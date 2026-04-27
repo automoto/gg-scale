@@ -1,0 +1,24 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test/coverage
+*.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# secrets
+.env
+
+# local k3s kubeconfig
+.k3s/
