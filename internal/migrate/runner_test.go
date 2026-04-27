@@ -46,14 +46,44 @@ func migrationsDir(t *testing.T) string {
 	return abs
 }
 
-func extensionCount(t *testing.T, dsn string) int {
+func openDB(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
-	defer db.Close()
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+func extensionCount(t *testing.T, dsn string) int {
+	t.Helper()
+	db := openDB(t, dsn)
 
 	var n int
-	err = db.QueryRow(`SELECT COUNT(*) FROM pg_extension WHERE extname IN ('pgcrypto','citext')`).Scan(&n)
+	err := db.QueryRow(`SELECT COUNT(*) FROM pg_extension WHERE extname IN ('pgcrypto','citext')`).Scan(&n)
+	require.NoError(t, err)
+	return n
+}
+
+func tableExists(t *testing.T, dsn, name string) bool {
+	t.Helper()
+	db := openDB(t, dsn)
+
+	var exists bool
+	err := db.QueryRow(`
+		SELECT EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = $1
+		)`, name).Scan(&exists)
+	require.NoError(t, err)
+	return exists
+}
+
+func policyCount(t *testing.T, dsn, table string) int {
+	t.Helper()
+	db := openDB(t, dsn)
+
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM pg_policies WHERE schemaname = 'public' AND tablename = $1`, table).Scan(&n)
 	require.NoError(t, err)
 	return n
 }
@@ -105,6 +135,89 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(1), v)
+	assert.Equal(t, uint(12), v)
 	assert.False(t, dirty)
+}
+
+func TestUp_creates_all_phase1_tables(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	require.NoError(t, r.Up())
+
+	for _, table := range []string{
+		"tenants", "projects", "api_keys",
+		"end_users", "sessions",
+		"storage_objects",
+		"leaderboards", "leaderboard_entries",
+		"friend_edges",
+		"audit_log",
+		"usage_samples",
+	} {
+		assert.True(t, tableExists(t, dsn, table), "table %s should exist", table)
+	}
+}
+
+func TestUp_enables_rls_with_isolation_policy(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	require.NoError(t, r.Up())
+
+	for _, table := range []string{
+		"tenants", "projects", "api_keys",
+		"end_users", "sessions",
+		"storage_objects",
+		"leaderboards", "leaderboard_entries",
+		"friend_edges",
+		"audit_log",
+		"usage_samples",
+	} {
+		assert.GreaterOrEqual(t, policyCount(t, dsn, table), 1, "%s should have an RLS policy", table)
+	}
+}
+
+func TestDown_walks_back_through_every_migration(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	require.NoError(t, r.Up())
+
+	for v := uint(12); v > 0; v-- {
+		require.NoError(t, r.Down(), "down from version %d", v)
+	}
+
+	v, dirty, err := r.Version()
+	require.NoError(t, err)
+	assert.Equal(t, uint(0), v)
+	assert.False(t, dirty)
+	assert.False(t, tableExists(t, dsn, "tenants"))
+}
+
+func TestUp_creates_monthly_partitions_for_usage_samples(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	require.NoError(t, r.Up())
+
+	db := openDB(t, dsn)
+	var n int
+	err = db.QueryRow(`
+		SELECT COUNT(*) FROM pg_inherits i
+		JOIN pg_class c ON c.oid = i.inhparent
+		WHERE c.relname = 'usage_samples'`).Scan(&n)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, n, 12, "should auto-create at least 12 monthly partitions")
 }

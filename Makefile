@@ -1,4 +1,4 @@
-.PHONY: build test test-integration e2e lint vulncheck \
+.PHONY: build test test-integration e2e lint vulncheck sqlc-gen \
         up down logs psql migrate migrate-new \
         up-k8s agones-install \
         preflight preflight-k8s clean
@@ -24,6 +24,11 @@ lint:
 
 vulncheck:
 	govulncheck ./...
+
+# Regenerates internal/db/sqlc/ from sqlc.yaml + internal/db/queries/.
+# Uses the official sqlc Docker image so contributors don't need a host install.
+sqlc-gen:
+	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:latest generate
 
 # ─── Compose lite stack ─────────────────────────────────────────────────
 
