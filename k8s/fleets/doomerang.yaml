@@ -1,0 +1,42 @@
+# Phase 2 placeholder. Not applied in Phase 0; never reach Allocated state at
+# replicas: 0. Phase 2 sets replicas, real image tag, region label selector,
+# and a FleetAutoscaler buffer policy. Schema-valid so kubectl --dry-run=client
+# can be used to lint changes from Phase 0 onward.
+apiVersion: agones.dev/v1
+kind: Fleet
+metadata:
+  name: doomerang
+  namespace: default
+  labels:
+    app: doomerang
+    phase: placeholder
+spec:
+  replicas: 0
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: "25%"
+      maxUnavailable: 0
+  template:
+    spec:
+      ports:
+        - name: default
+          portPolicy: Dynamic
+          containerPort: 7373
+          protocol: UDP
+      health:
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        failureThreshold: 3
+      template:
+        spec:
+          containers:
+            - name: doomerang-server
+              image: ghcr.io/ggscale/doomerang-server:placeholder
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi

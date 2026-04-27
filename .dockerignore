@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+.k3s
+*.md
+docs
+archive
+e2e
+**/*_test.go
+**/testdata
+.env
+.env.*
+!.env.example
