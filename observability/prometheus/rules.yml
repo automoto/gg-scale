@@ -1,0 +1,54 @@
+groups:
+  - name: ggscale-control-plane
+    rules:
+      - alert: ErrorRateHigh
+        expr: |
+          sum(rate(ggscale_http_errors_total{status_class="5xx"}[5m]))
+            / sum(rate(ggscale_http_request_duration_seconds_count[5m])) > 0.02
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "5xx error rate above 2% for 10 minutes"
+          runbook: docs/RUNBOOK.md
+
+      - alert: HTTPLatencyP99TooSlow
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(ggscale_http_request_duration_seconds_bucket[5m]))
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "HTTP p99 above 500 ms for 10 minutes"
+
+      - alert: DBQueryP99TooSlow
+        expr: |
+          histogram_quantile(0.99,
+            sum by (le) (rate(ggscale_db_query_duration_seconds_bucket[5m]))
+          ) > 0.25
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: "Postgres query p99 above 250 ms for 10 minutes"
+
+      - alert: ValkeyMissRateHigh
+        expr: |
+          sum(rate(ggscale_valkey_ops_total{result="miss"}[5m]))
+            / sum(rate(ggscale_valkey_ops_total[5m])) > 0.5
+        for: 15m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Valkey miss rate above 50% for 15 minutes — cold cache?"
+
+      - alert: RatelimitThrottleSpike
+        expr: |
+          sum(rate(ggscale_ratelimit_throttled_total[5m])) > 100
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Rate-limit throttle volume above 100 req/s — investigate source tenant"

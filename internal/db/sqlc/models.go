@@ -30,17 +30,20 @@ type AuditLog struct {
 }
 
 type EndUser struct {
-	ID              int64
-	TenantID        int64
-	ProjectID       int64
-	ExternalID      string
-	Email           *string
-	EmailVerifiedAt pgtype.Timestamptz
-	PasswordHash    []byte
-	CreatedAt       pgtype.Timestamptz
-	DeletedAt       pgtype.Timestamptz
+	ID                         int64
+	TenantID                   int64
+	ProjectID                  int64
+	ExternalID                 string
+	Email                      *string
+	EmailVerifiedAt            pgtype.Timestamptz
+	PasswordHash               []byte
+	CreatedAt                  pgtype.Timestamptz
+	DeletedAt                  pgtype.Timestamptz
+	EmailVerificationHash      []byte
+	EmailVerificationExpiresAt pgtype.Timestamptz
 }
 
+// One directed edge per (tenant, from, to). Status transitions are managed via UPSERT in the handler: a re-request after rejection updates status pending; pending/accepted are idempotent; blocked is terminal. See migration 0012 for the contract.
 type FriendEdge struct {
 	ID         int64
 	TenantID   int64
@@ -102,11 +105,12 @@ type StorageObject struct {
 }
 
 type Tenant struct {
-	ID        int64
-	Name      string
-	Tier      string
-	CreatedAt pgtype.Timestamptz
-	DeletedAt pgtype.Timestamptz
+	ID                int64
+	Name              string
+	Tier              string
+	CreatedAt         pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	CustomTokenSecret []byte
 }
 
 type UsageSample struct {

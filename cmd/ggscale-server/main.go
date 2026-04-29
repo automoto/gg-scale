@@ -11,8 +11,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/config"
+	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 // commit is overridden at build time via -ldflags.
@@ -34,9 +44,45 @@ func run() error {
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(collectors.NewGoCollector())
+	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	poolCfg.ConnConfig.Tracer = observability.NewPgxTracer(registry)
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
+	valkey := redis.NewClient(&redis.Options{Addr: cfg.ValkeyAddr})
+	valkey.AddHook(observability.NewValkeyHook(registry))
+	defer func() { _ = valkey.Close() }()
+
+	signer, err := auth.NewSignerFromHex(cfg.JWTSigningKey)
+	if err != nil {
+		return err
+	}
+	if cfg.JWTSigningKey == "" {
+		slog.Warn("JWT_SIGNING_KEY not set; using a random in-process key — sessions won't survive restart")
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version: "v1",
-		Commit:  commit,
+		Version:  "v1",
+		Commit:   commit,
+		Pool:     db.NewPool(pool),
+		Lookup:   tenant.NewSQLLookup(pool),
+		Limiter:  ratelimit.NewValkeyLimiter(valkey),
+		Signer:   signer,
+		Valkey:   valkey,
+		Registry: registry,
 	})
 
 	srv := &http.Server{
@@ -44,9 +90,6 @@ func run() error {
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() {

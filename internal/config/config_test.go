@@ -103,7 +103,7 @@ func parseEnvFileKeys(content string) []string {
 
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "VALKEY_ADDR", "LOG_LEVEL", "ENV"} {
+	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "VALKEY_ADDR", "LOG_LEVEL", "ENV", "JWT_SIGNING_KEY"} {
 		t.Setenv(k, "")
 	}
 }
