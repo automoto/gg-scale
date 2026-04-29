@@ -9,7 +9,13 @@ import (
 )
 
 type Querier interface {
+	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
+	CreateAnonymousEndUser(ctx context.Context, arg CreateAnonymousEndUserParams) (CreateAnonymousEndUserRow, error)
+	CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUserParams) (int64, error)
+	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier. Runs without an
 	// app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
@@ -17,8 +23,43 @@ type Querier interface {
 	// tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetEndUserByEmail(ctx context.Context, arg GetEndUserByEmailParams) (GetEndUserByEmailRow, error)
+	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
+	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
+	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
+	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
+	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
+	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
+	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
+	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
+	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
+	// Optimistic concurrency variant — only updates if the row's current
+	// version matches expected. RETURNING NULL row on mismatch.
+	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
+	// The unique index keeps one current row per directed pair, so re-requests
+	// after rejection update in place. Pending/accepted are idempotent (the
+	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
+	// terminal (the WHERE clause omits it). See migration 0012.
+	RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
+	RevokeSession(ctx context.Context, id int64) error
+	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
+	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
+	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
+	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
+	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
+	// Profile updates are deliberately narrow — only fields explicitly
+	// enumerated server-side may change. PATCHing email re-triggers the
+	// verify flow (handler clears email_verified_at).
+	UpdateProfileEmail(ctx context.Context, arg UpdateProfileEmailParams) error
+	// Custom-token flow: find existing end_user with this external_id under
+	// (tenant, project) or create one. Idempotent across repeated calls.
+	UpsertEndUserByExternalID(ctx context.Context, arg UpsertEndUserByExternalIDParams) (int64, error)
+	VerifyEmailByTokenHash(ctx context.Context, emailVerificationHash []byte) (int64, error)
+	WriteAudit(ctx context.Context, arg WriteAuditParams) error
 }
 
 var _ Querier = (*Queries)(nil)

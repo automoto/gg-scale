@@ -10,11 +10,12 @@ import (
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
-	HTTPAddr    string
-	DatabaseURL string
-	ValkeyAddr  string
-	LogLevel    string
-	Env         string
+	HTTPAddr      string
+	DatabaseURL   string
+	ValkeyAddr    string
+	LogLevel      string
+	Env           string
+	JWTSigningKey string
 }
 
 type varDecl struct {
@@ -30,6 +31,7 @@ var declared = []varDecl{
 	{name: "VALKEY_ADDR", defval: "localhost:6379", set: func(c *Config, v string) { c.ValkeyAddr = v }},
 	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) { c.LogLevel = v }},
 	{name: "ENV", defval: "dev", set: func(c *Config, v string) { c.Env = v }},
+	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) { c.JWTSigningKey = v }},
 }
 
 // Load reads the environment and returns a populated Config or an error if

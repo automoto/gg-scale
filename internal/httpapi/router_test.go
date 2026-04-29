@@ -63,6 +63,40 @@ func TestRouter_v1_healthz_returns_200_with_version_header(t *testing.T) {
 	assert.Equal(t, "ok", payload["status"])
 }
 
+func TestRouter_cors_preflight_returns_allow_headers(t *testing.T) {
+	srv := newServer(t)
+
+	req, err := http.NewRequest(http.MethodOptions, srv.URL+"/v1/healthz", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://game.example.com")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "Authorization,Content-Type")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.True(t, resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNoContent,
+		"preflight should be 200 or 204, got %d", resp.StatusCode)
+	assert.NotEmpty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+	assert.Contains(t, resp.Header.Get("Access-Control-Allow-Methods"), "POST")
+}
+
+func TestRouter_cors_simple_request_includes_allow_origin_header(t *testing.T) {
+	srv := newServer(t)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/healthz", nil)
+	require.NoError(t, err)
+	req.Header.Set("Origin", "https://game.example.com")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.NotEmpty(t, resp.Header.Get("Access-Control-Allow-Origin"))
+}
+
 func TestRouter_metrics_endpoint_returns_200(t *testing.T) {
 	srv := newServer(t)
 

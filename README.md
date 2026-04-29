@@ -6,6 +6,24 @@ K3s + Agones, multi-tenant control plane in Go, single-binary self-host.
 
 > Status: pre-v1.0. See [docs/mvp.md](docs/mvp.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Built for the full game lifecycle
+
+ggscale is the open-source backend for the entire lifecycle of a multiplayer
+game — from launch day to graceful sunset. The same OSS core, Agones fleet,
+and STUN/TURN relay underwrite three audiences:
+
+| Audience | What ggscale offers | Ships in |
+|---|---|---|
+| **Indie / mid-tier studios** building new live-service games | Hybrid networking (authoritative servers + STUN/TURN relay), 3-region OVH managed cloud behind Cloudflare LB, or self-host on a small commodity VM. Cheapest credible BaaS in the market. | v1.0 |
+| **Publishers shutting down** a live-service title | `ggscale Sunset` — B2B engagement that ports the title to ggscale-OSS for community self-hosting, or ships an offline-mode patch when porting is infeasible. Satisfies CA AB 2426 / Protect Our Games Act. | v1.8+ |
+| **Player communities** of sunset titles | `ggscale Community Hosting` — branded white-label hosting of private dedicated server instances, with royalty back to the publisher. | v1.8+ |
+
+A title shipped on ggscale at launch can mark its store page
+"preservation-ready" and skip the AB 2426 "revocable license" disclaimer —
+because it can already run independently of ggscale's infrastructure via
+the OSS self-host path. See [docs/LIFECYCLE.md](docs/LIFECYCLE.md) for the
+full strategy.
+
 ## Quickstart
 
 ```bash
@@ -65,7 +83,11 @@ TDD is the rule. Tests fail before implementation; see
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the compose stack,
 [docs/RUNBOOK.md](docs/RUNBOOK.md) for failure-mode recovery,
-[docs/mvp.md](docs/mvp.md) for the strategic plan, and
+[docs/HA.md](docs/HA.md) for the high-availability runbook (current HA
+posture, rolling deployments, future Postgres + Valkey HA),
+[docs/mvp.md](docs/mvp.md) for the engineering plan,
+[docs/LIFECYCLE.md](docs/LIFECYCLE.md) for the canonical product strategy
+(three audiences, regulatory tailwind, v1.0 vs. v1.8+ split), and
 [docs/ROADMAP.md](docs/ROADMAP.md) for the public versioned roadmap.
 
 ## License

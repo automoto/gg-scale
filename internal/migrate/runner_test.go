@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(12), v)
+	assert.Equal(t, uint(14), v)
 	assert.False(t, dirty)
 }
 
@@ -192,7 +192,7 @@ func TestDown_walks_back_through_every_migration(t *testing.T) {
 
 	require.NoError(t, r.Up())
 
-	for v := uint(12); v > 0; v-- {
+	for v := uint(14); v > 0; v-- {
 		require.NoError(t, r.Down(), "down from version %d", v)
 	}
 
