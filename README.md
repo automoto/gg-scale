@@ -27,8 +27,8 @@ full strategy.
 ## Quickstart
 
 ```bash
-git clone https://github.com/ggscale/ggscale.git
-cd ggscale
+git clone https://github.com/automoto/gg-scale.git
+cd gg-scale
 cp .env.example .env
 make up
 curl localhost:8080/v1/healthz
