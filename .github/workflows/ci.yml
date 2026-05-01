@@ -1,9 +1,7 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch: # disabled: re-add push/pull_request triggers when fixed
 
 concurrency:
   group: ci-${{ github.ref }}
