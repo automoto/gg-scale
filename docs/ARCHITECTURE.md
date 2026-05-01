@@ -17,12 +17,13 @@ There are two distinct compose profiles:
                    ┌────────────────────────────────────────┐
                    │ ggscale-server :8080  (Go, chi router) │
                    │  /v1/healthz · /v1/* · /metrics        │
-                   └─────────────┬──────────────┬───────────┘
-                                 │              │
-                       postgres:5432       valkey:6379
-                       (init via            (cache,
-                       migrate init         matchmaking
-                       container)           pools — Phase 1+)
+                   │  + cache.Store (memory or olric)       │
+                   └─────────────────────┬──────────────────┘
+                                         │
+                                   postgres:5432
+                                   (init via
+                                    migrate init
+                                    container)
 ```
 
 ## Lite-profile services
@@ -31,7 +32,6 @@ There are two distinct compose profiles:
 |---|---|---|---|
 | `ggscale-server` | local `ggscale-server:dev` | 8080 | Control-plane HTTP API (chi router, slog JSON, prometheus `/metrics`). |
 | `postgres` | `postgres:17` | 5432 | Primary DB. `pg_isready` healthcheck. |
-| `valkey` | `valkey/valkey:8` | 6379 | OSS Redis fork. Phase 0 doesn't yet read/write it; Phase 1 adds matchmaking/presence. |
 | `migrate` | `migrate/migrate:v4.19.1` | — | One-shot init container; applies `db/migrations/*.up.sql` against postgres before `ggscale-server` starts. |
 | `prometheus` | `prom/prometheus:v3.1.0` | 9090 | Scrapes `ggscale-server:8080/metrics`. Browse counters at `http://localhost:9090/graph`. |
 | `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for capturing signup/verify mail (Phase 1+). |
@@ -90,9 +90,14 @@ two diverge.
 |---|---|---|---|
 | `DATABASE_URL` | yes | — | Postgres connection string. |
 | `HTTP_ADDR` | no | `:8080` | HTTP listen address. |
-| `VALKEY_ADDR` | no | `localhost:6379` | Valkey/Redis address. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. |
 | `ENV` | no | `dev` | `dev`, `staging`, `prod`. |
+| `CACHE_BACKEND` | no | `memory` | Cache.Store backend. `memory` (default; in-process map; zero networking deps; covers dev, single-VM self-host, tests) or `olric` (embedded Olric cluster across the app processes; opt-in for multi-VM regions where rate-limit and connection-cap state must be shared). |
+| `CACHE_OLRIC_BIND_ADDR` | no | `127.0.0.1` | Olric protocol bind. |
+| `CACHE_OLRIC_BIND_PORT` | no | `3320` | Olric protocol port. |
+| `CACHE_OLRIC_MEMBERLIST_ADDR` | no | `127.0.0.1` | Memberlist (gossip) bind. |
+| `CACHE_OLRIC_MEMBERLIST_PORT` | no | `3322` | Memberlist port. |
+| `CACHE_OLRIC_PEERS` | no | (empty) | Comma-separated host:port peers; empty means cluster of one. |
 
 ## HTTP API surface (Phase 0)
 
@@ -104,6 +109,77 @@ two diverge.
 
 Phase 1 adds `/v1/auth/*`, `/v1/storage/*`, `/v1/leaderboards/*`, and the
 `tenant` middleware that guards all of them.
+
+## Tenant isolation (Phase 1)
+
+Tenant isolation is enforced at two layers; either alone is sufficient to
+block cross-tenant access, and the test suite exercises both.
+
+**Layer 1 — `internal/tenant` HTTP middleware.** Extracts the
+`Authorization: Bearer <key>` header, hashes the token with SHA-256, calls a
+`Lookup` against `api_keys` (returning `ErrUnknownKey` on no match), and
+maps results to status codes:
+
+- missing header / non-Bearer scheme / empty token / unknown key → **401**
+- recognised but revoked key → **403**
+- unexpected lookup error → **500**
+
+On success the middleware injects `tenant_id` (and optionally `project_id`)
+into the request context via `internal/db.WithTenant` / `WithProject`. No
+external header (e.g. `X-Tenant-Id`) is ever consulted; the resolver is the
+sole source of truth.
+
+**Layer 2 — Postgres Row-Level Security.** Migration `0009_rls.up.sql`
+enables RLS on every tenant-scoped table with a single policy:
+`tenant_id = current_setting('app.tenant_id', true)::bigint`. The `, true`
+flag makes a missing GUC return NULL, so the policy fails closed (no rows
+visible) when application code forgets to scope.
+
+The application sets the GUC via `db.Q(ctx, fn)`, which opens a
+transaction, executes `SET LOCAL app.tenant_id = '<id>'`, then runs the
+caller's closure. The setting is scoped to the tx and dropped on commit
+or rollback.
+
+**Why both.** Middleware filters at the API boundary; RLS catches anything
+that bypasses the middleware (a future internal job, a developer using
+`pool.Exec` directly, an SDK bug). Defence in depth — and the bypass policy
+on `api_keys` (`api_keys_bootstrap` in migration 0010) is the single
+deliberate exception, scoped to `SELECT` only when no GUC is set so the
+resolver itself can run.
+
+**Role separation.** The runtime connects as `ggscale_app` (created in
+`0007_audit_log`, granted in `0010_app_role_grants`). It is not a
+superuser, so RLS applies. `audit_log` keeps a narrower grant
+(`INSERT`, `SELECT` only) so even a compromised app session cannot
+rewrite history.
+
+## Auth headers — `Authorization` vs `X-Session-Token`
+
+Every authenticated request carries two distinct identities and we split
+them across two headers:
+
+| Header | Carries | Issued to | Lifetime |
+|---|---|---|---|
+| `Authorization: Bearer <api_key>` | The **tenant** identity (the game studio) | Tenant operator at project create time | Long-lived; rotated only on revoke |
+| `X-Session-Token: <jwt>` | The **end-user** identity (the player) | `/v1/auth/*` after sign-up / login / anonymous / custom-token | 15 minutes (refresh via `/v1/auth/refresh`) |
+
+This is intentionally inverted from the convention some HTTP guides
+recommend (where the user JWT lives in `Authorization`). The reasoning:
+
+- **SDK ergonomics.** Game SDKs hard-code the api_key in the
+  `Authorization` header at construction and rotate the player JWT in
+  `X-Session-Token` per session. Players signing in/out doesn't disturb
+  the api_key plumbing.
+- **Independent middleware tiers.** `internal/tenant` (Layer 1 above)
+  reads `Authorization` and runs *before* rate-limiting. The end-user
+  middleware (`internal/enduser`) reads `X-Session-Token` and runs only
+  on routes that need the player identity. Cleanly separating the
+  headers keeps each middleware single-purpose.
+- **Mirrors Firebase / Supabase**, where the SDK ships the project
+  api_key in one slot and the user JWT in another.
+
+A stolen `X-Session-Token` cannot be replayed under a different tenant's
+api_key: `enduser.New` asserts `claims.TenantID == ctx.tenant`.
 
 ## Observability
 
@@ -156,8 +232,114 @@ stable. See `.github/workflows/ci.yml`.
 `.github/dependabot.yml` opens weekly dependency-bump PRs for Go modules,
 GitHub Actions, and Docker base images.
 
+## Lifecycle architecture (forward-looking)
+
+The Phase 0 architecture above is the substrate for **three** product
+audiences, not one — the v1.0 indie / mid-tier BaaS audience, the v1.9+
+B2B sunset-services audience, and the v1.9+ B2C white-label community
+hosting audience. The strategic framing lives in [`LIFECYCLE.md`](LIFECYCLE.md).
+This subsection records the architectural commitment: **no v1.9+ SKU
+requires a structural change to the v1.0 platform.**
+
+```
+                                   ┌──────────────────────────────────────────────────────┐
+   live-service indie  ───────►    │                                                      │
+   (audience #1, v1.0)             │  ggscale control plane (multi-tenant, v1.0)          │
+                                   │  ─ tenant middleware (api-key → tenant_id)           │
+   sunset-port publisher ──────►   │  ─ Postgres + RLS, cache.Store (memory|olric),       │
+   (audience #2, v1.9+)            │    K3s + Agones, pion/turn                           │
+                                   │  ─ Cloudflare LB + origin-pool routing, Stripe, GDPR │
+                                   │                                                      │
+   white-label community ──────►   │  every "customer" is a tenant; the SKU determines    │
+   (audience #3, v1.9+)            │  who pays, what's branded, and where royalties flow  │
+                                   └──────────────────────────────────────────────────────┘
+```
+
+What each audience consumes (and where it ships):
+
+| Audience | Tenant origin | Branding | Billing entity | Primary substrate |
+|---|---|---|---|---|
+| #1 — indie / mid-tier launch | Studio signs up at `ggscale.io` | ggscale-managed under studio's namespace | Studio (PAYG / Premium / self-host) | Multi-tenant control plane + Agones fleet + STUN/TURN relay (v1.0 Phase 1–2). |
+| #2 — sunset port (B2B) | Publisher engagement; ggscale provisions tenant after porting work | Publisher brand on a self-host bundle the community runs | Publisher (fixed-fee engagement) | Same `docker-compose.yml` + `bw-ops` Ansible the v1.0 self-host audience uses. The published v1.0 self-host migration guide is the deliverable's runtime substrate. |
+| #3 — white-label community hosting (B2C) | ggscale provisions per-rental tenants under a publisher's IP | Publisher brand on a ggscale-hosted subdomain | Players (consumer subscription) → royalty to publisher | Same multi-tenant control plane + Agones fleet + Cloudflare LB hostname routing as audience #1, with a consumer storefront UX layered on top. |
+
+The v1.0 architectural decisions that make this possible — and that
+v1.9+ planning must therefore not regress on — are:
+
+- **Tenant isolation as a structural invariant.** Every tenant-scoped
+  table carries `tenant_id`; RLS enforces it at the DB layer; the tenant
+  middleware enforces it at the API layer. A "white-label rental" is
+  just a tenant; a "ported sunset title" is just a tenant. No special
+  per-SKU plumbing.
+- **Multi-tenancy on shared schema, not per-tenant DBs (default).** Cheap
+  per-tenant overhead is what makes the B2C white-label storefront
+  economically viable — provisioning a new rental cannot require a new
+  Postgres cluster or it ruins the unit economics.
+- **Agones fleet manager as the orchestration boundary.** A sunset
+  title's game-server image is a `Fleet` CRD just like a live title's;
+  Agones lifecycle (`Allocator` API, `RollingUpdate` strategy, drain on
+  `SDK.Shutdown()`) works identically.
+- **Stripe metering covers consumer subscriptions natively.** The same
+  Prometheus-driven CCU gauge + in-memory daily accumulator + per-day
+  `usage_aggregates` row pipeline (Phase 3 design — see `mvp.md` §
+  "Metering and billing pipeline") that bills PAYG indie tenants will
+  bill consumer rentals — the difference is the Stripe product
+  configuration, not a code path.
+- **Self-host parity by construction.** The published `docker-compose.yml`
+  is what the v1.0 self-host audience uses, what CI runs on every PR,
+  *and* what `ggscale Sunset` engagements hand to publishers as the
+  "community can run this themselves" deliverable. The Phase 0 commitment
+  to "what runs in CI is what the public self-host stack runs" is the
+  technical foundation of the entire B2B sunset value proposition.
+
+What v1.9+ does add (recorded here so this doc can grow into it without
+surprise): a consumer-storefront frontend (browse sunset titles, rent an
+instance, manage server settings) and a publisher royalty dashboard.
+Both are application-layer additions on top of the v1.0 control plane —
+new UI, no new substrate.
+
+## VM-based single-tenant provisioning (forward-looking)
+
+A second orchestration substrate planned alongside the K3s+Agones pod
+fleet. **Strictly sequenced after Kubernetes is in production** — this
+ships only once the v1.0 Agones fleet and the v1.1 dynamic K3s
+autoscaler are working. The pod fleet remains the default for
+multi-tenant indie / mid-tier workloads; VM provisioning is the
+Premium-tier escape hatch.
+
+The substrate: Packer-built VM images provisioned via OVH Public
+Cloud's OpenStack API (Nova / Neutron / Cinder), one tenant per VM by
+construction. Because OVH exposes vanilla OpenStack, the same
+provisioner extends to BYO-OpenStack as a follow-on for tenants with
+their own private cloud.
+
+What it unlocks:
+
+- **Windows-only game servers** that the Linux K3s node story can't host.
+- **High-perf workloads** that need kernel tuning, CPU pinning, or
+  NUMA layouts containers don't comfortably expose.
+- **Heavy per-tenant customization** (kernel modules, anti-cheat
+  drivers, exotic networking) that doesn't belong on a shared pod
+  substrate.
+
+Architectural commitment: the control plane treats "VM instance" and
+"Agones GameServer" as two implementations of the same allocation
+primitive. Tenant isolation, observability scrape, and the metering
+pipeline are unchanged — the new substrate plugs into the existing
+boundaries, not around them. Full scope and sequencing live in
+[`ROADMAP.md`](ROADMAP.md) under v1.4+.
+
 ## Related documents
 
+- [`LIFECYCLE.md`](LIFECYCLE.md) — canonical product strategy: three
+  audiences, the regulatory tailwind, the v1.0 vs. v1.9+ split, and how
+  this architecture serves all three without rework.
+- [`HA.md`](HA.md) — high-availability runbook: current HA posture,
+  blue/green and Agones rolling-deploy procedures, failure-mode recovery
+  for production, and the v1.1 path to closing Postgres + cache + K3s
+  SPOFs.
 - [`mvp.md`](mvp.md) — strategic plan, all phases.
 - [`ROADMAP.md`](ROADMAP.md) — public versioned roadmap (v1.0 → v2.x).
 - [`RUNBOOK.md`](RUNBOOK.md) — failure-mode recovery for the dev stack.
+- [`RATELIMIT.md`](RATELIMIT.md) — HTTP rate-limit and WS connection-cap
+  contract: tier defaults, response shapes, key formats, SDK guidance.
