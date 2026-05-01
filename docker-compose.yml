@@ -26,17 +26,6 @@ services:
       retries: 30
     logging: *default-logging
 
-  valkey:
-    image: valkey/valkey:8
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-    logging: *default-logging
-
   migrate:
     image: migrate/migrate:v4.19.1
     depends_on:
@@ -61,13 +50,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      valkey:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://ggscale:ggscale@postgres:5432/ggscale?sslmode=disable
-      VALKEY_ADDR: valkey:6379
+      CACHE_BACKEND: memory
       HTTP_ADDR: ":8080"
       LOG_LEVEL: info
       ENV: dev

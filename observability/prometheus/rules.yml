@@ -34,15 +34,11 @@ groups:
         annotations:
           summary: "Postgres query p99 above 250 ms for 10 minutes"
 
-      - alert: ValkeyMissRateHigh
-        expr: |
-          sum(rate(ggscale_valkey_ops_total{result="miss"}[5m]))
-            / sum(rate(ggscale_valkey_ops_total[5m])) > 0.5
-        for: 15m
-        labels:
-          severity: warn
-        annotations:
-          summary: "Valkey miss rate above 50% for 15 minutes — cold cache?"
+      # Cache-error / cache-miss alert removed 2026-04-28 with the
+      # Redis-protocol backend retirement. Replacement is a
+      # backend-agnostic alert keyed off the cache.Store instrumentation
+      # wrapper that lands with m1.md §5.4. See docs/m1.md and
+      # docs/summary-m1.md.
 
       - alert: RatelimitThrottleSpike
         expr: |

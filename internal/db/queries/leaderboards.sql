@@ -39,3 +39,31 @@ SELECT COUNT(*)::bigint
 FROM leaderboard_entries
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND leaderboard_id = $1;
+
+-- name: LeaderboardUserRank :one
+WITH ranked AS (
+    SELECT end_user_id,
+           RANK() OVER (ORDER BY MAX(score) DESC, end_user_id ASC) AS r
+    FROM leaderboard_entries
+    WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+      AND leaderboard_id = $1
+    GROUP BY end_user_id
+)
+SELECT r::bigint AS rank
+FROM ranked
+WHERE end_user_id = $2;
+
+-- name: LeaderboardRangeByRank :many
+WITH ranked AS (
+    SELECT end_user_id,
+           MAX(score)::bigint AS best_score,
+           RANK() OVER (ORDER BY MAX(score) DESC, end_user_id ASC) AS r
+    FROM leaderboard_entries
+    WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+      AND leaderboard_id = $1
+    GROUP BY end_user_id
+)
+SELECT end_user_id, best_score, r::bigint AS rank
+FROM ranked
+WHERE r BETWEEN sqlc.arg(rank_low)::bigint AND sqlc.arg(rank_high)::bigint
+ORDER BY r;

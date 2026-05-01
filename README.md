@@ -84,7 +84,7 @@ TDD is the rule. Tests fail before implementation; see
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the compose stack,
 [docs/RUNBOOK.md](docs/RUNBOOK.md) for failure-mode recovery,
 [docs/HA.md](docs/HA.md) for the high-availability runbook (current HA
-posture, rolling deployments, future Postgres + Valkey HA),
+posture, rolling deployments, Postgres replication + cache HA),
 [docs/mvp.md](docs/mvp.md) for the engineering plan,
 [docs/LIFECYCLE.md](docs/LIFECYCLE.md) for the canonical product strategy
 (three audiences, regulatory tailwind, v1.0 vs. v1.8+ split), and

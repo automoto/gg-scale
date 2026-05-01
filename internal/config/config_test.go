@@ -27,21 +27,15 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	cfg, err := config.Load()
 	require.NoError(t, err)
 
-	cases := []struct {
-		field string
-		got   string
-		want  string
-	}{
-		{"HTTPAddr", cfg.HTTPAddr, ":8080"},
-		{"ValkeyAddr", cfg.ValkeyAddr, "localhost:6379"},
-		{"LogLevel", cfg.LogLevel, "info"},
-		{"Env", cfg.Env, "dev"},
-	}
-	for _, c := range cases {
-		t.Run(c.field, func(t *testing.T) {
-			assert.Equal(t, c.want, c.got)
-		})
-	}
+	assert.Equal(t, ":8080", cfg.HTTPAddr)
+	assert.Equal(t, "info", cfg.LogLevel)
+	assert.Equal(t, "dev", cfg.Env)
+	assert.Equal(t, "memory", cfg.CacheBackend)
+	assert.Equal(t, "127.0.0.1", cfg.CacheOlricBindAddr)
+	assert.Equal(t, 3320, cfg.CacheOlricBindPort)
+	assert.Equal(t, "127.0.0.1", cfg.CacheOlricMemberlistAddr)
+	assert.Equal(t, 3322, cfg.CacheOlricMemberlistPort)
+	assert.Empty(t, cfg.CacheOlricPeers)
 }
 
 func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
@@ -51,9 +45,10 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		got    func(*config.Config) string
 	}{
 		{"HTTP_ADDR", ":9090", func(c *config.Config) string { return c.HTTPAddr }},
-		{"VALKEY_ADDR", "valkey:6379", func(c *config.Config) string { return c.ValkeyAddr }},
 		{"LOG_LEVEL", "debug", func(c *config.Config) string { return c.LogLevel }},
 		{"ENV", "staging", func(c *config.Config) string { return c.Env }},
+		{"CACHE_BACKEND", "olric", func(c *config.Config) string { return c.CacheBackend }},
+		{"CACHE_OLRIC_BIND_ADDR", "0.0.0.0", func(c *config.Config) string { return c.CacheOlricBindAddr }},
 	}
 	for _, c := range cases {
 		t.Run(c.envVar, func(t *testing.T) {
@@ -67,6 +62,27 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 			assert.Equal(t, c.value, c.got(cfg))
 		})
 	}
+}
+
+func TestLoad_rejects_unknown_cache_backend(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("CACHE_BACKEND", "nope")
+
+	_, err := config.Load()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "CACHE_BACKEND")
+}
+
+func TestLoad_parses_olric_peers_csv(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("CACHE_OLRIC_PEERS", "node-1:3322, node-2:3322 ,node-3:3322")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"node-1:3322", "node-2:3322", "node-3:3322"}, cfg.CacheOlricPeers)
 }
 
 func TestEnvExample_has_no_drift(t *testing.T) {
@@ -103,7 +119,12 @@ func parseEnvFileKeys(content string) []string {
 
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"DATABASE_URL", "HTTP_ADDR", "VALKEY_ADDR", "LOG_LEVEL", "ENV", "JWT_SIGNING_KEY"} {
+	for _, k := range []string{
+		"DATABASE_URL", "HTTP_ADDR", "LOG_LEVEL", "ENV", "JWT_SIGNING_KEY",
+		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
+		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",
+		"CACHE_OLRIC_PEERS",
+	} {
 		t.Setenv(k, "")
 	}
 }

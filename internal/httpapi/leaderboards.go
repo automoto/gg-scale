@@ -2,19 +2,31 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/enduser"
 )
+
+// leaderboardTopTTL bounds how stale a memoised top-N reply may be. Short
+// enough that a fresh score appears within a frame budget; long enough that
+// hot leaderboards don't replay the same query on every request.
+const leaderboardTopTTL = 10 * time.Second
+
+// leaderboardTopCachedLimit is the only limit value that gets memoised.
+// Caching every limit a caller might pass would leave us unable to
+// invalidate them all on submit, so off-default reads always hit Postgres.
+// 10 matches parseLimit's default and the SDK's pagination size.
+const leaderboardTopCachedLimit int32 = 10
 
 type submitScoreRequest struct {
 	Score int64 `json:"score"`
@@ -26,8 +38,8 @@ type leaderboardEntry struct {
 	Rank      int64 `json:"rank"`
 }
 
-func leaderboardKey(tenantID, leaderboardID int64) string {
-	return fmt.Sprintf("leaderboard:%d:%d", tenantID, leaderboardID)
+func leaderboardTopCacheKey(tenantID, leaderboardID int64, limit int32) string {
+	return fmt.Sprintf("leaderboard:top:%d:%d:%d", tenantID, leaderboardID, limit)
 }
 
 // POST /v1/leaderboards/{id}/scores — m1.md 4.3.1.
@@ -70,10 +82,11 @@ func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		key := leaderboardKey(tenantID, leaderboardID)
-		if err := zaddBest(ctx, d.Valkey, key, userID, req.Score); err != nil {
-			internalError(w, "leaderboard submit: zadd", err)
-			return
+		// Invalidate the memoised top-N so the next reader pays the
+		// fresh-query cost rather than serving a stale snapshot.
+		// Best-effort: on Delete failure the TTL still bounds staleness.
+		if d.Cache != nil {
+			_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, leaderboardID, leaderboardTopCachedLimit))
 		}
 
 		w.WriteHeader(http.StatusCreated)
@@ -88,30 +101,39 @@ func leaderboardTopHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "leaderboard id required", http.StatusBadRequest)
 			return
 		}
-		limit := parseLimit(r.URL.Query().Get("limit"), 10, 100)
+		limit := parseLimit(r.URL.Query().Get("limit"), leaderboardTopCachedLimit, 100)
 		ctx := r.Context()
 		tenantID, _ := db.TenantFromContext(ctx)
 
-		key := leaderboardKey(tenantID, leaderboardID)
-		entries, err := topFromValkey(ctx, d.Valkey, key, int64(limit))
-		if err != nil {
-			internalError(w, "leaderboard top: zrange", err)
-			return
-		}
-		if len(entries) == 0 {
-			// Cold cache — fall back to Postgres and rebuild ZSET opportunistically.
-			entries, err = topFromPostgres(ctx, d, leaderboardID, limit)
-			if err != nil {
-				internalError(w, "leaderboard top: postgres", err)
+		cacheable := d.Cache != nil && limit == leaderboardTopCachedLimit
+		cacheKey := leaderboardTopCacheKey(tenantID, leaderboardID, limit)
+		if cacheable {
+			if raw, err := d.Cache.Get(ctx, cacheKey); err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(raw)
 				return
-			}
-			if err := warmCache(ctx, d.Valkey, key, entries); err != nil {
-				// Cache rebuild is best-effort.
-				_ = err
 			}
 		}
 
-		writeJSON(w, map[string]any{"entries": entries})
+		entries, err := topFromPostgres(ctx, d, leaderboardID, limit)
+		if err != nil {
+			internalError(w, "leaderboard top: postgres", err)
+			return
+		}
+
+		payload, err := json.Marshal(map[string]any{"entries": entries})
+		if err != nil {
+			internalError(w, "leaderboard top: marshal", err)
+			return
+		}
+
+		if cacheable {
+			// Best-effort: a Set failure just costs a re-query next call.
+			_ = d.Cache.Set(ctx, cacheKey, payload, leaderboardTopTTL)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
 	}
 }
 
@@ -125,68 +147,23 @@ func leaderboardAroundMeHandler(d Deps) http.HandlerFunc {
 		}
 		radius := parseLimit(r.URL.Query().Get("radius"), 5, 50)
 		ctx := r.Context()
-		tenantID, _ := db.TenantFromContext(ctx)
 		userID, ok := enduser.IDFromContext(ctx)
 		if !ok {
 			http.Error(w, "no end user", http.StatusUnauthorized)
 			return
 		}
 
-		key := leaderboardKey(tenantID, leaderboardID)
-		rank, err := d.Valkey.ZRevRank(ctx, key, strconv.FormatInt(userID, 10)).Result()
-		if errors.Is(err, redis.Nil) {
-			writeJSON(w, map[string]any{"entries": []leaderboardEntry{}, "self_rank": -1})
-			return
-		}
+		entries, selfRank, err := aroundMeFromPostgres(ctx, d, leaderboardID, userID, int64(radius))
 		if err != nil {
-			internalError(w, "leaderboard around-me: zrevrank", err)
+			internalError(w, "leaderboard around-me", err)
 			return
 		}
-
-		start := rank - int64(radius)
-		if start < 0 {
-			start = 0
-		}
-		stop := rank + int64(radius)
-		raw, err := d.Valkey.ZRevRangeWithScores(ctx, key, start, stop).Result()
-		if err != nil {
-			internalError(w, "leaderboard around-me: zrange", err)
-			return
-		}
-		entries := make([]leaderboardEntry, 0, len(raw))
-		for i, z := range raw {
-			id, _ := strconv.ParseInt(asString(z.Member), 10, 64)
-			entries = append(entries, leaderboardEntry{
-				EndUserID: id, Score: int64(z.Score), Rank: start + int64(i),
-			})
-		}
-		writeJSON(w, map[string]any{"entries": entries, "self_rank": rank})
+		writeJSON(w, map[string]any{"entries": entries, "self_rank": selfRank})
 	}
-}
-
-func zaddBest(ctx context.Context, v *redis.Client, key string, userID, score int64) error {
-	// ZADD GT updates only if new score > existing — preserves "best score
-	// per user" semantics in the cache.
-	return v.ZAddGT(ctx, key, redis.Z{Score: float64(score), Member: strconv.FormatInt(userID, 10)}).Err()
-}
-
-func topFromValkey(ctx context.Context, v *redis.Client, key string, limit int64) ([]leaderboardEntry, error) {
-	raw, err := v.ZRevRangeWithScores(ctx, key, 0, limit-1).Result()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]leaderboardEntry, 0, len(raw))
-	for i, z := range raw {
-		id, _ := strconv.ParseInt(asString(z.Member), 10, 64)
-		out = append(out, leaderboardEntry{
-			EndUserID: id, Score: int64(z.Score), Rank: int64(i),
-		})
-	}
-	return out, nil
 }
 
 func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int32) ([]leaderboardEntry, error) {
-	var out []leaderboardEntry
+	out := make([]leaderboardEntry, 0)
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		rows, qerr := sqlcgen.New(tx).TopN(ctx, sqlcgen.TopNParams{
 			LeaderboardID: leaderboardID, Limit: limit,
@@ -204,15 +181,55 @@ func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int
 	return out, err
 }
 
-func warmCache(ctx context.Context, v *redis.Client, key string, entries []leaderboardEntry) error {
-	if len(entries) == 0 {
+func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, radius int64) ([]leaderboardEntry, int64, error) {
+	entries := make([]leaderboardEntry, 0)
+	selfRank := int64(-1)
+
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		rank, rerr := q.LeaderboardUserRank(ctx, sqlcgen.LeaderboardUserRankParams{
+			LeaderboardID: leaderboardID, EndUserID: userID,
+		})
+		if errors.Is(rerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if rerr != nil {
+			return rerr
+		}
+		selfRank = rank
+
+		low := rank - radius
+		if low < 1 {
+			low = 1
+		}
+		rows, qerr := q.LeaderboardRangeByRank(ctx, sqlcgen.LeaderboardRangeByRankParams{
+			LeaderboardID: leaderboardID,
+			RankLow:       low,
+			RankHigh:      rank + radius,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		for _, row := range rows {
+			entries = append(entries, leaderboardEntry{
+				EndUserID: row.EndUserID,
+				Score:     row.BestScore,
+				// Internal rank is 1-based per RANK(); convert to the
+				// 0-based rank the SDK has historically seen from ZREVRANK.
+				Rank: row.Rank - 1,
+			})
+		}
 		return nil
+	})
+	if err != nil {
+		return nil, -1, err
 	}
-	zs := make([]redis.Z, len(entries))
-	for i, e := range entries {
-		zs[i] = redis.Z{Score: float64(e.Score), Member: strconv.FormatInt(e.EndUserID, 10)}
+
+	if selfRank > 0 {
+		// Externalise as 0-based to match the historical Valkey semantics.
+		selfRank--
 	}
-	return v.ZAdd(ctx, key, zs...).Err()
+	return entries, selfRank, nil
 }
 
 func pathInt64(r *http.Request, name string) (int64, bool) {
@@ -222,11 +239,4 @@ func pathInt64(r *http.Request, name string) (int64, bool) {
 		return 0, false
 	}
 	return n, true
-}
-
-func asString(member any) string {
-	if s, ok := member.(string); ok {
-		return s
-	}
-	return ""
 }

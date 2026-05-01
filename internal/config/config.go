@@ -6,32 +6,92 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
 	HTTPAddr      string
 	DatabaseURL   string
-	ValkeyAddr    string
 	LogLevel      string
 	Env           string
 	JWTSigningKey string
+
+	// Cache backend selection. CacheBackend is one of "memory" or "olric".
+	// "memory" is the default and is appropriate for single-process
+	// self-host. "olric" links every app process into an embedded Olric
+	// cluster (or, with non-empty CacheOlricPeers, a multi-node cluster
+	// joined via memberlist gossip).
+	CacheBackend string
+	// CacheOlricBindAddr is the Olric-protocol bind address. Default
+	// "127.0.0.1". Only consulted when CacheBackend is "olric".
+	CacheOlricBindAddr string
+	// CacheOlricBindPort is the Olric-protocol port. 0 picks an ephemeral
+	// port. Default 3320.
+	CacheOlricBindPort int
+	// CacheOlricMemberlistAddr is the gossip bind address. Default
+	// matches CacheOlricBindAddr.
+	CacheOlricMemberlistAddr string
+	// CacheOlricMemberlistPort is the gossip port. 0 picks an ephemeral
+	// port. Default 3322.
+	CacheOlricMemberlistPort int
+	// CacheOlricPeers is the comma-separated host:port list of memberlist
+	// endpoints to join. Empty means a cluster of one.
+	CacheOlricPeers []string
 }
 
 type varDecl struct {
 	name     string
 	required bool
 	defval   string
-	set      func(*Config, string)
+	set      func(*Config, string) error
 }
 
 var declared = []varDecl{
-	{name: "DATABASE_URL", required: true, set: func(c *Config, v string) { c.DatabaseURL = v }},
-	{name: "HTTP_ADDR", defval: ":8080", set: func(c *Config, v string) { c.HTTPAddr = v }},
-	{name: "VALKEY_ADDR", defval: "localhost:6379", set: func(c *Config, v string) { c.ValkeyAddr = v }},
-	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) { c.LogLevel = v }},
-	{name: "ENV", defval: "dev", set: func(c *Config, v string) { c.Env = v }},
-	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) { c.JWTSigningKey = v }},
+	{name: "DATABASE_URL", required: true, set: func(c *Config, v string) error { c.DatabaseURL = v; return nil }},
+	{name: "HTTP_ADDR", defval: ":8080", set: func(c *Config, v string) error { c.HTTPAddr = v; return nil }},
+	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) error { c.LogLevel = v; return nil }},
+	{name: "ENV", defval: "dev", set: func(c *Config, v string) error { c.Env = v; return nil }},
+	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},
+
+	{name: "CACHE_BACKEND", defval: "memory", set: func(c *Config, v string) error {
+		switch v {
+		case "memory", "olric":
+			c.CacheBackend = v
+			return nil
+		default:
+			return fmt.Errorf("CACHE_BACKEND %q: must be one of memory|olric", v)
+		}
+	}},
+	{name: "CACHE_OLRIC_BIND_ADDR", defval: "127.0.0.1", set: func(c *Config, v string) error {
+		c.CacheOlricBindAddr = v
+		return nil
+	}},
+	{name: "CACHE_OLRIC_BIND_PORT", defval: "3320", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CACHE_OLRIC_BIND_PORT %q: %w", v, err)
+		}
+		c.CacheOlricBindPort = n
+		return nil
+	}},
+	{name: "CACHE_OLRIC_MEMBERLIST_ADDR", defval: "127.0.0.1", set: func(c *Config, v string) error {
+		c.CacheOlricMemberlistAddr = v
+		return nil
+	}},
+	{name: "CACHE_OLRIC_MEMBERLIST_PORT", defval: "3322", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("CACHE_OLRIC_MEMBERLIST_PORT %q: %w", v, err)
+		}
+		c.CacheOlricMemberlistPort = n
+		return nil
+	}},
+	{name: "CACHE_OLRIC_PEERS", defval: "", set: func(c *Config, v string) error {
+		c.CacheOlricPeers = splitCSV(v)
+		return nil
+	}},
 }
 
 // Load reads the environment and returns a populated Config or an error if
@@ -46,7 +106,9 @@ func Load() (*Config, error) {
 			}
 			val = v.defval
 		}
-		v.set(cfg, val)
+		if err := v.set(cfg, val); err != nil {
+			return nil, err
+		}
 	}
 	return cfg, nil
 }
@@ -57,6 +119,20 @@ func DeclaredVars() []string {
 	out := make([]string, len(declared))
 	for i, v := range declared {
 		out[i] = v.name
+	}
+	return out
+}
+
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
 	}
 	return out
 }
