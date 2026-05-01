@@ -22,3 +22,7 @@ Thumbs.db
 
 # local k3s kubeconfig
 .k3s/
+
+# Website lives in its own repo (github.com/automoto/gg-scale-site).
+# The copy under docs/website/ is a working tree only, not source of truth.
+docs/website/
