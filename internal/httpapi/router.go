@@ -15,9 +15,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -41,7 +41,7 @@ type Deps struct {
 	Limiter  ratelimit.Limiter
 	Signer   *auth.Signer
 	Mailer   mailer.Mailer
-	Valkey   *redis.Client
+	Cache    cache.Store
 	Registry *prometheus.Registry
 }
 

@@ -41,10 +41,10 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 		Version: "v1", Commit: "test",
 		Pool:    db.NewPool(c.appPool),
 		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Limiter: ratelimit.NewValkeyLimiter(c.valkey),
+		Limiter: ratelimit.NewCacheLimiter(c.cache),
 		Signer:  signer,
 		Mailer:  rec,
-		Valkey:  c.valkey,
+		Cache:   c.cache,
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -260,7 +260,9 @@ func TestStorage_put_get_delete_round_trip(t *testing.T) {
 	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/storage/objects/save", "k", access,
 		map[string]any{"hp": 100})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var put struct{ Version int64 `json:"version"` }
+	var put struct {
+		Version int64 `json:"version"`
+	}
 	require.NoError(t, json.Unmarshal(body, &put))
 	assert.Equal(t, int64(1), put.Version)
 
@@ -395,7 +397,9 @@ func TestFriends_re_request_after_rejection_transitions_to_pending(t *testing.T)
 	resp, body := authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "k", tokA, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var got struct{ Status string `json:"status"` }
+	var got struct {
+		Status string `json:"status"`
+	}
 	require.NoError(t, json.Unmarshal(body, &got))
 	assert.Equal(t, "pending", got.Status)
 }

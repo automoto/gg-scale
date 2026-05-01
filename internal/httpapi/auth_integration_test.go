@@ -14,14 +14,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/migrate"
@@ -32,7 +31,7 @@ import (
 type cluster struct {
 	bootstrapPool *pgxpool.Pool
 	appPool       *pgxpool.Pool
-	valkey        *redis.Client
+	cache         cache.Store
 }
 
 func startCluster(t *testing.T) *cluster {
@@ -77,31 +76,10 @@ func startCluster(t *testing.T) *cluster {
 	require.NoError(t, err)
 	t.Cleanup(app.Close)
 
-	valCtr, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "valkey/valkey:8",
-			ExposedPorts: []string{"6379/tcp"},
-			WaitingFor:   wait.ForLog("Ready to accept connections").WithStartupTimeout(60 * time.Second),
-		},
-		Started: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = valCtr.Terminate(shutdown)
-	})
+	store := memory.New()
+	t.Cleanup(func() { _ = store.Close(context.Background()) })
 
-	host, err := valCtr.Host(ctx)
-	require.NoError(t, err)
-	port, err := valCtr.MappedPort(ctx, "6379/tcp")
-	require.NoError(t, err)
-
-	valkey := redis.NewClient(&redis.Options{Addr: host + ":" + port.Port()})
-	require.NoError(t, valkey.Ping(ctx).Err())
-	t.Cleanup(func() { _ = valkey.Close() })
-
-	return &cluster{bootstrapPool: bootstrap, appPool: app, valkey: valkey}
+	return &cluster{bootstrapPool: bootstrap, appPool: app, cache: store}
 }
 
 func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier, token string) (tenantID, projectID int64) {
@@ -131,8 +109,9 @@ func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 		Commit:  "test",
 		Pool:    db.NewPool(c.appPool),
 		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Limiter: ratelimit.NewValkeyLimiter(c.valkey),
+		Limiter: ratelimit.NewCacheLimiter(c.cache),
 		Signer:  signer,
+		Cache:   c.cache,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

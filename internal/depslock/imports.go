@@ -11,7 +11,6 @@ import (
 	_ "github.com/jackc/pgx/v5"
 	_ "github.com/pion/turn/v3"
 	_ "github.com/prometheus/client_golang/prometheus"
-	_ "github.com/redis/go-redis/v9"
 	_ "github.com/stretchr/testify/assert"
 	_ "github.com/stripe/stripe-go/v79"
 	_ "k8s.io/client-go/kubernetes"

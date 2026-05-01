@@ -31,6 +31,8 @@ type Querier interface {
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
+	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
+	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)

@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
-	"github.com/redis/go-redis/v9"
 
 	"github.com/ggscale/ggscale/internal/auth"
+	cachebuild "github.com/ggscale/ggscale/internal/cache/build"
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
@@ -62,9 +62,22 @@ func run() error {
 	}
 	defer pool.Close()
 
-	valkey := redis.NewClient(&redis.Options{Addr: cfg.ValkeyAddr})
-	valkey.AddHook(observability.NewValkeyHook(registry))
-	defer func() { _ = valkey.Close() }()
+	store, err := cachebuild.New(ctx, cachebuild.Config{
+		Backend:             cfg.CacheBackend,
+		OlricBindAddr:       cfg.CacheOlricBindAddr,
+		OlricBindPort:       cfg.CacheOlricBindPort,
+		OlricMemberlistAddr: cfg.CacheOlricMemberlistAddr,
+		OlricMemberlistPort: cfg.CacheOlricMemberlistPort,
+		OlricPeers:          cfg.CacheOlricPeers,
+	})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = store.Close(shutdownCtx)
+	}()
 
 	signer, err := auth.NewSignerFromHex(cfg.JWTSigningKey)
 	if err != nil {
@@ -79,9 +92,9 @@ func run() error {
 		Commit:   commit,
 		Pool:     db.NewPool(pool),
 		Lookup:   tenant.NewSQLLookup(pool),
-		Limiter:  ratelimit.NewValkeyLimiter(valkey),
+		Limiter:  ratelimit.NewCacheLimiter(store),
 		Signer:   signer,
-		Valkey:   valkey,
+		Cache:    store,
 		Registry: registry,
 	})
 

@@ -26,7 +26,7 @@ import (
 // returns two pools:
 //   - bootstrap: superuser pool used to seed test data (RLS bypassed)
 //   - app:       runs every connection as ggscale_app via AfterConnect, so
-//                queries actually exercise RLS like production will
+//     queries actually exercise RLS like production will
 func startCluster(t *testing.T) (bootstrap, app *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()

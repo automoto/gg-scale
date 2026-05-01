@@ -67,6 +67,80 @@ func (q *Queries) GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardR
 	return i, err
 }
 
+const leaderboardRangeByRank = `-- name: LeaderboardRangeByRank :many
+WITH ranked AS (
+    SELECT end_user_id,
+           MAX(score)::bigint AS best_score,
+           RANK() OVER (ORDER BY MAX(score) DESC, end_user_id ASC) AS r
+    FROM leaderboard_entries
+    WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+      AND leaderboard_id = $1
+    GROUP BY end_user_id
+)
+SELECT end_user_id, best_score, r::bigint AS rank
+FROM ranked
+WHERE r BETWEEN $2::bigint AND $3::bigint
+ORDER BY r
+`
+
+type LeaderboardRangeByRankParams struct {
+	LeaderboardID int64
+	RankLow       int64
+	RankHigh      int64
+}
+
+type LeaderboardRangeByRankRow struct {
+	EndUserID int64
+	BestScore int64
+	Rank      int64
+}
+
+func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error) {
+	rows, err := q.db.Query(ctx, leaderboardRangeByRank, arg.LeaderboardID, arg.RankLow, arg.RankHigh)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaderboardRangeByRankRow
+	for rows.Next() {
+		var i LeaderboardRangeByRankRow
+		if err := rows.Scan(&i.EndUserID, &i.BestScore, &i.Rank); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const leaderboardUserRank = `-- name: LeaderboardUserRank :one
+WITH ranked AS (
+    SELECT end_user_id,
+           RANK() OVER (ORDER BY MAX(score) DESC, end_user_id ASC) AS r
+    FROM leaderboard_entries
+    WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+      AND leaderboard_id = $1
+    GROUP BY end_user_id
+)
+SELECT r::bigint AS rank
+FROM ranked
+WHERE end_user_id = $2
+`
+
+type LeaderboardUserRankParams struct {
+	LeaderboardID int64
+	EndUserID     int64
+}
+
+func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error) {
+	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.LeaderboardID, arg.EndUserID)
+	var rank int64
+	err := row.Scan(&rank)
+	return rank, err
+}
+
 const submitScore = `-- name: SubmitScore :one
 INSERT INTO leaderboard_entries (
     tenant_id, leaderboard_id, end_user_id, score, recorded_at

@@ -1,8 +1,9 @@
 // Package ratelimit applies a per-API-key token bucket to /v1/* requests.
 //
 // Tier limits are static defaults from LimitsForTier; the bucket itself
-// lives in Valkey (see ValkeyLimiter) so it survives ggscale-server
-// restarts and is shared across replicas. The middleware is meant to be
+// lives in cache.Store (see CacheLimiter). With CACHE_BACKEND=memory the
+// bucket is per-process; with CACHE_BACKEND=olric it is shared across
+// the regional cluster of app processes. The middleware is meant to be
 // mounted after internal/tenant.Middleware which installs the APIKey
 // in the request context.
 //

@@ -3,9 +3,9 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/redis/go-redis/v9"
-
+	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -17,8 +17,17 @@ const CloseCodeTenantConnectionCap = 1013
 
 // CloseReasonTenantConnectionCap is the close-frame reason string the
 // Phase-2 WebSocket handler will send alongside CloseCodeTenantConnectionCap.
-// Documented here so the SDK can rely on a stable value.
 const CloseReasonTenantConnectionCap = "tenant_connection_cap"
+
+// ConnectionCapIdleTTL is how long an idle counter survives without any
+// Acquire/Refresh activity. Long-lived holders must call Refresh from a
+// heartbeat goroutine to keep the counter alive past this window.
+const ConnectionCapIdleTTL = 6 * time.Hour
+
+// ConnectionCapHeartbeat is the recommended interval for callers to invoke
+// Refresh on each held slot. Comfortably under ConnectionCapIdleTTL with
+// margin for one missed tick.
+const ConnectionCapHeartbeat = 30 * time.Minute
 
 // ConnectionCapForTier maps a tenant tier to the maximum number of
 // concurrent WebSocket connections it can hold open. Per-tenant Premium
@@ -45,99 +54,57 @@ type CapDecision struct {
 }
 
 // ConnectionCap is the interface the Phase-2 WebSocket handler will call
-// before upgrading. Acquire INCRs the per-key counter and rejects (rolling
-// back) when the new value would exceed the supplied limit. Release DECRs
-// on close.
+// before upgrading. Acquire reserves one slot under key (rejecting at the
+// per-tenant cap); Release decrements on close; Refresh is called by the
+// caller's heartbeat to keep the counter from expiring under long-lived
+// connections.
 type ConnectionCap interface {
 	Acquire(ctx context.Context, key string, limit int64) (CapDecision, error)
 	Release(ctx context.Context, key string) error
+	Refresh(ctx context.Context, key string) error
 }
 
-// luaAcquireCap atomically INCRs and rejects-with-rollback above the cap.
-// Sets a long TTL on the counter so a process crash that misses Release
-// calls doesn't leak the counter forever.
-//
-// KEYS: counter
-// ARGV: limit, ttl_seconds
-// Returns: { allowed (0|1), current }
-const luaAcquireCap = `
-local key   = KEYS[1]
-local limit = tonumber(ARGV[1])
-local ttl   = tonumber(ARGV[2])
-
-local current = redis.call('INCR', key)
-if current > limit then
-    redis.call('DECR', key)
-    return {0, current - 1}
-end
-redis.call('EXPIRE', key, ttl)
-return {1, current}
-`
-
-// counterIdleTTL bounds how long a stale counter survives without any
-// activity (no Acquires, no Releases). Six hours is well past any
-// reasonable WebSocket session, so an actual leak only happens if the
-// server crashes mid-session AND no other connections come in for that
-// tenant within the window.
-//
-// TODO(phase2): the current TTL+DECR pattern is unsafe for WebSockets
-// that stay open longer than counterIdleTTL with no other Acquire
-// traffic for the same tenant. When that happens the key expires; the
-// eventual Release issues a DECR against a missing key, leaving the
-// counter at -1 and silently disabling the cap. The Phase-2 WS handler
-// must:
-//
-//	(a) refresh the counter's TTL on every heartbeat from any active
-//	    connection for that tenant (cheap PEXPIRE), and
-//	(b) clamp Release in Lua so DECR never drops below zero
-//	    (e.g., `if redis.call('GET', KEYS[1]) > 0 then DECR end`).
-//
-// Tracked in the 2026-04-27 backend code review (item 2).
-const counterIdleTTL = 6 * 3600
-
-// ValkeyConnectionCap is a ConnectionCap backed by Valkey.
-type ValkeyConnectionCap struct {
-	client   *redis.Client
-	acquireS *redis.Script
+// CacheConnectionCap implements ConnectionCap on a cache.Store. Counter
+// state lives in the slots DMap of the configured backend.
+type CacheConnectionCap struct {
+	store cache.Store
 }
 
-// NewValkeyConnectionCap constructs a ValkeyConnectionCap. The Lua script
-// is uploaded lazily on the first Acquire (EVALSHA fallback to EVAL).
-func NewValkeyConnectionCap(client *redis.Client) *ValkeyConnectionCap {
-	return &ValkeyConnectionCap{
-		client:   client,
-		acquireS: redis.NewScript(luaAcquireCap),
-	}
+// NewCacheConnectionCap wraps store as a ConnectionCap.
+func NewCacheConnectionCap(store cache.Store) *CacheConnectionCap {
+	return &CacheConnectionCap{store: store}
 }
 
-// Acquire attempts to reserve one connection slot under key. On success
-// the caller must call Release exactly once when the connection closes.
-func (c *ValkeyConnectionCap) Acquire(ctx context.Context, key string, limit int64) (CapDecision, error) {
-	res, err := c.acquireS.Run(ctx, c.client, []string{key}, limit, counterIdleTTL).Result()
+// Acquire reserves one slot under key. On success the caller must invoke
+// Release exactly once and Refresh periodically (every
+// ConnectionCapHeartbeat) until close.
+func (c *CacheConnectionCap) Acquire(ctx context.Context, key string, limit int64) (CapDecision, error) {
+	ok, current, err := c.store.AcquireSlot(ctx, key, limit, ConnectionCapIdleTTL)
 	if err != nil {
-		return CapDecision{}, fmt.Errorf("connection cap script: %w", err)
+		return CapDecision{}, fmt.Errorf("connection cap acquire: %w", err)
 	}
-	arr, ok := res.([]any)
-	if !ok || len(arr) != 2 {
-		return CapDecision{}, fmt.Errorf("connection cap script: unexpected reply %#v", res)
-	}
-	allowed, _ := arr[0].(int64)
-	current, _ := arr[1].(int64)
-
-	return CapDecision{Allowed: allowed == 1, Current: current}, nil
+	return CapDecision{Allowed: ok, Current: current}, nil
 }
 
-// Release decrements the counter under key. Safe to call once per
-// successful Acquire; double-releases or releases without a matching
-// Acquire will under-count and let extra connections through.
-func (c *ValkeyConnectionCap) Release(ctx context.Context, key string) error {
-	if err := c.client.Decr(ctx, key).Err(); err != nil {
+// Release decrements the counter under key, clamped at zero so a spurious
+// double-release cannot drive the counter negative.
+func (c *CacheConnectionCap) Release(ctx context.Context, key string) error {
+	if err := c.store.ReleaseSlot(ctx, key); err != nil {
 		return fmt.Errorf("connection cap release: %w", err)
 	}
 	return nil
 }
 
-// ConnectionCapKey is the canonical Valkey key for a tenant's WebSocket
+// Refresh extends the counter's idle TTL. Safe to call on every heartbeat
+// from any active connection for the tenant; idempotent.
+func (c *CacheConnectionCap) Refresh(ctx context.Context, key string) error {
+	if err := c.store.RefreshSlot(ctx, key, ConnectionCapIdleTTL); err != nil {
+		return fmt.Errorf("connection cap refresh: %w", err)
+	}
+	return nil
+}
+
+// ConnectionCapKey is the canonical cache key for a tenant's WebSocket
 // counter. Centralised so the Phase-2 WS handler and any
 // observability/admin tooling agree on the key shape.
 func ConnectionCapKey(tenantID int64) string {
