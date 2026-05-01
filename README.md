@@ -2,6 +2,8 @@
 
 Open-source backend for multiplayer games. We want to do for game hosting what WordPress did for websites: make it cheap, self-hostable, and survivable past the studio that built it.
 
+**ggscale is in active development and isn't ready for production yet, we're currently doing alpha testing and making bug fixes**
+
 ## What it is
 
 ggscale is a single Go binary. Drop it on any Linux box, point it at a Postgres URL, and you have auth, storage, leaderboards, lobbies, matchmaking, and a P2P relay. A second compose file adds k3s + Agones for studios that want an authoritative game-server fleet.
