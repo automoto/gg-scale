@@ -1,13 +1,22 @@
 // Package mailer sends transactional email. The dev compose stack runs
 // MailHog at :1025 (SMTP) / :8025 (web UI) which captures every send
-// without forwarding; production deploys swap in real SMTP.
+// without forwarding.
+//
+// Providers register themselves with Register in their package init, following
+// the same database/sql driver pattern. The built-in providers are in the smtp
+// and noop sub-packages; import them for side-effects in main.go:
+//
+//	import _ "github.com/ggscale/ggscale/internal/mailer/noop"
+//	import _ "github.com/ggscale/ggscale/internal/mailer/smtp"
+//
+// External providers (e.g. SendGrid, Mailgun) follow the same pattern without
+// ggscale ever importing them — no vendor lock-in enters the core binary.
 package mailer
 
 import (
 	"context"
 	"fmt"
-	"net/smtp"
-	"strings"
+	"sync"
 )
 
 // Mailer abstracts the send so tests can substitute a recorder.
@@ -24,47 +33,42 @@ type Message struct {
 	Body    string
 }
 
-// SMTPMailer talks to a plain SMTP server. MailHog accepts unauthenticated
-// connections; production uses STARTTLS via the standard library
-// machinery in net/smtp.
-type SMTPMailer struct {
-	addr string
-	auth smtp.Auth
-}
+// ProviderFunc constructs a Mailer from connection parameters.
+// addr is the server address (host:port for SMTP, endpoint URL for managed
+// providers). user and password are credentials — may be empty for
+// unauthenticated relays like MailHog. from is the default sender address.
+//
+// External providers implement this signature and call Register in init().
+type ProviderFunc func(addr, user, password, from string) (Mailer, error)
 
-// NewSMTPMailer constructs a mailer pointed at addr (e.g.
-// "mailhog:1025" in dev). auth may be nil for unauthenticated relays.
-func NewSMTPMailer(addr string, auth smtp.Auth) *SMTPMailer {
-	return &SMTPMailer{addr: addr, auth: auth}
-}
+var (
+	mu        sync.RWMutex
+	providers = map[string]ProviderFunc{}
+)
 
-// Send encodes msg as RFC 5322 and hands it to the SMTP server. Context
-// is currently advisory — net/smtp doesn't accept it; we may swap to
-// go-mail later.
-func (m *SMTPMailer) Send(_ context.Context, msg Message) error {
-	body := buildRFC5322(msg)
-	if err := smtp.SendMail(m.addr, m.auth, msg.From, msg.To, body); err != nil {
-		return fmt.Errorf("mailer: send: %w", err)
+// Register makes a provider available under name. Typically called from
+// provider init() functions. Panics if the same name is registered twice to
+// surface wiring mistakes early.
+func Register(name string, fn ProviderFunc) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := providers[name]; ok {
+		panic(fmt.Sprintf("mailer: provider %q already registered", name))
 	}
-	return nil
+	providers[name] = fn
 }
 
-func buildRFC5322(m Message) []byte {
-	var b strings.Builder
-	b.WriteString("From: ")
-	b.WriteString(m.From)
-	b.WriteString("\r\n")
-	b.WriteString("To: ")
-	b.WriteString(strings.Join(m.To, ", "))
-	b.WriteString("\r\n")
-	b.WriteString("Subject: ")
-	b.WriteString(m.Subject)
-	b.WriteString("\r\n")
-	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("\r\n")
-	b.WriteString(m.Body)
-	return []byte(b.String())
+// New constructs the named provider. Returns an error if the provider was
+// never registered — typically means the import side-effect is missing in
+// main.go.
+func New(provider, addr, user, password, from string) (Mailer, error) {
+	mu.RLock()
+	fn, ok := providers[provider]
+	mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("mailer: unknown provider %q (did you import the provider package?)", provider)
+	}
+	return fn(addr, user, password, from)
 }
 
 // Recorder is a Mailer that captures every Send. Useful as a test double

@@ -41,6 +41,7 @@ type Deps struct {
 	Limiter  ratelimit.Limiter
 	Signer   *auth.Signer
 	Mailer   mailer.Mailer
+	MailFrom string
 	Cache    cache.Store
 	Registry *prometheus.Registry
 }
