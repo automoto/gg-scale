@@ -1,7 +1,10 @@
 .PHONY: build test test-integration e2e lint vulncheck sqlc-gen \
         up down logs psql migrate migrate-new \
+        up-dev down-dev \
         up-k8s agones-install \
-        preflight preflight-k8s clean
+        preflight preflight-k8s clean clean-dev
+
+FULL_STACK := docker compose -f ops/full-stack-docker-compose.yml
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
@@ -30,13 +33,13 @@ vulncheck:
 sqlc-gen:
 	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:latest generate
 
-# ─── Compose lite stack ─────────────────────────────────────────────────
+# ─── Simple stack (self-hosting) ────────────────────────────────────────
 
 up: preflight
 	docker compose up -d --wait
 
 down:
-	docker compose --profile k8s down --remove-orphans
+	docker compose down --remove-orphans
 
 logs:
 	docker compose logs -f --tail=200 ggscale-server
@@ -54,14 +57,27 @@ migrate-new:
 	  echo "created db/migrations/$${next}_$(NAME).up.sql"; \
 	  echo "created db/migrations/$${next}_$(NAME).down.sql"
 
-# ─── K8s profile (k3s + Agones) ─────────────────────────────────────────
+clean:
+	docker compose down -v --remove-orphans
+
+# ─── Full dev stack (prometheus, stripe-mock, dashboard, k8s) ───────────
+
+up-dev: preflight
+	$(FULL_STACK) up -d --wait
+
+down-dev:
+	$(FULL_STACK) --profile k8s down --remove-orphans
 
 up-k8s: preflight-k8s
 	mkdir -p .k3s
-	docker compose --profile k8s up -d --wait k3s
+	$(FULL_STACK) --profile k8s up -d --wait k3s
 
 agones-install:
-	docker compose --profile k8s run --rm agones-install
+	$(FULL_STACK) --profile k8s run --rm agones-install
+
+clean-dev:
+	$(FULL_STACK) --profile k8s down -v --remove-orphans
+	rm -rf .k3s
 
 # ─── Misc ───────────────────────────────────────────────────────────────
 
@@ -70,7 +86,3 @@ preflight:
 
 preflight-k8s:
 	@bash scripts/preflight.sh k8s
-
-clean:
-	docker compose --profile k8s down -v --remove-orphans
-	rm -rf .k3s

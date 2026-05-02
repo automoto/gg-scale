@@ -13,16 +13,29 @@ ggscale is a single Go binary. Drop it on any Linux box, point it at a Postgres 
 ```bash
 git clone https://github.com/automoto/gg-scale.git
 cd gg-scale
-cp .env.example .env
 make up
 curl localhost:8080/v1/healthz
 ```
 
 Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
-### macOS contributors
+This starts the simple stack: the ggscale server, Postgres, and a local SMTP server (MailHog). MailHog's web UI is available at `http://localhost:8025`.
 
-The K8s profile requires Colima — Docker Desktop's host networking breaks Agones UDP reachability.
+## Docker Compose setups
+
+There are two compose configurations:
+
+**Simple stack** (`docker-compose.yml`) — for self-hosting and quick local runs:
+- `ggscale-server`, `postgres`, `mailhog` (SMTP)
+- `make up` / `make down`
+
+**Full dev stack** (`ops/full-stack-docker-compose.yml`) — for contributors who need the complete environment:
+- Everything in the simple stack plus Prometheus, Stripe mock, dashboard stub, and optional k3s + Agones
+- `make up-dev` / `make down-dev`
+
+### k8s profile (contributors only)
+
+The k8s profile requires Colima on macOS — Docker Desktop's host networking breaks Agones UDP reachability.
 
 ```bash
 brew install colima
@@ -30,18 +43,20 @@ colima start --network-address --cpus 4 --memory 8
 make up-k8s && make agones-install
 ```
 
-The lite stack (`make up`) works on Docker Desktop. Linux contributors need nothing extra.
+Linux contributors need nothing extra.
 
 ## Common commands
 
 | Target | What it does |
 |---|---|
-| `make up` | Start the lite stack (no k8s). |
-| `make up-k8s` | Start with k3s + Agones (macOS: run Colima first). |
+| `make up` | Start the simple stack (server + postgres + smtp). |
+| `make down` | Tear the simple stack down. |
+| `make clean` | Tear down + delete volumes. |
+| `make up-dev` | Start the full dev stack. |
+| `make down-dev` | Tear the full dev stack down. |
+| `make up-k8s` | Start k3s + Agones (full stack, macOS: run Colima first). |
 | `make test` | Unit tests with `-race`. |
 | `make lint` | `golangci-lint`. |
-| `make down` | Tear the stack down. |
-| `make clean` | Tear down + delete volumes. |
 
 ## License
 
