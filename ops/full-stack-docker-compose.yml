@@ -1,0 +1,147 @@
+name: ggscale
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ggscale
+      POSTGRES_PASSWORD: ggscale
+      POSTGRES_DB: ggscale
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../compose/init-sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ggscale -d ggscale"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    logging: *default-logging
+
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../db/migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://ggscale:ggscale@postgres:5432/ggscale?sslmode=disable",
+        "up"
+      ]
+    restart: "no"
+    logging: *default-logging
+
+  ggscale-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: ggscale-server:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mailhog:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://ggscale:ggscale@postgres:5432/ggscale?sslmode=disable
+      CACHE_BACKEND: memory
+      HTTP_ADDR: ":8080"
+      LOG_LEVEL: info
+      ENV: dev
+      MAIL_PROVIDER: smtp
+      SMTP_ADDR: "mailhog:1025"
+      MAIL_FROM: "noreply@ggscale.dev"
+    ports:
+      - "8080:8080"
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../compose/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    logging: *default-logging
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    logging: *default-logging
+
+  stripe-mock:
+    image: stripe/stripe-mock:v0.197.0
+    ports:
+      - "12111:12111"
+      - "12112:12112"
+    logging: *default-logging
+
+  dashboard-stub:
+    image: nginx:1.27-alpine
+    ports:
+      - "3001:80"
+    volumes:
+      - ../compose/dashboard-stub:/usr/share/nginx/html:ro
+    logging: *default-logging
+
+  # ─────── k8s profile ───────
+
+  k3s:
+    image: rancher/k3s:v1.30.6-k3s1
+    profiles: ["k8s"]
+    privileged: true
+    network_mode: host
+    command:
+      - server
+      - --disable=traefik
+      - --disable=servicelb
+      - --write-kubeconfig-mode=644
+      - --write-kubeconfig=/output/kubeconfig.yaml
+    environment:
+      K3S_KUBECONFIG_OUTPUT: /output/kubeconfig.yaml
+      K3S_KUBECONFIG_MODE: "644"
+    volumes:
+      - k3s-server:/var/lib/rancher/k3s
+      - ../.k3s:/output
+    tmpfs:
+      - /run
+      - /var/run
+    logging: *default-logging
+
+  agones-install:
+    image: bitnami/kubectl:1.30
+    profiles: ["k8s"]
+    depends_on:
+      - k3s
+    network_mode: host
+    volumes:
+      - ../.k3s:/kube:ro
+      - ../k8s:/manifests:ro
+      - ../scripts:/scripts:ro
+    environment:
+      KUBECONFIG: /kube/kubeconfig.yaml
+    entrypoint: ["/bin/sh", "/scripts/agones-install.sh"]
+    restart: "no"
+    logging: *default-logging
+
+volumes:
+  postgres-data:
+  prometheus-data:
+  k3s-server:
