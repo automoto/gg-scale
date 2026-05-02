@@ -39,6 +39,21 @@ type Config struct {
 	// CacheOlricPeers is the comma-separated host:port list of memberlist
 	// endpoints to join. Empty means a cluster of one.
 	CacheOlricPeers []string
+
+	// Mail provider and connection settings.
+	// MailProvider selects the registered provider: "smtp" (default) or "noop".
+	// External providers register via mailer.Register in their init().
+	MailProvider string
+	// SMTPAddr is the SMTP server address (host:port). Default "localhost:1025"
+	// matches MailHog in the dev compose stack.
+	SMTPAddr string
+	// SMTPUser is the SMTP username. Leave empty for unauthenticated relays
+	// (e.g. MailHog in dev).
+	SMTPUser string
+	// SMTPPassword is the SMTP password. Unused when SMTPUser is empty.
+	SMTPPassword string
+	// MailFrom is the From address on outbound mail. Default "noreply@ggscale.dev".
+	MailFrom string
 }
 
 type varDecl struct {
@@ -90,6 +105,27 @@ var declared = []varDecl{
 	}},
 	{name: "CACHE_OLRIC_PEERS", defval: "", set: func(c *Config, v string) error {
 		c.CacheOlricPeers = splitCSV(v)
+		return nil
+	}},
+
+	{name: "MAIL_PROVIDER", defval: "smtp", set: func(c *Config, v string) error {
+		c.MailProvider = v
+		return nil
+	}},
+	{name: "SMTP_ADDR", defval: "localhost:1025", set: func(c *Config, v string) error {
+		c.SMTPAddr = v
+		return nil
+	}},
+	{name: "SMTP_USER", defval: "", set: func(c *Config, v string) error {
+		c.SMTPUser = v
+		return nil
+	}},
+	{name: "SMTP_PASSWORD", defval: "", set: func(c *Config, v string) error {
+		c.SMTPPassword = v
+		return nil
+	}},
+	{name: "MAIL_FROM", defval: "noreply@ggscale.dev", set: func(c *Config, v string) error {
+		c.MailFrom = v
 		return nil
 	}},
 }

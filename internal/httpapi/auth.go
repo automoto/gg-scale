@@ -31,7 +31,6 @@ const (
 	verifyTokenTTL       = 24 * time.Hour
 	bcryptCost           = 12
 	maxJSONBodyBytes     = 1 << 20
-	mailerVerifyFrom     = "noreply@ggscale.dev"
 	mailerVerifySubject  = "Verify your ggscale email"
 	mailerVerifyBodyTmpl = "Your verification token (valid 24h):\n\n%s\n\nSubmit it to POST /v1/auth/verify."
 )
@@ -202,7 +201,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 
 		if d.Mailer != nil {
 			msg := mailer.Message{
-				From: mailerVerifyFrom, To: []string{req.Email},
+				From: d.MailFrom, To: []string{req.Email},
 				Subject: mailerVerifySubject,
 				Body:    fmt.Sprintf(mailerVerifyBodyTmpl, verifyToken),
 			}

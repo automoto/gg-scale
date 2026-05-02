@@ -115,7 +115,7 @@ func profilePatchHandler(d Deps) http.HandlerFunc {
 
 		if d.Mailer != nil {
 			_ = d.Mailer.Send(ctx, mailer.Message{
-				From: mailerVerifyFrom, To: []string{newEmail},
+				From: d.MailFrom, To: []string{newEmail},
 				Subject: mailerVerifySubject,
 				Body:    "Verification token: " + verifyToken + " (valid 24h)",
 			})

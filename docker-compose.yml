@@ -52,12 +52,17 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      mailhog:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://ggscale:ggscale@postgres:5432/ggscale?sslmode=disable
       CACHE_BACKEND: memory
       HTTP_ADDR: ":8080"
       LOG_LEVEL: info
       ENV: dev
+      MAIL_PROVIDER: smtp
+      SMTP_ADDR: "mailhog:1025"
+      MAIL_FROM: "noreply@ggscale.dev"
     ports:
       - "8080:8080"
     logging: *default-logging

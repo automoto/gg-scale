@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,10 @@ import (
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/ggscale/ggscale/internal/mailer"
+	_ "github.com/ggscale/ggscale/internal/mailer/noop"
+	_ "github.com/ggscale/ggscale/internal/mailer/smtp"
+	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -69,6 +74,7 @@ func run() error {
 		OlricMemberlistAddr: cfg.CacheOlricMemberlistAddr,
 		OlricMemberlistPort: cfg.CacheOlricMemberlistPort,
 		OlricPeers:          cfg.CacheOlricPeers,
+		Registry:            registry,
 	})
 	if err != nil {
 		return err
@@ -87,6 +93,11 @@ func run() error {
 		slog.Warn("JWT_SIGNING_KEY not set; using a random in-process key — sessions won't survive restart")
 	}
 
+	m, err := mailer.New(cfg.MailProvider, cfg.SMTPAddr, cfg.SMTPUser, cfg.SMTPPassword, cfg.MailFrom)
+	if err != nil {
+		return fmt.Errorf("mailer: %w", err)
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   commit,
@@ -94,6 +105,8 @@ func run() error {
 		Lookup:   tenant.NewSQLLookup(pool),
 		Limiter:  ratelimit.NewCacheLimiter(store),
 		Signer:   signer,
+		Mailer:   m,
+		MailFrom: cfg.MailFrom,
 		Cache:    store,
 		Registry: registry,
 	})
@@ -136,5 +149,6 @@ func newLogger(level string) *slog.Logger {
 	default:
 		lvl = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl}))
+	base := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
+	return slog.New(middleware.NewContextHandler(base))
 }
