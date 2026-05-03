@@ -45,7 +45,7 @@ func TestDashboard_login_page_renders_under_v1(t *testing.T) {
 func TestDashboard_setup_page_renders_when_bootstrap_pending(t *testing.T) {
 	srv := newDashboardServer(t)
 
-	resp, err := http.Get(srv.URL + "/v1/dashboard/setup?token=setup-token")
+	resp, err := http.Get(srv.URL + "/v1/dashboard/setup")
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -54,7 +54,8 @@ func TestDashboard_setup_page_renders_when_bootstrap_pending(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, string(body), "Set up ggscale Dashboard")
-	assert.Contains(t, string(body), `name="bootstrap_token" value="setup-token"`)
+	assert.Contains(t, string(body), `name="bootstrap_token"`)
+	assert.NotContains(t, string(body), `value="setup-token"`)
 }
 
 func TestDashboard_routes_outside_v1_return_404(t *testing.T) {
