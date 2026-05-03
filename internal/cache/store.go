@@ -51,7 +51,7 @@ type Store interface {
 	// Set writes value at key with the given TTL. ttl=0 means no expiry.
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
 
-	// Delete removes key. Missing keys are not an error.
+	// Delete removes key from all cache namespaces. Missing keys are not an error.
 	Delete(ctx context.Context, key string) error
 
 	// Close releases backend resources. Implementations of clustered

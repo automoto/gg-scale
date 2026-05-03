@@ -16,7 +16,8 @@ There are two distinct compose profiles:
 ```
                    ┌────────────────────────────────────────┐
                    │ ggscale-server :8080  (Go, chi router) │
-                   │  /v1/healthz · /v1/* · /metrics        │
+                  │  /v1/healthz · /v1/* · /metrics        │
+                  │  /v1/dashboard (HTMX + templ)          │
                    │  + cache.Store (memory or olric)       │
                    └─────────────────────┬──────────────────┘
                                          │
@@ -36,7 +37,7 @@ There are two distinct compose profiles:
 | `prometheus` | `prom/prometheus:v3.1.0` | 9090 | Scrapes `ggscale-server:8080/metrics`. Browse counters at `http://localhost:9090/graph`. |
 | `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for capturing signup/verify mail (Phase 1+). |
 | `stripe-mock` | `stripe/stripe-mock:v0.197.0` | 12111 / 12112 | Local Stripe API mock for the billing flows that land in Phase 3. Pre-wired now to avoid later compose churn. |
-| `dashboard-stub` | `nginx:1.27-alpine` | 3001 | One-line static placeholder. Phase 1 replaces with the real read-only ops dashboard. |
+| `ggscale-server` dashboard | local `ggscale-server:dev` | 3001 -> 8080 | HTMX + templ dashboard at `/v1/dashboard/login` for tenant/project/API-key bootstrap and API-key lifecycle management. |
 
 ## K8s-profile services
 
@@ -92,6 +93,9 @@ two diverge.
 | `HTTP_ADDR` | no | `:8080` | HTTP listen address. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. |
 | `ENV` | no | `dev` | `dev`, `staging`, `prod`. |
+| `DASHBOARD_DISABLED` | no | `false` | Disable the server-rendered dashboard when `true`. |
+| `DASHBOARD_BOOTSTRAP_TOKEN_FILE` | no | (empty) | Optional path for the first-run bootstrap token; written mode 0600. |
+| `DASHBOARD_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on dashboard session cookies. |
 | `CACHE_BACKEND` | no | `memory` | Cache.Store backend. `memory` (default; in-process map; zero networking deps; covers dev, single-VM self-host, tests) or `olric` (embedded Olric cluster across the app processes; opt-in for multi-VM regions where rate-limit and connection-cap state must be shared). |
 | `CACHE_OLRIC_BIND_ADDR` | no | `127.0.0.1` | Olric protocol bind. |
 | `CACHE_OLRIC_BIND_PORT` | no | `3320` | Olric protocol port. |
@@ -109,6 +113,22 @@ two diverge.
 
 Phase 1 adds `/v1/auth/*`, `/v1/storage/*`, `/v1/leaderboards/*`, and the
 `tenant` middleware that guards all of them.
+
+## Dashboard auth
+
+The dashboard is a separate operator surface under `/v1/dashboard`, not part
+of the player auth API. It uses platform-scoped `dashboard_users` with bcrypt
+password hashes, opaque DB-backed `dashboard_sessions`, and CSRF tokens on
+state-changing forms. A `dashboard_memberships` table maps dashboard users to
+tenants with `owner`, `admin`, or `member` roles; API-key management requires
+`admin` or stronger. Platform admins can see every tenant.
+
+Fresh installs are bootstrapped with a one-time token generated at server
+startup when `dashboard_users` is empty. The token is logged, optionally
+written to `DASHBOARD_BOOTSTRAP_TOKEN_FILE`, and accepted only by
+`/v1/dashboard/setup`. Once the first platform admin is created, setup returns
+410 and all access goes through email/password login. The old shared
+`DASHBOARD_ADMIN_TOKEN` model has been removed.
 
 ## Tenant isolation (Phase 1)
 

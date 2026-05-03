@@ -159,6 +159,8 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	delete(s.buckets, key)
+	delete(s.slots, key)
 	delete(s.kv, key)
 	return nil
 }

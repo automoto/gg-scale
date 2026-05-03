@@ -63,8 +63,11 @@ services:
       MAIL_PROVIDER: smtp
       SMTP_ADDR: "mailhog:1025"
       MAIL_FROM: "noreply@ggscale.dev"
+      DASHBOARD_DISABLED: "false"
+      DASHBOARD_COOKIE_SECURE: "true"
     ports:
       - "8080:8080"
+      - "3001:8080"
     logging: *default-logging
 
   prometheus:
@@ -91,14 +94,6 @@ services:
     ports:
       - "12111:12111"
       - "12112:12112"
-    logging: *default-logging
-
-  dashboard-stub:
-    image: nginx:1.27-alpine
-    ports:
-      - "3001:80"
-    volumes:
-      - ../compose/dashboard-stub:/usr/share/nginx/html:ro
     logging: *default-logging
 
   # ─────── k8s profile ───────

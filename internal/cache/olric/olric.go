@@ -272,8 +272,14 @@ func (s *Store) Set(ctx context.Context, key string, value []byte, ttl time.Dura
 
 // Delete implements cache.Store.
 func (s *Store) Delete(ctx context.Context, key string) error {
-	if _, err := s.kv.Delete(ctx, key); err != nil {
-		return fmt.Errorf("olric: delete: %w", err)
+	for name, dmap := range map[string]olricpkg.DMap{
+		"ratelimit": s.buckets,
+		"slots":     s.slots,
+		"kv":        s.kv,
+	} {
+		if _, err := dmap.Delete(ctx, key); err != nil && !errors.Is(err, olricpkg.ErrKeyNotFound) {
+			return fmt.Errorf("olric: delete %s: %w", name, err)
+		}
 	}
 	return nil
 }

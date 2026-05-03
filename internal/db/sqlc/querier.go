@@ -9,12 +9,18 @@ import (
 )
 
 type Querier interface {
+	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousEndUser(ctx context.Context, arg CreateAnonymousEndUserParams) (CreateAnonymousEndUserRow, error)
+	CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error)
+	CreateDashboardSession(ctx context.Context, arg CreateDashboardSessionParams) (CreateDashboardSessionRow, error)
+	CreateDashboardUser(ctx context.Context, arg CreateDashboardUserParams) (CreateDashboardUserRow, error)
 	CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUserParams) (int64, error)
+	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
 	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier. Runs without an
@@ -23,6 +29,10 @@ type Querier interface {
 	// tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetDashboardMembership(ctx context.Context, arg GetDashboardMembershipParams) (GetDashboardMembershipRow, error)
+	GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error)
+	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
+	GetDashboardUserByID(ctx context.Context, id int64) (GetDashboardUserByIDRow, error)
 	GetEndUserByEmail(ctx context.Context, arg GetEndUserByEmailParams) (GetEndUserByEmailRow, error)
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
 	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
@@ -34,6 +44,8 @@ type Querier interface {
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	ListDashboardTenantsForPlatformAdmin(ctx context.Context) ([]ListDashboardTenantsForPlatformAdminRow, error)
+	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
@@ -41,18 +53,25 @@ type Querier interface {
 	// Optimistic concurrency variant — only updates if the row's current
 	// version matches expected. RETURNING NULL row on mismatch.
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
+	RecordDashboardLoginFailure(ctx context.Context, arg RecordDashboardLoginFailureParams) (RecordDashboardLoginFailureRow, error)
+	RecordDashboardLoginSuccess(ctx context.Context, id int64) error
 	// The unique index keeps one current row per directed pair, so re-requests
 	// after rejection update in place. Pending/accepted are idempotent (the
 	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
 	// terminal (the WHERE clause omits it). See migration 0012.
 	RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
+	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
+	RevokeDashboardSession(ctx context.Context, id int64) error
 	RevokeSession(ctx context.Context, id int64) error
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
 	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
+	TouchDashboardSession(ctx context.Context, arg TouchDashboardSessionParams) error
+	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error
+	UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) error
 	// Profile updates are deliberately narrow — only fields explicitly
 	// enumerated server-side may change. PATCHing email re-triggers the
 	// verify flow (handler clears email_verified_at).

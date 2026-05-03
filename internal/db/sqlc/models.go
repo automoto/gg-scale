@@ -29,6 +29,38 @@ type AuditLog struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type DashboardMembership struct {
+	ID              int64
+	DashboardUserID int64
+	TenantID        int64
+	Role            string
+	CreatedAt       pgtype.Timestamptz
+}
+
+type DashboardSession struct {
+	ID              int64
+	DashboardUserID int64
+	RefreshHash     []byte
+	CsrfSecret      []byte
+	ExpiresAt       pgtype.Timestamptz
+	LastSeenAt      pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+	Ip              *string
+	UserAgent       *string
+	CreatedAt       pgtype.Timestamptz
+}
+
+type DashboardUser struct {
+	ID              int64
+	Email           string
+	PasswordHash    []byte
+	IsPlatformAdmin bool
+	LoginFailures   int32
+	LockedUntil     pgtype.Timestamptz
+	LastLoginAt     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type EndUser struct {
 	ID                         int64
 	TenantID                   int64

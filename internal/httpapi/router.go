@@ -18,6 +18,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -44,6 +45,9 @@ type Deps struct {
 	MailFrom string
 	Cache    cache.Store
 	Registry *prometheus.Registry
+
+	Dashboard          dashboard.Config
+	DashboardBootstrap *dashboard.Bootstrap
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -94,6 +98,9 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewVersion(d.Version, reg))
 		r.Use(middleware.NewObservability(reg))
 		r.Get("/healthz", healthzHandler(d))
+		if d.Dashboard.Enabled() {
+			r.Mount("/dashboard", dashboard.New(d.Pool, d.Cache, d.Limiter, reg, d.Dashboard, d.DashboardBootstrap))
+		}
 
 		if d.hasAuthDeps() {
 			r.Group(func(r chi.Router) {

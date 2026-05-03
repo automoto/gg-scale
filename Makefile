@@ -1,4 +1,4 @@
-.PHONY: build test test-integration e2e lint vulncheck sqlc-gen \
+.PHONY: build test test-integration e2e lint vulncheck sqlc-gen templ-generate \
         up down logs psql migrate migrate-new \
         up-dev down-dev \
         up-k8s agones-install \
@@ -32,6 +32,9 @@ vulncheck:
 # Uses the official sqlc Docker image so contributors don't need a host install.
 sqlc-gen:
 	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:latest generate
+
+templ-generate:
+	GOSUMDB=off go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 

@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(14), v)
+	assert.Equal(t, uint(17), v)
 	assert.False(t, dirty)
 }
 
@@ -156,6 +156,7 @@ func TestUp_creates_all_phase1_tables(t *testing.T) {
 		"friend_edges",
 		"audit_log",
 		"usage_samples",
+		"dashboard_users", "dashboard_memberships", "dashboard_sessions",
 	} {
 		assert.True(t, tableExists(t, dsn, table), "table %s should exist", table)
 	}
@@ -192,7 +193,7 @@ func TestDown_walks_back_through_every_migration(t *testing.T) {
 
 	require.NoError(t, r.Up())
 
-	for v := uint(14); v > 0; v-- {
+	for v := uint(17); v > 0; v-- {
 		require.NoError(t, r.Down(), "down from version %d", v)
 	}
 

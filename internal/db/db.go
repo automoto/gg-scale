@@ -101,3 +101,23 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 	}
 	return nil
 }
+
+// BootstrapQ runs fn inside a transaction before a tenant context exists.
+// Keep this for narrow bootstrap paths such as dashboard tenant creation;
+// tenant-scoped request handlers should use Q so RLS receives app.tenant_id.
+func (p *Pool) BootstrapQ(ctx context.Context, fn func(pgx.Tx) error) error {
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+
+	if err = fn(tx); err != nil {
+		_ = tx.Rollback(ctx)
+		return err
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+	return nil
+}
