@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(17), v)
+	assert.Equal(t, uint(18), v)
 	assert.False(t, dirty)
 }
 
@@ -155,6 +155,7 @@ func TestUp_creates_all_phase1_tables(t *testing.T) {
 		"leaderboards", "leaderboard_entries",
 		"friend_edges",
 		"audit_log",
+		"platform_audit_log",
 		"usage_samples",
 		"dashboard_users", "dashboard_memberships", "dashboard_sessions",
 	} {

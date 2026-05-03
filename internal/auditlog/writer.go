@@ -16,9 +16,8 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 )
 
-// Write inserts a row. actorUserID may be 0 (e.g. signup, where no user
-// exists yet) — the column is nullable. payload is JSON-marshalled; pass
-// nil to record an empty object.
+// Write inserts a tenant-scoped row. actorUserID may be 0 — the column is
+// nullable. payload is JSON-marshalled; pass nil to record an empty object.
 func Write(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target string, payload any) error {
 	body := []byte("{}")
 	if payload != nil {
@@ -46,6 +45,39 @@ func Write(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target str
 		Payload:     body,
 	}); err != nil {
 		return fmt.Errorf("auditlog: write: %w", err)
+	}
+	return nil
+}
+
+// WritePlatform inserts a platform-scoped row into platform_audit_log (no
+// tenant FK). Use for dashboard login/logout and other platform events.
+func WritePlatform(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target string, payload any) error {
+	body := []byte("{}")
+	if payload != nil {
+		var err error
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("auditlog: marshal payload: %w", err)
+		}
+	}
+
+	q := sqlcgen.New(tx)
+	var actor *int64
+	if actorUserID != 0 {
+		actor = &actorUserID
+	}
+	var tgt *string
+	if target != "" {
+		t := target
+		tgt = &t
+	}
+	if err := q.WritePlatformAudit(ctx, sqlcgen.WritePlatformAuditParams{
+		ActorUserID: actor,
+		Action:      action,
+		Target:      tgt,
+		Payload:     body,
+	}); err != nil {
+		return fmt.Errorf("auditlog: write platform: %w", err)
 	}
 	return nil
 }

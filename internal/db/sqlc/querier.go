@@ -81,6 +81,7 @@ type Querier interface {
 	UpsertEndUserByExternalID(ctx context.Context, arg UpsertEndUserByExternalIDParams) (int64, error)
 	VerifyEmailByTokenHash(ctx context.Context, emailVerificationHash []byte) (int64, error)
 	WriteAudit(ctx context.Context, arg WriteAuditParams) error
+	WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error
 }
 
 var _ Querier = (*Queries)(nil)

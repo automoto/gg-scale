@@ -33,3 +33,25 @@ func (q *Queries) WriteAudit(ctx context.Context, arg WriteAuditParams) error {
 	)
 	return err
 }
+
+const writePlatformAudit = `-- name: WritePlatformAudit :exec
+INSERT INTO platform_audit_log (actor_user_id, action, target, payload)
+VALUES ($1, $2, $3, $4)
+`
+
+type WritePlatformAuditParams struct {
+	ActorUserID *int64
+	Action      string
+	Target      *string
+	Payload     []byte
+}
+
+func (q *Queries) WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error {
+	_, err := q.db.Exec(ctx, writePlatformAudit,
+		arg.ActorUserID,
+		arg.Action,
+		arg.Target,
+		arg.Payload,
+	)
+	return err
+}

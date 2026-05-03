@@ -105,6 +105,15 @@ type LeaderboardEntry struct {
 	RecordedAt    pgtype.Timestamptz
 }
 
+type PlatformAuditLog struct {
+	ID          int64
+	ActorUserID *int64
+	Action      string
+	Target      *string
+	Payload     []byte
+	OccurredAt  pgtype.Timestamptz
+}
+
 type Project struct {
 	ID        int64
 	TenantID  int64

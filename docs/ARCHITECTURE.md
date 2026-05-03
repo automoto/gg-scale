@@ -39,6 +39,23 @@ There are two distinct compose profiles:
 | `stripe-mock` | `stripe/stripe-mock:v0.197.0` | 12111 / 12112 | Local Stripe API mock for the billing flows that land in Phase 3. Pre-wired now to avoid later compose churn. |
 | `ggscale-server` dashboard | local `ggscale-server:dev` | 3001 -> 8080 | HTMX + templ dashboard at `/v1/dashboard/login` for tenant/project/API-key bootstrap and API-key lifecycle management. |
 
+## Dashboard bootstrap
+
+On first run (no dashboard users in the DB), `ggscale-server` generates a
+one-time setup token. Both compose files write this token to a file via
+`DASHBOARD_BOOTSTRAP_TOKEN_FILE=/run/ggscale/bootstrap.token`, which is
+bind-mounted to `./data/` on the host:
+
+```shell
+cat ./data/bootstrap.token
+```
+
+Navigate to `http://localhost:3001/v1/dashboard/setup?token=<token>` to create
+the first platform-admin account. The token is intentionally kept out of
+structured logs — log aggregators (Loki, Datadog, CloudWatch) would otherwise
+retain the plaintext value for their full retention period. If
+`DASHBOARD_BOOTSTRAP_TOKEN_FILE` is unset the token falls back to stderr only.
+
 ## K8s-profile services
 
 | Service | Image | Role |
