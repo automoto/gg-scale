@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -137,5 +138,6 @@ func normalizeEmail(email string) string {
 }
 
 func validDashboardEmail(email string) bool {
-	return len(email) >= 5 && strings.Contains(email, "@") && strings.Contains(email[strings.LastIndex(email, "@"):], ".")
+	_, err := mail.ParseAddress(email)
+	return err == nil
 }

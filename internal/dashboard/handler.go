@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"embed"
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
@@ -255,6 +256,7 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 func render(r *http.Request, w http.ResponseWriter, component templ.Component) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := component.Render(r.Context(), w); err != nil {
+		slog.ErrorContext(r.Context(), "dashboard template render failed", "err", err)
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
 }
@@ -292,7 +294,17 @@ func parseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// clientIP extracts the real client IP for audit purposes.
+// CF-Connecting-IP and X-Real-IP are trusted only when a proxy strips them on
+// ingress (see ARCHITECTURE.md § "Reverse-proxy IP trust"). Falls back to
+// RemoteAddr when neither header is present.
 func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return ip
+	}
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
