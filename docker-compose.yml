@@ -63,8 +63,11 @@ services:
       MAIL_PROVIDER: smtp
       SMTP_ADDR: "mailhog:1025"
       MAIL_FROM: "noreply@ggscale.dev"
+      DASHBOARD_DISABLED: "false"
+      DASHBOARD_COOKIE_SECURE: "false"
     ports:
       - "8080:8080"
+      - "3001:8080"
     logging: *default-logging
 
   mailhog:

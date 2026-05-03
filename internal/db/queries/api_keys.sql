@@ -20,8 +20,38 @@ INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at;
 
+-- name: CreateDashboardAPIKey :one
+WITH args AS (
+    SELECT
+        sqlc.narg(project_id)::bigint AS project_id,
+        sqlc.arg(key_hash)::bytea AS key_hash,
+        sqlc.arg(label)::text AS label
+), tenant_ctx AS (
+    SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
+),
+project_ctx AS (
+    SELECT args.project_id
+    FROM args
+    WHERE args.project_id IS NULL
+    UNION ALL
+    SELECT p.id AS project_id
+    FROM projects p, tenant_ctx t, args
+    WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
+)
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), '{}'::text[]
+FROM tenant_ctx t
+CROSS JOIN project_ctx p
+CROSS JOIN args
+RETURNING id, created_at;
+
 -- name: ListAPIKeys :many
 SELECT id, project_id, label, scopes, created_at, revoked_at
 FROM api_keys
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY id DESC;
+
+-- name: UpdateAPIKeyLabel :exec
+UPDATE api_keys
+SET label = nullif(trim(sqlc.arg(label)::text), '')
+WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;

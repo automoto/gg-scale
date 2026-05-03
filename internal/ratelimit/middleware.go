@@ -42,6 +42,12 @@ type Limiter interface {
 
 const routeClassDefault = "v1"
 
+// APIKeyBucketKey returns the default route-class bucket key for apiKeyID.
+// Dashboard revocation uses this to clear limiter state immediately.
+func APIKeyBucketKey(apiKeyID int64) string {
+	return bucketKey(apiKeyID, routeClassDefault)
+}
+
 // New builds the rate-limit middleware.
 //
 // The throttled counter (ggscale_ratelimit_throttled_total{tier,route_class})

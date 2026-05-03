@@ -18,6 +18,13 @@ type Config struct {
 	Env           string
 	JWTSigningKey string
 
+	// DashboardEnabled controls whether /v1/dashboard is mounted.
+	DashboardEnabled bool
+	// DashboardBootstrapTokenFile optionally writes the first-run token to a file.
+	DashboardBootstrapTokenFile string
+	// DashboardCookieSecure sets the Secure flag on the dashboard session cookie.
+	DashboardCookieSecure bool
+
 	// Cache backend selection. CacheBackend is one of "memory" or "olric".
 	// "memory" is the default and is appropriate for single-process
 	// self-host. "olric" links every app process into an embedded Olric
@@ -69,6 +76,26 @@ var declared = []varDecl{
 	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) error { c.LogLevel = v; return nil }},
 	{name: "ENV", defval: "dev", set: func(c *Config, v string) error { c.Env = v; return nil }},
 	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},
+	{name: "DASHBOARD_DISABLED", defval: "false", set: func(c *Config, v string) error {
+		disabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("DASHBOARD_DISABLED %q: %w", v, err)
+		}
+		c.DashboardEnabled = !disabled
+		return nil
+	}},
+	{name: "DASHBOARD_BOOTSTRAP_TOKEN_FILE", defval: "", set: func(c *Config, v string) error {
+		c.DashboardBootstrapTokenFile = v
+		return nil
+	}},
+	{name: "DASHBOARD_COOKIE_SECURE", defval: "false", set: func(c *Config, v string) error {
+		secure, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("DASHBOARD_COOKIE_SECURE %q: %w", v, err)
+		}
+		c.DashboardCookieSecure = secure
+		return nil
+	}},
 
 	{name: "CACHE_BACKEND", defval: "memory", set: func(c *Config, v string) error {
 		switch v {

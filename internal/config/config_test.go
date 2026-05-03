@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -30,6 +31,9 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, ":8080", cfg.HTTPAddr)
 	assert.Equal(t, "info", cfg.LogLevel)
 	assert.Equal(t, "dev", cfg.Env)
+	assert.True(t, cfg.DashboardEnabled)
+	assert.Empty(t, cfg.DashboardBootstrapTokenFile)
+	assert.False(t, cfg.DashboardCookieSecure)
 	assert.Equal(t, "memory", cfg.CacheBackend)
 	assert.Equal(t, "127.0.0.1", cfg.CacheOlricBindAddr)
 	assert.Equal(t, 3320, cfg.CacheOlricBindPort)
@@ -47,6 +51,15 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		{"HTTP_ADDR", ":9090", func(c *config.Config) string { return c.HTTPAddr }},
 		{"LOG_LEVEL", "debug", func(c *config.Config) string { return c.LogLevel }},
 		{"ENV", "staging", func(c *config.Config) string { return c.Env }},
+		{"DASHBOARD_DISABLED", "true", func(c *config.Config) string {
+			return strconv.FormatBool(!c.DashboardEnabled)
+		}},
+		{"DASHBOARD_BOOTSTRAP_TOKEN_FILE", "/tmp/ggscale-bootstrap-token", func(c *config.Config) string {
+			return c.DashboardBootstrapTokenFile
+		}},
+		{"DASHBOARD_COOKIE_SECURE", "true", func(c *config.Config) string {
+			return strconv.FormatBool(c.DashboardCookieSecure)
+		}},
 		{"CACHE_BACKEND", "olric", func(c *config.Config) string { return c.CacheBackend }},
 		{"CACHE_OLRIC_BIND_ADDR", "0.0.0.0", func(c *config.Config) string { return c.CacheOlricBindAddr }},
 	}
@@ -121,6 +134,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"DATABASE_URL", "HTTP_ADDR", "LOG_LEVEL", "ENV", "JWT_SIGNING_KEY",
+		"DASHBOARD_DISABLED", "DASHBOARD_BOOTSTRAP_TOKEN_FILE", "DASHBOARD_COOKIE_SECURE",
 		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
 		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",
 		"CACHE_OLRIC_PEERS",

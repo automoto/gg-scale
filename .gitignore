@@ -29,3 +29,8 @@ docs/website/
 
 # Archive docs — kept locally but not tracked in git
 archive/
+
+# Temp docs
+docs/temp
+
+.cursor/*

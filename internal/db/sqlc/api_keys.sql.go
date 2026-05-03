@@ -43,6 +43,50 @@ func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (Cre
 	return i, err
 }
 
+const createDashboardAPIKey = `-- name: CreateDashboardAPIKey :one
+WITH args AS (
+    SELECT
+        $1::bigint AS project_id,
+        $2::bytea AS key_hash,
+        $3::text AS label
+), tenant_ctx AS (
+    SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
+),
+project_ctx AS (
+    SELECT args.project_id
+    FROM args
+    WHERE args.project_id IS NULL
+    UNION ALL
+    SELECT p.id AS project_id
+    FROM projects p, tenant_ctx t, args
+    WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
+)
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), '{}'::text[]
+FROM tenant_ctx t
+CROSS JOIN project_ctx p
+CROSS JOIN args
+RETURNING id, created_at
+`
+
+type CreateDashboardAPIKeyParams struct {
+	ProjectID *int64
+	KeyHash   []byte
+	Label     string
+}
+
+type CreateDashboardAPIKeyRow struct {
+	ID        int64
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error) {
+	row := q.db.QueryRow(ctx, createDashboardAPIKey, arg.ProjectID, arg.KeyHash, arg.Label)
+	var i CreateDashboardAPIKeyRow
+	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
 SELECT k.id, k.tenant_id, k.project_id, k.revoked_at, t.tier
 FROM api_keys k
@@ -128,5 +172,21 @@ WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
 
 func (q *Queries) RevokeAPIKey(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, revokeAPIKey, id)
+	return err
+}
+
+const updateAPIKeyLabel = `-- name: UpdateAPIKeyLabel :exec
+UPDATE api_keys
+SET label = nullif(trim($1::text), '')
+WHERE id = $2 AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+type UpdateAPIKeyLabelParams struct {
+	Label string
+	ID    int64
+}
+
+func (q *Queries) UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error {
+	_, err := q.db.Exec(ctx, updateAPIKeyLabel, arg.Label, arg.ID)
 	return err
 }

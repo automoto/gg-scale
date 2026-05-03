@@ -19,7 +19,7 @@ func TestHealthz_lite_stack_endpoints_respond(t *testing.T) {
 		{"ggscale-server", "http://localhost:8080/v1/healthz"},
 		{"prometheus", "http://localhost:9090/-/ready"},
 		{"mailhog", "http://localhost:8025/"},
-		{"dashboard-stub", "http://localhost:3001/"},
+		{"dashboard", "http://localhost:3001/v1/dashboard/login"},
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}

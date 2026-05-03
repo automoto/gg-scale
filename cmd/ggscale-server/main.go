@@ -19,6 +19,7 @@ import (
 	"github.com/ggscale/ggscale/internal/auth"
 	cachebuild "github.com/ggscale/ggscale/internal/cache/build"
 	"github.com/ggscale/ggscale/internal/config"
+	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -98,10 +99,19 @@ func run() error {
 		return fmt.Errorf("mailer: %w", err)
 	}
 
+	appPool := db.NewPool(pool)
+	var dashboardBootstrap *dashboard.Bootstrap
+	if cfg.DashboardEnabled {
+		dashboardBootstrap, err = dashboard.LoadBootstrap(ctx, appPool, cfg.DashboardBootstrapTokenFile, logger)
+		if err != nil {
+			return err
+		}
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   commit,
-		Pool:     db.NewPool(pool),
+		Pool:     appPool,
 		Lookup:   tenant.NewSQLLookup(pool),
 		Limiter:  ratelimit.NewCacheLimiter(store),
 		Signer:   signer,
@@ -109,6 +119,11 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		Cache:    store,
 		Registry: registry,
+		Dashboard: dashboard.Config{
+			Mount:        cfg.DashboardEnabled,
+			CookieSecure: cfg.DashboardCookieSecure,
+		},
+		DashboardBootstrap: dashboardBootstrap,
 	})
 
 	srv := &http.Server{
