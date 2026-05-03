@@ -67,6 +67,18 @@ func TestDashboard_routes_outside_v1_return_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestDashboard_login_page_sets_security_headers(t *testing.T) {
+	srv := newDashboardServer(t)
+
+	resp, err := http.Get(srv.URL + "/v1/dashboard/login")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, "DENY", resp.Header.Get("X-Frame-Options"))
+	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
+	assert.Equal(t, "same-origin", resp.Header.Get("Referrer-Policy"))
+}
+
 func TestDashboard_requires_login_for_home(t *testing.T) {
 	srv := newDashboardServer(t)
 	client := &http.Client{
