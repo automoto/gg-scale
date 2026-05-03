@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 )
 
@@ -33,8 +34,7 @@ func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
 		return
 	}
-	token := r.URL.Query().Get("token")
-	render(r, w, SetupPage(SetupView{Token: token}))
+	render(r, w, SetupPage(SetupView{}))
 }
 
 func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +86,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
 		return
 	}
+	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+		return auditlog.WritePlatform(r.Context(), tx, user.ID, "dashboard.login", user.Email, nil)
+	}); err != nil {
+		http.Error(w, "audit log failed", http.StatusInternalServerError)
+		return
+	}
 	session, err := h.issueSession(r.Context(), w, user.ID, clientIP(r), r.UserAgent())
 	if err != nil {
 		http.Error(w, "session create failed", http.StatusInternalServerError)
@@ -99,6 +105,9 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	session, ok := sessionFromContext(r.Context())
 	if ok {
 		_ = h.revokeSession(r.Context(), session.ID)
+		_ = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+			return auditlog.WritePlatform(r.Context(), tx, session.User.ID, "dashboard.logout", session.User.Email, nil)
+		})
 	}
 	h.clearSessionCookie(w)
 	http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)

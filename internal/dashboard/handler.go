@@ -49,6 +49,7 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 	}
 
 	r := chi.NewRouter()
+	r.Use(securityHeaders)
 	r.Get("/assets/htmx.min.js", h.htmxAsset)
 	r.Group(func(r chi.Router) {
 		if limiter != nil {
@@ -119,12 +120,13 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) openTenant(w http.ResponseWriter, r *http.Request) {
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
+	raw := r.URL.Query().Get("tenant_id")
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if raw == "" || err != nil || id <= 0 {
 		http.Redirect(w, r, "/v1/dashboard", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/tenants/"+tenantID+"/api-keys", http.StatusSeeOther)
+	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(id, 10)+"/api-keys", http.StatusSeeOther)
 }
 
 func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +204,15 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys", http.StatusSeeOther)
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "same-origin")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (h *Handler) requireSession(next http.Handler) http.Handler {

@@ -44,7 +44,8 @@ templ SetupPage(vm SetupView) {
 					<p role="alert">{ vm.Error }</p>
 				}
 				<form method="post" action="/v1/dashboard/setup">
-					<input type="hidden" name="bootstrap_token" value={ vm.Token }/>
+					<label for="bootstrap_token">Bootstrap token</label>
+					<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required/>
 					<label for="email">Email</label>
 					<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
 					<label for="password">Password</label>
