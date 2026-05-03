@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -64,9 +65,27 @@ func (b *Bootstrap) complete() {
 	b.pending = false
 }
 
+// emitBootstrapToken writes the token to tokenFile (owner-only) or to w, and
+// logs the delivery location — never the token value itself.
+func emitBootstrapToken(token, tokenFile string, logger *slog.Logger, w io.Writer) error {
+	if tokenFile != "" {
+		if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
+			return fmt.Errorf("write dashboard bootstrap token file: %w", err)
+		}
+		logger.Warn("dashboard bootstrap token written to file",
+			"path", "/v1/dashboard/setup",
+			"token_file", tokenFile)
+		return nil
+	}
+	logger.Warn("dashboard bootstrap token written to stderr — set DASHBOARD_BOOTSTRAP_TOKEN_FILE to avoid this",
+		"path", "/v1/dashboard/setup")
+	_, _ = fmt.Fprintf(w, "\n  ggscale bootstrap token: %s\n\n", token)
+	return nil
+}
+
 // LoadBootstrap builds a first-run bootstrap guard from the dashboard users
-// table. When no users exist it logs a one-time token and optionally writes it
-// to tokenFile with owner-only permissions.
+// table. When no users exist it emits a one-time token to tokenFile (if set)
+// or stderr, then returns a pending Bootstrap.
 func LoadBootstrap(ctx context.Context, pool *db.Pool, tokenFile string, logger *slog.Logger) (*Bootstrap, error) {
 	if pool == nil {
 		return DisabledBootstrap(), nil
@@ -87,14 +106,11 @@ func LoadBootstrap(ctx context.Context, pool *db.Pool, tokenFile string, logger 
 	if err != nil {
 		return nil, err
 	}
-	if tokenFile != "" {
-		if err := os.WriteFile(tokenFile, []byte(token+"\n"), 0o600); err != nil {
-			return nil, fmt.Errorf("write dashboard bootstrap token file: %w", err)
-		}
-	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	logger.Warn("dashboard bootstrap token generated", "path", "/v1/dashboard/setup", "token", token, "token_file", tokenFile)
+	if err := emitBootstrapToken(token, tokenFile, logger, os.Stderr); err != nil {
+		return nil, err
+	}
 	return NewBootstrap(token), nil
 }
