@@ -15,6 +15,9 @@ func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
+	if !parseForm(w, r) {
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
 	current := r.Form.Get("current_password")
 	next := r.Form.Get("new_password")
