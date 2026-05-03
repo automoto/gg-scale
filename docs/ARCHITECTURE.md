@@ -50,11 +50,12 @@ bind-mounted to `./data/` on the host:
 cat ./data/bootstrap.token
 ```
 
-Navigate to `http://localhost:3001/v1/dashboard/setup?token=<token>` to create
-the first platform-admin account. The token is intentionally kept out of
-structured logs — log aggregators (Loki, Datadog, CloudWatch) would otherwise
-retain the plaintext value for their full retention period. If
-`DASHBOARD_BOOTSTRAP_TOKEN_FILE` is unset the token falls back to stderr only.
+Navigate to `http://localhost:3001/v1/dashboard/setup`, paste the token into
+the **Bootstrap token** field, and create the first platform-admin account.
+The token is kept out of structured logs and out of URLs — log aggregators
+(Loki, Datadog, CloudWatch) and browser history would otherwise retain the
+plaintext value. If `DASHBOARD_BOOTSTRAP_TOKEN_FILE` is unset the token falls
+back to stderr only.
 
 ## K8s-profile services
 
@@ -141,11 +142,23 @@ tenants with `owner`, `admin`, or `member` roles; API-key management requires
 `admin` or stronger. Platform admins can see every tenant.
 
 Fresh installs are bootstrapped with a one-time token generated at server
-startup when `dashboard_users` is empty. The token is logged, optionally
-written to `DASHBOARD_BOOTSTRAP_TOKEN_FILE`, and accepted only by
-`/v1/dashboard/setup`. Once the first platform admin is created, setup returns
-410 and all access goes through email/password login. The old shared
-`DASHBOARD_ADMIN_TOKEN` model has been removed.
+startup when `dashboard_users` is empty. The token is written to
+`DASHBOARD_BOOTSTRAP_TOKEN_FILE` (if set) or stderr, and accepted only by
+`/v1/dashboard/setup`. Operators paste the token into the setup form — it is
+never pre-filled from a URL query parameter to keep it out of access logs and
+browser history. Once the first platform admin is created, setup returns 410
+and all access goes through email/password login.
+
+## Reverse-proxy IP trust
+
+Dashboard sessions record the client IP for auditing. `clientIP()` reads
+`CF-Connecting-IP` first (Cloudflare), then `X-Real-IP` (nginx/HAProxy), then
+falls back to `RemoteAddr`. **This is only safe when the reverse proxy strips
+these headers from untrusted client requests on ingress.** If the proxy does
+not strip them, a client can spoof any IP address in the session audit record.
+The compose files in this repo sit behind Cloudflare (ops) or a direct bind
+(dev); both configurations strip `CF-Connecting-IP` at the edge or it is
+absent entirely.
 
 ## Tenant isolation (Phase 1)
 
