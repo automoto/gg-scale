@@ -12,11 +12,16 @@ import (
 
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
-	HTTPAddr      string
-	DatabaseURL   string
-	LogLevel      string
-	Env           string
-	JWTSigningKey string
+	HTTPAddr string
+	// GameServerPublicIP is the public IP or hostname returned to game clients
+	// so they can connect directly to a game server container. Required when
+	// FLEET_BACKEND=docker or FLEET_BACKEND=static (Phase 2). Empty is fine
+	// for local dev.
+	GameServerPublicIP string
+	DatabaseURL        string
+	LogLevel           string
+	Env                string
+	JWTSigningKey      string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -73,6 +78,10 @@ type varDecl struct {
 var declared = []varDecl{
 	{name: "DATABASE_URL", required: true, set: func(c *Config, v string) error { c.DatabaseURL = v; return nil }},
 	{name: "HTTP_ADDR", defval: ":8080", set: func(c *Config, v string) error { c.HTTPAddr = v; return nil }},
+	{name: "GAME_SERVER_PUBLIC_IP", defval: "", set: func(c *Config, v string) error {
+		c.GameServerPublicIP = v
+		return nil
+	}},
 	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) error { c.LogLevel = v; return nil }},
 	{name: "ENV", defval: "dev", set: func(c *Config, v string) error { c.Env = v; return nil }},
 	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},

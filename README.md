@@ -29,6 +29,11 @@ There are two compose configurations:
 - `ggscale-server`, `postgres`, `mailhog` (SMTP)
 - `make up` / `make down`
 
+**Game server stack** (`ops/docker-compose.gameserver.yml`) — simple self-hosting with a dedicated game server alongside ggscale, no Kubernetes required:
+- Everything in the simple stack plus a `doomerang-server` container (UDP port 7654)
+- `make up-gameserver` / `make down-gameserver`
+- Set `GAME_SERVER_PUBLIC_IP` to your host's public IP so clients know where to connect. See [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) for production setup, UDP security, and the path to k3s + Agones when you outgrow static containers.
+
 **Full dev stack** (`ops/full-stack-docker-compose.yml`) — for contributors who need the complete environment:
 - Everything in the simple stack plus Prometheus, Stripe mock, dashboard stub, and optional k3s + Agones
 - `make up-dev` / `make down-dev`
@@ -52,6 +57,8 @@ Linux contributors need nothing extra.
 | `make up` | Start the simple stack (server + postgres + smtp). |
 | `make down` | Tear the simple stack down. |
 | `make clean` | Tear down + delete volumes. |
+| `make up-gameserver` | Start ggscale + a dedicated game server container (no k8s). |
+| `make down-gameserver` | Tear the game server stack down. |
 | `make up-dev` | Start the full dev stack. |
 | `make down-dev` | Tear the full dev stack down. |
 | `make up-k8s` | Start k3s + Agones (full stack, macOS: run Colima first). |
