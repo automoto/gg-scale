@@ -21,6 +21,8 @@ Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
 This starts the simple stack: the ggscale server, Postgres, and a local SMTP server (MailHog). MailHog's web UI is available at `http://localhost:8025`.
 
+New to ggscale? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a 5-minute tour of tenants, projects, and API keys before you open the dashboard.
+
 ## Docker Compose setups
 
 There are two compose configurations:

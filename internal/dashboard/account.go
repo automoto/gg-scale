@@ -11,7 +11,7 @@ import (
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, AccountPage(AccountView{CSRFToken: session.CSRFToken}))
+	render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
 func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +23,7 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	next := r.Form.Get("new_password")
 	if len(next) < minDashboardPassLen {
 		w.WriteHeader(http.StatusBadRequest)
-		render(r, w, AccountPage(AccountView{CSRFToken: session.CSRFToken, Error: "Password must be at least 12 characters"}))
+		render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Error: "Password must be at least 12 characters"}))
 		return
 	}
 
@@ -38,7 +38,7 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(current)) != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		render(r, w, AccountPage(AccountView{CSRFToken: session.CSRFToken, Error: "Current password is incorrect"}))
+		render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Error: "Current password is incorrect"}))
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcryptCost)

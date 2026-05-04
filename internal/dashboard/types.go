@@ -56,24 +56,58 @@ type SignupSuccessView struct {
 
 // APIKeyView is one API key row in the dashboard key table.
 type APIKeyView struct {
+	ID          int64
+	ProjectID   *int64
+	ProjectName string
+	Label       string
+	CreatedAt   time.Time
+	RevokedAt   *time.Time
+}
+
+// ProjectOption is one project pickable in the API-key creation form.
+type ProjectOption struct {
 	ID        int64
-	ProjectID string
-	Label     string
+	Name      string
 	CreatedAt time.Time
-	RevokedAt *time.Time
+}
+
+// NewTenantView is the data rendered by the create-tenant page.
+type NewTenantView struct {
+	UserEmail string
+	CSRFToken string
+	Error     string
+}
+
+// ProjectsView is the data rendered by the per-tenant projects page.
+type ProjectsView struct {
+	UserEmail string
+	TenantID  int64
+	CSRFToken string
+	Projects  []ProjectOption
+	Error     string
+	Message   string
 }
 
 // APIKeysView is the data rendered by the API-key management page.
 type APIKeysView struct {
+	UserEmail string
 	TenantID  int64
 	CSRFToken string
 	Keys      []APIKeyView
+	Projects  []ProjectOption
 	Message   string
 	Error     string
 }
 
+// HelpView is the data rendered by the in-app concepts page.
+type HelpView struct {
+	UserEmail string
+	CSRFToken string
+}
+
 // AccountView is the data rendered by the dashboard account page.
 type AccountView struct {
+	UserEmail string
 	CSRFToken string
 	Message   string
 	Error     string

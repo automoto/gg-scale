@@ -1,121 +1,240 @@
 package dashboard
 
-templ LoginPage(vm LoginView) {
+templ baseHead(title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<meta name="color-scheme" content="light dark"/>
+		<title>{ title }</title>
+		<link rel="stylesheet" href="/v1/dashboard/assets/pico.min.css"/>
+		<link rel="stylesheet" href="/v1/dashboard/assets/dashboard.css"/>
+		<script src="/v1/dashboard/assets/htmx.min.js"></script>
+	</head>
+}
+
+templ appLayout(title, userEmail, csrfToken string) {
 	<!doctype html>
 	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>ggscale Dashboard</title>
-			<script src="/v1/dashboard/assets/htmx.min.js"></script>
-		</head>
+		@baseHead(title)
 		<body>
-			<main>
-				<h1>ggscale Dashboard</h1>
-				if vm.Error != "" {
-					<p role="alert">{ vm.Error }</p>
-				}
-				<form method="post" action="/v1/dashboard/login">
-					<label for="email">Email</label>
-					<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
-					<label for="password">Password</label>
-					<input id="password" name="password" type="password" autocomplete="current-password" required/>
-					<button type="submit">Sign in</button>
-				</form>
+			<header class="app-header">
+				<nav>
+					<ul>
+						<li><a class="brand" href="/v1/dashboard">ggscale</a></li>
+					</ul>
+					<ul>
+						<li><a href="/v1/dashboard">Dashboard</a></li>
+						<li><a href="/v1/dashboard/help">Help</a></li>
+						<li><a href="/v1/dashboard/account/password">Account</a></li>
+						<li><span class="user-email">{ userEmail }</span></li>
+						<li>
+							<form method="post" action="/v1/dashboard/logout">
+								<input type="hidden" name="_csrf" value={ csrfToken }/>
+								<button type="submit" class="secondary outline btn-inline">Sign out</button>
+							</form>
+						</li>
+					</ul>
+				</nav>
+			</header>
+			<main class="app-main">
+				{ children... }
 			</main>
 		</body>
 	</html>
+}
+
+templ authLayout(title string) {
+	<!doctype html>
+	<html lang="en">
+		@baseHead(title)
+		<body>
+			<main class="auth-shell">
+				<article>
+					{ children... }
+				</article>
+			</main>
+		</body>
+	</html>
+}
+
+templ LoginPage(vm LoginView) {
+	@authLayout("Sign in — ggscale") {
+		<h1>ggscale Dashboard</h1>
+		<p class="subtitle">Sign in to your admin account.</p>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<form method="post" action="/v1/dashboard/login">
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			<label for="password">Password</label>
+			<input id="password" name="password" type="password" autocomplete="current-password" required/>
+			<button type="submit">Sign in</button>
+		</form>
+	}
 }
 
 templ SetupPage(vm SetupView) {
-	<!doctype html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>ggscale Dashboard Setup</title>
-			<script src="/v1/dashboard/assets/htmx.min.js"></script>
-		</head>
-		<body>
-			<main>
-				<h1>Set up ggscale Dashboard</h1>
-				<p>Create the first platform administrator. This setup page closes after the first account is created.</p>
-				if vm.Error != "" {
-					<p role="alert">{ vm.Error }</p>
-				}
-				<form method="post" action="/v1/dashboard/setup">
-					<label for="bootstrap_token">Bootstrap token</label>
-					<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required/>
-					<label for="email">Email</label>
-					<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
-					<label for="password">Password</label>
-					<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required/>
-					<button type="submit">Create admin account</button>
-				</form>
-			</main>
-		</body>
-	</html>
+	@authLayout("Set up — ggscale") {
+		<h1>Set up ggscale</h1>
+		<p class="subtitle">Create the first platform administrator. This page closes after the first account is created.</p>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<form method="post" action="/v1/dashboard/setup">
+			<label for="bootstrap_token">Bootstrap token</label>
+			<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required/>
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			<label for="password">Password</label>
+			<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters"/>
+			<button type="submit">Create admin account</button>
+		</form>
+	}
 }
 
 templ HomePage(vm HomeView) {
-	<!doctype html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>ggscale Dashboard</title>
-			<script src="/v1/dashboard/assets/htmx.min.js"></script>
-		</head>
-		<body>
-			<header>
-				<h1>ggscale Dashboard</h1>
-				<p>Signed in as { vm.UserEmail }</p>
-				<nav><a href="/v1/dashboard/account/password">Account</a></nav>
-				<form method="post" action="/v1/dashboard/logout">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<button type="submit">Sign out</button>
-				</form>
-			</header>
-			<main>
-				<section>
-					<h2>Create Tenant</h2>
-					<form method="post" action="/v1/dashboard/tenants" hx-post="/v1/dashboard/tenants" hx-target="#signup-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
-						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-						<label for="tenant_name">Tenant name</label>
-						<input id="tenant_name" name="tenant_name" required/>
-						<label for="project_name">Project name</label>
-						<input id="project_name" name="project_name" required/>
-						<label for="label">First API key label</label>
-						<input id="label" name="label" value="Default key"/>
-						<button type="submit">Create tenant</button>
-					</form>
-					<div id="signup-result"></div>
-				</section>
-				<section>
-					<h2>Manage API Keys</h2>
-					if len(vm.Tenants) == 0 {
-						<p>No tenants yet.</p>
-					} else {
-						<ul>
-							for _, tenant := range vm.Tenants {
-								<li>
-									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/api-keys") }>{ tenant.Name }</a>
-									<span>({ tenant.Role })</span>
-								</li>
-							}
-						</ul>
-					}
-				</section>
-			</main>
-		</body>
-	</html>
+	@appLayout("ggscale Dashboard", vm.UserEmail, vm.CSRFToken) {
+		<div class="page-header">
+			<div>
+				<h1>Tenants</h1>
+				<p class="subtitle">Tenants you have access to.</p>
+			</div>
+			<a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+		</div>
+		<section class="card">
+			if len(vm.Tenants) == 0 {
+				<div class="empty-state">
+					<p>No tenants yet.</p>
+					<p><a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">Create your first tenant</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Tenant</th>
+							<th>Role</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, tenant := range vm.Tenants {
+							<tr>
+								<td>{ tenant.Name }</td>
+								<td><span class="badge badge-role">{ tenant.Role }</span></td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/projects") } role="button" class="secondary outline">Projects</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewTenantPage(vm NewTenantView) {
+	@appLayout("New tenant — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / New</div>
+		<div class="page-header">
+			<div>
+				<h1>New tenant</h1>
+				<p class="subtitle">Sets up a tenant with a starter project and its first API key.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action="/v1/dashboard/tenants" hx-post="/v1/dashboard/tenants" hx-target="#signup-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="grid">
+					<label>
+						Tenant name
+						<input name="tenant_name" required autofocus/>
+					</label>
+					<label>
+						Starter project name
+						<input name="project_name" required/>
+					</label>
+				</div>
+				<label>
+					First API key name
+					<input name="label" value="Default key"/>
+				</label>
+				<div class="form-actions">
+					<a href="/v1/dashboard" role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create tenant</button>
+				</div>
+			</form>
+			<div id="signup-result"></div>
+		</section>
+	}
+}
+
+templ ProjectsPage(vm ProjectsView) {
+	@appLayout("Projects — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Projects</div>
+		<div class="page-header">
+			<div>
+				<h1>Projects</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline btn-inline">API keys →</a>
+		</div>
+		<section class="card">
+			<h2>Create project</h2>
+			<p class="card-subtitle">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p>
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			if vm.Message != "" {
+				<p class="flash-success">{ vm.Message }</p>
+			}
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Project name
+					<input name="name" required autofocus placeholder="e.g. arcade-prod"/>
+				</label>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Create project</button>
+				</div>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Existing projects</h2>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state">No projects yet. Create one above.</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Created</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Projects {
+							<tr>
+								<td>{ p.Name }</td>
+								<td>{ timeString(p.CreatedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
 }
 
 templ SignupSuccessPage(vm SignupSuccessView) {
-	<section>
-		<h2>Tenant Created</h2>
-		<p>Store this API key now. It will not be shown again.</p>
-		<dl>
+	<div class="reveal-card">
+		<h2>Tenant created</h2>
+		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
+		<dl class="kv">
 			<dt>Tenant ID</dt>
 			<dd>{ stringFromInt(vm.TenantID) }</dd>
 			<dt>Project ID</dt>
@@ -125,133 +244,209 @@ templ SignupSuccessPage(vm SignupSuccessView) {
 			<dt>API key</dt>
 			<dd><code>{ vm.APIKey }</code></dd>
 		</dl>
-		<p><a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>Manage API keys</a></p>
-	</section>
+		<div class="form-actions">
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Manage API keys</a>
+		</div>
+	</div>
 }
 
 templ APIKeyCreatedPage(vm SignupSuccessView) {
-	<section>
-		<h2>API Key Created</h2>
-		<p>Store this API key now. It will not be shown again.</p>
-		<dl>
+	<div class="reveal-card">
+		<h2>API key created</h2>
+		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
+		<dl class="kv">
 			<dt>API key ID</dt>
 			<dd>{ stringFromInt(vm.APIKeyID) }</dd>
 			<dt>API key</dt>
 			<dd><code>{ vm.APIKey }</code></dd>
 		</dl>
-		<p><a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>Back to API keys</a></p>
-	</section>
+		<div class="form-actions">
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Back to API keys</a>
+		</div>
+	</div>
 }
 
 templ APIKeysPage(vm APIKeysView) {
-	<!doctype html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>ggscale Dashboard API Keys</title>
-			<script src="/v1/dashboard/assets/htmx.min.js"></script>
-		</head>
-		<body>
-			<header>
-				<h1>API Keys</h1>
-				<nav><a href="/v1/dashboard">Dashboard home</a></nav>
-				<form method="post" action="/v1/dashboard/logout">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<button type="submit">Sign out</button>
-				</form>
-			</header>
-			<main>
-				<section>
-					<h2>Create API Key</h2>
-					<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } hx-post={ "/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys" } hx-target="#api-key-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
-						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-						<label for="project_id">Project ID</label>
-						<input id="project_id" name="project_id" inputmode="numeric"/>
-						<label for="key_label">Label</label>
-						<input id="key_label" name="label"/>
-						<button type="submit">Create API key</button>
-					</form>
-					<div id="api-key-result"></div>
-				</section>
-				<section>
-					<h2>Existing Keys</h2>
-					<table>
-						<thead>
+	@appLayout("API keys — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / API keys</div>
+		<div class="page-header">
+			<div>
+				<h1>API keys</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">← Projects</a>
+		</div>
+		<section class="card">
+			<h2>Create API key</h2>
+			<p class="card-subtitle">Generates a new key. The plaintext value is shown once after creation.</p>
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } hx-post={ "/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys" } hx-target="#api-key-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="grid">
+					<label>
+						Project
+						<select id="project_id" name="project_id">
+							<option value="">Tenant-wide (all projects)</option>
+							for _, p := range vm.Projects {
+								<option value={ stringFromInt(p.ID) }>{ p.Name }</option>
+							}
+						</select>
+					</label>
+					<label>
+						Name
+						<input id="key_label" name="label" placeholder="e.g. CI deploy key" required/>
+					</label>
+				</div>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Create API key</button>
+				</div>
+			</form>
+			<div id="api-key-result"></div>
+		</section>
+		<section class="card">
+			<h2>Existing keys</h2>
+			<p class="card-subtitle">Revoked keys are kept for audit.</p>
+			if len(vm.Keys) == 0 {
+				<div class="empty-state">No API keys yet.</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>ID</th>
+							<th>Project</th>
+							<th>Name</th>
+							<th>Created</th>
+							<th>Status</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, key := range vm.Keys {
 							<tr>
-								<th>ID</th>
-								<th>Project</th>
-								<th>Label</th>
-								<th>Created</th>
-								<th>Status</th>
-								<th>Actions</th>
-							</tr>
-						</thead>
-						<tbody>
-							for _, key := range vm.Keys {
-								<tr>
-									<td>{ stringFromInt(key.ID) }</td>
-									<td>{ key.ProjectID }</td>
-									<td>
-										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label") }>
+								<td>{ stringFromInt(key.ID) }</td>
+								<td>
+									if key.ProjectID == nil {
+										<span class="muted">tenant-wide</span>
+									} else if key.ProjectName != "" {
+										{ key.ProjectName }
+									} else {
+										<span class="muted">(deleted)</span>
+									}
+								</td>
+								<td class="label-cell">
+									<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label") }>
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<input name="label" value={ key.Label } aria-label="API key name"/>
+										<button type="submit" class="secondary outline">Save</button>
+									</form>
+								</td>
+								<td>{ timeString(key.CreatedAt) }</td>
+								if key.RevokedAt != nil {
+									<td><span class="badge badge-revoked">Revoked</span></td>
+									<td class="actions-cell"><small>{ timeString(*key.RevokedAt) }</small></td>
+								} else {
+									<td><span class="badge badge-active">Active</span></td>
+									<td class="actions-cell">
+										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke") }>
 											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-											<input name="label" value={ key.Label }/>
-											<button type="submit">Save label</button>
+											<button type="submit" class="contrast outline">Revoke</button>
 										</form>
 									</td>
-									<td>{ timeString(key.CreatedAt) }</td>
-									if key.RevokedAt != nil {
-										<td>Revoked</td>
-										<td>{ timeString(*key.RevokedAt) }</td>
-									} else {
-										<td>Active</td>
-										<td>
-											<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke") }>
-												<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-												<button type="submit">Revoke</button>
-											</form>
-										</td>
-									}
-								</tr>
-							}
-						</tbody>
-					</table>
-				</section>
-			</main>
-		</body>
-	</html>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ HelpPage(vm HelpView) {
+	@appLayout("Help — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="page-header">
+			<div>
+				<h1>Concepts &amp; quick start</h1>
+				<p class="subtitle">A 2-minute tour of how ggscale fits together.</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>The 30-second version</h2>
+			<p class="card-subtitle">What you need to put ggscale in front of players.</p>
+			<ol class="quick-steps">
+				<li><strong>Create a tenant.</strong> The dashboard sets up a tenant, a starter project, and a first API key in one step.</li>
+				<li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li>
+				<li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the tenant&apos;s API key.</li>
+			</ol>
+		</section>
+		<section class="card">
+			<h2>The pieces</h2>
+			<p class="card-subtitle">Each row is one row in the database, and one place in this dashboard.</p>
+			<dl class="concept-list">
+				<dt>Tenant</dt>
+				<dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (projects, API keys, player accounts, save data, leaderboards) belongs to exactly one tenant. Tenants never see each other&apos;s data.</dd>
+				<dt>Project</dt>
+				<dd>A workload partition inside a tenant. Most studios use one project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting projects keeps prod and staging data separate while still rolling up to one tenant for billing and admin.</dd>
+				<dt>API key</dt>
+				<dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd>
+				<dt>Dashboard user</dt>
+				<dd>You. Humans who log in here to manage tenants, projects, and keys. Dashboard users are separate from end users; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles.</dd>
+				<dt>End user (player)</dt>
+				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. End users never touch this dashboard.</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>How a request flows</h2>
+			<p class="card-subtitle">Why each piece matters at runtime.</p>
+			<pre class="flow-diagram">
+your game ──► ggscale HTTP API
+              │
+              ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project)
+              └─ X-Session-Token: &lt;player session&gt;   → resolves to an End user inside that Tenant
+              │
+              ▼
+       Postgres (Row-Level Security)
+       Only rows belonging to that tenant_id are visible.</pre>
+			<p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses tenant lines.</p>
+		</section>
+		<section class="card">
+			<h2>What to do next</h2>
+			<ul class="next-steps">
+				<li><a href="/v1/dashboard/tenants/new">Create your first tenant</a> — gets you a tenant, a starter project, and your first API key in one step.</li>
+				<li>Open the <a href="/v1/dashboard">Dashboard</a> to see tenants you can manage.</li>
+				<li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li>
+			</ul>
+		</section>
+	}
 }
 
 templ AccountPage(vm AccountView) {
-	<!doctype html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<title>ggscale Dashboard Account</title>
-			<script src="/v1/dashboard/assets/htmx.min.js"></script>
-		</head>
-		<body>
-			<header>
+	@appLayout("Account — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Dashboard</a> / Account</div>
+		<div class="page-header">
+			<div>
 				<h1>Account</h1>
-				<nav><a href="/v1/dashboard">Dashboard home</a></nav>
-			</header>
-			<main>
-				if vm.Message != "" {
-					<p>{ vm.Message }</p>
-				}
-				if vm.Error != "" {
-					<p role="alert">{ vm.Error }</p>
-				}
-				<form method="post" action="/v1/dashboard/account/password">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<label for="current_password">Current password</label>
-					<input id="current_password" name="current_password" type="password" autocomplete="current-password" required/>
-					<label for="new_password">New password</label>
-					<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required/>
-					<button type="submit">Update password</button>
-				</form>
-			</main>
-		</body>
-	</html>
+				<p class="subtitle">Signed in as { vm.UserEmail }</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>Change password</h2>
+			<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
+			if vm.Message != "" {
+				<p class="flash-success">{ vm.Message }</p>
+			}
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action="/v1/dashboard/account/password">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="current_password">Current password</label>
+				<input id="current_password" name="current_password" type="password" autocomplete="current-password" required/>
+				<label for="new_password">New password</label>
+				<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters"/>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Update password</button>
+				</div>
+			</form>
+		</section>
+	}
 }

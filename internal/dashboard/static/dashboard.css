@@ -1,0 +1,406 @@
+/* ggscale dashboard polish on top of Pico v2 */
+
+:root {
+  --gg-content-max: 64rem;
+  --gg-radius: 0.5rem;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--pico-background-color);
+}
+
+/* === Top app bar ============================================== */
+.app-header {
+  background: var(--pico-card-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  padding: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.app-header > nav {
+  max-width: var(--gg-content-max);
+  margin: 0 auto;
+  padding: 0.4rem 1rem;
+  align-items: center;
+}
+.app-header ul { margin: 0; padding: 0; }
+.app-header li { padding: 0.3rem 0.6rem; }
+.app-header .brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--pico-color);
+  letter-spacing: -0.01em;
+}
+.app-header .brand:hover { color: var(--pico-primary); }
+.app-header .user-email {
+  color: var(--pico-muted-color);
+  font-size: 0.88rem;
+}
+.app-header form { margin: 0; display: inline; }
+.app-header .btn-inline {
+  margin: 0;
+  width: auto;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+}
+.app-header a { text-decoration: none; }
+.app-header a:hover { text-decoration: underline; }
+
+/* === Main content ============================================= */
+main.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--gg-content-max);
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.page-header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+.page-header .subtitle {
+  color: var(--pico-muted-color);
+  font-size: 0.95rem;
+  margin: 0.25rem 0 0;
+}
+.breadcrumb {
+  font-size: 0.88rem;
+  color: var(--pico-muted-color);
+  margin-bottom: 0.5rem;
+}
+.breadcrumb a { color: var(--pico-muted-color); }
+
+/* === Auth pages =============================================== */
+.auth-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  width: 100%;
+  max-width: none;
+}
+.auth-shell article {
+  width: 100%;
+  max-width: 420px;
+  padding: 2.25rem;
+  margin: 0;
+}
+.auth-shell h1 {
+  text-align: center;
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+  letter-spacing: -0.01em;
+}
+.auth-shell .subtitle {
+  text-align: center;
+  color: var(--pico-muted-color);
+  font-size: 0.92rem;
+  margin-bottom: 1.75rem;
+}
+
+/* === Cards / sections ========================================= */
+section.card {
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--gg-radius);
+  padding: 1.5rem;
+  margin-bottom: 1.25rem;
+}
+section.card > h2 {
+  margin-top: 0;
+  margin-bottom: 0.25rem;
+  font-size: 1.15rem;
+  letter-spacing: -0.01em;
+}
+section.card > .card-subtitle {
+  color: var(--pico-muted-color);
+  font-size: 0.88rem;
+  margin: 0 0 1.25rem;
+}
+
+/* === Forms ==================================================== */
+.btn-inline { width: auto; }
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+.form-actions button,
+.form-actions [role="button"] {
+  width: auto;
+  margin: 0;
+}
+
+/* === Tables =================================================== */
+.data-table {
+  font-size: 0.92rem;
+  margin-bottom: 0;
+}
+.data-table th {
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--pico-muted-color);
+  border-bottom: 2px solid var(--pico-muted-border-color);
+}
+.data-table td { vertical-align: middle; }
+.data-table .actions-cell {
+  white-space: nowrap;
+  text-align: right;
+}
+.data-table .actions-cell form { margin: 0; display: inline-block; }
+.data-table .actions-cell button {
+  width: auto;
+  margin: 0 0 0 0.35rem;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+}
+.data-table .label-cell form {
+  margin: 0;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.data-table .label-cell input {
+  margin: 0;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.88rem;
+  flex: 1;
+  min-width: 8rem;
+}
+.data-table .label-cell button {
+  width: auto;
+  margin: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+}
+.data-table code {
+  font-size: 0.85rem;
+  padding: 0.1rem 0.35rem;
+}
+
+/* === Inline muted text ======================================== */
+.muted {
+  color: var(--pico-muted-color);
+  font-style: italic;
+  font-size: 0.9em;
+}
+.muted-id {
+  color: var(--pico-muted-color);
+  font-size: 0.78em;
+  margin-left: 0.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Status badges ============================================ */
+.badge {
+  display: inline-block;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.badge-active {
+  background: color-mix(in srgb, var(--pico-ins-color, #16a34a) 18%, transparent);
+  color: var(--pico-ins-color, #16a34a);
+}
+.badge-revoked {
+  background: var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+}
+.badge-role {
+  background: color-mix(in srgb, var(--pico-primary) 15%, transparent);
+  color: var(--pico-primary);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.55rem;
+}
+
+/* === Empty state ============================================== */
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--pico-muted-color);
+  font-size: 0.95rem;
+  border: 1px dashed var(--pico-muted-border-color);
+  border-radius: var(--gg-radius);
+}
+
+/* === Alerts =================================================== */
+[role="alert"] {
+  background: color-mix(in srgb, var(--pico-del-color, #dc2626) 14%, transparent);
+  color: var(--pico-del-color, #dc2626);
+  border-left: 3px solid var(--pico-del-color, #dc2626);
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--gg-radius);
+  margin-bottom: 1rem;
+  font-size: 0.92rem;
+}
+.flash-success {
+  background: color-mix(in srgb, var(--pico-ins-color, #16a34a) 14%, transparent);
+  color: var(--pico-ins-color, #16a34a);
+  border-left: 3px solid var(--pico-ins-color, #16a34a);
+  padding: 0.65rem 0.9rem;
+  border-radius: var(--gg-radius);
+  margin-bottom: 1rem;
+  font-size: 0.92rem;
+}
+
+/* === Definition list (API key reveal) ========================= */
+dl.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 1.5rem;
+  row-gap: 0.55rem;
+  margin: 1rem 0 1.25rem;
+}
+dl.kv dt {
+  font-weight: 600;
+  color: var(--pico-muted-color);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+dl.kv dd {
+  margin: 0;
+  font-family: var(--pico-font-family-monospace);
+  font-size: 0.92rem;
+  word-break: break-all;
+}
+dl.kv code {
+  display: block;
+  padding: 0.5rem 0.7rem;
+  background: var(--pico-code-background-color);
+  border-radius: 0.35rem;
+  font-size: 0.92rem;
+}
+
+/* === Tenant list ============================================== */
+.tenant-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.tenant-list li {
+  padding: 0.85rem 0.25rem;
+  border-bottom: 1px solid var(--pico-muted-border-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.tenant-list li:last-child { border-bottom: none; }
+.tenant-list li a { font-weight: 500; text-decoration: none; }
+.tenant-list li a:hover { text-decoration: underline; }
+
+/* === Reveal-once card (HTMX swap target) ===================== */
+.reveal-card {
+  margin-top: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: color-mix(in srgb, var(--pico-ins-color, #16a34a) 8%, var(--pico-card-background-color));
+  border: 1px solid color-mix(in srgb, var(--pico-ins-color, #16a34a) 35%, var(--pico-muted-border-color));
+  border-radius: var(--gg-radius);
+}
+.reveal-card h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.05rem;
+  color: var(--pico-ins-color, #16a34a);
+}
+.reveal-card .reveal-warning {
+  font-size: 0.88rem;
+  color: var(--pico-muted-color);
+  margin: 0 0 0.5rem;
+}
+
+/* === Help / concepts page ===================================== */
+.quick-steps {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+.quick-steps li {
+  margin-bottom: 0.6rem;
+  line-height: 1.55;
+}
+.quick-steps li:last-child { margin-bottom: 0; }
+
+dl.concept-list {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  column-gap: 1.5rem;
+  row-gap: 1.1rem;
+  margin: 0;
+}
+dl.concept-list dt {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--pico-color);
+  padding-top: 0.1rem;
+}
+dl.concept-list dd {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--pico-color);
+}
+dl.concept-list code {
+  font-size: 0.88em;
+  padding: 0.05rem 0.3rem;
+}
+
+.flow-diagram {
+  background: var(--pico-code-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--gg-radius);
+  padding: 1rem 1.2rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  margin: 0 0 0.75rem;
+  color: var(--pico-color);
+}
+
+.next-steps {
+  margin: 0;
+  padding-left: 1.4rem;
+}
+.next-steps li {
+  margin-bottom: 0.5rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 640px) {
+  dl.concept-list {
+    grid-template-columns: 1fr;
+    row-gap: 0.5rem;
+  }
+  dl.concept-list dt { padding-top: 0.5rem; }
+}
+
+/* === Responsive tweaks ======================================== */
+@media (max-width: 640px) {
+  .app-header .user-email { display: none; }
+  main.app-main { padding: 1.25rem 0.75rem 2rem; }
+  .page-header h1 { font-size: 1.45rem; }
+  section.card { padding: 1.1rem; }
+}
