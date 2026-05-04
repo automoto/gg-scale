@@ -39,7 +39,13 @@ func NewIPLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus.Regi
 		},
 		[]string{"route_class"},
 	)
-	reg.MustRegister(throttled)
+	if err := reg.Register(throttled); err != nil {
+		are, ok := err.(prometheus.AlreadyRegisteredError)
+		if !ok {
+			panic(err)
+		}
+		throttled = are.ExistingCollector.(*prometheus.CounterVec)
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
