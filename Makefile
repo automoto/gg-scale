@@ -2,9 +2,11 @@
         up down logs psql migrate migrate-new \
         up-dev down-dev \
         up-k8s agones-install \
+        up-gameserver down-gameserver \
         preflight preflight-k8s clean clean-dev
 
-FULL_STACK := docker compose -f ops/full-stack-docker-compose.yml
+FULL_STACK       := docker compose -f ops/full-stack-docker-compose.yml
+GAMESERVER_STACK := docker compose -f docker-compose.yml -f ops/docker-compose.gameserver.yml
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +64,14 @@ migrate-new:
 
 clean:
 	docker compose down -v --remove-orphans
+
+# ─── Game server stack (tier-0 self-hosting, no k8s) ────────────────────
+
+up-gameserver: preflight
+	$(GAMESERVER_STACK) up -d --wait
+
+down-gameserver:
+	$(GAMESERVER_STACK) down --remove-orphans
 
 # ─── Full dev stack (prometheus, stripe-mock, dashboard, k8s) ───────────
 
