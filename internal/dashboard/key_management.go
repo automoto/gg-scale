@@ -5,17 +5,21 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 )
 
-var errInvalidTenant = errors.New("dashboard: tenant id is required")
+var (
+	errInvalidTenant      = errors.New("dashboard: tenant id is required")
+	errInvalidProjectName = errors.New("dashboard: project name is required")
+	errDuplicateProject   = errors.New("dashboard: project with that name already exists")
+)
 
 type createKeyInput struct {
 	TenantID  int64
@@ -46,12 +50,10 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 		out = make([]APIKeyView, 0, len(rows))
 		for _, row := range rows {
 			key := APIKeyView{
-				ID:        row.ID,
-				ProjectID: "-",
-				Label:     stringValue(row.Label),
-			}
-			if row.ProjectID != nil {
-				key.ProjectID = strconv.FormatInt(*row.ProjectID, 10)
+				ID:          row.ID,
+				ProjectID:   row.ProjectID,
+				ProjectName: stringValue(row.ProjectName),
+				Label:       stringValue(row.Label),
 			}
 			if row.CreatedAt.Valid {
 				key.CreatedAt = row.CreatedAt.Time
@@ -61,6 +63,64 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 				key.RevokedAt = &t
 			}
 			out = append(out, key)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOption, error) {
+	if tenantID <= 0 {
+		return nil, errInvalidTenant
+	}
+	if h.pool == nil {
+		return nil, errors.New("dashboard: database pool is required")
+	}
+	var out []ProjectOption
+	ctx = db.WithTenant(ctx, tenantID)
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		rows, err := sqlcgen.New(tx).ListProjectsForTenant(ctx)
+		if err != nil {
+			return fmt.Errorf("list projects: %w", err)
+		}
+		out = make([]ProjectOption, 0, len(rows))
+		for _, row := range rows {
+			opt := ProjectOption{ID: row.ID, Name: row.Name}
+			if row.CreatedAt.Valid {
+				opt.CreatedAt = row.CreatedAt.Time
+			}
+			out = append(out, opt)
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (h *Handler) createProject(ctx context.Context, tenantID int64, name string) (ProjectOption, error) {
+	if tenantID <= 0 {
+		return ProjectOption{}, errInvalidTenant
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ProjectOption{}, errInvalidProjectName
+	}
+	if h.pool == nil {
+		return ProjectOption{}, errors.New("dashboard: database pool is required")
+	}
+	var out ProjectOption
+	ctx = db.WithTenant(ctx, tenantID)
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		row, err := sqlcgen.New(tx).CreateProjectForTenant(ctx, name)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return errDuplicateProject
+			}
+			return fmt.Errorf("create project: %w", err)
+		}
+		out = ProjectOption{ID: row.ID, Name: row.Name}
+		if row.CreatedAt.Valid {
+			out.CreatedAt = row.CreatedAt.Time
 		}
 		return nil
 	})

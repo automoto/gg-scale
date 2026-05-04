@@ -10,7 +10,7 @@ import "context"
 import "io"
 import "bytes"
 
-func LoginPage(vm LoginView) templ.Component {
+func baseHead(title string) templ.Component {
 	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
 		if !templ_7745c5c3_IsBuffer {
@@ -23,38 +23,191 @@ func LoginPage(vm LoginView) templ.Component {
 			templ_7745c5c3_Var1 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ggscale Dashboard</title><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head><body><main><h1>ggscale Dashboard</h1>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if vm.Error != "" {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var2 string
-			templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 15, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		var templ_7745c5c3_Var2 string
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.JoinStringErrs(title)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 7, Col: 16}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/dashboard/login\"><label for=\"email\">Email</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var2))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Email))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</title><link rel=\"stylesheet\" href=\"/v1/dashboard/assets/pico.min.css\"><link rel=\"stylesheet\" href=\"/v1/dashboard/assets/dashboard.css\"><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"username\" required> <label for=\"password\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required> <button type=\"submit\">Sign in</button></form></main></body></html>")
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func appLayout(title, userEmail, csrfToken string) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var3 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var3 == nil {
+			templ_7745c5c3_Var3 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = baseHead(title).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<body><header class=\"app-header\"><nav><ul><li><a class=\"brand\" href=\"/v1/dashboard\">ggscale</a></li></ul><ul><li><a href=\"/v1/dashboard\">Dashboard</a></li><li><a href=\"/v1/dashboard/help\">Help</a></li><li><a href=\"/v1/dashboard/account/password\">Account</a></li><li><span class=\"user-email\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var4 string
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(userEmail)
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 28, Col: 46}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</span></li><li><form method=\"post\" action=\"/v1/dashboard/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(csrfToken))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Sign out</button></form></li></ul></nav></header><main class=\"app-main\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templ_7745c5c3_Var3.Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</main></body></html>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func authLayout(title string) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var5 == nil {
+			templ_7745c5c3_Var5 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\">")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = baseHead(title).Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<body><main class=\"auth-shell\"><article>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templ_7745c5c3_Var5.Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</article></main></body></html>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func LoginPage(vm LoginView) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var6 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var6 == nil {
+			templ_7745c5c3_Var6 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var7 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>ggscale Dashboard</h1><p class=\"subtitle\">Sign in to your admin account.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if vm.Error != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 64, Col: 29}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <form method=\"post\" action=\"/v1/dashboard/login\"><label for=\"email\">Email</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Email))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"username\" required> <label for=\"password\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" required> <button type=\"submit\">Sign in</button></form>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = authLayout("Sign in — ggscale").Render(templ.WithChildren(ctx, templ_7745c5c3_Var7), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -73,51 +226,66 @@ func SetupPage(vm SetupView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var3 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var3 == nil {
-			templ_7745c5c3_Var3 = templ.NopComponent
+		templ_7745c5c3_Var9 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var9 == nil {
+			templ_7745c5c3_Var9 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ggscale Dashboard Setup</title><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head><body><main><h1>Set up ggscale Dashboard</h1><p>Create the first platform administrator. This setup page closes after the first account is created.</p>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if vm.Error != "" {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+		templ_7745c5c3_Var10 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Set up ggscale</h1><p class=\"subtitle\">Create the first platform administrator. This page closes after the first account is created.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 43, Col: 31}
+			if vm.Error != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var11 string
+				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 81, Col: 29}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <form method=\"post\" action=\"/v1/dashboard/setup\"><label for=\"bootstrap_token\">Bootstrap token</label> <input id=\"bootstrap_token\" name=\"bootstrap_token\" type=\"text\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Token))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/dashboard/setup\"><label for=\"bootstrap_token\">Bootstrap token</label> <input id=\"bootstrap_token\" name=\"bootstrap_token\" type=\"text\" value=\"")
-		if templ_7745c5c3_Err != nil {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"off\" required> <label for=\"email\">Email</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Email))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"username\" required> <label for=\"password\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"new-password\" minlength=\"12\" required placeholder=\"At least 12 characters\"> <button type=\"submit\">Create admin account</button></form>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
 			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Token))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"off\" required> <label for=\"email\">Email</label> <input id=\"email\" name=\"email\" type=\"email\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.Email))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" autocomplete=\"username\" required> <label for=\"password\">Password</label> <input id=\"password\" name=\"password\" type=\"password\" autocomplete=\"new-password\" minlength=\"12\" required> <button type=\"submit\">Create admin account</button></form></main></body></html>")
+		})
+		templ_7745c5c3_Err = authLayout("Set up — ggscale").Render(templ.WithChildren(ctx, templ_7745c5c3_Var10), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -136,109 +304,345 @@ func HomePage(vm HomeView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var5 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var5 == nil {
-			templ_7745c5c3_Var5 = templ.NopComponent
+		templ_7745c5c3_Var12 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var12 == nil {
+			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ggscale Dashboard</title><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head><body><header><h1>ggscale Dashboard</h1><p>Signed in as ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var6 string
-		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(vm.UserEmail)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 71, Col: 34}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p><nav><a href=\"/v1/dashboard/account/password\">Account</a></nav><form method=\"post\" action=\"/v1/dashboard/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Sign out</button></form></header><main><section><h2>Create Tenant</h2><form method=\"post\" action=\"/v1/dashboard/tenants\" hx-post=\"/v1/dashboard/tenants\" hx-target=\"#signup-result\" hx-headers=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(csrfHeaders(vm.CSRFToken)))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label for=\"tenant_name\">Tenant name</label> <input id=\"tenant_name\" name=\"tenant_name\" required> <label for=\"project_name\">Project name</label> <input id=\"project_name\" name=\"project_name\" required> <label for=\"label\">First API key label</label> <input id=\"label\" name=\"label\" value=\"Default key\"> <button type=\"submit\">Create tenant</button></form><div id=\"signup-result\"></div></section><section><h2>Manage API Keys</h2>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if len(vm.Tenants) == 0 {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>No tenants yet.</p>")
+		templ_7745c5c3_Var13 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><h1>Tenants</h1><p class=\"subtitle\">Tenants you have access to.</p></div><a href=\"/v1/dashboard/tenants/new\" role=\"button\" class=\"btn-inline\">+ New tenant</a></div><section class=\"card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		} else {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<ul>")
+			if len(vm.Tenants) == 0 {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No tenants yet.</p><p><a href=\"/v1/dashboard/tenants/new\" role=\"button\" class=\"btn-inline\">Create your first tenant</a></p></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Tenant</th><th>Role</th><th></th></tr></thead> <tbody>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				for _, tenant := range vm.Tenants {
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<tr><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var14 string
+					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(tenant.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 122, Col: 25}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td><span class=\"badge badge-role\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var15 string
+					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(tenant.Role)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 123, Col: 56}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</span></td><td class=\"actions-cell\"><a href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var16 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/projects")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var16)))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline\">Projects</a> <a href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var17 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/api-keys")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var17)))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline\">API keys</a></td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, tenant := range vm.Tenants {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<li><a href=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var7 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/api-keys")
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var7)))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(tenant.Name)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 101, Col: 111}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</a> <span>(")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(tenant.Role)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 102, Col: 29}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(")</span></li>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</ul>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = appLayout("ggscale Dashboard", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var13), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section></main></body></html>")
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func NewTenantPage(vm NewTenantView) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var18 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var18 == nil {
+			templ_7745c5c3_Var18 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var19 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/dashboard\">Tenants</a> / New</div><div class=\"page-header\"><div><h1>New tenant</h1><p class=\"subtitle\">Sets up a tenant with a starter project and its first API key.</p></div></div><section class=\"card\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if vm.Error != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var20 string
+				templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 148, Col: 30}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/dashboard/tenants\" hx-post=\"/v1/dashboard/tenants\" hx-target=\"#signup-result\" hx-headers=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(csrfHeaders(vm.CSRFToken)))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Tenant name <input name=\"tenant_name\" required autofocus></label> <label>Starter project name <input name=\"project_name\" required></label></div><label>First API key name <input name=\"label\" value=\"Default key\"></label><div class=\"form-actions\"><a href=\"/v1/dashboard\" role=\"button\" class=\"secondary outline btn-inline\">Cancel</a> <button type=\"submit\" class=\"btn-inline\">Create tenant</button></div></form><div id=\"signup-result\"></div></section>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = appLayout("New tenant — ggscale", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var19), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func ProjectsPage(vm ProjectsView) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var21 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var21 == nil {
+			templ_7745c5c3_Var21 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var22 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/dashboard\">Tenants</a> / Projects</div><div class=\"page-header\"><div><h1>Projects</h1><p class=\"subtitle\">Tenant #")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var23 string
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 182, Col: 60}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p></div><a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var24 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var24)))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline btn-inline\">API keys →</a></div><section class=\"card\"><h2>Create project</h2><p class=\"card-subtitle\">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if vm.Error != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var25 string
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 190, Col: 30}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			if vm.Message != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"flash-success\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var26 string
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Message)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 193, Col: 41}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var27 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var27)))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Project name <input name=\"name\" required autofocus placeholder=\"e.g. arcade-prod\"></label><div class=\"form-actions\"><button type=\"submit\" class=\"btn-inline\">Create project</button></div></form></section><section class=\"card\"><h2>Existing projects</h2>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if len(vm.Projects) == 0 {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\">No projects yet. Create one above.</div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			} else {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Name</th><th>Created</th></tr></thead> <tbody>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				for _, p := range vm.Projects {
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<tr><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var28 string
+					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 221, Col: 20}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var29 string
+					templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(p.CreatedAt))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 222, Col: 37}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td></tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = appLayout("Projects — ggscale", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var22), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -257,21 +661,21 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var10 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var10 == nil {
-			templ_7745c5c3_Var10 = templ.NopComponent
+		templ_7745c5c3_Var30 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var30 == nil {
+			templ_7745c5c3_Var30 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section><h2>Tenant Created</h2><p>Store this API key now. It will not be shown again.</p><dl><dt>Tenant ID</dt><dd>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"reveal-card\"><h2>Tenant created</h2><p class=\"reveal-warning\">Store this API key now. It will not be shown again.</p><dl class=\"kv\"><dt>Tenant ID</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var11 string
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
+		var templ_7745c5c3_Var31 string
+		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 119, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 238, Col: 35}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -279,12 +683,12 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var12 string
-		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
+		var templ_7745c5c3_Var32 string
+		templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 121, Col: 36}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 240, Col: 36}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -292,12 +696,12 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var13 string
-		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.APIKeyID))
+		var templ_7745c5c3_Var33 string
+		templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.APIKeyID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 123, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 242, Col: 35}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -305,25 +709,25 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var14 string
-		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(vm.APIKey)
+		var templ_7745c5c3_Var34 string
+		templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(vm.APIKey)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 125, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 244, Col: 24}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code></dd></dl><p><a href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var15 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var15)))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code></dd></dl><div class=\"form-actions\"><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Manage API keys</a></p></section>")
+		var templ_7745c5c3_Var35 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var35)))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">Manage API keys</a></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -342,21 +746,21 @@ func APIKeyCreatedPage(vm SignupSuccessView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var16 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var16 == nil {
-			templ_7745c5c3_Var16 = templ.NopComponent
+		templ_7745c5c3_Var36 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var36 == nil {
+			templ_7745c5c3_Var36 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section><h2>API Key Created</h2><p>Store this API key now. It will not be shown again.</p><dl><dt>API key ID</dt><dd>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"reveal-card\"><h2>API key created</h2><p class=\"reveal-warning\">Store this API key now. It will not be shown again.</p><dl class=\"kv\"><dt>API key ID</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var17 string
-		templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.APIKeyID))
+		var templ_7745c5c3_Var37 string
+		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.APIKeyID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 137, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 258, Col: 35}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -364,25 +768,25 @@ func APIKeyCreatedPage(vm SignupSuccessView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var18 string
-		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(vm.APIKey)
+		var templ_7745c5c3_Var38 string
+		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(vm.APIKey)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 139, Col: 24}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 260, Col: 24}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code></dd></dl><p><a href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var19 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var19)))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code></dd></dl><div class=\"form-actions\"><a href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Back to API keys</a></p></section>")
+		var templ_7745c5c3_Var39 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var39)))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">Back to API keys</a></div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -401,89 +805,61 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var20 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var20 == nil {
-			templ_7745c5c3_Var20 = templ.NopComponent
+		templ_7745c5c3_Var40 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var40 == nil {
+			templ_7745c5c3_Var40 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ggscale Dashboard API Keys</title><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head><body><header><h1>API Keys</h1><nav><a href=\"/v1/dashboard\">Dashboard home</a></nav><form method=\"post\" action=\"/v1/dashboard/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Sign out</button></form></header><main><section><h2>Create API Key</h2><form method=\"post\" action=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var21 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var21)))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" hx-post=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys"))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" hx-target=\"#api-key-result\" hx-headers=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(csrfHeaders(vm.CSRFToken)))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label for=\"project_id\">Project ID</label> <input id=\"project_id\" name=\"project_id\" inputmode=\"numeric\"> <label for=\"key_label\">Label</label> <input id=\"key_label\" name=\"label\"> <button type=\"submit\">Create API key</button></form><div id=\"api-key-result\"></div></section><section><h2>Existing Keys</h2><table><thead><tr><th>ID</th><th>Project</th><th>Label</th><th>Created</th><th>Status</th><th>Actions</th></tr></thead> <tbody>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		for _, key := range vm.Keys {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<tr><td>")
+		templ_7745c5c3_Var41 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/dashboard\">Tenants</a> / API keys</div><div class=\"page-header\"><div><h1>API keys</h1><p class=\"subtitle\">Tenant #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var22 string
-			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(key.ID))
+			var templ_7745c5c3_Var42 string
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 192, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 274, Col: 60}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(key.ProjectID)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 193, Col: 28}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p></div><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td><form method=\"post\" action=\"")
+			var templ_7745c5c3_Var43 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var43)))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var24 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label")
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var24)))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline btn-inline\">← Projects</a></div><section class=\"card\"><h2>Create API key</h2><p class=\"card-subtitle\">Generates a new key. The plaintext value is shown once after creation.</p><form method=\"post\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var44 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var44)))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" hx-post=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys"))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" hx-target=\"#api-key-result\" hx-headers=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(csrfHeaders(vm.CSRFToken)))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -495,78 +871,232 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <input name=\"label\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Project <select id=\"project_id\" name=\"project_id\"><option value=\"\">Tenant-wide (all projects)</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(key.Label))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Save label</button></form></td><td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(key.CreatedAt))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 201, Col: 40}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			if key.RevokedAt != nil {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<td>Revoked</td><td>")
+			for _, p := range vm.Projects {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<option value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var26 string
-				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(*key.RevokedAt))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 204, Col: 42}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(stringFromInt(p.ID)))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var45 string
+				templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(p.Name)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 289, Col: 54}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</option>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</select></label> <label>Name <input id=\"key_label\" name=\"label\" placeholder=\"e.g. CI deploy key\" required></label></div><div class=\"form-actions\"><button type=\"submit\" class=\"btn-inline\">Create API key</button></div></form><div id=\"api-key-result\"></div></section><section class=\"card\"><h2>Existing keys</h2><p class=\"card-subtitle\">Revoked keys are kept for audit.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if len(vm.Keys) == 0 {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\">No API keys yet.</div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<td>Active</td><td><form method=\"post\" action=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>ID</th><th>Project</th><th>Name</th><th>Created</th><th>Status</th><th></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				var templ_7745c5c3_Var27 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke")
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var27)))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
+				for _, key := range vm.Keys {
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<tr><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var46 string
+					templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(key.ID))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 324, Col: 35}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if key.ProjectID == nil {
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">tenant-wide</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else if key.ProjectName != "" {
+						var templ_7745c5c3_Var47 string
+						templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(key.ProjectName)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 329, Col: 27}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">(deleted)</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td class=\"label-cell\"><form method=\"post\" action=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var48 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var48)))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <input name=\"label\" value=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(key.Label))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" aria-label=\"API key name\"> <button type=\"submit\" class=\"secondary outline\">Save</button></form></td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var49 string
+					templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(key.CreatedAt))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 341, Col: 39}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if key.RevokedAt != nil {
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<td><span class=\"badge badge-revoked\">Revoked</span></td><td class=\"actions-cell\"><small>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var50 string
+						templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(*key.RevokedAt))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 344, Col: 69}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</small></td>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<td><span class=\"badge badge-active\">Active</span></td><td class=\"actions-cell\"><form method=\"post\" action=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var51 templ.SafeURL = templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke")
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var51)))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"contrast outline\">Revoke</button></form></td>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tr>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Revoke</button></form></td>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tr>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = appLayout("API keys — ggscale", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var41), templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table></section></main></body></html>")
+		if !templ_7745c5c3_IsBuffer {
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteTo(templ_7745c5c3_W)
+		}
+		return templ_7745c5c3_Err
+	})
+}
+
+func HelpPage(vm HelpView) templ.Component {
+	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+		if !templ_7745c5c3_IsBuffer {
+			templ_7745c5c3_Buffer = templ.GetBuffer()
+			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var52 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var52 == nil {
+			templ_7745c5c3_Var52 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		templ_7745c5c3_Var53 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><h1>Concepts &amp; quick start</h1><p class=\"subtitle\">A 2-minute tour of how ggscale fits together.</p></div></div><section class=\"card\"><h2>The 30-second version</h2><p class=\"card-subtitle\">What you need to put ggscale in front of players.</p><ol class=\"quick-steps\"><li><strong>Create a tenant.</strong> The dashboard sets up a tenant, a starter project, and a first API key in one step.</li><li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li><li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the tenant&apos;s API key.</li></ol></section><section class=\"card\"><h2>The pieces</h2><p class=\"card-subtitle\">Each row is one row in the database, and one place in this dashboard.</p><dl class=\"concept-list\"><dt>Tenant</dt><dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (projects, API keys, player accounts, save data, leaderboards) belongs to exactly one tenant. Tenants never see each other&apos;s data.</dd><dt>Project</dt><dd>A workload partition inside a tenant. Most studios use one project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting projects keeps prod and staging data separate while still rolling up to one tenant for billing and admin.</dd><dt>API key</dt><dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd><dt>Dashboard user</dt><dd>You. Humans who log in here to manage tenants, projects, and keys. Dashboard users are separate from end users; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles.</dd><dt>End user (player)</dt><dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. End users never touch this dashboard.</dd></dl></section><section class=\"card\"><h2>How a request flows</h2><p class=\"card-subtitle\">Why each piece matters at runtime.</p><pre class=\"flow-diagram\">your game ──► ggscale HTTP API │ ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project) └─ X-Session-Token: &lt;player session&gt;   → resolves to an End user inside that Tenant │ ▼ Postgres (Row-Level Security) Only rows belonging to that tenant_id are visible.</pre><p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses tenant lines.</p></section><section class=\"card\"><h2>What to do next</h2><ul class=\"next-steps\"><li><a href=\"/v1/dashboard/tenants/new\">Create your first tenant</a> — gets you a tenant, a starter project, and your first API key in one step.</li><li>Open the <a href=\"/v1/dashboard\">Dashboard</a> to see tenants you can manage.</li><li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li></ul></section>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
+			return templ_7745c5c3_Err
+		})
+		templ_7745c5c3_Err = appLayout("Help — ggscale", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var53), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -585,62 +1115,90 @@ func AccountPage(vm AccountView) templ.Component {
 			defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var28 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var28 == nil {
-			templ_7745c5c3_Var28 = templ.NopComponent
+		templ_7745c5c3_Var54 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var54 == nil {
+			templ_7745c5c3_Var54 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>ggscale Dashboard Account</title><script src=\"/v1/dashboard/assets/htmx.min.js\"></script></head><body><header><h1>Account</h1><nav><a href=\"/v1/dashboard\">Dashboard home</a></nav></header><main>")
-		if templ_7745c5c3_Err != nil {
+		templ_7745c5c3_Var55 := templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {
+			templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templ_7745c5c3_W.(*bytes.Buffer)
+			if !templ_7745c5c3_IsBuffer {
+				templ_7745c5c3_Buffer = templ.GetBuffer()
+				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/dashboard\">Dashboard</a> / Account</div><div class=\"page-header\"><div><h1>Account</h1><p class=\"subtitle\">Signed in as ")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var56 string
+			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(vm.UserEmail)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 427, Col: 51}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p></div></div><section class=\"card\"><h2>Change password</h2><p class=\"card-subtitle\">All other sessions will be signed out after a successful change.</p>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if vm.Message != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"flash-success\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var57 string
+				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Message)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 434, Col: 41}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			if vm.Error != "" {
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var58 string
+				templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 437, Col: 30}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/dashboard/account/password\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label for=\"current_password\">Current password</label> <input id=\"current_password\" name=\"current_password\" type=\"password\" autocomplete=\"current-password\" required> <label for=\"new_password\">New password</label> <input id=\"new_password\" name=\"new_password\" type=\"password\" autocomplete=\"new-password\" minlength=\"12\" required placeholder=\"At least 12 characters\"><div class=\"form-actions\"><button type=\"submit\" class=\"btn-inline\">Update password</button></div></form></section>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if !templ_7745c5c3_IsBuffer {
+				_, templ_7745c5c3_Err = io.Copy(templ_7745c5c3_W, templ_7745c5c3_Buffer)
+			}
 			return templ_7745c5c3_Err
-		}
-		if vm.Message != "" {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var29 string
-			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Message)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 240, Col: 20}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		if vm.Error != "" {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var30 string
-			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 243, Col: 31}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</p>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/dashboard/account/password\"><input type=\"hidden\" name=\"_csrf\" value=\"")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label for=\"current_password\">Current password</label> <input id=\"current_password\" name=\"current_password\" type=\"password\" autocomplete=\"current-password\" required> <label for=\"new_password\">New password</label> <input id=\"new_password\" name=\"new_password\" type=\"password\" autocomplete=\"new-password\" minlength=\"12\" required> <button type=\"submit\">Update password</button></form></main></body></html>")
+		})
+		templ_7745c5c3_Err = appLayout("Account — ggscale", vm.UserEmail, vm.CSRFToken).Render(templ.WithChildren(ctx, templ_7745c5c3_Var55), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

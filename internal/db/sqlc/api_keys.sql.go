@@ -122,19 +122,21 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 }
 
 const listAPIKeys = `-- name: ListAPIKeys :many
-SELECT id, project_id, label, scopes, created_at, revoked_at
-FROM api_keys
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-ORDER BY id DESC
+SELECT k.id, k.project_id, p.name AS project_name, k.label, k.scopes, k.created_at, k.revoked_at
+FROM api_keys k
+LEFT JOIN projects p ON p.id = k.project_id
+WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
+ORDER BY k.id DESC
 `
 
 type ListAPIKeysRow struct {
-	ID        int64
-	ProjectID *int64
-	Label     *string
-	Scopes    []string
-	CreatedAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
+	ID          int64
+	ProjectID   *int64
+	ProjectName *string
+	Label       *string
+	Scopes      []string
+	CreatedAt   pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
 }
 
 func (q *Queries) ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error) {
@@ -149,6 +151,7 @@ func (q *Queries) ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error) {
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProjectID,
+			&i.ProjectName,
 			&i.Label,
 			&i.Scopes,
 			&i.CreatedAt,

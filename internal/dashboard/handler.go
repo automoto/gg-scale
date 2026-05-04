@@ -19,7 +19,7 @@ import (
 
 const maxFormBodyBytes = 1 << 20
 
-//go:embed static/htmx.min.js
+//go:embed static/htmx.min.js static/pico.min.css static/dashboard.css
 var staticFS embed.FS
 
 // Handler owns dashboard HTTP routes.
@@ -52,6 +52,8 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 	r := chi.NewRouter()
 	r.Use(securityHeaders)
 	r.Get("/assets/htmx.min.js", h.htmxAsset)
+	r.Get("/assets/pico.min.css", h.picoAsset)
+	r.Get("/assets/dashboard.css", h.dashboardAsset)
 	r.Group(func(r chi.Router) {
 		if limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, reg))
@@ -66,12 +68,16 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 		r.Use(h.requireSession)
 		r.Use(h.requireCSRF)
 		r.Get("/", h.home)
+		r.Get("/help", h.helpPage)
+		r.Get("/tenants/new", h.newTenantPage)
 		r.Post("/tenants", h.createTenantHandler)
 		r.Get("/tenants", h.openTenant)
 		r.Get("/account/password", h.accountPage)
 		r.Post("/account/password", h.updatePassword)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
 			r.Use(h.requireTenantAccess(roleAdmin))
+			r.Get("/projects", h.projectsPage)
+			r.Post("/projects", h.createProjectHandler)
 			r.Get("/api-keys", h.apiKeys)
 			r.Post("/api-keys", h.createAPIKeyHandler)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
@@ -88,6 +94,16 @@ func (h *Handler) htmxAsset(w http.ResponseWriter, r *http.Request) {
 	http.ServeFileFS(w, r, staticFS, "static/htmx.min.js")
 }
 
+func (h *Handler) picoAsset(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	http.ServeFileFS(w, r, staticFS, "static/pico.min.css")
+}
+
+func (h *Handler) dashboardAsset(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	http.ServeFileFS(w, r, staticFS, "static/dashboard.css")
+}
+
 func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	tenants, err := h.listTenants(r.Context(), session.User)
@@ -96,6 +112,74 @@ func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	render(r, w, HomePage(HomeView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Tenants: tenants}))
+}
+
+func (h *Handler) helpPage(w http.ResponseWriter, r *http.Request) {
+	session, _ := sessionFromContext(r.Context())
+	render(r, w, HelpPage(HelpView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+}
+
+func (h *Handler) newTenantPage(w http.ResponseWriter, r *http.Request) {
+	session, _ := sessionFromContext(r.Context())
+	render(r, w, NewTenantPage(NewTenantView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+}
+
+func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projects, err := h.listProjects(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, "project list failed", http.StatusInternalServerError)
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	render(r, w, ProjectsPage(ProjectsView{
+		UserEmail: session.User.Email,
+		TenantID:  tenantID,
+		CSRFToken: session.CSRFToken,
+		Projects:  projects,
+	}))
+}
+
+func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	if !parseForm(w, r) {
+		return
+	}
+	_, err := h.createProject(r.Context(), tenantID, r.Form.Get("name"))
+	if err != nil {
+		session, _ := sessionFromContext(r.Context())
+		projects, listErr := h.listProjects(r.Context(), tenantID)
+		if listErr != nil {
+			http.Error(w, "project list failed", http.StatusInternalServerError)
+			return
+		}
+		status := http.StatusInternalServerError
+		msg := "project create failed"
+		switch err {
+		case errInvalidProjectName:
+			status = http.StatusBadRequest
+			msg = "Project name is required"
+		case errDuplicateProject:
+			status = http.StatusConflict
+			msg = "A project with that name already exists"
+		}
+		w.WriteHeader(status)
+		render(r, w, ProjectsPage(ProjectsView{
+			UserEmail: session.User.Email,
+			TenantID:  tenantID,
+			CSRFToken: session.CSRFToken,
+			Projects:  projects,
+			Error:     msg,
+		}))
+		return
+	}
+	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/projects", http.StatusSeeOther)
 }
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
@@ -140,8 +224,19 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "api key list failed", http.StatusInternalServerError)
 		return
 	}
+	projects, err := h.listProjects(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, "project list failed", http.StatusInternalServerError)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, APIKeysPage(APIKeysView{TenantID: tenantID, CSRFToken: session.CSRFToken, Keys: keys}))
+	render(r, w, APIKeysPage(APIKeysView{
+		UserEmail: session.User.Email,
+		TenantID:  tenantID,
+		CSRFToken: session.CSRFToken,
+		Keys:      keys,
+		Projects:  projects,
+	}))
 }
 
 func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {

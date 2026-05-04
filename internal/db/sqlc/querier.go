@@ -19,6 +19,7 @@ type Querier interface {
 	CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUserParams) (int64, error)
 	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
+	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
 	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error
@@ -47,6 +48,7 @@ type Querier interface {
 	ListDashboardTenantsForPlatformAdmin(ctx context.Context) ([]ListDashboardTenantsForPlatformAdminRow, error)
 	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
+	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)

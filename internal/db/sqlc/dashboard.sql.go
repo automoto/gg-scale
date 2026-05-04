@@ -7,7 +7,31 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const createProjectForTenant = `-- name: CreateProjectForTenant :one
+INSERT INTO projects (tenant_id, name)
+VALUES (
+    current_setting('app.tenant_id', true)::bigint,
+    trim($1::text)
+)
+RETURNING id, name, created_at
+`
+
+type CreateProjectForTenantRow struct {
+	ID        int64
+	Name      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error) {
+	row := q.db.QueryRow(ctx, createProjectForTenant, name)
+	var i CreateProjectForTenantRow
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
+}
 
 const dashboardCreateTenant = `-- name: DashboardCreateTenant :one
 SELECT
@@ -55,4 +79,38 @@ func (q *Queries) DashboardCreateTenant(ctx context.Context, arg DashboardCreate
 		&i.MembershipID,
 	)
 	return i, err
+}
+
+const listProjectsForTenant = `-- name: ListProjectsForTenant :many
+SELECT id, name, created_at
+FROM projects
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+ORDER BY name
+`
+
+type ListProjectsForTenantRow struct {
+	ID        int64
+	Name      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listProjectsForTenant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListProjectsForTenantRow
+	for rows.Next() {
+		var i ListProjectsForTenantRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
