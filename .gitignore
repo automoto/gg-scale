@@ -20,6 +20,9 @@ Thumbs.db
 # secrets
 .env
 
+#build files
+data/
+
 # local k3s kubeconfig
 .k3s/
 
