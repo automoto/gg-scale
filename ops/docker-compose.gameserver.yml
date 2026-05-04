@@ -1,0 +1,45 @@
+# Usage: docker compose -f docker-compose.yml -f ops/docker-compose.gameserver.yml up
+# Adds a doomerang dedicated-server container alongside ggscale.
+# For production, layer ops/docker-compose.gameserver.prod.yml on top.
+#
+# The game server connects directly to clients — ggscale is not in the
+# real-time traffic path. ggscale brokers allocation (POST /v1/fleet/allocate)
+# and returns {host, port}; the client then connects directly to the container.
+# Set GAME_SERVER_PUBLIC_IP to the host machine's public IP so ggscale returns
+# the correct address to clients.
+
+name: ggscale
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  ggscale-server:
+    environment:
+      GAME_SERVER_PUBLIC_IP: ${GAME_SERVER_PUBLIC_IP:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/v1/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  doomerang-server:
+    image: ghcr.io/ggscale/doomerang-server:latest
+    ports:
+      - "7654:7654/udp"
+    environment:
+      GGSCALE_URL: http://ggscale-server:8080
+      # FLEET_SECRET authenticates the game server to ggscale's internal fleet
+      # API (Phase 2). Rotate this like a service credential; do not share it
+      # with players.
+      FLEET_SECRET: ${FLEET_SECRET:-changeme}
+    depends_on:
+      ggscale-server:
+        condition: service_healthy
+    logging: *default-logging
