@@ -20,15 +20,17 @@ func (c Config) Enabled() bool {
 
 // LoginView is the data rendered by the dashboard login template.
 type LoginView struct {
-	Email string
-	Error string
+	Email       string
+	Error       string
+	FieldErrors map[string]string
 }
 
 // SetupView is the data rendered by the first-run setup template.
 type SetupView struct {
-	Token string
-	Email string
-	Error string
+	Token       string
+	Email       string
+	Error       string
+	FieldErrors map[string]string
 }
 
 // TenantView is one tenant visible to a dashboard user.
@@ -73,30 +75,33 @@ type ProjectOption struct {
 
 // NewTenantView is the data rendered by the create-tenant page.
 type NewTenantView struct {
-	UserEmail string
-	CSRFToken string
-	Error     string
+	UserEmail   string
+	CSRFToken   string
+	Error       string
+	FieldErrors map[string]string
 }
 
 // ProjectsView is the data rendered by the per-tenant projects page.
 type ProjectsView struct {
-	UserEmail string
-	TenantID  int64
-	CSRFToken string
-	Projects  []ProjectOption
-	Error     string
-	Message   string
+	UserEmail   string
+	TenantID    int64
+	CSRFToken   string
+	Projects    []ProjectOption
+	Error       string
+	Message     string
+	FieldErrors map[string]string
 }
 
 // APIKeysView is the data rendered by the API-key management page.
 type APIKeysView struct {
-	UserEmail string
-	TenantID  int64
-	CSRFToken string
-	Keys      []APIKeyView
-	Projects  []ProjectOption
-	Message   string
-	Error     string
+	UserEmail   string
+	TenantID    int64
+	CSRFToken   string
+	Keys        []APIKeyView
+	Projects    []ProjectOption
+	Message     string
+	Error       string
+	FieldErrors map[string]string
 }
 
 // HelpView is the data rendered by the in-app concepts page.
@@ -107,10 +112,11 @@ type HelpView struct {
 
 // AccountView is the data rendered by the dashboard account page.
 type AccountView struct {
-	UserEmail string
-	CSRFToken string
-	Message   string
-	Error     string
+	UserEmail   string
+	CSRFToken   string
+	Message     string
+	Error       string
+	FieldErrors map[string]string
 }
 
 func stringFromInt(n int64) string {

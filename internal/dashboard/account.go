@@ -22,8 +22,12 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	current := r.Form.Get("current_password")
 	next := r.Form.Get("new_password")
 	if len(next) < minDashboardPassLen {
-		w.WriteHeader(http.StatusBadRequest)
-		render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Error: "Password must be at least 12 characters"}))
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		render(r, w, AccountPage(AccountView{
+			UserEmail:   session.User.Email,
+			CSRFToken:   session.CSRFToken,
+			FieldErrors: map[string]string{"new_password": "Password must be at least 12 characters"},
+		}))
 		return
 	}
 
@@ -38,7 +42,11 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(current)) != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Error: "Current password is incorrect"}))
+		render(r, w, AccountPage(AccountView{
+			UserEmail:   session.User.Email,
+			CSRFToken:   session.CSRFToken,
+			FieldErrors: map[string]string{"current_password": "Current password is incorrect"},
+		}))
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcryptCost)
@@ -60,5 +68,5 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clearSessionCookie(w)
-	http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/login")
 }
