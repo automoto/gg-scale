@@ -58,3 +58,60 @@ func TestFormErrorFragment_RendersAlertRole(t *testing.T) {
 	assert.Contains(t, html, `role="alert"`)
 	assert.Contains(t, html, ">nope<")
 }
+
+func TestSetupTokenPage_RendersTokenFilePath(t *testing.T) {
+	html := renderToString(t, SetupTokenPage(SetupTokenView{
+		TokenFilePath: "/var/lib/ggscale/bootstrap.token",
+	}))
+	assert.Contains(t, html, "<code>/var/lib/ggscale/bootstrap.token</code>")
+}
+
+func TestSetupTokenPage_NoFilePathShowsStderrInstruction(t *testing.T) {
+	html := renderToString(t, SetupTokenPage(SetupTokenView{}))
+	assert.Contains(t, html, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
+	assert.Contains(t, html, "stderr")
+}
+
+func TestSetupTokenPage_RendersFieldError(t *testing.T) {
+	html := renderToString(t, SetupTokenPage(SetupTokenView{
+		FieldErrors: map[string]string{"bootstrap_token": "Invalid bootstrap token"},
+	}))
+	assert.Contains(t, html, `id="bootstrap_token-error"`)
+	assert.Contains(t, html, "Invalid bootstrap token")
+}
+
+func TestSetupTokenPage_PostsToTokenEndpoint(t *testing.T) {
+	html := renderToString(t, SetupTokenPage(SetupTokenView{}))
+	assert.Contains(t, html, `action="/v1/dashboard/setup/token"`)
+}
+
+func TestSetupAdminPage_HasHiddenTokenField(t *testing.T) {
+	html := renderToString(t, SetupAdminPage(SetupAdminView{Token: "abc"}))
+	assert.Contains(t, html, `<input type="hidden" name="bootstrap_token" value="abc"`)
+}
+
+func TestSetupAdminPage_PostsToSetupEndpoint(t *testing.T) {
+	html := renderToString(t, SetupAdminPage(SetupAdminView{Token: "abc"}))
+	assert.Contains(t, html, `action="/v1/dashboard/setup"`)
+}
+
+func TestSetupAdminPage_RendersFieldErrors(t *testing.T) {
+	html := renderToString(t, SetupAdminPage(SetupAdminView{
+		Token: "abc",
+		Email: "bob@example.com",
+		FieldErrors: map[string]string{
+			"email":    "Enter a valid email address",
+			"password": "Password must be at least 12 characters",
+		},
+	}))
+	assert.Contains(t, html, `id="email-error"`)
+	assert.Contains(t, html, "Enter a valid email address")
+	assert.Contains(t, html, `id="password-error"`)
+	assert.Contains(t, html, "Password must be at least 12 characters")
+	assert.Contains(t, html, `class="field-error"`)
+}
+
+func TestSetupAdminPage_DoesNotShowTokenFilePath(t *testing.T) {
+	html := renderToString(t, SetupAdminPage(SetupAdminView{Token: "abc"}))
+	assert.NotContains(t, html, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
+}

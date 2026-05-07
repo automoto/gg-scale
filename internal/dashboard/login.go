@@ -29,12 +29,32 @@ type setupInput struct {
 	Password string
 }
 
-func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) setupTokenPage(w http.ResponseWriter, r *http.Request) {
 	if h.bootstrap == nil || !h.bootstrap.Pending() {
 		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
 		return
 	}
-	render(r, w, SetupPage(SetupView{}))
+	render(r, w, SetupTokenPage(SetupTokenView{TokenFilePath: h.bootstrap.TokenFilePath()}))
+}
+
+func (h *Handler) verifySetupToken(w http.ResponseWriter, r *http.Request) {
+	if h.bootstrap == nil || !h.bootstrap.Pending() {
+		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
+		return
+	}
+	if !parseForm(w, r) {
+		return
+	}
+	token := r.Form.Get("bootstrap_token")
+	if !h.bootstrap.tokenMatches(token) {
+		w.WriteHeader(http.StatusUnauthorized)
+		render(r, w, SetupTokenPage(SetupTokenView{
+			TokenFilePath: h.bootstrap.TokenFilePath(),
+			FieldErrors:   map[string]string{"bootstrap_token": "Invalid bootstrap token"},
+		}))
+		return
+	}
+	render(r, w, SetupAdminPage(SetupAdminView{Token: token}))
 }
 
 func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
@@ -46,33 +66,33 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		Email:    normalizeEmail(r.Form.Get("email")),
 		Password: r.Form.Get("password"),
 	}
-	if err := h.createFirstAdmin(r, in); err != nil {
-		view := SetupView{Token: in.Token, Email: in.Email}
-		status := http.StatusUnprocessableEntity
-		switch {
-		case errors.Is(err, errInvalidCredentials):
-			status = http.StatusUnauthorized
-			view.Error = "Invalid bootstrap token"
-		case errors.Is(err, errBootstrapUnavailable):
-			status = http.StatusGone
-			view.Error = "Dashboard setup is no longer available"
-		case errors.Is(err, errInvalidSignup):
-			view.FieldErrors = map[string]string{}
-			if !validDashboardEmail(in.Email) {
-				view.FieldErrors["email"] = "Enter a valid email address"
-			}
-			if len(in.Password) < minDashboardPassLen {
-				view.FieldErrors["password"] = "Password must be at least 12 characters"
-			}
-		default:
-			status = http.StatusInternalServerError
-			view.Error = "Setup failed"
-		}
-		w.WriteHeader(status)
-		render(r, w, SetupPage(view))
+	err := h.createFirstAdmin(r, in)
+	if err == nil {
+		htmxRedirect(w, r, "/v1/dashboard/login")
 		return
 	}
-	htmxRedirect(w, r, "/v1/dashboard/login")
+	switch {
+	case errors.Is(err, errInvalidCredentials):
+		w.WriteHeader(http.StatusUnauthorized)
+		render(r, w, SetupTokenPage(SetupTokenView{
+			TokenFilePath: h.bootstrap.TokenFilePath(),
+			Error:         "Bootstrap token no longer valid. Please re-enter it.",
+		}))
+	case errors.Is(err, errBootstrapUnavailable):
+		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
+	case errors.Is(err, errInvalidSignup):
+		view := SetupAdminView{Token: in.Token, Email: in.Email, FieldErrors: map[string]string{}}
+		if !validDashboardEmail(in.Email) {
+			view.FieldErrors["email"] = "Enter a valid email address"
+		}
+		if len(in.Password) < minDashboardPassLen {
+			view.FieldErrors["password"] = "Password must be at least 12 characters"
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		render(r, w, SetupAdminPage(view))
+	default:
+		http.Error(w, "Setup failed", http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {

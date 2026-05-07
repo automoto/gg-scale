@@ -339,6 +339,22 @@ section.card > .card-subtitle {
   padding: 6px 14px;
   font-size: 13px;
 }
+.data-table .label-cell .label-display {
+  margin-right: var(--space-sm);
+}
+.data-table .label-cell details {
+  display: inline-block;
+}
+.data-table .label-cell summary {
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+  display: inline-block;
+}
+.data-table .label-cell summary::-webkit-details-marker { display: none; }
+.data-table .label-cell details[open] form {
+  margin-top: var(--space-xs);
+}
 .data-table .label-cell form {
   margin: 0;
   display: flex;
@@ -358,6 +374,9 @@ section.card > .card-subtitle {
   padding: 6px 12px;
   font-size: 13px;
 }
+.create-toggle { margin-bottom: var(--space-md); }
+.create-toggle > summary { margin-bottom: var(--space-sm); }
+.create-toggle .create-card { margin-top: 0; }
 .data-table code {
   font-size: 14px;
   padding: 2px 6px;
