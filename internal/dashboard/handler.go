@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -19,7 +20,7 @@ import (
 
 const maxFormBodyBytes = 1 << 20
 
-//go:embed static/htmx.min.js static/pico.min.css static/dashboard.css
+//go:embed static
 var staticFS embed.FS
 
 // Handler owns dashboard HTTP routes.
@@ -51,9 +52,7 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 
 	r := chi.NewRouter()
 	r.Use(securityHeaders)
-	r.Get("/assets/htmx.min.js", h.htmxAsset)
-	r.Get("/assets/pico.min.css", h.picoAsset)
-	r.Get("/assets/dashboard.css", h.dashboardAsset)
+	r.Get("/assets/*", h.assetHandler)
 	r.Group(func(r chi.Router) {
 		if limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, reg))
@@ -89,19 +88,14 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 	return r
 }
 
-func (h *Handler) htmxAsset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	http.ServeFileFS(w, r, staticFS, "static/htmx.min.js")
-}
-
-func (h *Handler) picoAsset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	http.ServeFileFS(w, r, staticFS, "static/pico.min.css")
-}
-
-func (h *Handler) dashboardAsset(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/css; charset=utf-8")
-	http.ServeFileFS(w, r, staticFS, "static/dashboard.css")
+func (h *Handler) assetHandler(w http.ResponseWriter, r *http.Request) {
+	name := chi.URLParam(r, "*")
+	if name == "" || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFileFS(w, r, staticFS, "static/"+name)
 }
 
 func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
@@ -160,29 +154,32 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status := http.StatusInternalServerError
-		msg := "project create failed"
-		switch err {
-		case errInvalidProjectName:
-			status = http.StatusBadRequest
-			msg = "Project name is required"
-		case errDuplicateProject:
-			status = http.StatusConflict
-			msg = "A project with that name already exists"
-		}
-		w.WriteHeader(status)
-		render(r, w, ProjectsPage(ProjectsView{
+		view := ProjectsView{
 			UserEmail: session.User.Email,
 			TenantID:  tenantID,
 			CSRFToken: session.CSRFToken,
 			Projects:  projects,
-			Error:     msg,
-		}))
+			Error:     "project create failed",
+		}
+		switch err {
+		case errInvalidProjectName:
+			status = http.StatusUnprocessableEntity
+			view.Error = ""
+			view.FieldErrors = map[string]string{"name": "Project name is required"}
+		case errDuplicateProject:
+			status = http.StatusConflict
+			view.Error = ""
+			view.FieldErrors = map[string]string{"name": "A project with that name already exists"}
+		}
+		w.WriteHeader(status)
+		render(r, w, ProjectsPage(view))
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/projects", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/projects")
 }
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Vary", "HX-Request")
 	if !parseForm(w, r) {
 		return
 	}
@@ -195,10 +192,13 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
+		msg := "tenant signup failed"
 		if err == errInvalidSignup {
-			status = http.StatusBadRequest
+			status = http.StatusUnprocessableEntity
+			msg = "Tenant name and project name are required"
 		}
-		http.Error(w, "tenant signup failed", status)
+		w.WriteHeader(status)
+		render(r, w, FormErrorFragment(msg))
 		return
 	}
 	render(r, w, SignupSuccessPage(SignupSuccessView(result)))
@@ -240,6 +240,7 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Vary", "HX-Request")
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
 		return
@@ -251,7 +252,8 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if raw := r.Form.Get("project_id"); raw != "" {
 		id, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || id <= 0 {
-			http.Error(w, "invalid project_id", http.StatusBadRequest)
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			render(r, w, FormErrorFragment("Pick a valid project (or leave empty for tenant-wide)"))
 			return
 		}
 		projectID = &id
@@ -262,7 +264,8 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		Label:     r.Form.Get("label"),
 	})
 	if err != nil {
-		http.Error(w, "api key create failed", http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError)
+		render(r, w, FormErrorFragment("api key create failed"))
 		return
 	}
 	render(r, w, APIKeyCreatedPage(SignupSuccessView{
@@ -284,7 +287,7 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys")
 }
 
 func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -299,7 +302,7 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys")
 }
 
 func securityHeaders(next http.Handler) http.Handler {
@@ -354,6 +357,18 @@ func render(r *http.Request, w http.ResponseWriter, component templ.Component) {
 		slog.ErrorContext(r.Context(), "dashboard template render failed", "err", err)
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
+}
+
+// htmxRedirect sends an HX-Redirect header for HTMX clients (which would
+// otherwise transparently follow a 303 into the swap target) and a plain
+// 303 See Other for everything else.
+func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", path)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	http.Redirect(w, r, path, http.StatusSeeOther)
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {

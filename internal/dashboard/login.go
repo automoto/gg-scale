@@ -47,21 +47,32 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		Password: r.Form.Get("password"),
 	}
 	if err := h.createFirstAdmin(r, in); err != nil {
-		status := http.StatusBadRequest
-		msg := "Invalid setup request"
+		view := SetupView{Token: in.Token, Email: in.Email}
+		status := http.StatusUnprocessableEntity
 		switch {
 		case errors.Is(err, errInvalidCredentials):
 			status = http.StatusUnauthorized
-			msg = "Invalid bootstrap token"
+			view.Error = "Invalid bootstrap token"
 		case errors.Is(err, errBootstrapUnavailable):
 			status = http.StatusGone
-			msg = "Dashboard setup is no longer available"
+			view.Error = "Dashboard setup is no longer available"
+		case errors.Is(err, errInvalidSignup):
+			view.FieldErrors = map[string]string{}
+			if !validDashboardEmail(in.Email) {
+				view.FieldErrors["email"] = "Enter a valid email address"
+			}
+			if len(in.Password) < minDashboardPassLen {
+				view.FieldErrors["password"] = "Password must be at least 12 characters"
+			}
+		default:
+			status = http.StatusInternalServerError
+			view.Error = "Setup failed"
 		}
 		w.WriteHeader(status)
-		render(r, w, SetupPage(SetupView{Token: in.Token, Email: in.Email, Error: msg}))
+		render(r, w, SetupPage(view))
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/login")
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +109,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.User = user
-	http.Redirect(w, r, "/v1/dashboard", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard")
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +121,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.clearSessionCookie(w)
-	http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+	htmxRedirect(w, r, "/v1/dashboard/login")
 }
 
 func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) error {

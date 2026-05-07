@@ -57,6 +57,16 @@ templ authLayout(title string) {
 	</html>
 }
 
+templ FormErrorFragment(message string) {
+	<p role="alert">{ message }</p>
+}
+
+templ fieldError(errs map[string]string, name string) {
+	if msg, ok := errs[name]; ok {
+		<small class="field-error" id={ name + "-error" }>{ msg }</small>
+	}
+}
+
 templ LoginPage(vm LoginView) {
 	@authLayout("Sign in — ggscale") {
 		<h1>ggscale Dashboard</h1>
@@ -66,9 +76,11 @@ templ LoginPage(vm LoginView) {
 		}
 		<form method="post" action="/v1/dashboard/login">
 			<label for="email">Email</label>
-			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
+			@fieldError(vm.FieldErrors, "email")
 			<label for="password">Password</label>
-			<input id="password" name="password" type="password" autocomplete="current-password" required/>
+			<input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error"/>
+			@fieldError(vm.FieldErrors, "password")
 			<button type="submit">Sign in</button>
 		</form>
 	}
@@ -83,11 +95,14 @@ templ SetupPage(vm SetupView) {
 		}
 		<form method="post" action="/v1/dashboard/setup">
 			<label for="bootstrap_token">Bootstrap token</label>
-			<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required/>
+			<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required aria-describedby="bootstrap_token-error"/>
+			@fieldError(vm.FieldErrors, "bootstrap_token")
 			<label for="email">Email</label>
-			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
+			@fieldError(vm.FieldErrors, "email")
 			<label for="password">Password</label>
-			<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters"/>
+			<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="password-error"/>
+			@fieldError(vm.FieldErrors, "password")
 			<button type="submit">Create admin account</button>
 		</form>
 	}
@@ -97,6 +112,7 @@ templ HomePage(vm HomeView) {
 	@appLayout("ggscale Dashboard", vm.UserEmail, vm.CSRFToken) {
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">Tenants</p>
 				<h1>Tenants</h1>
 				<p class="subtitle">Tenants you have access to.</p>
 			</div>
@@ -140,6 +156,7 @@ templ NewTenantPage(vm NewTenantView) {
 		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / New</div>
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">New tenant</p>
 				<h1>New tenant</h1>
 				<p class="subtitle">Sets up a tenant with a starter project and its first API key.</p>
 			</div>
@@ -153,16 +170,19 @@ templ NewTenantPage(vm NewTenantView) {
 				<div class="grid">
 					<label>
 						Tenant name
-						<input name="tenant_name" required autofocus/>
+						<input name="tenant_name" required autofocus aria-describedby="tenant_name-error"/>
+						@fieldError(vm.FieldErrors, "tenant_name")
 					</label>
 					<label>
 						Starter project name
-						<input name="project_name" required/>
+						<input name="project_name" required aria-describedby="project_name-error"/>
+						@fieldError(vm.FieldErrors, "project_name")
 					</label>
 				</div>
 				<label>
 					First API key name
-					<input name="label" value="Default key"/>
+					<input name="label" value="Default key" aria-describedby="label-error"/>
+					@fieldError(vm.FieldErrors, "label")
 				</label>
 				<div class="form-actions">
 					<a href="/v1/dashboard" role="button" class="secondary outline btn-inline">Cancel</a>
@@ -179,6 +199,7 @@ templ ProjectsPage(vm ProjectsView) {
 		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Projects</div>
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">Projects</p>
 				<h1>Projects</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
@@ -197,7 +218,8 @@ templ ProjectsPage(vm ProjectsView) {
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Project name
-					<input name="name" required autofocus placeholder="e.g. arcade-prod"/>
+					<input name="name" required autofocus placeholder="e.g. arcade-prod" aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
 				</label>
 				<div class="form-actions">
 					<button type="submit" class="btn-inline">Create project</button>
@@ -231,8 +253,9 @@ templ ProjectsPage(vm ProjectsView) {
 }
 
 templ SignupSuccessPage(vm SignupSuccessView) {
-	<div class="reveal-card">
-		<h2>Tenant created</h2>
+	<section class="color-block color-block--lime">
+		<p class="eyebrow">Tenant created</p>
+		<h2>Save your API key</h2>
 		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
 		<dl class="kv">
 			<dt>Tenant ID</dt>
@@ -247,12 +270,13 @@ templ SignupSuccessPage(vm SignupSuccessView) {
 		<div class="form-actions">
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Manage API keys</a>
 		</div>
-	</div>
+	</section>
 }
 
 templ APIKeyCreatedPage(vm SignupSuccessView) {
-	<div class="reveal-card">
-		<h2>API key created</h2>
+	<section class="color-block color-block--lime">
+		<p class="eyebrow">API key created</p>
+		<h2>Save your API key</h2>
 		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
 		<dl class="kv">
 			<dt>API key ID</dt>
@@ -263,7 +287,7 @@ templ APIKeyCreatedPage(vm SignupSuccessView) {
 		<div class="form-actions">
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Back to API keys</a>
 		</div>
-	</div>
+	</section>
 }
 
 templ APIKeysPage(vm APIKeysView) {
@@ -271,6 +295,7 @@ templ APIKeysPage(vm APIKeysView) {
 		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / API keys</div>
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">API keys</p>
 				<h1>API keys</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
@@ -284,16 +309,18 @@ templ APIKeysPage(vm APIKeysView) {
 				<div class="grid">
 					<label>
 						Project
-						<select id="project_id" name="project_id">
+						<select id="project_id" name="project_id" aria-describedby="project_id-error">
 							<option value="">Tenant-wide (all projects)</option>
 							for _, p := range vm.Projects {
 								<option value={ stringFromInt(p.ID) }>{ p.Name }</option>
 							}
 						</select>
+						@fieldError(vm.FieldErrors, "project_id")
 					</label>
 					<label>
 						Name
-						<input id="key_label" name="label" placeholder="e.g. CI deploy key" required/>
+						<input id="key_label" name="label" placeholder="e.g. CI deploy key" required aria-describedby="label-error"/>
+						@fieldError(vm.FieldErrors, "label")
 					</label>
 				</div>
 				<div class="form-actions">
@@ -365,6 +392,7 @@ templ HelpPage(vm HelpView) {
 	@appLayout("Help — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">Help</p>
 				<h1>Concepts &amp; quick start</h1>
 				<p class="subtitle">A 2-minute tour of how ggscale fits together.</p>
 			</div>
@@ -424,6 +452,7 @@ templ AccountPage(vm AccountView) {
 		<div class="breadcrumb"><a href="/v1/dashboard">Dashboard</a> / Account</div>
 		<div class="page-header">
 			<div>
+				<p class="eyebrow">Account</p>
 				<h1>Account</h1>
 				<p class="subtitle">Signed in as { vm.UserEmail }</p>
 			</div>
@@ -440,9 +469,11 @@ templ AccountPage(vm AccountView) {
 			<form method="post" action="/v1/dashboard/account/password">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label for="current_password">Current password</label>
-				<input id="current_password" name="current_password" type="password" autocomplete="current-password" required/>
+				<input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error"/>
+				@fieldError(vm.FieldErrors, "current_password")
 				<label for="new_password">New password</label>
-				<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters"/>
+				<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="new_password-error"/>
+				@fieldError(vm.FieldErrors, "new_password")
 				<div class="form-actions">
 					<button type="submit" class="btn-inline">Update password</button>
 				</div>
