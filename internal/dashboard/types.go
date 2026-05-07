@@ -25,8 +25,15 @@ type LoginView struct {
 	FieldErrors map[string]string
 }
 
-// SetupView is the data rendered by the first-run setup template.
-type SetupView struct {
+// SetupTokenView is the data rendered by step 1 of first-run setup.
+type SetupTokenView struct {
+	TokenFilePath string
+	Error         string
+	FieldErrors   map[string]string
+}
+
+// SetupAdminView is the data rendered by step 2 of first-run setup.
+type SetupAdminView struct {
 	Token       string
 	Email       string
 	Error       string

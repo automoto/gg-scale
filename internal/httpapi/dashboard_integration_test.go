@@ -50,7 +50,7 @@ func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboar
 
 func TestDashboardSetup_creates_first_platform_admin_then_returns_410(t *testing.T) {
 	c := startCluster(t)
-	srv := newDashboardIntegrationServer(t, c, dashboard.NewBootstrap("setup-token"))
+	srv := newDashboardIntegrationServer(t, c, dashboard.NewBootstrap("setup-token", "/tmp/ggscale-bootstrap.token"))
 	noRedirect := noRedirectClient()
 
 	form := url.Values{

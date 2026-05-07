@@ -65,3 +65,17 @@ func TestEmitBootstrapToken_no_file_token_absent_from_log(t *testing.T) {
 	assert.NotContains(t, logBuf.String(), "testtoken123")
 	assert.Contains(t, logBuf.String(), "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
 }
+
+func TestNewBootstrap_StoresTokenFilePath(t *testing.T) {
+	b := NewBootstrap("tok", "/tmp/x")
+	assert.Equal(t, "/tmp/x", b.TokenFilePath())
+}
+
+func TestDisabledBootstrap_TokenFilePathEmpty(t *testing.T) {
+	assert.Equal(t, "", DisabledBootstrap().TokenFilePath())
+}
+
+func TestBootstrap_TokenFilePathNilSafe(t *testing.T) {
+	var b *Bootstrap
+	assert.Equal(t, "", b.TokenFilePath())
+}

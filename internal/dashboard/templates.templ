@@ -86,17 +86,36 @@ templ LoginPage(vm LoginView) {
 	}
 }
 
-templ SetupPage(vm SetupView) {
+templ SetupTokenPage(vm SetupTokenView) {
 	@authLayout("Set up — ggscale") {
 		<h1>Set up ggscale</h1>
-		<p class="subtitle">Create the first platform administrator. This page closes after the first account is created.</p>
+		<p class="subtitle">Step 1 of 2 — paste the bootstrap token to start setup.</p>
+		if vm.TokenFilePath != "" {
+			<p>The token was written to <code>{ vm.TokenFilePath }</code> on the server. Read it from there.</p>
+		} else {
+			<p>The token was printed to the server&apos;s stderr (no <code>DASHBOARD_BOOTSTRAP_TOKEN_FILE</code> configured). Check your server logs.</p>
+		}
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<form method="post" action="/v1/dashboard/setup/token">
+			<label for="bootstrap_token">Bootstrap token</label>
+			<input id="bootstrap_token" name="bootstrap_token" type="text" autocomplete="off" required aria-describedby="bootstrap_token-error"/>
+			@fieldError(vm.FieldErrors, "bootstrap_token")
+			<button type="submit">Continue</button>
+		</form>
+	}
+}
+
+templ SetupAdminPage(vm SetupAdminView) {
+	@authLayout("Set up — ggscale") {
+		<h1>Create admin account</h1>
+		<p class="subtitle">Step 2 of 2 — set the email and password for the first administrator.</p>
 		if vm.Error != "" {
 			<p role="alert">{ vm.Error }</p>
 		}
 		<form method="post" action="/v1/dashboard/setup">
-			<label for="bootstrap_token">Bootstrap token</label>
-			<input id="bootstrap_token" name="bootstrap_token" type="text" value={ vm.Token } autocomplete="off" required aria-describedby="bootstrap_token-error"/>
-			@fieldError(vm.FieldErrors, "bootstrap_token")
+			<input type="hidden" name="bootstrap_token" value={ vm.Token }/>
 			<label for="email">Email</label>
 			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
 			@fieldError(vm.FieldErrors, "email")
@@ -301,46 +320,45 @@ templ APIKeysPage(vm APIKeysView) {
 			</div>
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">← Projects</a>
 		</div>
+		<details class="create-toggle">
+			<summary role="button" class="btn-inline">+ Create API key</summary>
+			<section class="card create-card">
+				<p class="card-subtitle">Generates a new key. The plaintext value is shown once after creation.</p>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } hx-post={ "/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys" } hx-target="#api-key-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<div class="grid">
+						<label>
+							Project
+							<select id="project_id" name="project_id" aria-describedby="project_id-error">
+								<option value="">Tenant-wide (all projects)</option>
+								for _, p := range vm.Projects {
+									<option value={ stringFromInt(p.ID) }>{ p.Name }</option>
+								}
+							</select>
+							@fieldError(vm.FieldErrors, "project_id")
+						</label>
+						<label>
+							Name
+							<input id="key_label" name="label" placeholder="e.g. CI deploy key" required aria-describedby="label-error"/>
+							@fieldError(vm.FieldErrors, "label")
+						</label>
+					</div>
+					<div class="form-actions">
+						<button type="submit" class="btn-inline">Create API key</button>
+					</div>
+				</form>
+			</section>
+		</details>
+		<div id="api-key-result"></div>
 		<section class="card">
-			<h2>Create API key</h2>
-			<p class="card-subtitle">Generates a new key. The plaintext value is shown once after creation.</p>
-			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } hx-post={ "/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys" } hx-target="#api-key-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
-				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<div class="grid">
-					<label>
-						Project
-						<select id="project_id" name="project_id" aria-describedby="project_id-error">
-							<option value="">Tenant-wide (all projects)</option>
-							for _, p := range vm.Projects {
-								<option value={ stringFromInt(p.ID) }>{ p.Name }</option>
-							}
-						</select>
-						@fieldError(vm.FieldErrors, "project_id")
-					</label>
-					<label>
-						Name
-						<input id="key_label" name="label" placeholder="e.g. CI deploy key" required aria-describedby="label-error"/>
-						@fieldError(vm.FieldErrors, "label")
-					</label>
-				</div>
-				<div class="form-actions">
-					<button type="submit" class="btn-inline">Create API key</button>
-				</div>
-			</form>
-			<div id="api-key-result"></div>
-		</section>
-		<section class="card">
-			<h2>Existing keys</h2>
-			<p class="card-subtitle">Revoked keys are kept for audit.</p>
 			if len(vm.Keys) == 0 {
 				<div class="empty-state">No API keys yet.</div>
 			} else {
 				<table class="data-table">
 					<thead>
 						<tr>
-							<th>ID</th>
 							<th>Project</th>
-							<th>Name</th>
+							<th>Key Name</th>
 							<th>Created</th>
 							<th>Status</th>
 							<th></th>
@@ -349,7 +367,6 @@ templ APIKeysPage(vm APIKeysView) {
 					<tbody>
 						for _, key := range vm.Keys {
 							<tr>
-								<td>{ stringFromInt(key.ID) }</td>
 								<td>
 									if key.ProjectID == nil {
 										<span class="muted">tenant-wide</span>
@@ -360,11 +377,15 @@ templ APIKeysPage(vm APIKeysView) {
 									}
 								</td>
 								<td class="label-cell">
-									<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label") }>
-										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-										<input name="label" value={ key.Label } aria-label="API key name"/>
-										<button type="submit" class="secondary outline">Save</button>
-									</form>
+									<span class="label-display">{ key.Label }</span>
+									<details class="label-edit">
+										<summary class="secondary outline">Edit</summary>
+										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label") }>
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<input name="label" value={ key.Label } aria-label="API key name"/>
+											<button type="submit" class="secondary outline">Save</button>
+										</form>
+									</details>
 								</td>
 								<td>{ timeString(key.CreatedAt) }</td>
 								if key.RevokedAt != nil {

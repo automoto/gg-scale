@@ -57,7 +57,8 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 		if limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, reg))
 		}
-		r.Get("/setup", h.setup)
+		r.Get("/setup", h.setupTokenPage)
+		r.Post("/setup/token", h.verifySetupToken)
 		r.Post("/setup", h.completeSetup)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)

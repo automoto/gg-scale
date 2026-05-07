@@ -18,14 +18,22 @@ import (
 
 // Bootstrap tracks the first-run dashboard setup token.
 type Bootstrap struct {
-	mu      sync.Mutex
-	pending bool
-	hash    [32]byte
+	mu            sync.Mutex
+	pending       bool
+	hash          [32]byte
+	tokenFilePath string
 }
 
-// NewBootstrap returns a pending bootstrap guard for token.
-func NewBootstrap(token string) *Bootstrap {
-	return &Bootstrap{pending: true, hash: sha256.Sum256([]byte(token))}
+// NewBootstrap returns a pending bootstrap guard for token. tokenFilePath is
+// the on-disk location where the token was written (empty if it was emitted
+// to stderr); it is exposed so the setup UI can tell the operator where to
+// read the token from.
+func NewBootstrap(token, tokenFilePath string) *Bootstrap {
+	return &Bootstrap{
+		pending:       true,
+		hash:          sha256.Sum256([]byte(token)),
+		tokenFilePath: tokenFilePath,
+	}
 }
 
 // DisabledBootstrap returns a bootstrap guard with setup disabled.
@@ -41,6 +49,15 @@ func (b *Bootstrap) Pending() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.pending
+}
+
+// TokenFilePath returns the on-disk path the bootstrap token was written to,
+// or "" if it was emitted to stderr or the bootstrap is nil.
+func (b *Bootstrap) TokenFilePath() string {
+	if b == nil {
+		return ""
+	}
+	return b.tokenFilePath
 }
 
 func (b *Bootstrap) tokenMatches(token string) bool {
@@ -112,5 +129,5 @@ func LoadBootstrap(ctx context.Context, pool *db.Pool, tokenFile string, logger 
 	if err := emitBootstrapToken(token, tokenFile, logger, os.Stderr); err != nil {
 		return nil, err
 	}
-	return NewBootstrap(token), nil
+	return NewBootstrap(token, tokenFile), nil
 }

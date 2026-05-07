@@ -20,7 +20,7 @@ func newDashboardServer(t *testing.T) *httptest.Server {
 		Dashboard: dashboard.Config{
 			Mount: true,
 		},
-		DashboardBootstrap: dashboard.NewBootstrap("setup-token"),
+		DashboardBootstrap: dashboard.NewBootstrap("setup-token", "/tmp/ggscale-bootstrap.token"),
 	}))
 	t.Cleanup(srv.Close)
 	return srv
