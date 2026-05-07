@@ -1,6 +1,7 @@
 package fleet_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -144,4 +145,46 @@ func TestDeregister_other_tenant_returns_not_found(t *testing.T) {
 	err = r.Deregister(2, id)
 
 	assert.ErrorIs(t, err, fleet.ErrNotFound)
+}
+
+func TestRun_sweeps_expired_entries_periodically(t *testing.T) {
+	r := fleet.NewRegistry(10 * time.Millisecond)
+	_, err := r.Register(sample(1, 10))
+	require.NoError(t, err)
+	require.Equal(t, 1, r.Size())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		r.Run(ctx)
+		close(done)
+	}()
+
+	assert.Eventually(t, func() bool { return r.Size() == 0 }, time.Second, 5*time.Millisecond)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after context cancel")
+	}
+}
+
+func TestRun_returns_when_context_canceled(t *testing.T) {
+	r := fleet.NewRegistry(testTTL)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		r.Run(ctx)
+		close(done)
+	}()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after context cancel")
+	}
 }
