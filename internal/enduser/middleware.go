@@ -67,6 +67,18 @@ func New(signer *auth.Signer) func(http.Handler) http.Handler {
 				return
 			}
 
+			// When the api_key is project-pinned, also assert the
+			// session's pid claim matches. Closes a same-tenant cross-
+			// project session-replay seam: a session minted under
+			// project A must not work when presented under an api_key
+			// pinned to project B.
+			if projectID, ok := db.ProjectFromContext(r.Context()); ok {
+				if claims.ProjectID != 0 && claims.ProjectID != projectID {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+			}
+
 			ctx := WithID(r.Context(), claims.EndUserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

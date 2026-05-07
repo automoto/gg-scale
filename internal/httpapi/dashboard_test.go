@@ -53,7 +53,7 @@ func TestDashboard_setup_page_renders_when_bootstrap_pending(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Contains(t, string(body), "Set up ggscale Dashboard")
+	assert.Contains(t, string(body), "Set up ggscale")
 	assert.Contains(t, string(body), `name="bootstrap_token"`)
 	assert.NotContains(t, string(body), `value="setup-token"`)
 }

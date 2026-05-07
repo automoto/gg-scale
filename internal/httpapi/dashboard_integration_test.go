@@ -258,7 +258,7 @@ func TestDashboardAPIKeys_create_label_and_revoke(t *testing.T) {
 	listBody, err := io.ReadAll(listResp.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, listResp.StatusCode, string(listBody))
-	assert.Contains(t, string(listBody), "API Keys")
+	assert.Contains(t, string(listBody), "API keys")
 
 	createForm := url.Values{
 		"_csrf":      {csrf},

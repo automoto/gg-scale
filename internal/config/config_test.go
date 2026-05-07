@@ -98,6 +98,43 @@ func TestLoad_parses_olric_peers_csv(t *testing.T) {
 	assert.Equal(t, []string{"node-1:3322", "node-2:3322", "node-3:3322"}, cfg.CacheOlricPeers)
 }
 
+func TestLoad_reads_DATABASE_URL_FILE_when_set(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "db_url")
+	require.NoError(t, os.WriteFile(path, []byte("postgres://localhost/from-file\n"), 0o600))
+	t.Setenv("DATABASE_URL_FILE", path)
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "postgres://localhost/from-file", cfg.DatabaseURL)
+}
+
+func TestLoad_FILE_wins_over_plain_env(t *testing.T) {
+	clearEnv(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "db_url")
+	require.NoError(t, os.WriteFile(path, []byte("postgres://localhost/from-file"), 0o600))
+	t.Setenv("DATABASE_URL", "postgres://localhost/from-env")
+	t.Setenv("DATABASE_URL_FILE", path)
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "postgres://localhost/from-file", cfg.DatabaseURL)
+}
+
+func TestLoad_returns_error_when_FILE_path_is_unreadable(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL_FILE", "/nonexistent/path/to/secret")
+
+	_, err := config.Load()
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "DATABASE_URL_FILE")
+}
+
 func TestEnvExample_has_no_drift(t *testing.T) {
 	declared := config.DeclaredVars()
 
@@ -133,7 +170,8 @@ func parseEnvFileKeys(content string) []string {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"DATABASE_URL", "HTTP_ADDR", "LOG_LEVEL", "ENV", "JWT_SIGNING_KEY",
+		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "LOG_LEVEL", "ENV",
+		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
 		"DASHBOARD_DISABLED", "DASHBOARD_BOOTSTRAP_TOKEN_FILE", "DASHBOARD_COOKIE_SECURE",
 		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
 		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",

@@ -15,6 +15,7 @@ type APIKey struct {
 	KeyHash   []byte
 	Label     *string
 	Scopes    []string
+	KeyType   string
 	CreatedAt pgtype.Timestamptz
 	RevokedAt pgtype.Timestamptz
 }

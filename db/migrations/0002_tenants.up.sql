@@ -31,6 +31,11 @@ CREATE TABLE api_keys (
     key_hash    BYTEA NOT NULL UNIQUE,
     label       TEXT,
     scopes      TEXT[] NOT NULL DEFAULT '{}',
+    -- key_type splits Stripe-style publishable (embedded in shipped game
+    -- binaries) from secret (game-server / tenant-backend only). Sensitive
+    -- writes (fleet register, leaderboard submit) require 'secret'.
+    key_type    TEXT NOT NULL DEFAULT 'secret'
+                CHECK (key_type IN ('publishable', 'secret')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     revoked_at  TIMESTAMPTZ
 );
@@ -38,3 +43,4 @@ CREATE TABLE api_keys (
 CREATE INDEX api_keys_tenant_id_idx ON api_keys (tenant_id);
 CREATE INDEX api_keys_project_id_idx ON api_keys (project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX api_keys_active_idx ON api_keys (tenant_id) WHERE revoked_at IS NULL;
+CREATE INDEX api_keys_type_idx ON api_keys (tenant_id, key_type) WHERE revoked_at IS NULL;

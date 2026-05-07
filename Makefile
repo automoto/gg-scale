@@ -3,10 +3,16 @@
         up-dev down-dev \
         up-k8s agones-install \
         up-gameserver down-gameserver \
+        docker-image docker-push \
         preflight preflight-k8s clean clean-dev
 
 FULL_STACK       := docker compose -f ops/full-stack-docker-compose.yml
 GAMESERVER_STACK := docker compose -f docker-compose.yml -f ops/docker-compose.gameserver.yml
+
+# Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
+DOCKER_IMAGE ?= buildwrangler/ggscale
+TAG          ?= latest
+GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
@@ -91,6 +97,17 @@ agones-install:
 clean-dev:
 	$(FULL_STACK) --profile k8s down -v --remove-orphans
 	rm -rf .k3s
+
+# ─── Docker Hub image (ggscale-server) ──────────────────────────────────
+
+docker-image:
+	docker build \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		-t $(DOCKER_IMAGE):$(TAG) \
+		.
+
+docker-push: docker-image
+	docker push $(DOCKER_IMAGE):$(TAG)
 
 # ─── Misc ───────────────────────────────────────────────────────────────
 

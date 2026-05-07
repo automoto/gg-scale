@@ -72,11 +72,16 @@ type varDecl struct {
 	name     string
 	required bool
 	defval   string
-	set      func(*Config, string) error
+	// fileFallback enables the <name>_FILE convention: if <name>_FILE is set
+	// in the environment, its content is read from that path (trimmed of
+	// trailing whitespace) and used in place of <name>. Lets operators mount
+	// docker/k8s/Vault file-based secrets without exposing them in env vars.
+	fileFallback bool
+	set          func(*Config, string) error
 }
 
 var declared = []varDecl{
-	{name: "DATABASE_URL", required: true, set: func(c *Config, v string) error { c.DatabaseURL = v; return nil }},
+	{name: "DATABASE_URL", required: true, fileFallback: true, set: func(c *Config, v string) error { c.DatabaseURL = v; return nil }},
 	{name: "HTTP_ADDR", defval: ":8080", set: func(c *Config, v string) error { c.HTTPAddr = v; return nil }},
 	{name: "GAME_SERVER_PUBLIC_IP", defval: "", set: func(c *Config, v string) error {
 		c.GameServerPublicIP = v
@@ -84,7 +89,7 @@ var declared = []varDecl{
 	}},
 	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) error { c.LogLevel = v; return nil }},
 	{name: "ENV", defval: "dev", set: func(c *Config, v string) error { c.Env = v; return nil }},
-	{name: "JWT_SIGNING_KEY", set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},
+	{name: "JWT_SIGNING_KEY", fileFallback: true, set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},
 	{name: "DASHBOARD_DISABLED", defval: "false", set: func(c *Config, v string) error {
 		disabled, err := strconv.ParseBool(v)
 		if err != nil {
@@ -171,11 +176,14 @@ var declared = []varDecl{
 func Load() (*Config, error) {
 	cfg := &Config{}
 	for _, v := range declared {
-		val := os.Getenv(v.name)
+		val, err := resolveValue(v)
+		if err != nil {
+			return nil, err
+		}
+		if val == "" && v.required {
+			return nil, fmt.Errorf("required env var %s is missing", v.name)
+		}
 		if val == "" {
-			if v.required {
-				return nil, fmt.Errorf("required env var %s is missing", v.name)
-			}
 			val = v.defval
 		}
 		if err := v.set(cfg, val); err != nil {
@@ -185,12 +193,34 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// DeclaredVars returns the list of env-var names this package reads.
+// resolveValue looks up the env value for a varDecl, honoring the
+// <name>_FILE convention when the decl opts in. _FILE wins over the plain
+// env var; reading the file is required to succeed if the path is set.
+func resolveValue(v varDecl) (string, error) {
+	if !v.fileFallback {
+		return os.Getenv(v.name), nil
+	}
+	path := os.Getenv(v.name + "_FILE")
+	if path == "" {
+		return os.Getenv(v.name), nil
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // operator-supplied secret path is the documented contract
+	if err != nil {
+		return "", fmt.Errorf("read %s_FILE %q: %w", v.name, path, err)
+	}
+	return strings.TrimRight(string(data), " \t\r\n"), nil
+}
+
+// DeclaredVars returns the list of env-var names this package reads,
+// including <name>_FILE variants for vars that support file fallback.
 // Used by the drift test to compare against .env.example.
 func DeclaredVars() []string {
-	out := make([]string, len(declared))
-	for i, v := range declared {
-		out[i] = v.name
+	out := make([]string, 0, len(declared))
+	for _, v := range declared {
+		out = append(out, v.name)
+		if v.fileFallback {
+			out = append(out, v.name+"_FILE")
+		}
 	}
 	return out
 }
