@@ -98,6 +98,58 @@ func TestMiddleware_injects_end_user_id_on_success(t *testing.T) {
 	assert.Equal(t, int64(42), captured)
 }
 
+func TestMiddleware_returns_403_when_token_project_pin_mismatches_api_key(t *testing.T) {
+	signer := newSigner(t)
+	// Session was minted under project 7 but is being presented under an
+	// api_key pinned to project 8. Same tenant, different project pin.
+	tok, err := signer.Sign(auth.Claims{
+		EndUserID: 5, TenantID: 1, ProjectID: 7, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req = req.WithContext(db.WithProject(req.Context(), 8))
+	req.Header.Set("X-Session-Token", tok)
+	enduser.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestMiddleware_passes_when_token_project_pin_matches_api_key(t *testing.T) {
+	signer := newSigner(t)
+	tok, err := signer.Sign(auth.Claims{
+		EndUserID: 5, TenantID: 1, ProjectID: 7, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req = req.WithContext(db.WithProject(req.Context(), 7))
+	req.Header.Set("X-Session-Token", tok)
+	enduser.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code) // passes through to NotFoundHandler
+}
+
+func TestMiddleware_passes_when_token_has_no_project_pin(t *testing.T) {
+	signer := newSigner(t)
+	// No ProjectID claim on the session — accept against any api_key
+	// project pin (legacy / non-pinned sessions).
+	tok, err := signer.Sign(auth.Claims{
+		EndUserID: 5, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req = req.WithContext(db.WithProject(req.Context(), 8))
+	req.Header.Set("X-Session-Token", tok)
+	enduser.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 func TestIDFromContext_returns_false_on_bare_context(t *testing.T) {
 	_, ok := enduser.IDFromContext(context.Background())
 

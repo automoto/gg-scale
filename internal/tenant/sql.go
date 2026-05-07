@@ -29,6 +29,7 @@ func NewSQLLookup(pool *pgxpool.Pool) Lookup {
 			TenantID:  row.TenantID,
 			ProjectID: row.ProjectID,
 			Tier:      Tier(row.Tier),
+			Type:      KeyType(row.KeyType),
 			Revoked:   row.RevokedAt.Valid,
 		}, nil
 	}

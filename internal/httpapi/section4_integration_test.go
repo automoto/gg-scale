@@ -22,6 +22,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -45,6 +46,7 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 		Signer:  signer,
 		Mailer:  rec,
 		Cache:   c.cache,
+		Fleet:   fleet.NewRegistry(30 * time.Second),
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

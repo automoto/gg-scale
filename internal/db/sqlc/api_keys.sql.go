@@ -88,7 +88,7 @@ func (q *Queries) CreateDashboardAPIKey(ctx context.Context, arg CreateDashboard
 }
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT k.id, k.tenant_id, k.project_id, k.revoked_at, t.tier
+SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.revoked_at, t.tier
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
 WHERE k.key_hash = $1
@@ -98,12 +98,13 @@ type GetAPIKeyByHashRow struct {
 	ID        int64
 	TenantID  int64
 	ProjectID *int64
+	KeyType   string
 	RevokedAt pgtype.Timestamptz
 	Tier      string
 }
 
 // Bootstrap query used by the tenant middleware to resolve a Bearer token
-// to its tenant_id + project_id + tenant tier. Runs without an
+// to its tenant_id + project_id + tenant tier + key_type. Runs without an
 // app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
 // through. Note: this query does NOT filter by tenants table RLS because
 // tenants.id = current_setting GUC is unset at bootstrap; if/when we add
@@ -115,6 +116,7 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 		&i.ID,
 		&i.TenantID,
 		&i.ProjectID,
+		&i.KeyType,
 		&i.RevokedAt,
 		&i.Tier,
 	)

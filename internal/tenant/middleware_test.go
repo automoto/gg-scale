@@ -174,6 +174,44 @@ func TestMiddleware_ignores_X_Tenant_Id_header_spoof(t *testing.T) {
 	assert.Equal(t, int64(1), tid, "must use resolver value, not the spoofed header")
 }
 
+func TestRequireKeyType_returns_403_when_key_type_mismatches(t *testing.T) {
+	mw := tenant.New(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{TenantID: 1, Type: tenant.KeyTypePublishable}, nil
+	})
+	gate := tenant.RequireKeyType(tenant.KeyTypeSecret)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	rr := httptest.NewRecorder()
+	mw(gate(nopHandler())).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestRequireKeyType_passes_when_key_type_matches(t *testing.T) {
+	mw := tenant.New(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{TenantID: 1, Type: tenant.KeyTypeSecret}, nil
+	})
+	gate := tenant.RequireKeyType(tenant.KeyTypeSecret)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	rr := httptest.NewRecorder()
+	mw(gate(nopHandler())).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestRequireKeyType_returns_401_when_no_api_key_in_context(t *testing.T) {
+	gate := tenant.RequireKeyType(tenant.KeyTypeSecret)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	rr := httptest.NewRecorder()
+	gate(nopHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
 func TestMiddleware_hashes_token_with_sha256_before_lookup(t *testing.T) {
 	var seen [][]byte
 	mw := tenant.New(func(_ context.Context, h []byte) (*tenant.APIKey, error) {

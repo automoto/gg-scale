@@ -35,5 +35,6 @@ archive/
 
 # Temp docs
 docs/temp
+work/
 
 .cursor/*

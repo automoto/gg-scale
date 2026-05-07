@@ -39,12 +39,25 @@ const (
 	TierPremium Tier = "premium"
 )
 
+// KeyType splits Stripe-style publishable (embedded in shipped game
+// binaries) from secret (game-server / tenant-backend only). Sensitive
+// writes — fleet register/heartbeat/deregister, leaderboard submit —
+// require KeyTypeSecret. Reads and player-session bootstrap accept either.
+type KeyType string
+
+// KeyType values mirror the CHECK constraint on api_keys.key_type.
+const (
+	KeyTypePublishable KeyType = "publishable"
+	KeyTypeSecret      KeyType = "secret"
+)
+
 // APIKey is the resolver's view of a row in api_keys joined to its tenant.
 type APIKey struct {
 	ID        int64
 	TenantID  int64
 	ProjectID *int64
 	Tier      Tier
+	Type      KeyType
 	Revoked   bool
 }
 
@@ -99,6 +112,27 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 			}
 			ctx = WithAPIKey(ctx, *key)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// RequireKeyType is middleware that returns 403 unless the resolved API
+// key's Type matches want. Mount AFTER New so APIKeyFromContext is
+// populated. KeyTypeSecret is treated as a strict requirement; callers
+// who want "secret-only" routes wrap them in RequireKeyType(KeyTypeSecret).
+func RequireKeyType(want KeyType) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key, ok := APIKeyFromContext(r.Context())
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if key.Type != want {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

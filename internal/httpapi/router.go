@@ -21,6 +21,7 @@ import (
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -45,6 +46,7 @@ type Deps struct {
 	MailFrom string
 	Cache    cache.Store
 	Registry *prometheus.Registry
+	Fleet    *fleet.Registry
 
 	Dashboard          dashboard.Config
 	DashboardBootstrap *dashboard.Bootstrap
@@ -123,6 +125,16 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/auth/custom-token", customTokenHandler(d))
 				})
 
+				// Fleet write paths: API-key authenticated only — game
+				// servers register with their project-pinned key, no
+				// end-user session needed. Secret-only: a publishable
+				// key embedded in a shipped game must not be able to
+				// register/heartbeat/deregister fleet entries.
+				r.Group(func(r chi.Router) {
+					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
+					mountFleetWriteRoutes(r, d)
+				})
+
 				// End-user authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
 					r.Use(enduser.New(d.Signer))
@@ -130,6 +142,7 @@ func NewRouter(d Deps) http.Handler {
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)
 					mountProfileRoutes(r, d)
+					mountFleetReadRoutes(r, d)
 				})
 			})
 		}
