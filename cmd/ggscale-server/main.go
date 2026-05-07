@@ -109,6 +109,9 @@ func run() error {
 		}
 	}
 
+	fleetRegistry := fleet.NewRegistry(30 * time.Second)
+	go fleetRegistry.Run(ctx)
+
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   commit,
@@ -120,7 +123,7 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		Cache:    store,
 		Registry: registry,
-		Fleet:    fleet.NewRegistry(30 * time.Second),
+		Fleet:    fleetRegistry,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,

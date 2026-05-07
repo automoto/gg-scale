@@ -8,6 +8,7 @@
 package fleet
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -139,6 +140,22 @@ func (r *Registry) Size() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.servers)
+}
+
+// Run sweeps expired entries on a ticker until ctx is canceled. Without it
+// the map grows unbounded as ephemeral servers register and vanish without
+// deregistering.
+func (r *Registry) Run(ctx context.Context) {
+	ticker := time.NewTicker(r.ttl)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.Sweep()
+		}
+	}
 }
 
 // Sweep removes expired entries from the map. List already filters by TTL,
