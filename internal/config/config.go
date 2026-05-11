@@ -28,10 +28,18 @@ type Config struct {
 	// binaries. Default "/etc/ggscale/plugins". Only consulted when
 	// FleetBackend starts with "plugin:".
 	FleetPluginDir string
-	DatabaseURL    string
-	LogLevel       string
-	Env            string
-	JWTSigningKey  string
+
+	// Docker fleet-backend tunables. Only consulted when FleetBackend=docker.
+	DockerGameServerImage string
+	DockerGameServerPort  int
+	DockerProbeType       string
+	DockerProbePath       string
+	DockerMaxSessions     int
+	DockerHost            string
+	DatabaseURL           string
+	LogLevel              string
+	Env                   string
+	JWTSigningKey         string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -131,6 +139,44 @@ var declared = []varDecl{
 	}},
 	{name: "FLEET_PLUGIN_DIR", defval: "/etc/ggscale/plugins", set: func(c *Config, v string) error {
 		c.FleetPluginDir = v
+		return nil
+	}},
+
+	{name: "DOCKER_GAMESERVER_IMAGE", defval: "", set: func(c *Config, v string) error {
+		c.DockerGameServerImage = v
+		return nil
+	}},
+	{name: "DOCKER_GAMESERVER_PORT", defval: "7777", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("DOCKER_GAMESERVER_PORT %q: %w", v, err)
+		}
+		c.DockerGameServerPort = n
+		return nil
+	}},
+	{name: "DOCKER_PROBE_TYPE", defval: "tcp", set: func(c *Config, v string) error {
+		switch v {
+		case "", "tcp", "http":
+			c.DockerProbeType = v
+			return nil
+		default:
+			return fmt.Errorf("DOCKER_PROBE_TYPE %q: must be tcp|http (empty disables)", v)
+		}
+	}},
+	{name: "DOCKER_PROBE_PATH", defval: "/healthz", set: func(c *Config, v string) error {
+		c.DockerProbePath = v
+		return nil
+	}},
+	{name: "DOCKER_MAX_SESSIONS", defval: "0", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("DOCKER_MAX_SESSIONS %q: %w", v, err)
+		}
+		c.DockerMaxSessions = n
+		return nil
+	}},
+	{name: "DOCKER_HOST", defval: "", set: func(c *Config, v string) error {
+		c.DockerHost = v
 		return nil
 	}},
 

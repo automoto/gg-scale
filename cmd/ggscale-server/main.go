@@ -21,6 +21,8 @@ import (
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/fleet"
+	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
@@ -108,6 +110,11 @@ func run() error {
 		}
 	}
 
+	fleetMgr, err := buildFleet(cfg, appPool, logger)
+	if err != nil {
+		return err
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   commit,
@@ -119,6 +126,7 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		Cache:    store,
 		Registry: registry,
+		Fleet:    fleetMgr,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,
@@ -150,6 +158,40 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// buildFleet wires the configured fleet backend. Returns (nil, nil) when
+// the operator hasn't configured one yet — the server still boots and the
+// matchmaker (M6) will surface a "not implemented" error to callers. Real
+// startup failures (invalid backend name, docker reachable but missing
+// image, …) return a non-nil error and abort startup.
+func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, error) {
+	if cfg.FleetBackend == "docker" && cfg.DockerGameServerImage == "" {
+		logger.Warn("fleet disabled: DOCKER_GAMESERVER_IMAGE unset; matchmaker will reject Allocate")
+		return nil, nil
+	}
+
+	backend, err := fleetbuild.New(fleetbuild.Config{
+		Backend:       cfg.FleetBackend,
+		Region:        cfg.FleetRegion,
+		PluginDir:     cfg.FleetPluginDir,
+		GameServerIP:  cfg.GameServerPublicIP,
+		DockerImage:   cfg.DockerGameServerImage,
+		DockerPort:    cfg.DockerGameServerPort,
+		DockerProbe:   cfg.DockerProbeType,
+		DockerProbeP:  cfg.DockerProbePath,
+		DockerMaxSess: cfg.DockerMaxSessions,
+		DockerHost:    cfg.DockerHost,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("fleet: %w", err)
+	}
+
+	return fleet.NewManager(
+		fleet.NewPostgresStore(pool),
+		backend,
+		fleet.ManagerOptions{Retries: 3},
+	), nil
 }
 
 func newLogger(level string) *slog.Logger {
