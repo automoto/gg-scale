@@ -38,8 +38,88 @@ func TestSignupSuccessPage_WrapsRevealInLimeColorBlock(t *testing.T) {
 func TestAPIKeyCreatedPage_WrapsRevealInLimeColorBlock(t *testing.T) {
 	html := renderToString(t, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: 7, APIKeyID: 9, APIKey: "secret",
-	}))
+	}, "alice@example.com", "tok"))
 	assert.Contains(t, html, `<section class="color-block color-block--lime">`)
+	assert.Contains(t, html, "Save your API key")
+	assert.Contains(t, html, "alice@example.com")
+}
+
+func TestAPIKeyCreatedPage_LinksBackToList(t *testing.T) {
+	html := renderToString(t, APIKeyCreatedPage(SignupSuccessView{
+		TenantID: 7, APIKeyID: 9, APIKey: "secret",
+	}, "alice@example.com", "tok"))
+	assert.Contains(t, html, `href="/v1/dashboard/tenants/7/api-keys"`)
+}
+
+func TestProjectsPage_HasNewProjectButtonInHeader(t *testing.T) {
+	html := renderToString(t, ProjectsPage(ProjectsView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		CSRFToken: "tok",
+	}))
+	assert.Contains(t, html, `href="/v1/dashboard/tenants/42/projects/new"`)
+	assert.Contains(t, html, "+ New project")
+	assert.NotContains(t, html, `<h2>Create project</h2>`, "the inline create form moved to its own page")
+}
+
+func TestProjectsPage_RendersFlashMessage(t *testing.T) {
+	html := renderToString(t, ProjectsPage(ProjectsView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		Message:   "Project \"arcade-prod\" created.",
+	}))
+	assert.Contains(t, html, `class="flash-success"`)
+	assert.Contains(t, html, `Project &#34;arcade-prod&#34; created.`)
+}
+
+func TestNewProjectPage_RendersFormWithCSRFAndCancelLink(t *testing.T) {
+	html := renderToString(t, NewProjectPage(NewProjectView{
+		UserEmail: "alice@example.com",
+		CSRFToken: "tok-xyz",
+		TenantID:  42,
+	}))
+	assert.Contains(t, html, `action="/v1/dashboard/tenants/42/projects"`)
+	assert.Contains(t, html, `<input type="hidden" name="_csrf" value="tok-xyz">`)
+	assert.Contains(t, html, `href="/v1/dashboard/tenants/42/projects"`, "cancel link returns to list")
+}
+
+func TestNewProjectPage_RendersFieldErrorAndPreservesInput(t *testing.T) {
+	html := renderToString(t, NewProjectPage(NewProjectView{
+		UserEmail:   "alice@example.com",
+		TenantID:    42,
+		Name:        "arcade prod",
+		FieldErrors: map[string]string{"name": "Project name is required"},
+	}))
+	assert.Contains(t, html, "Project name is required")
+	assert.Contains(t, html, `value="arcade prod"`)
+}
+
+func TestAPIKeysPage_HasNewAPIKeyButtonInHeader(t *testing.T) {
+	html := renderToString(t, APIKeysPage(APIKeysView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+	}))
+	assert.Contains(t, html, `href="/v1/dashboard/tenants/42/api-keys/new"`)
+	assert.Contains(t, html, "+ New API key")
+	assert.NotContains(t, html, "create-toggle", "the inline create-toggle moved to its own page")
+}
+
+func TestNewAPIKeyPage_RendersProjectSelectAndPreservesSelection(t *testing.T) {
+	html := renderToString(t, NewAPIKeyPage(NewAPIKeyView{
+		UserEmail: "alice@example.com",
+		CSRFToken: "tok",
+		TenantID:  42,
+		Projects: []ProjectOption{
+			{ID: 1, Name: "arcade-prod"},
+			{ID: 2, Name: "arcade-staging"},
+		},
+		ProjectID: "2",
+		Label:     "ci-key",
+	}))
+	assert.Contains(t, html, `action="/v1/dashboard/tenants/42/api-keys"`)
+	assert.Contains(t, html, `<option value="2" selected>arcade-staging</option>`)
+	assert.Contains(t, html, `<option value="1">arcade-prod</option>`)
+	assert.Contains(t, html, `value="ci-key"`)
 }
 
 func TestNewTenantPage_HasCSRFHeaderForHTMX(t *testing.T) {

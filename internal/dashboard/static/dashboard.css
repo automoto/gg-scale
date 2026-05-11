@@ -375,9 +375,6 @@ section.card > .card-subtitle {
   padding: 6px 12px;
   font-size: 13px;
 }
-.create-toggle { margin-bottom: var(--space-md); }
-.create-toggle > summary { margin-bottom: var(--space-sm); }
-.create-toggle .create-card { margin-top: 0; }
 .data-table code {
   font-size: 14px;
   padding: 2px 6px;

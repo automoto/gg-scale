@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -77,8 +78,10 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
 			r.Use(h.requireTenantAccess(roleAdmin))
 			r.Get("/projects", h.projectsPage)
+			r.Get("/projects/new", h.newProjectPage)
 			r.Post("/projects", h.createProjectHandler)
 			r.Get("/api-keys", h.apiKeys)
+			r.Get("/api-keys/new", h.newAPIKeyPage)
 			r.Post("/api-keys", h.createAPIKeyHandler)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
@@ -135,6 +138,20 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Projects:  projects,
+		Message:   r.URL.Query().Get("created"),
+	}))
+}
+
+func (h *Handler) newProjectPage(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	render(r, w, NewProjectPage(NewProjectView{
+		UserEmail: session.User.Email,
+		CSRFToken: session.CSRFToken,
+		TenantID:  tenantID,
 	}))
 }
 
@@ -146,22 +163,18 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
 	}
-	_, err := h.createProject(r.Context(), tenantID, r.Form.Get("name"))
+	name := r.Form.Get("name")
+	_, err := h.createProject(r.Context(), tenantID, name)
 	if err != nil {
 		session, _ := sessionFromContext(r.Context())
-		projects, listErr := h.listProjects(r.Context(), tenantID)
-		if listErr != nil {
-			http.Error(w, "project list failed", http.StatusInternalServerError)
-			return
-		}
-		status := http.StatusInternalServerError
-		view := ProjectsView{
+		view := NewProjectView{
 			UserEmail: session.User.Email,
-			TenantID:  tenantID,
 			CSRFToken: session.CSRFToken,
-			Projects:  projects,
+			TenantID:  tenantID,
+			Name:      name,
 			Error:     "project create failed",
 		}
+		status := http.StatusInternalServerError
 		switch err {
 		case errInvalidProjectName:
 			status = http.StatusUnprocessableEntity
@@ -173,10 +186,11 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			view.FieldErrors = map[string]string{"name": "A project with that name already exists"}
 		}
 		w.WriteHeader(status)
-		render(r, w, ProjectsPage(view))
+		render(r, w, NewProjectPage(view))
 		return
 	}
-	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/projects")
+	target := "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Project \""+strings.TrimSpace(name)+"\" created.")
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
@@ -225,23 +239,36 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "api key list failed", http.StatusInternalServerError)
 		return
 	}
-	projects, err := h.listProjects(r.Context(), tenantID)
-	if err != nil {
-		http.Error(w, "project list failed", http.StatusInternalServerError)
-		return
-	}
 	session, _ := sessionFromContext(r.Context())
 	render(r, w, APIKeysPage(APIKeysView{
 		UserEmail: session.User.Email,
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Keys:      keys,
+		Message:   r.URL.Query().Get("created"),
+	}))
+}
+
+func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projects, err := h.listProjects(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, "project list failed", http.StatusInternalServerError)
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	render(r, w, NewAPIKeyPage(NewAPIKeyView{
+		UserEmail: session.User.Email,
+		CSRFToken: session.CSRFToken,
+		TenantID:  tenantID,
 		Projects:  projects,
 	}))
 }
 
 func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Vary", "HX-Request")
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
 		return
@@ -249,12 +276,16 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if !parseForm(w, r) {
 		return
 	}
+	session, _ := sessionFromContext(r.Context())
+	rawProjectID := r.Form.Get("project_id")
+	label := r.Form.Get("label")
 	var projectID *int64
-	if raw := r.Form.Get("project_id"); raw != "" {
-		id, err := strconv.ParseInt(raw, 10, 64)
+	if rawProjectID != "" {
+		id, err := strconv.ParseInt(rawProjectID, 10, 64)
 		if err != nil || id <= 0 {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			render(r, w, FormErrorFragment("Pick a valid project (or leave empty for tenant-wide)"))
+			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID,
+				http.StatusUnprocessableEntity,
+				map[string]string{"project_id": "Pick a valid project (or leave empty for tenant-wide)"}, "")
 			return
 		}
 		projectID = &id
@@ -262,17 +293,39 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	result, err := h.createAPIKey(r.Context(), createKeyInput{
 		TenantID:  tenantID,
 		ProjectID: projectID,
-		Label:     r.Form.Get("label"),
+		Label:     label,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		render(r, w, FormErrorFragment("api key create failed"))
+		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID,
+			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
 	render(r, w, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: tenantID,
 		APIKeyID: result.APIKeyID,
 		APIKey:   result.APIKey,
+	}, session.User.Email, session.CSRFToken))
+}
+
+// renderNewAPIKeyError re-renders the new API key page with field errors
+// and the form values the user already typed.
+func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, tenantID int64, label, projectID string, status int, fieldErrors map[string]string, errorMsg string) {
+	session, _ := sessionFromContext(r.Context())
+	projects, err := h.listProjects(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, "project list failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(status)
+	render(r, w, NewAPIKeyPage(NewAPIKeyView{
+		UserEmail:   session.User.Email,
+		CSRFToken:   session.CSRFToken,
+		TenantID:    tenantID,
+		Projects:    projects,
+		Label:       label,
+		ProjectID:   projectID,
+		Error:       errorMsg,
+		FieldErrors: fieldErrors,
 	}))
 }
 
