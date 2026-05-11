@@ -90,25 +90,42 @@ type NewTenantView struct {
 
 // ProjectsView is the data rendered by the per-tenant projects page.
 type ProjectsView struct {
+	UserEmail string
+	TenantID  int64
+	CSRFToken string
+	Projects  []ProjectOption
+	Message   string
+}
+
+// NewProjectView is the data rendered by the create-project page.
+type NewProjectView struct {
 	UserEmail   string
-	TenantID    int64
 	CSRFToken   string
-	Projects    []ProjectOption
+	TenantID    int64
+	Name        string
 	Error       string
-	Message     string
+	FieldErrors map[string]string
+}
+
+// NewAPIKeyView is the data rendered by the create-api-key page.
+type NewAPIKeyView struct {
+	UserEmail   string
+	CSRFToken   string
+	TenantID    int64
+	Projects    []ProjectOption
+	Label       string
+	ProjectID   string
+	Error       string
 	FieldErrors map[string]string
 }
 
 // APIKeysView is the data rendered by the API-key management page.
 type APIKeysView struct {
-	UserEmail   string
-	TenantID    int64
-	CSRFToken   string
-	Keys        []APIKeyView
-	Projects    []ProjectOption
-	Message     string
-	Error       string
-	FieldErrors map[string]string
+	UserEmail string
+	TenantID  int64
+	CSRFToken string
+	Keys      []APIKeyView
+	Message   string
 }
 
 // HelpView is the data rendered by the in-app concepts page.
