@@ -10,11 +10,13 @@ import (
 	"strings"
 
 	"github.com/ggscale/ggscale/internal/fleet"
+	agonesbackend "github.com/ggscale/ggscale/internal/fleet/agones"
 	dockerbackend "github.com/ggscale/ggscale/internal/fleet/docker"
 )
 
 // Config is the runtime input to New. Backend selects which subpackage is
-// wired; the Docker* fields are only consulted when Backend == "docker".
+// wired; the Docker*/Agones* fields are only consulted when their backend
+// is selected.
 type Config struct {
 	Backend       string
 	Region        string
@@ -26,6 +28,10 @@ type Config struct {
 	DockerProbeP  string
 	DockerMaxSess int
 	DockerHost    string
+	AgonesNS      string
+	AgonesFleet   string
+	AgonesLabels  string
+	AgonesKubecfg string
 }
 
 // New constructs a fleet.Backend for the configured selector. An empty or
@@ -44,7 +50,13 @@ func New(c Config) (fleet.Backend, error) {
 			ProbePath: c.DockerProbeP,
 			PublicIP:  c.GameServerIP,
 		})
-	case "agones", "openstack":
+	case "agones":
+		return agonesbackend.NewFromKubeconfig(agonesbackend.Config{
+			Namespace:      c.AgonesNS,
+			FleetName:      c.AgonesFleet,
+			SelectorLabels: agonesbackend.ParseSelectorLabels(c.AgonesLabels),
+		}, c.AgonesKubecfg)
+	case "openstack":
 		return nil, fmt.Errorf("fleet: backend %q is planned for a later milestone", c.Backend)
 	default:
 		if strings.HasPrefix(c.Backend, "plugin:") {

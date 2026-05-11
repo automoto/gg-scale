@@ -36,10 +36,16 @@ type Config struct {
 	DockerProbePath       string
 	DockerMaxSessions     int
 	DockerHost            string
-	DatabaseURL           string
-	LogLevel              string
-	Env                   string
-	JWTSigningKey         string
+
+	// Agones fleet-backend tunables. Only consulted when FleetBackend=agones.
+	AgonesNamespace      string
+	AgonesFleetName      string
+	AgonesSelectorLabels string
+	AgonesKubeconfig     string
+	DatabaseURL          string
+	LogLevel             string
+	Env                  string
+	JWTSigningKey        string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -177,6 +183,23 @@ var declared = []varDecl{
 	}},
 	{name: "DOCKER_HOST", defval: "", set: func(c *Config, v string) error {
 		c.DockerHost = v
+		return nil
+	}},
+
+	{name: "AGONES_NAMESPACE", defval: "default", set: func(c *Config, v string) error {
+		c.AgonesNamespace = v
+		return nil
+	}},
+	{name: "AGONES_FLEET_NAME", defval: "", set: func(c *Config, v string) error {
+		c.AgonesFleetName = v
+		return nil
+	}},
+	{name: "AGONES_SELECTOR_LABELS", defval: "", set: func(c *Config, v string) error {
+		c.AgonesSelectorLabels = v
+		return nil
+	}},
+	{name: "AGONES_KUBECONFIG", defval: "", set: func(c *Config, v string) error {
+		c.AgonesKubeconfig = v
 		return nil
 	}},
 

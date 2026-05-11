@@ -34,17 +34,19 @@ type fakeAPI struct {
 	stopCount       int
 	removeCount     int
 	lastCreateCfg   *dockercontainer.Config
+	lastHostCfg     *dockercontainer.HostConfig
 	inspectResponse dockercontainer.InspectResponse
 	eventsCh        chan dockerevents.Message
 	eventsErr       chan error
 	pingErr         error
 }
 
-func (f *fakeAPI) ContainerCreate(_ context.Context, cfg *dockercontainer.Config, _ *dockercontainer.HostConfig, _ *dockernetwork.NetworkingConfig, _ *ocispec.Platform, _ string) (dockercontainer.CreateResponse, error) {
+func (f *fakeAPI) ContainerCreate(_ context.Context, cfg *dockercontainer.Config, host *dockercontainer.HostConfig, _ *dockernetwork.NetworkingConfig, _ *ocispec.Platform, _ string) (dockercontainer.CreateResponse, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCount++
 	f.lastCreateCfg = cfg
+	f.lastHostCfg = host
 	return dockercontainer.CreateResponse{ID: "container-abc"}, nil
 }
 
@@ -154,6 +156,13 @@ func TestBackend_Allocate_creates_starts_and_returns_host_address(t *testing.T) 
 	assert.Equal(t, "7", fake.lastCreateCfg.Labels["ggscale.tenant_id"])
 	assert.Equal(t, "11", fake.lastCreateCfg.Labels["ggscale.project_id"])
 	assert.Equal(t, "ggscale.fleet", fake.lastCreateCfg.Labels["ggscale.managed_by"])
+
+	// Multi-tenant safety: containers must run with no-new-privileges
+	// and all capabilities dropped. Tightening these is a non-trivial
+	// behaviour change; loosening them belongs in a separate review.
+	require.NotNil(t, fake.lastHostCfg)
+	assert.Contains(t, fake.lastHostCfg.SecurityOpt, "no-new-privileges:true")
+	assert.Equal(t, []string{"ALL"}, []string(fake.lastHostCfg.CapDrop))
 }
 
 func TestBackend_Allocate_cleans_up_when_probe_never_succeeds(t *testing.T) {
@@ -176,6 +185,37 @@ func TestBackend_Allocate_cleans_up_when_probe_never_succeeds(t *testing.T) {
 	_, err = be.Allocate(context.Background(), sampleReq())
 	require.Error(t, err)
 	assert.GreaterOrEqual(t, fake.removeCount, 1, "container must be force-removed on probe failure")
+}
+
+func TestBackend_HTTPProbe_does_not_follow_redirects(t *testing.T) {
+	// A compromised image could 302 the probe at the cloud metadata
+	// service. The probe must refuse to follow and fail closed.
+	var got int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got++
+		w.Header().Set("Location", "http://169.254.169.254/latest/meta-data/")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	host, port := mustSplitHostPort(t, srv.URL)
+
+	fake := &fakeAPI{}
+	fake.inspectResponse = inspectWithPortBinding("7777/tcp", host, port)
+
+	be, err := dockerbackend.New(dockerbackend.Config{
+		Client:       fake,
+		Image:        "ggscale/echo:latest",
+		Port:         7777,
+		ProbeType:    "http",
+		ProbePath:    "/",
+		PublicIP:     host,
+		ProbeTimeout: 200 * time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	_, err = be.Allocate(context.Background(), sampleReq())
+	require.Error(t, err, "probe must fail when the server only redirects")
+	assert.Greater(t, got, 0, "probe must have hit the container's port")
 }
 
 func TestBackend_Allocate_uses_http_probe_when_configured(t *testing.T) {

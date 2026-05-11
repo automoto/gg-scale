@@ -87,6 +87,13 @@ type AllocationID int64
 // AllocationRequest is the input a matchmaker hands to Manager.Allocate. The
 // manager forwards it to the configured Backend after persisting a pending
 // row.
+//
+// Trust boundary: Region, GameMode, and Labels are flow-through fields that
+// land in backend-specific places (Kubernetes label selectors, Docker
+// labels, plugin gRPC). They are treated here as already-validated inputs.
+// The validation boundary lives at the matchmaker HTTP handler (M6), which
+// is the surface receiving end-user SDK input — validating again here
+// would put the check on the wrong side of the boundary.
 type AllocationRequest struct {
 	TenantID  int64
 	ProjectID int64
