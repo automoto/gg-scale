@@ -1,4 +1,4 @@
-.PHONY: build test test-integration e2e lint vulncheck sqlc-gen templ-generate \
+.PHONY: build test test-integration e2e e2e-docker lint vulncheck sqlc-gen templ-generate \
         up down logs psql migrate migrate-new \
         up-dev down-dev \
         up-k8s agones-install \
@@ -29,6 +29,12 @@ test-integration:
 # Use `make up-k8s && make agones-install && make e2e`.
 e2e:
 	go test -race -tags=e2e -timeout=180s ./e2e/...
+
+# Runs the docker fleet-backend integration test against the local Docker
+# daemon. Requires a reachable daemon and network access to pull
+# traefik/whoami on first run.
+e2e-docker:
+	go test -race -tags=integration -timeout=180s ./internal/fleet/docker/...
 
 lint:
 	golangci-lint run
