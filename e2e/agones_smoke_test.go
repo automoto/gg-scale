@@ -23,7 +23,8 @@ import (
 )
 
 func TestAgonesAllocation_assigns_host_port_reachable_via_udp(t *testing.T) {
-	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath(t))
+	kcfg := kubeconfigPathOrSkip(t)
+	cfg, err := clientcmd.BuildConfigFromFlags("", kcfg)
 	require.NoError(t, err)
 
 	cs, err := versioned.NewForConfig(cfg)
@@ -118,12 +119,20 @@ func simpleGameServerTemplate() corev1.PodTemplateSpec {
 	}
 }
 
-func kubeconfigPath(t *testing.T) string {
+// kubeconfigPathOrSkip returns a kubeconfig path for Agones, or skips the test
+// when k8s is not set up (e.g. only the lite compose stack is running).
+func kubeconfigPathOrSkip(t *testing.T) string {
 	t.Helper()
+	var path string
 	if v := os.Getenv("KUBECONFIG"); v != "" {
-		return v
+		path = v
+	} else {
+		abs, err := filepath.Abs(filepath.Join("..", ".k3s", "kubeconfig.yaml"))
+		require.NoError(t, err)
+		path = abs
 	}
-	abs, err := filepath.Abs(filepath.Join("..", ".k3s", "kubeconfig.yaml"))
-	require.NoError(t, err)
-	return abs
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("Agones e2e skipped (no kubeconfig at %q: %v); run make up-k8s && make agones-install", path, err)
+	}
+	return path
 }

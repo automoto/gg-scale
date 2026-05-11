@@ -12,12 +12,12 @@ import (
 )
 
 func TestHealthz_lite_stack_endpoints_respond(t *testing.T) {
+	// Root docker-compose.yml (lite stack): server, MailHog, dashboard — no Prometheus.
 	cases := []struct {
 		name string
 		url  string
 	}{
 		{"ggscale-server", "http://localhost:8080/v1/healthz"},
-		{"prometheus", "http://localhost:9090/-/ready"},
 		{"mailhog", "http://localhost:8025/"},
 		{"dashboard", "http://localhost:3001/v1/dashboard/login"},
 	}

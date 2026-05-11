@@ -1,17 +1,19 @@
-# ggscale — Phase 0 Architecture
+# ggscale — architecture (Phase 1)
 
-This document describes what's actually running in the dev stack today
-(Phase 0). Phase 1+ scope lives in [`mvp.md`](mvp.md) and [`ROADMAP.md`](ROADMAP.md);
-this file is rewritten as those phases land.
+This document tracks what ships in-tree today: multi-tenant HTTP API under `/v1/`,
+Postgres + RLS, pluggable mail, and observability on `/metrics`. Strategic sequencing
+lives in [`mvp.md`](mvp.md).
 
 ## Deployment topology
 
 There are two distinct compose profiles:
 
-- **lite** (default `make up`) — control plane + observability + auxiliary
-  services. No Kubernetes. Sufficient for HTTP API work.
-- **k8s** (`make up-k8s`) — adds k3s (single-node, `--network=host`) and an
-  Agones install job. Required for the Agones e2e smoke test.
+- **simple / lite** (default `make up`, root `docker-compose.yml`) — Postgres, migrate,
+  `ggscale-server`, MailHog. Dashboard on host port **3001** (mapped to the server).
+  No Prometheus sidecar in this file; scrape `/metrics` from your own collector or use
+  `make up-dev` (`ops/full-stack-docker-compose.yml`) for bundled Prometheus.
+- **k8s** (`make up-k8s`) — adds k3s (single-node, `--network=host`) and an Agones install
+  job. Required for the Agones e2e smoke test when kubeconfig is present.
 
 ```
                    ┌────────────────────────────────────────┐
@@ -27,17 +29,17 @@ There are two distinct compose profiles:
                                     container)
 ```
 
-## Lite-profile services
+## Simple-stack services (`docker-compose.yml`)
 
 | Service | Image | Port | Role |
 |---|---|---|---|
-| `ggscale-server` | local `ggscale-server:dev` | 8080 | Control-plane HTTP API (chi router, slog JSON, prometheus `/metrics`). |
 | `postgres` | `postgres:17` | 5432 | Primary DB. `pg_isready` healthcheck. |
-| `migrate` | `migrate/migrate:v4.19.1` | — | One-shot init container; applies `db/migrations/*.up.sql` against postgres before `ggscale-server` starts. |
-| `prometheus` | `prom/prometheus:v3.1.0` | 9090 | Scrapes `ggscale-server:8080/metrics`. Browse counters at `http://localhost:9090/graph`. |
-| `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for capturing signup/verify mail (Phase 1+). |
-| `stripe-mock` | `stripe/stripe-mock:v0.197.0` | 12111 / 12112 | Local Stripe API mock for the billing flows that land in Phase 3. Pre-wired now to avoid later compose churn. |
-| `ggscale-server` dashboard | local `ggscale-server:dev` | 3001 -> 8080 | HTMX + templ dashboard at `/v1/dashboard/login` for tenant/project/API-key bootstrap and API-key lifecycle management. |
+| `migrate` | `migrate/migrate:v4.19.1` | — | One-shot init; applies `db/migrations/*.up.sql` before the server starts. |
+| `ggscale-server` | build `Dockerfile` | 8080, 3001→8080 | `/v1/*` HTTP API, `/metrics`, HTMX dashboard at `/v1/dashboard/*`. |
+| `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for auth/profile verification mail in dev. |
+
+**Full dev stack** (`ops/full-stack-docker-compose.yml`, `make up-dev`) adds Prometheus,
+Stripe mock, and optional k8s — see that file for the extended service matrix.
 
 ## Dashboard bootstrap
 
@@ -121,16 +123,23 @@ two diverge.
 | `CACHE_OLRIC_MEMBERLIST_PORT` | no | `3322` | Memberlist port. |
 | `CACHE_OLRIC_PEERS` | no | (empty) | Comma-separated host:port peers; empty means cluster of one. |
 
-## HTTP API surface (Phase 0)
+## HTTP API surface (`/v1/`)
 
-| Path | Status | Notes |
+All product routes mount under `/v1/`; anything else returns **404**.
+
+| Area | Paths (summary) | Auth |
 |---|---|---|
-| `GET /v1/healthz` | 200 | `{"status":"ok","version":"v1","commit":"<sha>"}`. Sets `X-API-Version: v1`. |
-| `GET /metrics` | 200 | Prometheus scrape target. Versionless on purpose. |
-| any non-`/v1/` path | 404 | Enforced by chi `r.Mount("/v1", ...)` + default `NotFound`. |
+| Health | `GET /v1/healthz` | Public |
+| Metrics | `GET /metrics` | Public (versionless by design) |
+| Auth | `POST /v1/auth/signup`, `/verify`, `/login`, `/refresh`, `/logout`, `/anonymous`, `/custom-token` | Tenant API key (`Authorization: Bearer`); bcrypt + JWT session |
+| Storage | `PUT/GET/DELETE /v1/storage/objects/...`, list | API key + `X-Session-Token` |
+| Leaderboards | `POST .../scores`, `GET .../top`, `GET .../around-me` | Submit: secret key + session; reads: key + session |
+| Friends | `POST/GET/DELETE /v1/friends/...` | API key + session |
+| Profile | `GET/PATCH /v1/profile/` | API key + session |
+| Dashboard | `/v1/dashboard/*` | Separate platform session (bcrypt users, CSRF) |
 
-Phase 1 adds `/v1/auth/*`, `/v1/storage/*`, `/v1/leaderboards/*`, and the
-`tenant` middleware that guards all of them.
+**Tenant middleware** (`internal/tenant`) runs on the API-key group before rate limiting
+and resolves `Authorization: Bearer` → `tenant_id` / optional `project_id`.
 
 ## Dashboard auth
 
@@ -233,16 +242,15 @@ api_key: `enduser.New` asserts `claims.TenantID == ctx.tenant`.
 
 ## Observability
 
-Prometheus scrapes the server's `/metrics` endpoint every 15 s. The
-`ggscale_http_requests_by_version_total` counter (label: `version`) is
-incremented by `version.Middleware` for every request inside the `/v1`
-subtree. Standard Go runtime + process collectors are also registered.
-Prometheus's own UI at `http://localhost:9090/graph` is the dev surface
-for poking at counters; a full Grafana + Loki + Promtail dashboarding
-stack is deferred to v1.1 (see `ROADMAP.md`).
+The server exposes Prometheus metrics at **`/metrics`**: HTTP latency histograms, error
+counter, DB query timings (pgx tracer), cache op counters, and rate-limit throttle
+counter. Wire your own Prometheus scrape config, or use the full dev compose overlay
+for a local Prometheus UI.
 
-Logs are structured JSON via `slog`, written to stdout. In dev,
-`docker compose logs -f ggscale-server` is the log surface.
+**Structured logs:** `slog` JSON to stdout. `middleware.NewContextHandler` enriches records
+with `tenant_id`, `project_id`, and `request_id` when present.
+
+Grafana + Loki + Promtail are deferred to v1.1 per milestone notes.
 
 ## Database migrations
 
@@ -260,20 +268,21 @@ Logs are structured JSON via `slog`, written to stdout. In dev,
 
 ## CI
 
-`.github/workflows/ci.yml` runs three jobs on `ubuntu-24.04`. Workflow-level
-permissions default to `contents: read`; jobs elevate scope only when needed.
-Action versions are pinned to commit SHAs.
+`.github/workflows/ci.yml` runs jobs on `ubuntu-24.04`. Workflow-level permissions
+default to `contents: read`; jobs elevate scope only when needed. Action versions are
+pinned to commit SHAs.
 
 1. **lint-test** — `golangci-lint` (v2.11.4 with errcheck/govet/staticcheck/
-   unused/gosec/gocritic/revive), `go test -race`, `govulncheck` (pinned).
+   unused/gosec/gocritic/revive), `go test -race`, integration tests
+   (`go test -race -tags=integration`, Docker-backed testcontainers), `govulncheck` (pinned).
 2. **docker-build** — multi-stage Docker build. Image is exported as a
    tarball and uploaded as a workflow artifact (1-day retention) so the
    `e2e` job can consume it. Runs with `contents: read` only — no GHCR
    credentials.
-3. **e2e** — depends on `docker-build`; loads the artifact image, starts the
-   full compose stack including the k8s profile, installs Agones, runs
-   `go test -tags=e2e ./e2e/...` (the healthz suite + the Agones allocation
-   smoke). On failure, compose logs are captured as an artifact.
+3. **e2e** — depends on `docker-build`; loads the artifact image, starts compose
+   (lite stack + k8s profile), installs Agones, runs `go test -tags=e2e ./e2e/...`
+   (healthz against ggscale/MailHog/dashboard; Agones smoke skips when no kubeconfig).
+   On failure, compose logs are captured as an artifact.
 
 A fourth job, `docker-publish` (push image to GHCR on main), is wired and
 commented out. We'll re-enable it when Phase 0 testing+building proves
