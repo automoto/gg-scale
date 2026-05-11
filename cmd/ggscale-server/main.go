@@ -182,6 +182,10 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		DockerProbeP:  cfg.DockerProbePath,
 		DockerMaxSess: cfg.DockerMaxSessions,
 		DockerHost:    cfg.DockerHost,
+		AgonesNS:      cfg.AgonesNamespace,
+		AgonesFleet:   cfg.AgonesFleetName,
+		AgonesLabels:  cfg.AgonesSelectorLabels,
+		AgonesKubecfg: cfg.AgonesKubeconfig,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fleet: %w", err)

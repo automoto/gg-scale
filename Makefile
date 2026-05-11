@@ -1,4 +1,4 @@
-.PHONY: build test test-integration e2e e2e-docker lint vulncheck sqlc-gen templ-generate \
+.PHONY: build test test-integration e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
         up down logs psql migrate migrate-new \
         up-dev down-dev \
         up-k8s agones-install \
@@ -35,6 +35,11 @@ e2e:
 # traefik/whoami on first run.
 e2e-docker:
 	go test -race -tags=integration -timeout=180s ./internal/fleet/docker/...
+
+# Runs the agones fleet-backend smoke test against the local K3s+Agones
+# cluster from `make up-k8s && make agones-install`. Set AGONES_E2E=1.
+e2e-agones:
+	AGONES_E2E=1 go test -tags=agones_e2e -timeout=180s ./internal/fleet/agones/...
 
 lint:
 	golangci-lint run

@@ -149,6 +149,13 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 				containerPort: []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}},
 			},
 			AutoRemove: false,
+			// Safe defaults for a multi-tenant platform: game servers
+			// never need elevated privileges (we publish to a dynamic
+			// high port, no CAP_NET_BIND_SERVICE required). Operators
+			// who need to relax this should add a config knob rather
+			// than weaken the default.
+			SecurityOpt: []string{"no-new-privileges:true"},
+			CapDrop:     []string{"ALL"},
 		},
 		nil, nil, "")
 	if err != nil {
@@ -346,13 +353,22 @@ func (b *Backend) probeOnce(ctx context.Context, address string) bool {
 		if err != nil {
 			return false
 		}
-		c := http.Client{Timeout: 500 * time.Millisecond}
+		// Block redirects: a malicious image could 302 the probe at the
+		// cloud metadata service or an internal endpoint (blind SSRF).
+		// The probe should only validate that the container itself
+		// responds — anything else fails closed.
+		c := http.Client{
+			Timeout:       500 * time.Millisecond,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
+		}
 		resp, err := c.Do(req)
 		if err != nil {
 			return false
 		}
 		_ = resp.Body.Close()
-		return resp.StatusCode >= 200 && resp.StatusCode < 400
+		// Treat redirects as probe failures: the container is delegating
+		// responsibility elsewhere, which is exactly what we don't want.
+		return resp.StatusCode >= 200 && resp.StatusCode < 300
 	default:
 		return true
 	}
