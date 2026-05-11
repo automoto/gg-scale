@@ -14,14 +14,24 @@ ggscale is a single Go binary. Drop it on any Linux box, point it at a Postgres 
 git clone https://github.com/automoto/gg-scale.git
 cd gg-scale
 make up
-curl localhost:8080/v1/healthz
+curl -s localhost:8080/v1/healthz
 ```
 
 Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
-This starts the simple stack: the ggscale server, Postgres, and a local SMTP server (MailHog). MailHog's web UI is available at `http://localhost:8025`.
+This starts the **simple stack**: ggscale-server, Postgres, and MailHog (SMTP + web UI at `http://localhost:8025`).
 
-New to ggscale? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for a 5-minute tour of tenants, projects, and API keys before you open the dashboard.
+### Multi-tenant bootstrap (dashboard)
+
+1. Read the one-time token: `cat ./data/bootstrap.token` (or check `docker compose logs ggscale-server` once at startup).
+2. Open `http://localhost:3001/v1/dashboard/setup`, create the first platform admin, then sign in at `/v1/dashboard/login`.
+3. Create a **tenant**, **project**, and **secret API key** (shown once; store it safely). All player-facing `/v1/*` calls use `Authorization: Bearer <api_key>`.
+
+### Go SDK (v0.1)
+
+The client module is published as **`github.com/automoto/ggscale-go`** (sibling repo `ggscale-go`). It covers auth, storage, leaderboards, and profile with a pluggable `Transport`.
+
+New to the model? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for tenants, projects, and API keys.
 
 ## Docker Compose setups
 
@@ -65,6 +75,8 @@ Linux contributors need nothing extra.
 | `make down-dev` | Tear the full dev stack down. |
 | `make up-k8s` | Start k3s + Agones (full stack, macOS: run Colima first). |
 | `make test` | Unit tests with `-race`. |
+| `make test-integration` | Integration tests (`-tags=integration`, Postgres via testcontainers). |
+| `make e2e` | Live compose checks (`-tags=e2e`); run after `make up`. |
 | `make lint` | `golangci-lint`. |
 
 ## License
