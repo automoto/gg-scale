@@ -339,22 +339,23 @@ section.card > .card-subtitle {
   padding: 6px 14px;
   font-size: 13px;
 }
-.data-table .label-cell .label-display {
-  margin-right: var(--space-sm);
-}
-.data-table .label-cell details {
-  display: inline-block;
-}
-.data-table .label-cell summary {
+.data-table .label-cell details { display: inline-block; }
+.data-table .label-cell .label-edit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
   cursor: pointer;
-  font-size: 13px;
   list-style: none;
-  display: inline-block;
 }
-.data-table .label-cell summary::-webkit-details-marker { display: none; }
-.data-table .label-cell details[open] form {
-  margin-top: var(--space-xs);
+.data-table .label-cell .label-edit-toggle::-webkit-details-marker { display: none; }
+.data-table .label-cell .label-edit-icon {
+  font-size: 13px;
+  opacity: 0.55;
+  line-height: 1;
 }
+.data-table .label-cell .label-edit-toggle:hover .label-edit-icon,
+.data-table .label-cell details[open] .label-edit-icon { opacity: 1; }
+.data-table .label-cell details[open] form { margin-top: var(--space-xs); }
 .data-table .label-cell form {
   margin: 0;
   display: flex;

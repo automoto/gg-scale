@@ -1204,20 +1204,20 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 							return templ_7745c5c3_Err
 						}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td class=\"label-cell\"><span class=\"label-display\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</td><td class=\"label-cell\"><details class=\"label-edit\"><summary class=\"label-edit-toggle\" aria-label=\"Edit name\" title=\"Edit name\"><span class=\"label-display\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var55 string
 					templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(key.Label)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 379, Col: 48}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 381, Col: 50}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</span> <details class=\"label-edit\"><summary class=\"secondary outline\">Edit</summary><form method=\"post\" action=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</span> <span class=\"label-edit-icon\" aria-hidden=\"true\">✎</span></summary><form method=\"post\" action=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1249,7 +1249,7 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 					var templ_7745c5c3_Var57 string
 					templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(key.CreatedAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 389, Col: 39}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 391, Col: 39}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 					if templ_7745c5c3_Err != nil {
@@ -1267,7 +1267,7 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 						var templ_7745c5c3_Var58 string
 						templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(*key.RevokedAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 392, Col: 69}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 394, Col: 69}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 						if templ_7745c5c3_Err != nil {
@@ -1395,7 +1395,7 @@ func AccountPage(vm AccountView) templ.Component {
 			var templ_7745c5c3_Var64 string
 			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(vm.UserEmail)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 477, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 479, Col: 51}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 			if templ_7745c5c3_Err != nil {
@@ -1413,7 +1413,7 @@ func AccountPage(vm AccountView) templ.Component {
 				var templ_7745c5c3_Var65 string
 				templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 484, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 486, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 				if templ_7745c5c3_Err != nil {
@@ -1432,7 +1432,7 @@ func AccountPage(vm AccountView) templ.Component {
 				var templ_7745c5c3_Var66 string
 				templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 487, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/dashboard/templates.templ`, Line: 489, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 				if templ_7745c5c3_Err != nil {
