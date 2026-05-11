@@ -21,7 +21,6 @@ import (
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
@@ -109,9 +108,6 @@ func run() error {
 		}
 	}
 
-	fleetRegistry := fleet.NewRegistry(30 * time.Second)
-	go fleetRegistry.Run(ctx)
-
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   commit,
@@ -123,7 +119,6 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		Cache:    store,
 		Registry: registry,
-		Fleet:    fleetRegistry,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,

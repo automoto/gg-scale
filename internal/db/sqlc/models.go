@@ -5,8 +5,58 @@
 package sqlcgen
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type AllocationStatus string
+
+const (
+	AllocationStatusPending    AllocationStatus = "pending"
+	AllocationStatusAllocating AllocationStatus = "allocating"
+	AllocationStatusReady      AllocationStatus = "ready"
+	AllocationStatusAllocated  AllocationStatus = "allocated"
+	AllocationStatusDraining   AllocationStatus = "draining"
+	AllocationStatusShutdown   AllocationStatus = "shutdown"
+	AllocationStatusFailed     AllocationStatus = "failed"
+)
+
+func (e *AllocationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = AllocationStatus(s)
+	case string:
+		*e = AllocationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for AllocationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullAllocationStatus struct {
+	AllocationStatus AllocationStatus
+	Valid            bool // Valid is true if AllocationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullAllocationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.AllocationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.AllocationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullAllocationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.AllocationStatus), nil
+}
 
 type APIKey struct {
 	ID        int64
@@ -85,6 +135,21 @@ type FriendEdge struct {
 	Status     string
 	CreatedAt  pgtype.Timestamptz
 	UpdatedAt  pgtype.Timestamptz
+}
+
+type GameServerAllocation struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Backend     string
+	BackendRef  string
+	Region      string
+	Address     string
+	Status      AllocationStatus
+	Metadata    []byte
+	RequestedAt pgtype.Timestamptz
+	ReadyAt     pgtype.Timestamptz
+	ReleasedAt  pgtype.Timestamptz
 }
 
 type Leaderboard struct {

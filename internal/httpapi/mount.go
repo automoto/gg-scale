@@ -46,21 +46,3 @@ func mountProfileRoutes(r chi.Router, d Deps) {
 		r.Patch("/", profilePatchHandler(d))
 	})
 }
-
-// mountFleetWriteRoutes wires /v1/fleet/servers writes called by game
-// servers registering themselves. API-key auth via the surrounding tenant
-// group; no session required.
-func mountFleetWriteRoutes(r chi.Router, d Deps) {
-	r.Route("/fleet/servers", func(r chi.Router) {
-		r.Post("/", fleetRegisterHandler(d))
-		r.Put("/{id}/heartbeat", fleetHeartbeatHandler(d))
-		r.Delete("/{id}", fleetDeregisterHandler(d))
-	})
-}
-
-// mountFleetReadRoutes wires /v1/fleet/servers reads called by clients
-// browsing for servers. End-user session auth via the surrounding enduser
-// group.
-func mountFleetReadRoutes(r chi.Router, d Deps) {
-	r.Get("/fleet/servers", fleetListHandler(d))
-}
