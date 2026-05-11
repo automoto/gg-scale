@@ -20,7 +20,7 @@ type friendEntry struct {
 	UpdatedAt  string `json:"updated_at"`
 }
 
-// POST /v1/friends/{user_id}/request — m1.md 4.4.1.
+// POST /v1/friends/{user_id}/request
 func friendRequestHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -77,17 +77,17 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// POST /v1/friends/{user_id}/accept — m1.md 4.4.2.
+// POST /v1/friends/{user_id}/accept
 func friendAcceptHandler(d Deps) http.HandlerFunc {
 	return changeStatusHandler(d, "accepted", []string{"pending"})
 }
 
-// POST /v1/friends/{user_id}/reject — m1.md 4.4.2.
+// POST /v1/friends/{user_id}/reject
 func friendRejectHandler(d Deps) http.HandlerFunc {
 	return changeStatusHandler(d, "rejected", []string{"pending", "accepted"})
 }
 
-// DELETE /v1/friends/{user_id} — m1.md 4.4.2.
+// DELETE /v1/friends/{user_id}
 func friendDeleteHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -167,7 +167,7 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 	}
 }
 
-// GET /v1/friends?status=... — m1.md 4.4.3.
+// GET /v1/friends?status=...
 func friendsListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
