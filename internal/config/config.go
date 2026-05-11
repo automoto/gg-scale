@@ -15,13 +15,23 @@ type Config struct {
 	HTTPAddr string
 	// GameServerPublicIP is the public IP or hostname returned to game clients
 	// so they can connect directly to a game server container. Required when
-	// FLEET_BACKEND=docker or FLEET_BACKEND=static (Phase 2). Empty is fine
-	// for local dev.
+	// FLEET_BACKEND=docker. Empty is fine for local dev.
 	GameServerPublicIP string
-	DatabaseURL        string
-	LogLevel           string
-	Env                string
-	JWTSigningKey      string
+
+	// FleetBackend selects the fleet allocator: docker | agones | openstack |
+	// plugin:<name>. Default "docker" matches the single-VPS self-host story.
+	FleetBackend string
+	// FleetRegion is the region label persisted on every allocation and used
+	// by Agones GameServerSelector / region-aware backends. Default "local".
+	FleetRegion string
+	// FleetPluginDir is the directory scanned for ggscale-fleet-* plugin
+	// binaries. Default "/etc/ggscale/plugins". Only consulted when
+	// FleetBackend starts with "plugin:".
+	FleetPluginDir string
+	DatabaseURL    string
+	LogLevel       string
+	Env            string
+	JWTSigningKey  string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -108,6 +118,19 @@ var declared = []varDecl{
 			return fmt.Errorf("DASHBOARD_COOKIE_SECURE %q: %w", v, err)
 		}
 		c.DashboardCookieSecure = secure
+		return nil
+	}},
+
+	{name: "FLEET_BACKEND", defval: "docker", set: func(c *Config, v string) error {
+		c.FleetBackend = v
+		return nil
+	}},
+	{name: "FLEET_REGION", defval: "local", set: func(c *Config, v string) error {
+		c.FleetRegion = v
+		return nil
+	}},
+	{name: "FLEET_PLUGIN_DIR", defval: "/etc/ggscale/plugins", set: func(c *Config, v string) error {
+		c.FleetPluginDir = v
 		return nil
 	}},
 

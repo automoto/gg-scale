@@ -19,6 +19,7 @@ type Querier interface {
 	CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUserParams) (int64, error)
 	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
+	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
@@ -30,6 +31,7 @@ type Querier interface {
 	// tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
 	GetDashboardMembership(ctx context.Context, arg GetDashboardMembershipParams) (GetDashboardMembershipRow, error)
 	GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error)
 	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
@@ -45,11 +47,14 @@ type Querier interface {
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
 	ListDashboardTenantsForPlatformAdmin(ctx context.Context) ([]ListDashboardTenantsForPlatformAdminRow, error)
 	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	MarkAllocationFailed(ctx context.Context, id int64) error
+	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
 	// Optimistic concurrency variant — only updates if the row's current
@@ -57,6 +62,7 @@ type Querier interface {
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordDashboardLoginFailure(ctx context.Context, arg RecordDashboardLoginFailureParams) (RecordDashboardLoginFailureRow, error)
 	RecordDashboardLoginSuccess(ctx context.Context, id int64) error
+	ReleaseAllocation(ctx context.Context, id int64) error
 	// The unique index keeps one current row per directed pair, so re-requests
 	// after rejection update in place. Pending/accepted are idempotent (the
 	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
@@ -67,6 +73,7 @@ type Querier interface {
 	RevokeDashboardSession(ctx context.Context, id int64) error
 	RevokeSession(ctx context.Context, id int64) error
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
+	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
 	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
