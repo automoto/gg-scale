@@ -232,7 +232,12 @@ func (s *grpcServer) HealthCheck(ctx context.Context, _ *fleetpb.HealthCheckRequ
 	return &fleetpb.HealthCheckResponse{}, nil
 }
 
-func (s *grpcServer) Ping(_ context.Context, _ *fleetpb.PingRequest) (*fleetpb.PingResponse, error) {
+func (s *grpcServer) Ping(ctx context.Context, _ *fleetpb.PingRequest) (*fleetpb.PingResponse, error) {
+	if p, ok := s.impl.(pinger); ok {
+		if err := p.Ping(ctx); err != nil {
+			return nil, errToStatus(err)
+		}
+	}
 	return &fleetpb.PingResponse{}, nil
 }
 

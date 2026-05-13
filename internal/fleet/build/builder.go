@@ -61,9 +61,8 @@ func New(c Config) (fleet.Backend, error) {
 			if name == "" {
 				return nil, fmt.Errorf("fleet: plugin backend requires a name, e.g. plugin:ovh")
 			}
-			return pluginbackend.Launch(pluginbackend.LaunchConfig{
-				Dir:  c.PluginDir,
-				Name: name,
+			return pluginbackend.NewSupervisor(pluginbackend.SupervisorConfig{
+				Launch: pluginbackend.LaunchConfig{Dir: c.PluginDir, Name: name},
 			})
 		}
 		return nil, fmt.Errorf("fleet: unknown backend %q", c.Backend)
