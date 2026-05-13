@@ -55,6 +55,18 @@ sqlc-gen:
 templ-generate:
 	GOSUMDB=off go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
 
+# Regenerates internal/fleet/plugin/proto/*.pb.go from fleet.proto. The
+# generated files are committed so CI does not need protoc; this target only
+# runs when the .proto schema changes. Requires protoc (brew install protobuf)
+# plus protoc-gen-go and protoc-gen-go-grpc on $PATH ($GOPATH/bin after
+# `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest` and
+# `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`).
+proto:
+	PATH="$$PATH:$$(go env GOPATH)/bin" protoc \
+		--go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		internal/fleet/plugin/proto/fleet.proto
+
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
 up: preflight

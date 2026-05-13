@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -110,9 +111,12 @@ func run() error {
 		}
 	}
 
-	fleetMgr, err := buildFleet(cfg, appPool, logger)
+	fleetMgr, fleetCloser, err := buildFleet(cfg, appPool, logger)
 	if err != nil {
 		return err
+	}
+	if fleetCloser != nil {
+		defer func() { _ = fleetCloser.Close() }()
 	}
 
 	router := httpapi.NewRouter(httpapi.Deps{
@@ -160,15 +164,19 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// buildFleet wires the configured fleet backend. Returns (nil, nil) when
+// buildFleet wires the configured fleet backend. Returns (nil, nil, nil) when
 // the operator hasn't configured one yet — the server still boots and the
 // matchmaker (M6) will surface a "not implemented" error to callers. Real
 // startup failures (invalid backend name, docker reachable but missing
-// image, …) return a non-nil error and abort startup.
-func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, error) {
+// image, plugin binary missing, …) return a non-nil error and abort startup.
+//
+// The optional io.Closer is non-nil for plugin backends; the caller defers
+// Close() so the subprocess is reaped on shutdown. In-process backends
+// (docker, agones) return a nil closer.
+func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
 	if cfg.FleetBackend == "docker" && cfg.DockerGameServerImage == "" {
 		logger.Warn("fleet disabled: DOCKER_GAMESERVER_IMAGE unset; matchmaker will reject Allocate")
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	backend, err := fleetbuild.New(fleetbuild.Config{
@@ -188,14 +196,18 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		AgonesKubecfg: cfg.AgonesKubeconfig,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("fleet: %w", err)
+		return nil, nil, fmt.Errorf("fleet: %w", err)
 	}
 
+	var closer io.Closer
+	if c, ok := backend.(io.Closer); ok {
+		closer = c
+	}
 	return fleet.NewManager(
 		fleet.NewPostgresStore(pool),
 		backend,
 		fleet.ManagerOptions{Retries: 3},
-	), nil
+	), closer, nil
 }
 
 func newLogger(level string) *slog.Logger {
