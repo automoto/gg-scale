@@ -3,6 +3,7 @@ package httpapi
 import (
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -45,4 +46,33 @@ func mountProfileRoutes(r chi.Router, d Deps) {
 		r.Get("/", profileGetHandler(d))
 		r.Patch("/", profilePatchHandler(d))
 	})
+}
+
+func mountRealtimeRoutes(r chi.Router, d Deps) {
+	if d.Hub == nil {
+		return
+	}
+	r.Get("/ws", realtime.ServeWS(realtime.Options{
+		Hub:          d.Hub,
+		Cache:        d.Cache,
+		MaxPerTenant: d.RealtimeMaxPerTenant,
+	}))
+}
+
+func mountMatchmakerRoutes(r chi.Router, d Deps) {
+	if d.Matchmaker == nil {
+		return
+	}
+	r.Route("/matchmaker/tickets", func(r chi.Router) {
+		r.Post("/", matchmakerCreateTicketHandler(d))
+		r.Get("/{id}", matchmakerGetTicketHandler(d))
+		r.Delete("/{id}", matchmakerCancelTicketHandler(d))
+	})
+}
+
+func mountRelayRoutes(r chi.Router, d Deps) {
+	if d.RelayIssuer == nil {
+		return
+	}
+	r.Post("/relay/credentials", relayCredentialsHandler(d))
 }

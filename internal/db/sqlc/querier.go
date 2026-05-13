@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
@@ -40,10 +41,12 @@ type Querier interface {
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
 	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
+	GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error)
 	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
+	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
@@ -52,9 +55,13 @@ type Querier interface {
 	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
+	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	MarkAllocationFailed(ctx context.Context, id int64) error
 	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
+	MarkMatchmakerFailed(ctx context.Context, dollar_1 []int64) error
+	MarkMatchmakerMatched(ctx context.Context, arg MarkMatchmakerMatchedParams) error
+	PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
 	// Optimistic concurrency variant — only updates if the row's current

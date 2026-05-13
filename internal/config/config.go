@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config holds runtime configuration loaded from the environment.
@@ -42,10 +43,30 @@ type Config struct {
 	AgonesFleetName      string
 	AgonesSelectorLabels string
 	AgonesKubeconfig     string
-	DatabaseURL          string
-	LogLevel             string
-	Env                  string
-	JWTSigningKey        string
+
+	// RealtimeMaxPerTenant caps concurrent /v1/ws connections per tenant.
+	// 0 disables the cap (the cache.Store layer is bypassed entirely).
+	RealtimeMaxPerTenant int64
+
+	// MatchmakerBucketSize is the number of queued tickets that must
+	// accumulate in a (tenant, project, region, game_mode) bucket before
+	// the worker calls fleet.Manager.Allocate. Default 1.
+	MatchmakerBucketSize int
+	// MatchmakerInterval is the time between worker scans. Default 100ms.
+	MatchmakerInterval time.Duration
+
+	// TURN relay tunables. The relay is disabled unless RelayPublicIP and
+	// RelaySharedSecret are both set.
+	RelayPublicIP     string
+	RelayBindAddr     string
+	RelayUDPPort      int
+	RelayRealm        string
+	RelaySharedSecret string
+	RelayCredTTL      time.Duration
+	DatabaseURL       string
+	LogLevel          string
+	Env               string
+	JWTSigningKey     string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -200,6 +221,65 @@ var declared = []varDecl{
 	}},
 	{name: "AGONES_KUBECONFIG", defval: "", set: func(c *Config, v string) error {
 		c.AgonesKubeconfig = v
+		return nil
+	}},
+
+	{name: "REALTIME_MAX_PER_TENANT", defval: "0", set: func(c *Config, v string) error {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("REALTIME_MAX_PER_TENANT %q: must be a non-negative integer", v)
+		}
+		c.RealtimeMaxPerTenant = n
+		return nil
+	}},
+
+	{name: "MATCHMAKER_BUCKET_SIZE", defval: "1", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("MATCHMAKER_BUCKET_SIZE %q: must be a positive integer", v)
+		}
+		c.MatchmakerBucketSize = n
+		return nil
+	}},
+	{name: "MATCHMAKER_INTERVAL", defval: "100ms", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("MATCHMAKER_INTERVAL %q: must be a positive duration", v)
+		}
+		c.MatchmakerInterval = d
+		return nil
+	}},
+
+	{name: "RELAY_PUBLIC_IP", defval: "", set: func(c *Config, v string) error {
+		c.RelayPublicIP = v
+		return nil
+	}},
+	{name: "RELAY_BIND_ADDR", defval: "0.0.0.0", set: func(c *Config, v string) error {
+		c.RelayBindAddr = v
+		return nil
+	}},
+	{name: "RELAY_UDP_PORT", defval: "3478", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 || n > 65535 {
+			return fmt.Errorf("RELAY_UDP_PORT %q: must be 1..65535", v)
+		}
+		c.RelayUDPPort = n
+		return nil
+	}},
+	{name: "RELAY_REALM", defval: "ggscale", set: func(c *Config, v string) error {
+		c.RelayRealm = v
+		return nil
+	}},
+	{name: "RELAY_SHARED_SECRET", fileFallback: true, set: func(c *Config, v string) error {
+		c.RelaySharedSecret = v
+		return nil
+	}},
+	{name: "RELAY_CRED_TTL", defval: "5m", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("RELAY_CRED_TTL %q: must be a positive duration", v)
+		}
+		c.RelayCredTTL = d
 		return nil
 	}},
 

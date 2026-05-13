@@ -58,6 +58,50 @@ func (ns NullAllocationStatus) Value() (driver.Value, error) {
 	return string(ns.AllocationStatus), nil
 }
 
+type TicketStatus string
+
+const (
+	TicketStatusQueued    TicketStatus = "queued"
+	TicketStatusMatched   TicketStatus = "matched"
+	TicketStatusCancelled TicketStatus = "cancelled"
+	TicketStatusFailed    TicketStatus = "failed"
+)
+
+func (e *TicketStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TicketStatus(s)
+	case string:
+		*e = TicketStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TicketStatus: %T", src)
+	}
+	return nil
+}
+
+type NullTicketStatus struct {
+	TicketStatus TicketStatus
+	Valid        bool // Valid is true if TicketStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTicketStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.TicketStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TicketStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTicketStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TicketStatus), nil
+}
+
 type APIKey struct {
 	ID        int64
 	TenantID  int64
@@ -169,6 +213,20 @@ type LeaderboardEntry struct {
 	EndUserID     int64
 	Score         int64
 	RecordedAt    pgtype.Timestamptz
+}
+
+type MatchmakingTicket struct {
+	ID           int64
+	TenantID     int64
+	ProjectID    int64
+	EndUserID    int64
+	Region       string
+	GameMode     string
+	Attributes   []byte
+	Status       TicketStatus
+	MatchAddress string
+	CreatedAt    pgtype.Timestamptz
+	MatchedAt    pgtype.Timestamptz
 }
 
 type PlatformAuditLog struct {

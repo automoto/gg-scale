@@ -23,8 +23,11 @@ import (
 	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/realtime"
+	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -51,6 +54,16 @@ type Deps struct {
 	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
 	// and degrades to a not-implemented error when unset.
 	Fleet *fleet.Manager
+
+	// Hub fans WS messages out to connected end-users. nil disables /v1/ws.
+	Hub                  *realtime.Hub
+	RealtimeMaxPerTenant int64
+
+	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
+	Matchmaker matchmaker.Queue
+
+	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
+	RelayIssuer *relay.Issuer
 
 	Dashboard          dashboard.Config
 	DashboardBootstrap *dashboard.Bootstrap
@@ -136,6 +149,9 @@ func NewRouter(d Deps) http.Handler {
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)
 					mountProfileRoutes(r, d)
+					mountRealtimeRoutes(r, d)
+					mountMatchmakerRoutes(r, d)
+					mountRelayRoutes(r, d)
 				})
 			})
 		}

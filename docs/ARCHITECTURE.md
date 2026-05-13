@@ -1,8 +1,10 @@
-# ggscale — architecture (Phase 1)
+# ggscale — architecture
 
-This document tracks what ships in-tree today: multi-tenant HTTP API under `/v1/`,
-Postgres + RLS, pluggable mail, and observability on `/metrics`. Strategic sequencing
-lives in [`mvp.md`](mvp.md).
+This document tracks what ships in-tree today: the multi-tenant HTTP +
+WebSocket API under `/v1/`, the pluggable game-server fleet (Docker, Agones,
+or out-of-tree plugin subprocesses), the realtime hub and ticket-driven
+matchmaker, the embedded TURN relay, Postgres + RLS, pluggable mail, and
+observability on `/metrics`. Strategic sequencing lives in [`mvp.md`](mvp.md).
 
 ## Deployment topology
 
@@ -16,17 +18,25 @@ There are two distinct compose profiles:
   job. Required for the Agones e2e smoke test when kubeconfig is present.
 
 ```
-                   ┌────────────────────────────────────────┐
-                   │ ggscale-server :8080  (Go, chi router) │
-                  │  /v1/healthz · /v1/* · /metrics        │
-                  │  /v1/dashboard (HTMX + templ)          │
-                   │  + cache.Store (memory or olric)       │
-                   └─────────────────────┬──────────────────┘
-                                         │
-                                   postgres:5432
-                                   (init via
-                                    migrate init
-                                    container)
+                   ┌──────────────────────────────────────────────┐
+   game client     │ ggscale-server :8080  (Go, chi router)       │
+   ──────────────► │  /v1/healthz · /v1/auth · /v1/storage · …    │
+                   │  /v1/ws            (realtime Hub)            │
+                   │  /v1/matchmaker/*  (ticket queue + worker)   │
+                   │  /v1/relay/*       (TURN-REST credentials)   │
+                   │  /v1/dashboard     (HTMX + templ)            │
+                   │  /metrics                                    │
+                   │  + cache.Store (memory or olric)             │
+                   │  + fleet.Manager → Backend                   │
+                   └──┬──────────────────────────────┬────────────┘
+                      │                              │
+                postgres:5432                  fleet backend
+                (migrate init,                 ──────────────
+                 LISTEN/NOTIFY                 docker | agones |
+                 wakeup for                    plugin:<name>
+                 matchmaker)
+                                       (also: pion/turn :3478 UDP
+                                        when RELAY_PUBLIC_IP set)
 ```
 
 ## Simple-stack services (`docker-compose.yml`)
@@ -74,8 +84,8 @@ re-fetch and a PR.
 
 The MVP requires that game-server UDP `hostPort`s assigned by Agones be
 reachable directly from the host OS — no Docker bridge, no port-forward proxy.
-That's the `--network=host` contract. It's the substrate the Phase 0 e2e smoke
-test exercises (`TestAgonesAllocation_AssignsHostPort_ReachableViaUDP`):
+That's the `--network=host` contract. It's the substrate the Agones e2e
+smoke test exercises (`TestAgonesAllocation_AssignsHostPort_ReachableViaUDP`):
 
 1. Apply a `GameServer` CRD via the Agones Go client.
 2. Wait for `Status.State == Ready`.
@@ -122,6 +132,27 @@ two diverge.
 | `CACHE_OLRIC_MEMBERLIST_ADDR` | no | `127.0.0.1` | Memberlist (gossip) bind. |
 | `CACHE_OLRIC_MEMBERLIST_PORT` | no | `3322` | Memberlist port. |
 | `CACHE_OLRIC_PEERS` | no | (empty) | Comma-separated host:port peers; empty means cluster of one. |
+| `FLEET_BACKEND` | no | `docker` | Fleet backend selector: `docker`, `agones`, or `plugin:<name>`. |
+| `FLEET_REGION` | no | `local` | Region label persisted on every allocation. |
+| `FLEET_PLUGIN_DIR` | no | `/etc/ggscale/plugins` | Scanned for `ggscale-fleet-<name>` plugin binaries when `FLEET_BACKEND` starts with `plugin:`. |
+| `DOCKER_GAMESERVER_IMAGE` | docker only | (empty) | Image to run for each allocation. Empty disables the fleet (matchmaker rejects Allocate). |
+| `DOCKER_GAMESERVER_PORT` | no | `7777` | Container port the health probe targets. |
+| `DOCKER_PROBE_TYPE` | no | `tcp` | `tcp`, `http`, or empty to disable readiness probing. |
+| `DOCKER_PROBE_PATH` | no | `/healthz` | HTTP probe path (when `DOCKER_PROBE_TYPE=http`). |
+| `DOCKER_HOST` | no | (empty) | Override the docker daemon endpoint. Honoured by the upstream SDK directly. |
+| `AGONES_NAMESPACE` | no | `default` | Namespace the `GameServerAllocation` CR is created in. |
+| `AGONES_FLEET_NAME` | no | (empty) | Optional `agones.dev/fleet=<name>` selector. |
+| `AGONES_SELECTOR_LABELS` | no | (empty) | Additional `k=v,…` label selector. |
+| `AGONES_KUBECONFIG` | no | (empty) | Path to kubeconfig. Empty tries in-cluster, then `~/.kube/config`. |
+| `REALTIME_MAX_PER_TENANT` | no | `0` | Concurrent `/v1/ws` connections per tenant; 0 disables the cap. |
+| `MATCHMAKER_BUCKET_SIZE` | no | `1` | Tickets per allocated match in a `(tenant, project, region, game_mode)` bucket. |
+| `MATCHMAKER_INTERVAL` | no | `5s` | Fallback scan cadence. The hot path is Postgres LISTEN/NOTIFY; this ticker catches gaps during a listener reconnect. |
+| `RELAY_PUBLIC_IP` | no | (empty) | Public address advertised to TURN peers. Setting this + `RELAY_SHARED_SECRET` boots the UDP listener. |
+| `RELAY_BIND_ADDR` | no | `0.0.0.0` | UDP bind host. |
+| `RELAY_UDP_PORT` | no | `3478` | UDP bind port. |
+| `RELAY_REALM` | no | `ggscale` | TURN realm string. |
+| `RELAY_SHARED_SECRET` | no | (empty) | HMAC secret backing the TURN-REST issuer. Supports `RELAY_SHARED_SECRET_FILE`. |
+| `RELAY_CRED_TTL` | no | `5m` | Validity window of issued credentials. |
 
 ## HTTP API surface (`/v1/`)
 
@@ -136,6 +167,9 @@ All product routes mount under `/v1/`; anything else returns **404**.
 | Leaderboards | `POST .../scores`, `GET .../top`, `GET .../around-me` | Submit: secret key + session; reads: key + session |
 | Friends | `POST/GET/DELETE /v1/friends/...` | API key + session |
 | Profile | `GET/PATCH /v1/profile/` | API key + session |
+| Realtime | `GET /v1/ws` (WebSocket upgrade; heartbeat, presence, `match_ready` push) | API key + session |
+| Matchmaker | `POST/GET/DELETE /v1/matchmaker/tickets[/{id}]` | API key + session |
+| Relay | `POST /v1/relay/credentials` (TURN-REST credential issue) | API key + session |
 | Dashboard | `/v1/dashboard/*` | Separate platform session (bcrypt users, CSRF) |
 
 **Tenant middleware** (`internal/tenant`) runs on the API-key group before rate limiting
@@ -169,7 +203,7 @@ The compose files in this repo sit behind Cloudflare (ops) or a direct bind
 (dev); both configurations strip `CF-Connecting-IP` at the edge or it is
 absent entirely.
 
-## Tenant isolation (Phase 1)
+## Tenant isolation
 
 Tenant isolation is enforced at two layers; either alone is sufficient to
 block cross-tenant access, and the test suite exercises both.
@@ -240,6 +274,137 @@ recommend (where the user JWT lives in `Authorization`). The reasoning:
 A stolen `X-Session-Token` cannot be replayed under a different tenant's
 api_key: `enduser.New` asserts `claims.TenantID == ctx.tenant`.
 
+## Game-server fleet
+
+`fleet.Manager` (in `internal/fleet/manager.go`) is the single allocator
+the matchmaker and any future caller talk to. It owns persistence in
+`game_server_allocations` (migration `0019`), retry/backoff, and a
+backend-agnostic state machine: pending → allocating → ready → allocated
+→ shutdown/failed. The backend itself is one Go interface:
+
+```go
+type Backend interface {
+    Name() string
+    Allocate(ctx, AllocationRequest)         (*Allocation, error)
+    Deallocate(ctx, AllocationID, ref)       error
+    Status(ctx, AllocationID, ref)           (Status, error)
+    Watch(ctx, AllocationID, ref)            (<-chan StatusUpdate, error)
+    HealthCheck(ctx)                         error
+}
+```
+
+Three implementations ship in-tree:
+
+- **Docker** (`internal/fleet/docker`) — talks to the local daemon via the
+  upstream Go SDK, runs one container per allocation, attaches
+  `ggscale.tenant_id` / `project_id` / `region` labels, dynamically maps
+  the configured port, and translates Docker events (`Start`,
+  `HealthStatusHealthy`, `Die`, `OOM`) into `fleet.StatusUpdate` frames.
+  Cold start under three seconds in the e2e test.
+- **Agones** (`internal/fleet/agones`) — uses the typed Kubernetes
+  clientset to create a `GameServerAllocation` CR and `Watch` against the
+  resulting `GameServer`, mapping Agones lifecycle states through the same
+  enum.
+- **Plugin shim** (`internal/fleet/plugin`) — out-of-tree backends ship as
+  separate binaries under `/etc/ggscale/plugins/` and talk to the host
+  over gRPC under `hashicorp/go-plugin` with AutoMTLS (handshake cookie
+  `GGSCALE_FLEET_PLUGIN` / `ggscale-v1`, protocol version 1). A
+  supervisor watches the subprocess, restarts up to three consecutive
+  crashes, and force-kills plugins that stop answering `Ping`. An
+  optional `<binary>.manifest.toml` sidecar carries the plugin's
+  declared `name` / `version` / `protocol_version`. Author guide:
+  [`fleet-plugins.md`](fleet-plugins.md).
+
+Selection is operator-controlled at startup via `FLEET_BACKEND`
+(`docker`, `agones`, `plugin:<name>`). The Manager is unaware of which
+side it's calling; tenant context flows through `db.WithTenant` so
+Postgres-backed allocations still receive `app.tenant_id` for RLS.
+
+## Realtime WebSocket hub
+
+`internal/realtime` is the WebSocket fan-out for ggscale. Players open
+one persistent connection to `/v1/ws` after authenticating; the server
+registers it in `realtime.Hub` keyed by `(tenant_id, end_user_id)` so
+any backend goroutine — matchmaker, presence, future lobby/chat — can
+push a message at a specific player without knowing how they're
+connected.
+
+Key contracts:
+
+- **Transport.** `coder/websocket`. The Hub holds a transport-agnostic
+  `Writer` interface; the production wrapper writes JSON text frames.
+- **Heartbeat.** Server-initiated `Ping` every 30 s (configurable). A
+  missed `Pong` closes the connection; the read loop exits, releasing
+  the slot.
+- **Per-tenant CCU cap.** When `REALTIME_MAX_PER_TENANT > 0`, the
+  handler calls `cache.Store.AcquireSlot("realtime:tenant:<id>", ...)`
+  before upgrading and `ReleaseSlot` on disconnect. The Olric cache
+  backend shares the counter across multi-VM regions.
+- **Send.** Matchmaker and other callers invoke `Hub.Send(ctx,
+  tenantID, endUserID, Message{Type:"match_ready", Payload: ...})`.
+  Returns `ErrNotConnected` when the player is offline; callers decide
+  whether to retry or fall back to polling.
+
+The Hub itself is concurrency-safe and transport-agnostic — unit tests
+inject a fake `Writer`; the integration test in `internal/matchmaker`
+exercises the real upgrade path against an httptest server.
+
+## Matchmaker
+
+The matchmaker (`internal/matchmaker`) turns end-user "find me a match"
+requests into game-server allocations. Players POST a ticket to
+`/v1/matchmaker/tickets`; a background worker batches tickets into
+buckets keyed by `(tenant_id, project_id, region, game_mode)` and, once
+a bucket fills, calls `fleet.Manager.Allocate` exactly once. Each
+matched player gets a `match_ready` envelope pushed through the realtime
+hub with the live server's address.
+
+Schema lives in migration `0019_fleet_allocations` (the allocation table)
+and `0020_matchmaking_tickets` (the queue), both RLS-isolated by
+`tenant_id`. The queue uses an `AFTER INSERT` trigger added in
+`0021_matchmaker_notify` that emits `NOTIFY matchmaker_ticket` with a
+JSON `(tenant, project, region, game_mode)` payload — the worker
+subscribes via Postgres LISTEN and wakes event-driven within
+milliseconds of a ticket landing, instead of polling.
+
+The worker loop converges three event sources:
+
+1. **Listener events.** Hot path; one bucket processed per `NOTIFY`.
+2. **Fallback ticker** (`MATCHMAKER_INTERVAL`, default 5 s). Catches
+   tickets that arrive during a listener reconnect gap or when the
+   queue backend doesn't implement the optional `Listener` interface
+   (e.g. the in-memory queue used in tests).
+3. **`ctx.Done`** for graceful shutdown.
+
+Bucket processing uses `FOR UPDATE SKIP LOCKED` (`PopMatchmakerBucket`)
+so multiple ggscale-server processes can run workers safely against the
+same Postgres without double-popping. The HTTP `GET
+/v1/matchmaker/tickets/{id}` path is the authoritative source of truth
+for clients — SDKs subscribe to the WebSocket push but should poll on
+reconnect to recover from any missed `match_ready` delivery.
+
+## TURN relay
+
+`internal/relay` wraps `pion/turn/v3` with ggscale's tenant + end-user
+identity model. Authentication follows the standard TURN-REST shape:
+the username encodes `<expires>:<tenant_id>:<end_user_id>` and the
+password is a base64 HMAC-SHA1 of the username under
+`RELAY_SHARED_SECRET`. An authenticated player calls `POST
+/v1/relay/credentials` and receives `{username, password, ttl, realm,
+urls}`.
+
+The HTTP credential endpoint and the UDP TURN listener are gated
+independently:
+
+- **Issuer only** — `RELAY_SHARED_SECRET` set, `RELAY_PUBLIC_IP` empty.
+  Useful for issuing credentials to a relay you host elsewhere.
+- **Issuer + embedded server** — both set. The TURN listener boots at
+  `RELAY_BIND_ADDR:RELAY_UDP_PORT` (default `0.0.0.0:3478`) with a
+  `RelayAddressGeneratorStatic` pointing at `RELAY_PUBLIC_IP`. The
+  AuthHandler recomputes the HMAC password and runs it through
+  `pion.GenerateAuthKey`, refusing requests that don't match the
+  issuer's view of the realm.
+
 ## Observability
 
 The server exposes Prometheus metrics at **`/metrics`**: HTTP latency histograms, error
@@ -255,9 +420,13 @@ Grafana + Loki + Promtail are deferred to v1.1 per milestone notes.
 ## Database migrations
 
 - Forward-only SQL files in `db/migrations/`, named `NNNN_<name>.up.sql` /
-  `.down.sql`.
-- `0001_init.up.sql` is extensions-only (`pgcrypto`, `citext`). Phase 1 owns
-  the first table-creating migration.
+  `.down.sql`. Current head is `0021_matchmaker_notify`.
+- `0001_init.up.sql` is extensions-only (`pgcrypto`, `citext`); the first
+  table-creating migration is `0002_tenants`.
+- Notable trigger-bearing migrations: `0021_matchmaker_notify` adds an
+  `AFTER INSERT` trigger on `matchmaking_tickets` that emits a
+  `pg_notify('matchmaker_ticket', json_build_object(...))` payload so
+  the matchmaker worker wakes event-driven instead of polling.
 - `make migrate` runs the `migrate/migrate:v4.19.1` image against the
   compose postgres. The same image is also wired as a compose init
   container, so `make up` applies pending migrations before
@@ -285,32 +454,34 @@ pinned to commit SHAs.
    On failure, compose logs are captured as an artifact.
 
 A fourth job, `docker-publish` (push image to GHCR on main), is wired and
-commented out. We'll re-enable it when Phase 0 testing+building proves
+commented out. We'll re-enable it when the test + build pipeline proves
 stable. See `.github/workflows/ci.yml`.
 
 `.github/dependabot.yml` opens weekly dependency-bump PRs for Go modules,
 GitHub Actions, and Docker base images.
 
-## Lifecycle architecture (forward-looking)
+## Lifecycle architecture (three audiences, one substrate)
 
-The Phase 0 architecture above is the substrate for **three** product
-audiences, not one — the v1.0 indie / mid-tier BaaS audience, the v1.9+
-B2B sunset-services audience, and the v1.9+ B2C white-label community
-hosting audience. The strategic framing lives in [`LIFECYCLE.md`](LIFECYCLE.md).
-This subsection records the architectural commitment: **no v1.9+ SKU
-requires a structural change to the v1.0 platform.**
+The architecture above is the substrate for **three** product audiences,
+not one — the v1.0 indie / mid-tier BaaS audience (live today), the
+v1.9+ B2B sunset-services audience, and the v1.9+ B2C white-label
+community hosting audience. The strategic framing lives in
+[`LIFECYCLE.md`](LIFECYCLE.md). This subsection records the architectural
+commitment: **no v1.9+ SKU requires a structural change to the v1.0
+platform.**
 
 ```
                                    ┌──────────────────────────────────────────────────────┐
    live-service indie  ───────►    │                                                      │
-   (audience #1, v1.0)             │  ggscale control plane (multi-tenant, v1.0)          │
+   (audience #1, v1.0)             │  ggscale control plane (multi-tenant, shipped)       │
                                    │  ─ tenant middleware (api-key → tenant_id)           │
-   sunset-port publisher ──────►   │  ─ Postgres + RLS, cache.Store (memory|olric),       │
-   (audience #2, v1.9+)            │    K3s + Agones, pion/turn                           │
-                                   │  ─ Cloudflare LB + origin-pool routing, Stripe, GDPR │
-                                   │                                                      │
-   white-label community ──────►   │  every "customer" is a tenant; the SKU determines    │
-   (audience #3, v1.9+)            │  who pays, what's branded, and where royalties flow  │
+   sunset-port publisher ──────►   │  ─ Postgres + RLS, cache.Store (memory|olric)        │
+   (audience #2, v1.9+)            │  ─ fleet.Backend: Docker | Agones | plugin           │
+                                   │  ─ realtime Hub, matchmaker (LISTEN/NOTIFY)          │
+   white-label community ──────►   │  ─ pion/turn relay, Cloudflare LB, Stripe, GDPR      │
+   (audience #3, v1.9+)            │                                                      │
+                                   │  every "customer" is a tenant; the SKU determines    │
+                                   │  who pays, what's branded, and where royalties flow  │
                                    └──────────────────────────────────────────────────────┘
 ```
 
@@ -318,7 +489,7 @@ What each audience consumes (and where it ships):
 
 | Audience | Tenant origin | Branding | Billing entity | Primary substrate |
 |---|---|---|---|---|
-| #1 — indie / mid-tier launch | Studio signs up at `ggscale.io` | ggscale-managed under studio's namespace | Studio (PAYG / Premium / self-host) | Multi-tenant control plane + Agones fleet + STUN/TURN relay (v1.0 Phase 1–2). |
+| #1 — indie / mid-tier launch | Studio signs up at `ggscale.io` | ggscale-managed under studio's namespace | Studio (PAYG / Premium / self-host) | Multi-tenant control plane + pluggable fleet (Docker/Agones/plugin) + TURN relay — all shipped. |
 | #2 — sunset port (B2B) | Publisher engagement; ggscale provisions tenant after porting work | Publisher brand on a self-host bundle the community runs | Publisher (fixed-fee engagement) | Same `docker-compose.yml` + `bw-ops` Ansible the v1.0 self-host audience uses. The published v1.0 self-host migration guide is the deliverable's runtime substrate. |
 | #3 — white-label community hosting (B2C) | ggscale provisions per-rental tenants under a publisher's IP | Publisher brand on a ggscale-hosted subdomain | Players (consumer subscription) → royalty to publisher | Same multi-tenant control plane + Agones fleet + Cloudflare LB hostname routing as audience #1, with a consumer storefront UX layered on top. |
 
@@ -334,10 +505,12 @@ v1.9+ planning must therefore not regress on — are:
   per-tenant overhead is what makes the B2C white-label storefront
   economically viable — provisioning a new rental cannot require a new
   Postgres cluster or it ruins the unit economics.
-- **Agones fleet manager as the orchestration boundary.** A sunset
-  title's game-server image is a `Fleet` CRD just like a live title's;
-  Agones lifecycle (`Allocator` API, `RollingUpdate` strategy, drain on
-  `SDK.Shutdown()`) works identically.
+- **Fleet `Backend` interface as the orchestration boundary.** A sunset
+  title's game-server image is a Docker container, an Agones `Fleet`
+  CRD, or a plugin-managed VM — all addressed through the same six-method
+  `Backend` contract. The matchmaker doesn't know which side it's
+  calling. Swapping or adding orchestration substrates doesn't touch the
+  control plane.
 - **Stripe metering covers consumer subscriptions natively.** The same
   Prometheus-driven CCU gauge + in-memory daily accumulator + per-day
   `usage_aggregates` row pipeline (Phase 3 design — see `mvp.md` §
@@ -347,9 +520,10 @@ v1.9+ planning must therefore not regress on — are:
 - **Self-host parity by construction.** The published `docker-compose.yml`
   is what the v1.0 self-host audience uses, what CI runs on every PR,
   *and* what `ggscale Sunset` engagements hand to publishers as the
-  "community can run this themselves" deliverable. The Phase 0 commitment
-  to "what runs in CI is what the public self-host stack runs" is the
-  technical foundation of the entire B2B sunset value proposition.
+  "community can run this themselves" deliverable. The structural
+  commitment that "what runs in CI is what the public self-host stack
+  runs" is the technical foundation of the entire B2B sunset value
+  proposition.
 
 What v1.9+ does add (recorded here so this doc can grow into it without
 surprise): a consumer-storefront frontend (browse sunset titles, rent an
