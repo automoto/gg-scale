@@ -1,4 +1,5 @@
-.PHONY: build test test-integration e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
+.PHONY: build test test-integration test-plugins e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
+	proto build-example-plugin \
         up down logs psql migrate migrate-new \
         up-dev down-dev \
         up-k8s agones-install \
@@ -66,6 +67,20 @@ proto:
 		--go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		internal/fleet/plugin/proto/fleet.proto
+
+# Builds the reference fleet plugin. Drop the result at
+# $$GGSCALE_PLUGIN_DIR/ggscale-fleet-example and run core with
+# FLEET_BACKEND=plugin:example to exercise the plugin path end-to-end.
+build-example-plugin:
+	go build -o bin/ggscale-fleet-example ./cmd/ggscale-fleet-example
+
+# Runs the plugin subprocess integration test (`internal/fleet/plugin/
+# integration_test.go`). Builds the example plugin into a temp dir, then
+# spawns + kills it under Supervisor. Already included in `make
+# test-integration`; this target exists so the plugin path can be exercised
+# in isolation while iterating on the supervisor.
+test-plugins:
+	go test -race -tags=integration -timeout=60s ./internal/fleet/plugin/...
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
