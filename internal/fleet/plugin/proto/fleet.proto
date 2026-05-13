@@ -1,0 +1,109 @@
+// fleet.proto defines the wire contract between core ggscale and out-of-tree
+// fleet backends running as hashicorp/go-plugin subprocesses. Messages mirror
+// the Go types in package fleet (backend.go): the adapter layer in grpc.go is
+// the only place these two type systems meet.
+//
+// Stability: the package version (v1) and ProtocolVersion (see plugin/host.go)
+// are bumped together on any breaking change.
+syntax = "proto3";
+
+package ggscale.fleet.v1;
+
+option go_package = "github.com/ggscale/ggscale/internal/fleet/plugin/proto;fleetpb";
+
+// FleetBackend is the gRPC surface a plugin exposes. Method-by-method
+// equivalents of fleet.Backend; Watch is a server-stream so the manager can
+// see status transitions without polling. Ping is the host's liveness probe
+// (called every 10s by the host).
+service FleetBackend {
+  rpc Name(NameRequest) returns (NameResponse);
+  rpc Allocate(AllocateRequest) returns (AllocateResponse);
+  rpc Deallocate(DeallocateRequest) returns (DeallocateResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  rpc Watch(WatchRequest) returns (stream StatusUpdate);
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+// AllocationStatus mirrors fleet.Status. The zero value is UNSPECIFIED so a
+// missing field never silently decodes as a real state.
+enum AllocationStatus {
+  ALLOCATION_STATUS_UNSPECIFIED = 0;
+  ALLOCATION_STATUS_PENDING = 1;
+  ALLOCATION_STATUS_ALLOCATING = 2;
+  ALLOCATION_STATUS_READY = 3;
+  ALLOCATION_STATUS_ALLOCATED = 4;
+  ALLOCATION_STATUS_DRAINING = 5;
+  ALLOCATION_STATUS_SHUTDOWN = 6;
+  ALLOCATION_STATUS_FAILED = 7;
+}
+
+// AllocationRequest mirrors fleet.AllocationRequest.
+message AllocationRequest {
+  int64 tenant_id = 1;
+  int64 project_id = 2;
+  string region = 3;
+  string game_mode = 4;
+  int32 capacity = 5;
+  map<string, string> labels = 6;
+}
+
+// Allocation mirrors fleet.Allocation. BackendRef is the plugin's opaque
+// identifier — the host stores it but never inspects it.
+message Allocation {
+  int64 id = 1;
+  int64 tenant_id = 2;
+  int64 project_id = 3;
+  string backend = 4;
+  string backend_ref = 5;
+  string region = 6;
+  string address = 7;
+  AllocationStatus status = 8;
+  map<string, string> metadata = 9;
+}
+
+message NameRequest {}
+message NameResponse {
+  string name = 1;
+}
+
+message AllocateRequest {
+  AllocationRequest request = 1;
+}
+message AllocateResponse {
+  Allocation allocation = 1;
+}
+
+message DeallocateRequest {
+  int64 allocation_id = 1;
+  string backend_ref = 2;
+}
+message DeallocateResponse {}
+
+message StatusRequest {
+  int64 allocation_id = 1;
+  string backend_ref = 2;
+}
+message StatusResponse {
+  AllocationStatus status = 1;
+}
+
+message WatchRequest {
+  int64 allocation_id = 1;
+  string backend_ref = 2;
+}
+
+// StatusUpdate mirrors fleet.StatusUpdate. error_message is empty unless the
+// plugin reports a terminal failure; the adapter translates a non-empty value
+// into a Go error for the manager.
+message StatusUpdate {
+  AllocationStatus status = 1;
+  string address = 2;
+  string error_message = 3;
+}
+
+message HealthCheckRequest {}
+message HealthCheckResponse {}
+
+message PingRequest {}
+message PingResponse {}

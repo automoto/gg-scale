@@ -1,8 +1,7 @@
 // Package build wires a concrete fleet.Backend from runtime configuration.
 // It lives outside the fleet package itself to avoid an import cycle:
 // fleet.Backend is consumed by every backend subpackage (docker, agones,
-// openstack, plugin), so the factory that imports them all sits one level
-// down.
+// plugin), so the factory that imports them all sits one level down.
 package build
 
 import (
@@ -12,6 +11,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	agonesbackend "github.com/ggscale/ggscale/internal/fleet/agones"
 	dockerbackend "github.com/ggscale/ggscale/internal/fleet/docker"
+	pluginbackend "github.com/ggscale/ggscale/internal/fleet/plugin"
 )
 
 // Config is the runtime input to New. Backend selects which subpackage is
@@ -56,11 +56,15 @@ func New(c Config) (fleet.Backend, error) {
 			FleetName:      c.AgonesFleet,
 			SelectorLabels: agonesbackend.ParseSelectorLabels(c.AgonesLabels),
 		}, c.AgonesKubecfg)
-	case "openstack":
-		return nil, fmt.Errorf("fleet: backend %q is planned for a later milestone", c.Backend)
 	default:
-		if strings.HasPrefix(c.Backend, "plugin:") {
-			return nil, fmt.Errorf("fleet: plugin backends ship in M4")
+		if name, ok := strings.CutPrefix(c.Backend, "plugin:"); ok {
+			if name == "" {
+				return nil, fmt.Errorf("fleet: plugin backend requires a name, e.g. plugin:ovh")
+			}
+			return pluginbackend.Launch(pluginbackend.LaunchConfig{
+				Dir:  c.PluginDir,
+				Name: name,
+			})
 		}
 		return nil, fmt.Errorf("fleet: unknown backend %q", c.Backend)
 	}
