@@ -7,6 +7,7 @@
 - Keep code simple and concise. Try not to do overly complex or clever code unless its needed.
 - Avoid verbose comments, only add comments where extra context is really needed.
 
+
 ## Testing Conventions
 
 ### TDD Workflow
@@ -17,7 +18,7 @@
 - Use testify "assert" https://pkg.go.dev/github.com/stretchr/testify/assert for test cases
 - Use table based tests where appropriate to keep our tests concise
 
-### Test-First Rules
+#### Test-First Rules
 - When I ask for a feature, write tests first
 - Tests should FAIL initially (no implementation exists)
 - Only after tests are written, implement minimal code to pass
