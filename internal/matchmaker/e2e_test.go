@@ -121,7 +121,7 @@ func TestE2EMatchmakerDeliversMatchReadyOverWebSocket(t *testing.T) {
 	assert.NotZero(t, payload.TicketID)
 
 	// fakeAllocator should have been called with the right tenant + region.
-	require.Equal(t, 1, alloc.called)
+	require.Equal(t, int64(1), alloc.Called())
 	require.Len(t, alloc.gotReqs, 1)
 	assert.Equal(t, tenantID, alloc.gotReqs[0].TenantID)
 	assert.Equal(t, projectID, alloc.gotReqs[0].ProjectID)

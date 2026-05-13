@@ -28,9 +28,12 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
 	_ "github.com/ggscale/ggscale/internal/mailer/smtp"
+	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/realtime"
+	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -119,18 +122,58 @@ func run() error {
 		defer func() { _ = fleetCloser.Close() }()
 	}
 
+	hub := realtime.NewHub()
+
+	var relayIssuer *relay.Issuer
+	if cfg.RelaySharedSecret != "" {
+		relayIssuer = relay.NewIssuer(cfg.RelaySharedSecret, cfg.RelayRealm, cfg.RelayCredTTL)
+		if cfg.RelayPublicIP != "" {
+			relayServer, rerr := relay.NewServer(relay.ServerConfig{
+				PublicIP: cfg.RelayPublicIP,
+				BindAddr: cfg.RelayBindAddr,
+				BindPort: cfg.RelayUDPPort,
+				Issuer:   relayIssuer,
+			})
+			if rerr != nil {
+				return fmt.Errorf("relay: %w", rerr)
+			}
+			defer func() { _ = relayServer.Close() }()
+			logger.Info("relay server listening", "addr", cfg.RelayBindAddr, "port", cfg.RelayUDPPort, "public_ip", cfg.RelayPublicIP)
+		} else {
+			logger.Warn("relay credentials issued but no UDP listener: RELAY_PUBLIC_IP unset")
+		}
+	}
+
+	mmQueue := matchmaker.NewPGQueue(appPool)
+	if fleetMgr != nil {
+		worker := matchmaker.NewWorker(mmQueue, fleetMgr, hub, matchmaker.WorkerConfig{
+			BucketSize: cfg.MatchmakerBucketSize,
+			Interval:   cfg.MatchmakerInterval,
+			Logger:     logger,
+		})
+		workerCtx, cancelWorker := context.WithCancel(ctx)
+		defer cancelWorker()
+		go worker.Run(workerCtx)
+	} else {
+		logger.Warn("matchmaker worker disabled: no fleet backend configured")
+	}
+
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:  "v1",
-		Commit:   commit,
-		Pool:     appPool,
-		Lookup:   tenant.NewSQLLookup(pool),
-		Limiter:  ratelimit.NewCacheLimiter(store),
-		Signer:   signer,
-		Mailer:   m,
-		MailFrom: cfg.MailFrom,
-		Cache:    store,
-		Registry: registry,
-		Fleet:    fleetMgr,
+		Version:              "v1",
+		Commit:               commit,
+		Pool:                 appPool,
+		Lookup:               tenant.NewSQLLookup(pool),
+		Limiter:              ratelimit.NewCacheLimiter(store),
+		Signer:               signer,
+		Mailer:               m,
+		MailFrom:             cfg.MailFrom,
+		Cache:                store,
+		Registry:             registry,
+		Fleet:                fleetMgr,
+		Hub:                  hub,
+		RealtimeMaxPerTenant: cfg.RealtimeMaxPerTenant,
+		Matchmaker:           mmQueue,
+		RelayIssuer:          relayIssuer,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,

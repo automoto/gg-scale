@@ -102,6 +102,43 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 	return nil
 }
 
+// ListenChannel acquires a dedicated connection, issues LISTEN <channel>,
+// and dispatches each notification's payload to fn. Returns nil on
+// ctx.Done() and a wrapped error on connection failure (the caller decides
+// whether to reconnect — typically a background loop with backoff).
+//
+// The underlying connection is force-closed on return so pgxpool evicts
+// it rather than returning a LISTEN-tainted conn to the shared pool. pgx
+// does not auto-issue UNLISTEN on Release, and a later Q()/BootstrapQ()
+// borrowing that conn would receive async NOTIFY frames mid-query.
+func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payload string)) error {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("listen acquire: %w", err)
+	}
+	defer func() {
+		// Force the pool to discard this conn rather than reuse it.
+		_ = conn.Conn().Close(context.Background())
+		conn.Release()
+	}()
+
+	// Postgres LISTEN does not accept parameterized identifiers; quote via
+	// pgx.Identifier so a future dynamic channel name can't be injected.
+	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+	for {
+		n, err := conn.Conn().WaitForNotification(ctx)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return fmt.Errorf("wait notification: %w", err)
+		}
+		fn(n.Payload)
+	}
+}
+
 // BootstrapQ runs fn inside a transaction before a tenant context exists.
 // Keep this for narrow bootstrap paths such as dashboard tenant creation;
 // tenant-scoped request handlers should use Q so RLS receives app.tenant_id.

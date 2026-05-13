@@ -52,7 +52,10 @@ type Config struct {
 	// accumulate in a (tenant, project, region, game_mode) bucket before
 	// the worker calls fleet.Manager.Allocate. Default 1.
 	MatchmakerBucketSize int
-	// MatchmakerInterval is the time between worker scans. Default 100ms.
+	// MatchmakerInterval is the fallback scan cadence for the worker.
+	// The hot path is Postgres LISTEN/NOTIFY, which wakes the worker in
+	// milliseconds; this ticker only catches tickets queued during a
+	// listener reconnect gap. Default 5s.
 	MatchmakerInterval time.Duration
 
 	// TURN relay tunables. The relay is disabled unless RelayPublicIP and
@@ -241,7 +244,7 @@ var declared = []varDecl{
 		c.MatchmakerBucketSize = n
 		return nil
 	}},
-	{name: "MATCHMAKER_INTERVAL", defval: "100ms", set: func(c *Config, v string) error {
+	{name: "MATCHMAKER_INTERVAL", defval: "5s", set: func(c *Config, v string) error {
 		d, err := time.ParseDuration(v)
 		if err != nil || d <= 0 {
 			return fmt.Errorf("MATCHMAKER_INTERVAL %q: must be a positive duration", v)
