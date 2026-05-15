@@ -120,9 +120,6 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (C
 }
 
 const getEndUserByEmail = `-- name: GetEndUserByEmail :one
--- Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
--- /v1/auth/login behaves identically to an unknown email — same dummy
--- bcrypt + invalid_credentials response.
 SELECT id, project_id, password_hash, email_verified_at
 FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -144,6 +141,9 @@ type GetEndUserByEmailRow struct {
 	EmailVerifiedAt pgtype.Timestamptz
 }
 
+// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+// /v1/auth/login behaves identically to an unknown email — same dummy
+// bcrypt + invalid_credentials response.
 func (q *Queries) GetEndUserByEmail(ctx context.Context, arg GetEndUserByEmailParams) (GetEndUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getEndUserByEmail, arg.ProjectID, arg.Email)
 	var i GetEndUserByEmailRow
@@ -230,8 +230,6 @@ func (q *Queries) GetEndUserVerificationState(ctx context.Context, arg GetEndUse
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
--- Joined to end_users so refresh fails for disabled / deleted accounts
--- even if the refresh token is still otherwise valid.
 SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at
 FROM sessions s
 JOIN end_users u ON u.id = s.end_user_id
@@ -248,6 +246,8 @@ type GetSessionByRefreshHashRow struct {
 	RevokedAt pgtype.Timestamptz
 }
 
+// Joined to end_users so refresh fails for disabled / deleted accounts
+// even if the refresh token is still otherwise valid.
 func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error) {
 	row := q.db.QueryRow(ctx, getSessionByRefreshHash, refreshHash)
 	var i GetSessionByRefreshHashRow

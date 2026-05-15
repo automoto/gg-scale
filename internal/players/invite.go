@@ -175,9 +175,7 @@ func (h *Handler) lookupPlayerInvite(ctx context.Context, projectID int64, code 
 		}
 		out.ProjectID = projectID
 		out.Email = row.Email
-		if row.ProjectName != nil {
-			out.ProjectName = *row.ProjectName
-		}
+		out.ProjectName = row.ProjectName
 		return nil
 	})
 	if err != nil {

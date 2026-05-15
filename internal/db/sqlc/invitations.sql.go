@@ -811,6 +811,48 @@ func (q *Queries) MarkPlayerVerified(ctx context.Context, id int64) error {
 	return err
 }
 
+const playerInviteLookup = `-- name: PlayerInviteLookup :one
+SELECT
+    (lookup.id)::bigint           AS id,
+    (lookup.tenant_id)::bigint    AS tenant_id,
+    (lookup.project_id)::bigint   AS project_id,
+    (lookup.email)::text          AS email,
+    (lookup.expires_at)::timestamptz AS expires_at,
+    (lookup.project_name)::text   AS project_name
+FROM player_invite_lookup($1)
+    AS lookup(id, tenant_id, project_id, email, expires_at, project_name)
+`
+
+type PlayerInviteLookupRow struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Email       string
+	ExpiresAt   pgtype.Timestamptz
+	ProjectName string
+}
+
+// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
+// page. Returns the tenant_id so the caller can SET app.tenant_id and
+// continue under normal RLS enforcement.
+//
+// The per-column casts give sqlc concrete types: it cannot introspect
+// SECURITY DEFINER table functions, so it would otherwise fall back to
+// interface{} for every column.
+func (q *Queries) PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error) {
+	row := q.db.QueryRow(ctx, playerInviteLookup, codeHash)
+	var i PlayerInviteLookupRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Email,
+		&i.ExpiresAt,
+		&i.ProjectName,
+	)
+	return i, err
+}
+
 const promoteDashboardUserToPlatformAdmin = `-- name: PromoteDashboardUserToPlatformAdmin :exec
 UPDATE dashboard_users
 SET is_platform_admin = true
@@ -901,35 +943,4 @@ func (q *Queries) SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVe
 		arg.ID,
 	)
 	return err
-}
-
-const playerInviteLookup = `-- name: PlayerInviteLookup :one
--- Privileged (SECURITY DEFINER) lookup used by the player invite-accept
--- page. Returns the tenant_id so the caller can SET app.tenant_id and
--- continue under normal RLS enforcement.
-SELECT id, tenant_id, project_id, email::text AS email, expires_at, project_name
-FROM player_invite_lookup($1)
-`
-
-type PlayerInviteLookupRow struct {
-	ID          int64
-	TenantID    int64
-	ProjectID   int64
-	Email       string
-	ExpiresAt   pgtype.Timestamptz
-	ProjectName *string
-}
-
-func (q *Queries) PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error) {
-	row := q.db.QueryRow(ctx, playerInviteLookup, codeHash)
-	var i PlayerInviteLookupRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ProjectID,
-		&i.Email,
-		&i.ExpiresAt,
-		&i.ProjectName,
-	)
-	return i, err
 }

@@ -67,6 +67,7 @@ type fakeStore struct {
 	mu          sync.Mutex
 	next        fleet.AllocationID
 	allocations map[fleet.AllocationID]*fleet.Allocation
+	events      []fleet.Event
 }
 
 func newFakeStore() *fakeStore {
@@ -134,6 +135,70 @@ func (s *fakeStore) Get(_ context.Context, id fleet.AllocationID) (*fleet.Alloca
 	}
 	clone := *a
 	return &clone, nil
+}
+
+func (s *fakeStore) List(_ context.Context, projectID int64, includeTerminal bool, limit, offset int) ([]*fleet.Allocation, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var matched []*fleet.Allocation
+	for _, a := range s.allocations {
+		if a.ProjectID != projectID {
+			continue
+		}
+		if !includeTerminal && a.Status.IsTerminal() {
+			continue
+		}
+		clone := *a
+		matched = append(matched, &clone)
+	}
+	total := int64(len(matched))
+	if offset >= len(matched) {
+		return nil, total, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], total, nil
+}
+
+func (s *fakeStore) AppendEvent(_ context.Context, id fleet.AllocationID, status fleet.Status, address, errMessage string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, fleet.Event{
+		ID:           int64(len(s.events) + 1),
+		AllocationID: id,
+		Status:       status,
+		Address:      address,
+		ErrMessage:   errMessage,
+	})
+	return nil
+}
+
+func (s *fakeStore) ListEvents(_ context.Context, id fleet.AllocationID, limit int) ([]fleet.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []fleet.Event
+	for i := len(s.events) - 1; i >= 0 && len(out) < limit; i-- {
+		if s.events[i].AllocationID == id {
+			out = append(out, s.events[i])
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeStore) BackendsForTenant(_ context.Context) ([]fleet.BackendStats, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := map[string]int64{}
+	for _, a := range s.allocations {
+		counts[a.Backend]++
+	}
+	var out []fleet.BackendStats
+	for name, c := range counts {
+		out = append(out, fleet.BackendStats{Name: name, AllocationCount: c})
+	}
+	return out, nil
 }
 
 func sampleReq() fleet.AllocationRequest {
@@ -251,6 +316,84 @@ func TestManager_Watch_pipes_backend_updates_to_caller(t *testing.T) {
 
 	got := drainStatuses(t, out)
 	assert.Equal(t, []fleet.Status{fleet.StatusAllocating, fleet.StatusReady}, got)
+}
+
+func TestManager_Allocate_appends_pending_and_ready_events(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{
+		name: "fake",
+		allocateImpl: func(_ int) (*fleet.Allocation, error) {
+			return &fleet.Allocation{BackendRef: "ref", Address: "1.2.3.4:1"}, nil
+		},
+	}
+	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	a, err := mgr.Allocate(context.Background(), sampleReq())
+	require.NoError(t, err)
+
+	events, err := mgr.ListEvents(context.Background(), a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	// Newest first.
+	assert.Equal(t, fleet.StatusReady, events[0].Status)
+	assert.Equal(t, "1.2.3.4:1", events[0].Address)
+	assert.Equal(t, fleet.StatusPending, events[1].Status)
+}
+
+func TestManager_Allocate_appends_failed_event_after_exhausting_retries(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{
+		name: "fake",
+		allocateImpl: func(_ int) (*fleet.Allocation, error) {
+			return nil, errors.New("backend down")
+		},
+	}
+	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Retries: 1, Clock: zeroClock})
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+	require.Error(t, err)
+
+	events, err := mgr.ListEvents(context.Background(), 1, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
+	assert.Equal(t, fleet.StatusFailed, events[0].Status)
+	assert.Contains(t, events[0].ErrMessage, "backend down")
+}
+
+func TestManager_List_skips_terminal_when_excluded(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{
+		name: "fake",
+		allocateImpl: func(_ int) (*fleet.Allocation, error) {
+			return &fleet.Allocation{BackendRef: "ref", Address: "1.2.3.4:1"}, nil
+		},
+	}
+	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	a, err := mgr.Allocate(context.Background(), sampleReq())
+	require.NoError(t, err)
+	require.NoError(t, mgr.Deallocate(context.Background(), a.ID))
+
+	excluded, total, err := mgr.List(context.Background(), 2, false, 10, 0)
+	require.NoError(t, err)
+	assert.Empty(t, excluded)
+	assert.Equal(t, int64(0), total)
+
+	included, total, err := mgr.List(context.Background(), 2, true, 10, 0)
+	require.NoError(t, err)
+	require.Len(t, included, 1)
+	assert.Equal(t, int64(1), total)
+}
+
+func TestManager_BackendsForTenant_returns_distinct_backends(t *testing.T) {
+	store := newFakeStore()
+	mgr := fleet.NewManager(store, &fakeBackend{name: "docker", allocateImpl: func(_ int) (*fleet.Allocation, error) {
+		return &fleet.Allocation{}, nil
+	}}, fleet.ManagerOptions{Clock: zeroClock})
+	_, _ = mgr.Allocate(context.Background(), sampleReq())
+	_, _ = mgr.Allocate(context.Background(), sampleReq())
+	stats, err := mgr.BackendsForTenant(context.Background())
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "docker", stats[0].Name)
+	assert.Equal(t, int64(2), stats[0].AllocationCount)
 }
 
 func zeroClock(_ int) time.Duration { return 0 }

@@ -173,6 +173,7 @@ type DashboardUser struct {
 	EmailVerificationExpiresAt  pgtype.Timestamptz
 	EmailVerificationAttempts   int32
 	EmailVerificationLastSentAt pgtype.Timestamptz
+	DisabledAt                  pgtype.Timestamptz
 }
 
 type EndUser struct {
@@ -204,6 +205,16 @@ type EndUserInvitation struct {
 	RevokedAt       pgtype.Timestamptz
 	InvitedByUserID int64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type FleetAllocationEvent struct {
+	ID           int64
+	TenantID     int64
+	AllocationID int64
+	Status       AllocationStatus
+	Address      string
+	ErrMessage   string
+	CreatedAt    pgtype.Timestamptz
 }
 
 // One directed edge per (tenant, from, to). Status transitions are managed via UPSERT in the handler: a re-request after rejection updates status pending; pending/accepted are idempotent; blocked is terminal. See migration 0012 for the contract.

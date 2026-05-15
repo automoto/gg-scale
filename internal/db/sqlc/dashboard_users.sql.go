@@ -36,6 +36,19 @@ func (q *Queries) CountDashboardUsers(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const countDashboardUsersForPlatformAdmin = `-- name: CountDashboardUsersForPlatformAdmin :one
+SELECT COUNT(*)::bigint
+FROM dashboard_users u
+WHERE ($1::text IS NULL OR u.email::text ILIKE '%' || $1::text || '%')
+`
+
+func (q *Queries) CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error) {
+	row := q.db.QueryRow(ctx, countDashboardUsersForPlatformAdmin, emailFilter)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createDashboardSession = `-- name: CreateDashboardSession :one
 INSERT INTO dashboard_sessions (
     dashboard_user_id, refresh_hash, csrf_secret, expires_at, ip, user_agent
@@ -207,10 +220,6 @@ func (q *Queries) GetDashboardMembership(ctx context.Context, arg GetDashboardMe
 }
 
 const getDashboardSessionByRefreshHash = `-- name: GetDashboardSessionByRefreshHash :one
--- Joined to dashboard_users so the session dies as soon as a platform
--- admin sets disabled_at, without needing a separate session-purge step
--- on every request path. requireSession maps ErrNoRows to a redirect to
--- /login, which is what we want for disabled accounts.
 SELECT
     s.id,
     s.dashboard_user_id,
@@ -237,6 +246,10 @@ type GetDashboardSessionByRefreshHashRow struct {
 	IsPlatformAdmin bool
 }
 
+// Joined to dashboard_users so the session dies as soon as a platform
+// admin sets disabled_at, without needing a separate session-purge step
+// on every request path. requireSession maps ErrNoRows to a redirect to
+// /login, which is what we want for disabled accounts.
 func (q *Queries) GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error) {
 	row := q.db.QueryRow(ctx, getDashboardSessionByRefreshHash, refreshHash)
 	var i GetDashboardSessionByRefreshHashRow
@@ -253,10 +266,43 @@ func (q *Queries) GetDashboardSessionByRefreshHash(ctx context.Context, refreshH
 	return i, err
 }
 
+const getDashboardUserAnyStatusByEmail = `-- name: GetDashboardUserAnyStatusByEmail :one
+SELECT
+    id,
+    email::text AS email,
+    password_hash,
+    is_platform_admin,
+    disabled_at
+FROM dashboard_users
+WHERE email = $1
+`
+
+type GetDashboardUserAnyStatusByEmailRow struct {
+	ID              int64
+	Email           string
+	PasswordHash    []byte
+	IsPlatformAdmin bool
+	DisabledAt      pgtype.Timestamptz
+}
+
+// Status-blind variant used ONLY by the invite-accept code path so we
+// can distinguish "no row" (truly new email — create user) from "row
+// exists but disabled" (refuse with errInviteForDisabledAccount).
+// DO NOT use this for authentication.
+func (q *Queries) GetDashboardUserAnyStatusByEmail(ctx context.Context, email string) (GetDashboardUserAnyStatusByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getDashboardUserAnyStatusByEmail, email)
+	var i GetDashboardUserAnyStatusByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.IsPlatformAdmin,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
 const getDashboardUserByEmail = `-- name: GetDashboardUserByEmail :one
--- Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
--- /v1/dashboard/login behaves identically to an unknown email — same
--- dummy bcrypt + invalid_credentials response.
 SELECT
     id,
     email::text AS email,
@@ -284,6 +330,9 @@ type GetDashboardUserByEmailRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+// /v1/dashboard/login behaves identically to an unknown email — same
+// dummy bcrypt + invalid_credentials response.
 func (q *Queries) GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getDashboardUserByEmail, email)
 	var i GetDashboardUserByEmailRow
@@ -473,6 +522,67 @@ func (q *Queries) ListDashboardTenantsForUser(ctx context.Context, dashboardUser
 	return items, nil
 }
 
+const listDashboardUsersForPlatformAdmin = `-- name: ListDashboardUsersForPlatformAdmin :many
+SELECT
+    u.id,
+    u.email::text AS email,
+    u.is_platform_admin,
+    u.disabled_at,
+    u.last_login_at,
+    u.created_at,
+    (SELECT COUNT(*)::bigint FROM dashboard_memberships m WHERE m.dashboard_user_id = u.id) AS tenant_count
+FROM dashboard_users u
+WHERE ($1::text IS NULL OR u.email::text ILIKE '%' || $1::text || '%')
+ORDER BY u.created_at DESC
+LIMIT $3 OFFSET $2
+`
+
+type ListDashboardUsersForPlatformAdminParams struct {
+	EmailFilter *string
+	Off         int32
+	Lim         int32
+}
+
+type ListDashboardUsersForPlatformAdminRow struct {
+	ID              int64
+	Email           string
+	IsPlatformAdmin bool
+	DisabledAt      pgtype.Timestamptz
+	LastLoginAt     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	TenantCount     int64
+}
+
+// Powers the /v1/dashboard/admin/users page. tenant_count is a
+// correlated subquery so users with zero memberships still appear.
+func (q *Queries) ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardUsersForPlatformAdmin, arg.EmailFilter, arg.Off, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDashboardUsersForPlatformAdminRow
+	for rows.Next() {
+		var i ListDashboardUsersForPlatformAdminRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.IsPlatformAdmin,
+			&i.DisabledAt,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+			&i.TenantCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDashboardUserVerified = `-- name: MarkDashboardUserVerified :exec
 UPDATE dashboard_users
 SET email_verified_at               = now(),
@@ -551,6 +661,39 @@ func (q *Queries) RevokeDashboardSession(ctx context.Context, id int64) error {
 	return err
 }
 
+const revokeOpenInvitationsByInviter = `-- name: RevokeOpenInvitationsByInviter :exec
+UPDATE dashboard_invitations
+SET revoked_at = now()
+WHERE invited_by_user_id = $1
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+`
+
+// Bulk-revoke the outgoing invitations a (now-disabled) user created.
+// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
+func (q *Queries) RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error {
+	_, err := q.db.Exec(ctx, revokeOpenInvitationsByInviter, invitedByUserID)
+	return err
+}
+
+const setDashboardUserDisabled = `-- name: SetDashboardUserDisabled :exec
+UPDATE dashboard_users
+SET disabled_at = $1::timestamptz
+WHERE id = $2
+`
+
+type SetDashboardUserDisabledParams struct {
+	DisabledAt pgtype.Timestamptz
+	ID         int64
+}
+
+// Nullable timestamptz so the same query handles disable (now()) and
+// enable (NULL).
+func (q *Queries) SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error {
+	_, err := q.db.Exec(ctx, setDashboardUserDisabled, arg.DisabledAt, arg.ID)
+	return err
+}
+
 const setDashboardUserVerificationCode = `-- name: SetDashboardUserVerificationCode :exec
 UPDATE dashboard_users
 SET email_verification_code_hash    = $1,
@@ -611,148 +754,5 @@ type UpdateDashboardPasswordParams struct {
 
 func (q *Queries) UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateDashboardPassword, arg.PasswordHash, arg.ID)
-	return err
-}
-
-const getDashboardUserAnyStatusByEmail = `-- name: GetDashboardUserAnyStatusByEmail :one
--- Status-blind variant used ONLY by the invite-accept code path so we
--- can distinguish "no row" (truly new email — create user) from "row
--- exists but disabled" (refuse with errInviteForDisabledAccount).
--- DO NOT use this for authentication.
-SELECT
-    id,
-    email::text AS email,
-    password_hash,
-    is_platform_admin,
-    disabled_at
-FROM dashboard_users
-WHERE email = $1
-`
-
-type GetDashboardUserAnyStatusByEmailRow struct {
-	ID              int64
-	Email           string
-	PasswordHash    []byte
-	IsPlatformAdmin bool
-	DisabledAt      pgtype.Timestamptz
-}
-
-func (q *Queries) GetDashboardUserAnyStatusByEmail(ctx context.Context, email string) (GetDashboardUserAnyStatusByEmailRow, error) {
-	row := q.db.QueryRow(ctx, getDashboardUserAnyStatusByEmail, email)
-	var i GetDashboardUserAnyStatusByEmailRow
-	err := row.Scan(
-		&i.ID,
-		&i.Email,
-		&i.PasswordHash,
-		&i.IsPlatformAdmin,
-		&i.DisabledAt,
-	)
-	return i, err
-}
-
-const listDashboardUsersForPlatformAdmin = `-- name: ListDashboardUsersForPlatformAdmin :many
--- Powers the /v1/dashboard/admin/users page. tenant_count is a
--- correlated subquery so users with zero memberships still appear.
-SELECT
-    u.id,
-    u.email::text AS email,
-    u.is_platform_admin,
-    u.disabled_at,
-    u.last_login_at,
-    u.created_at,
-    (SELECT COUNT(*)::bigint FROM dashboard_memberships m WHERE m.dashboard_user_id = u.id) AS tenant_count
-FROM dashboard_users u
-WHERE ($1::text IS NULL OR u.email::text ILIKE '%' || $1::text || '%')
-ORDER BY u.created_at DESC
-LIMIT $2 OFFSET $3
-`
-
-type ListDashboardUsersForPlatformAdminParams struct {
-	EmailFilter *string
-	Lim         int32
-	Off         int32
-}
-
-type ListDashboardUsersForPlatformAdminRow struct {
-	ID              int64
-	Email           string
-	IsPlatformAdmin bool
-	DisabledAt      pgtype.Timestamptz
-	LastLoginAt     pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	TenantCount     int64
-}
-
-func (q *Queries) ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardUsersForPlatformAdmin, arg.EmailFilter, arg.Lim, arg.Off)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListDashboardUsersForPlatformAdminRow
-	for rows.Next() {
-		var i ListDashboardUsersForPlatformAdminRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.IsPlatformAdmin,
-			&i.DisabledAt,
-			&i.LastLoginAt,
-			&i.CreatedAt,
-			&i.TenantCount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const countDashboardUsersForPlatformAdmin = `-- name: CountDashboardUsersForPlatformAdmin :one
-SELECT COUNT(*)::bigint
-FROM dashboard_users u
-WHERE ($1::text IS NULL OR u.email::text ILIKE '%' || $1::text || '%')
-`
-
-func (q *Queries) CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error) {
-	row := q.db.QueryRow(ctx, countDashboardUsersForPlatformAdmin, emailFilter)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const setDashboardUserDisabled = `-- name: SetDashboardUserDisabled :exec
--- Nullable timestamptz so the same query handles disable (now()) and
--- enable (NULL).
-UPDATE dashboard_users
-SET disabled_at = $1::timestamptz
-WHERE id = $2
-`
-
-type SetDashboardUserDisabledParams struct {
-	DisabledAt pgtype.Timestamptz
-	ID         int64
-}
-
-func (q *Queries) SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error {
-	_, err := q.db.Exec(ctx, setDashboardUserDisabled, arg.DisabledAt, arg.ID)
-	return err
-}
-
-const revokeOpenInvitationsByInviter = `-- name: RevokeOpenInvitationsByInviter :exec
--- Bulk-revoke the outgoing invitations a (now-disabled) user created.
--- Re-enabling does NOT un-revoke these; the platform admin can re-issue.
-UPDATE dashboard_invitations
-SET revoked_at = now()
-WHERE invited_by_user_id = $1
-  AND accepted_at IS NULL
-  AND revoked_at IS NULL
-`
-
-func (q *Queries) RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error {
-	_, err := q.db.Exec(ctx, revokeOpenInvitationsByInviter, invitedByUserID)
 	return err
 }

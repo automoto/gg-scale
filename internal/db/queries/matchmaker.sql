@@ -63,3 +63,18 @@ WHERE id = ANY($1::bigint[]);
 UPDATE matchmaking_tickets
 SET status = 'failed'
 WHERE id = ANY($1::bigint[]);
+
+-- name: ListMatchmakerBucketsForProject :many
+-- Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
+-- the current tenant's project, plus oldest queued ticket so operators can
+-- spot stuck buckets at a glance.
+SELECT region,
+       game_mode,
+       status::text AS status,
+       count(*)::bigint AS ticket_count,
+       min(created_at)::timestamptz AS oldest
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+GROUP BY region, game_mode, status
+ORDER BY region, game_mode, status;

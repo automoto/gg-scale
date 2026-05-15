@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAllocationsForProject = `-- name: CountAllocationsForProject :one
+SELECT count(*)::bigint
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND ($2::boolean OR released_at IS NULL)
+`
+
+type CountAllocationsForProjectParams struct {
+	ProjectID       int64
+	IncludeTerminal bool
+}
+
+func (q *Queries) CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllocationsForProject, arg.ProjectID, arg.IncludeTerminal)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createPendingAllocation = `-- name: CreatePendingAllocation :one
 INSERT INTO game_server_allocations (
     tenant_id, project_id, backend, region, status, metadata
@@ -89,6 +109,38 @@ func (q *Queries) GetAllocation(ctx context.Context, id int64) (GetAllocationRow
 	return i, err
 }
 
+const insertAllocationEvent = `-- name: InsertAllocationEvent :exec
+INSERT INTO fleet_allocation_events (
+    tenant_id, allocation_id, status, address, err_message
+)
+VALUES (
+    current_setting('app.tenant_id', true)::bigint,
+    $1,
+    $2::allocation_status,
+    $3,
+    $4
+)
+`
+
+type InsertAllocationEventParams struct {
+	AllocationID int64
+	Status       AllocationStatus
+	Address      string
+	ErrMessage   string
+}
+
+// Append an event for the watch stream. The trim trigger keeps history
+// bounded per allocation_id; callers can fire-and-forget.
+func (q *Queries) InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error {
+	_, err := q.db.Exec(ctx, insertAllocationEvent,
+		arg.AllocationID,
+		arg.Status,
+		arg.Address,
+		arg.ErrMessage,
+	)
+	return err
+}
+
 const listActiveAllocations = `-- name: ListActiveAllocations :many
 SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
@@ -129,6 +181,167 @@ func (q *Queries) ListActiveAllocations(ctx context.Context, arg ListActiveAlloc
 	var items []ListActiveAllocationsRow
 	for rows.Next() {
 		var i ListActiveAllocationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ProjectID,
+			&i.Backend,
+			&i.BackendRef,
+			&i.Region,
+			&i.Address,
+			&i.Status,
+			&i.Metadata,
+			&i.RequestedAt,
+			&i.ReadyAt,
+			&i.ReleasedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationBackendsForTenant = `-- name: ListAllocationBackendsForTenant :many
+SELECT backend, count(*)::bigint AS allocation_count
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+GROUP BY backend
+ORDER BY backend
+`
+
+type ListAllocationBackendsForTenantRow struct {
+	Backend         string
+	AllocationCount int64
+}
+
+// Distinct backends seen across this tenant's recent allocations. Drives
+// the backends-health page so operators see which backends actually serve
+// traffic, not just the one currently configured.
+func (q *Queries) ListAllocationBackendsForTenant(ctx context.Context) ([]ListAllocationBackendsForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationBackendsForTenant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllocationBackendsForTenantRow
+	for rows.Next() {
+		var i ListAllocationBackendsForTenantRow
+		if err := rows.Scan(&i.Backend, &i.AllocationCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationEvents = `-- name: ListAllocationEvents :many
+SELECT id, allocation_id, status::text AS status, address, err_message, created_at
+FROM fleet_allocation_events
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND allocation_id = $1
+ORDER BY id DESC
+LIMIT $2
+`
+
+type ListAllocationEventsParams struct {
+	AllocationID int64
+	Lim          int32
+}
+
+type ListAllocationEventsRow struct {
+	ID           int64
+	AllocationID int64
+	Status       string
+	Address      string
+	ErrMessage   string
+	CreatedAt    pgtype.Timestamptz
+}
+
+func (q *Queries) ListAllocationEvents(ctx context.Context, arg ListAllocationEventsParams) ([]ListAllocationEventsRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationEvents, arg.AllocationID, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllocationEventsRow
+	for rows.Next() {
+		var i ListAllocationEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AllocationID,
+			&i.Status,
+			&i.Address,
+			&i.ErrMessage,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllocationsForProject = `-- name: ListAllocationsForProject :many
+SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+       status::text AS status, metadata, requested_at, ready_at, released_at
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND ($2::boolean OR released_at IS NULL)
+ORDER BY id DESC
+LIMIT $4
+OFFSET $3
+`
+
+type ListAllocationsForProjectParams struct {
+	ProjectID       int64
+	IncludeTerminal bool
+	Off             int32
+	Lim             int32
+}
+
+type ListAllocationsForProjectRow struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Backend     string
+	BackendRef  string
+	Region      string
+	Address     string
+	Status      string
+	Metadata    []byte
+	RequestedAt pgtype.Timestamptz
+	ReadyAt     pgtype.Timestamptz
+	ReleasedAt  pgtype.Timestamptz
+}
+
+// Dashboard fleet list: optionally include terminal rows (shutdown/failed)
+// and paginate. include_terminal=false keeps the page focused on live
+// allocations; the UI toggles it via a query param.
+func (q *Queries) ListAllocationsForProject(ctx context.Context, arg ListAllocationsForProjectParams) ([]ListAllocationsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationsForProject,
+		arg.ProjectID,
+		arg.IncludeTerminal,
+		arg.Off,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllocationsForProjectRow
+	for rows.Next() {
+		var i ListAllocationsForProjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,

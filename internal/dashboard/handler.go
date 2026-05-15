@@ -15,6 +15,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -34,18 +35,40 @@ type Deps struct {
 	Config    Config
 	Bootstrap *Bootstrap
 	Mailer    mailer.Mailer
+	// Fleet is the manager the dashboard reads allocations from and
+	// invokes manual Allocate/Deallocate against. nil when no backend is
+	// configured — fleet pages render "not configured" in that case.
+	Fleet *fleet.Manager
+	// PluginInfo returns a snapshot of the running fleet plugin (if the
+	// backend is a plugin). nil when not a plugin backend; the admin
+	// plugins page renders "no plugin backend" in that case.
+	PluginInfo func() *PluginSnapshot
+}
+
+// PluginSnapshot is the read-only view the admin/plugins page renders.
+// Lives here so dashboard does not need to import internal/fleet/plugin.
+type PluginSnapshot struct {
+	Name              string
+	Version           string
+	ProtocolVersion   int
+	Pid               int
+	RestartCount      int
+	TotalRestartCount int
+	HealthErr         string
 }
 
 // Handler owns dashboard HTTP routes.
 type Handler struct {
-	pool      *db.Pool
-	cache     cache.Store
-	limiter   ratelimit.Limiter
-	reg       prometheus.Registerer
-	cfg       Config
-	bootstrap *Bootstrap
-	mailer    mailer.Mailer
-	now       func() time.Time
+	pool       *db.Pool
+	cache      cache.Store
+	limiter    ratelimit.Limiter
+	reg        prometheus.Registerer
+	cfg        Config
+	bootstrap  *Bootstrap
+	mailer     mailer.Mailer
+	fleet      *fleet.Manager
+	pluginInfo func() *PluginSnapshot
+	now        func() time.Time
 	// verifySigningKey signs the short-lived verify-pending cookie.
 	// Generated once at handler construction so each process has a fresh
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
@@ -74,6 +97,8 @@ func New(d Deps) http.Handler {
 		cfg:              d.Config,
 		bootstrap:        bootstrap,
 		mailer:           d.Mailer,
+		fleet:            d.Fleet,
+		pluginInfo:       d.PluginInfo,
 		now:              time.Now,
 		verifySigningKey: key,
 	}
@@ -125,6 +150,17 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/players/{playerID}/disable", h.playerToggleDisableHandler)
 			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
 			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
+			r.Get("/projects/{projectID}/fleet", h.fleetListPage)
+			r.Get("/projects/{projectID}/fleet/table", h.fleetListFragment)
+			r.Get("/projects/{projectID}/fleet/new", h.fleetNewPage)
+			r.Post("/projects/{projectID}/fleet", h.fleetAllocateHandler)
+			r.Get("/projects/{projectID}/fleet/{allocID}", h.fleetDetailPage)
+			r.Get("/projects/{projectID}/fleet/{allocID}/events", h.fleetDetailFragment)
+			r.Get("/projects/{projectID}/fleet/{allocID}/deallocate", h.fleetDeallocatePage)
+			r.Post("/projects/{projectID}/fleet/{allocID}/deallocate", h.fleetDeallocateHandler)
+			r.Get("/projects/{projectID}/matchmaker", h.matchmakerQueuePage)
+			r.Get("/projects/{projectID}/matchmaker/table", h.matchmakerQueueFragment)
+			r.Get("/fleet/backends", h.fleetBackendsPage)
 		})
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(h.requirePlatformAdmin)
@@ -134,6 +170,7 @@ func New(d Deps) http.Handler {
 			r.Get("/users", h.platformUsersPage)
 			r.Post("/users/{userID}/disable", h.disableDashboardUserHandler)
 			r.Post("/users/{userID}/enable", h.enableDashboardUserHandler)
+			r.Get("/plugins", h.platformPluginsPage)
 		})
 		r.Post("/logout", h.logout)
 	})

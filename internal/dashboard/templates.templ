@@ -256,6 +256,7 @@ templ ProjectsPage(vm ProjectsView) {
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleet") } role="button" class="secondary outline">Fleet</a>
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
 								</td>
 							</tr>
@@ -1002,6 +1003,378 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 				</div>
 			</form>
 		}
+	}
+}
+
+templ FleetPage(vm FleetView) {
+	@appLayout("Fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleet
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>Allocations</h1>
+				<p class="subtitle">
+					Project #{ stringFromInt(vm.ProjectID) } —
+					if vm.BackendName != "" {
+						backend <code>{ vm.BackendName }</code>
+					} else {
+						no backend configured
+					}
+				</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/fleet/backends") } role="button" class="secondary outline btn-inline">Backends</a>
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/matchmaker") } role="button" class="secondary outline btn-inline">Matchmaker</a>
+				if vm.Enabled {
+					<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ Manual allocate</a>
+				}
+			</div>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card">
+			<form method="get" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+				<label>
+					if vm.IncludeTerminal {
+						<input type="checkbox" name="all" value="1" checked/>
+					} else {
+						<input type="checkbox" name="all" value="1"/>
+					}
+					Include terminal (shutdown / failed)
+				</label>
+				<button type="submit" class="secondary outline btn-inline">Apply</button>
+			</form>
+		</section>
+		if !vm.Enabled {
+			<section class="card">
+				<div class="empty-state">
+					<p>No fleet backend configured.</p>
+					<p class="card-subtitle">Set <code>FLEET_BACKEND</code> (e.g. <code>docker</code>, <code>agones</code>, <code>plugin:ovh</code>) and restart.</p>
+				</div>
+			</section>
+		} else {
+			<section class="card"
+				hx-get={ fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/table?" + fleetQuery(vm) }
+				hx-trigger="every 5s"
+				hx-swap="innerHTML">
+				@FleetTableFragment(vm)
+			</section>
+		}
+	}
+}
+
+templ FleetTableFragment(vm FleetView) {
+	if len(vm.Allocations) == 0 {
+		<div class="empty-state"><p>No allocations.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Status</th>
+					<th>Region</th>
+					<th>Backend ref</th>
+					<th>Address</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, a := range vm.Allocations {
+					<tr>
+						<td>#{ stringFromInt(a.ID) }</td>
+						<td><span class="badge badge-role">{ a.Status }</span></td>
+						<td>{ a.Region }</td>
+						<td><code>{ a.BackendRef }</code></td>
+						<td><code>{ a.Address }</code></td>
+						<td class="actions-cell">
+							<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(a.ID)) } role="button" class="secondary outline">View</a>
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<p>Showing { stringFromInt(int64(len(vm.Allocations))) } of { stringFromInt(vm.Total) }.</p>
+	}
+}
+
+templ FleetDetailPage(vm FleetDetailView) {
+	@appLayout("Allocation — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			#{ stringFromInt(vm.Allocation.ID) }
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Allocation</p>
+				<h1>#{ stringFromInt(vm.Allocation.ID) }</h1>
+				<p class="subtitle">Backend <code>{ vm.Allocation.Backend }</code> — status <span class="badge badge-role">{ vm.Allocation.Status }</span></p>
+			</div>
+			if !allocationTerminal(vm.Allocation.Status) {
+				<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") } role="button" class="contrast outline btn-inline">Deallocate</a>
+			}
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card"
+			hx-get={ fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/events" }
+			hx-trigger="every 5s"
+			hx-swap="innerHTML">
+			@FleetDetailFragment(vm)
+		</section>
+	}
+}
+
+templ FleetDetailFragment(vm FleetDetailView) {
+	<dl class="kv">
+		<dt>ID</dt><dd>#{ stringFromInt(vm.Allocation.ID) }</dd>
+		<dt>Status</dt><dd><span class="badge badge-role">{ vm.Allocation.Status }</span></dd>
+		<dt>Backend</dt><dd><code>{ vm.Allocation.Backend }</code></dd>
+		<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
+		<dt>Region</dt><dd>{ vm.Allocation.Region }</dd>
+		<dt>Address</dt><dd><code>{ vm.Allocation.Address }</code></dd>
+	</dl>
+	<h2>Recent events</h2>
+	if len(vm.Events) == 0 {
+		<div class="empty-state"><p>No events yet.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr>
+					<th>When</th>
+					<th>Status</th>
+					<th>Address</th>
+					<th>Error</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range vm.Events {
+					<tr>
+						<td>{ timeString(e.CreatedAt) }</td>
+						<td><span class="badge">{ e.Status }</span></td>
+						<td><code>{ e.Address }</code></td>
+						<td>{ e.ErrMessage }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ NewFleetAllocationPage(vm NewAllocationView) {
+	@appLayout("Manual allocate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Manual allocate
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Manual allocate</p>
+				<h1>Manual allocate</h1>
+				<p class="subtitle">
+					Bypasses the matchmaker queue and asks
+					if vm.BackendName != "" {
+						<code>{ vm.BackendName }</code>
+					} else {
+						the fleet backend
+					}
+					to bring up a server now.
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			if !vm.Enabled {
+				<p role="alert">No fleet backend configured.</p>
+			} else {
+				if vm.Error != "" {
+					<p role="alert">{ vm.Error }</p>
+				}
+				<form method="post" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>
+						Region
+						<input name="region" value={ vm.Region } required placeholder="us-east-1" aria-describedby="region-error"/>
+						@fieldError(vm.FieldErrors, "region")
+					</label>
+					<label>
+						Game mode
+						<input name="game_mode" value={ vm.GameMode } placeholder="deathmatch"/>
+					</label>
+					<label>
+						Capacity
+						<input name="capacity" type="number" min="1" value={ capacityString(vm.Capacity) } required/>
+					</label>
+					<div class="form-actions">
+						<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+						<button type="submit" class="btn-inline">Allocate</button>
+					</div>
+				</form>
+			}
+		</section>
+	}
+}
+
+templ DeallocateConfirmPage(vm DeallocateConfirmView) {
+	@appLayout("Deallocate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> /
+			Deallocate
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Confirm</p>
+				<h1>Deallocate #{ stringFromInt(vm.Allocation.ID) }</h1>
+				<p class="subtitle">Type the allocation ID exactly to confirm — this stops the game server.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<dl class="kv">
+				<dt>Backend</dt><dd><code>{ vm.Allocation.Backend }</code></dd>
+				<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
+				<dt>Address</dt><dd><code>{ vm.Allocation.Address }</code></dd>
+			</dl>
+			<form method="post" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Type <code>{ stringFromInt(vm.Allocation.ID) }</code> to confirm
+					<input name="confirm_id" autocomplete="off" required/>
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="contrast btn-inline">Deallocate</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ FleetBackendsPage(vm FleetBackendsView) {
+	@appLayout("Backends — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Backends</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Backends</p>
+				<h1>Fleet backends</h1>
+				<p class="subtitle">
+					Configured backend:
+					if vm.ConfiguredName != "" {
+						<code>{ vm.ConfiguredName }</code>
+					} else {
+						none
+					}
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>Health</h2>
+			if !vm.Enabled {
+				<p>No backend configured.</p>
+			} else if vm.HealthErr != "" {
+				<p role="alert">Backend unreachable: { vm.HealthErr }</p>
+			} else {
+				<p class="flash-success">Backend healthy.</p>
+			}
+		</section>
+		<section class="card">
+			<h2>Allocations by backend</h2>
+			if len(vm.Backends) == 0 {
+				<div class="empty-state"><p>No allocations recorded for this tenant.</p></div>
+			} else {
+				<table class="data-table">
+					<thead><tr><th>Backend</th><th>Allocation count</th></tr></thead>
+					<tbody>
+						for _, b := range vm.Backends {
+							<tr><td><code>{ b.Name }</code></td><td>{ stringFromInt(b.AllocationCount) }</td></tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ MatchmakerQueuePage(vm MatchmakerQueueView) {
+	@appLayout("Matchmaker — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Matchmaker</p>
+				<h1>Queue depth</h1>
+				<p class="subtitle">Tickets grouped by region, game mode, and status — project #{ stringFromInt(vm.ProjectID) }.</p>
+			</div>
+		</div>
+		<section class="card"
+			hx-get={ "/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/matchmaker/table" }
+			hx-trigger="every 5s"
+			hx-swap="innerHTML">
+			@MatchmakerTableFragment(vm)
+		</section>
+	}
+}
+
+templ MatchmakerTableFragment(vm MatchmakerQueueView) {
+	if len(vm.Buckets) == 0 {
+		<div class="empty-state"><p>No tickets in flight.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr><th>Region</th><th>Game mode</th><th>Status</th><th>Tickets</th><th>Oldest</th></tr>
+			</thead>
+			<tbody>
+				for _, b := range vm.Buckets {
+					<tr>
+						<td>{ b.Region }</td>
+						<td>{ b.GameMode }</td>
+						<td><span class="badge">{ b.Status }</span></td>
+						<td>{ stringFromInt(b.Count) }</td>
+						<td>{ timeString(b.Oldest) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ PlatformPluginsPage(vm PlatformPluginsView) {
+	@appLayout("Plugins — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">Platform admin / Plugins</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Plugins</p>
+				<h1>Fleet plugin status</h1>
+				<p class="subtitle">Snapshot of the running fleet plugin subprocess.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Snapshot == nil {
+				<p>No plugin backend configured (FLEET_BACKEND is not <code>plugin:&lt;name&gt;</code>).</p>
+			} else {
+				<dl class="kv">
+					<dt>Name</dt><dd>{ vm.Snapshot.Name }</dd>
+					<dt>Version</dt><dd>{ vm.Snapshot.Version }</dd>
+					<dt>Protocol version</dt><dd>{ stringFromInt(int64(vm.Snapshot.ProtocolVersion)) }</dd>
+					<dt>PID</dt><dd>{ stringFromInt(int64(vm.Snapshot.Pid)) }</dd>
+					<dt>Consecutive restarts</dt><dd>{ stringFromInt(int64(vm.Snapshot.RestartCount)) }</dd>
+					<dt>Lifetime restarts</dt><dd>{ stringFromInt(int64(vm.Snapshot.TotalRestartCount)) }</dd>
+				</dl>
+				if vm.Snapshot.HealthErr != "" {
+					<p role="alert">Health probe failed: { vm.Snapshot.HealthErr }</p>
+				} else {
+					<p class="flash-success">Health probe OK.</p>
+				}
+			}
+		</section>
 	}
 }
 

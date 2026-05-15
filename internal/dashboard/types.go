@@ -265,8 +265,154 @@ type AcceptInviteView struct {
 	AcceptedAt  time.Time
 }
 
+// AllocationView is one row in the fleet list and the snapshot on the
+// allocation-detail page.
+type AllocationView struct {
+	ID         int64
+	ProjectID  int64
+	Backend    string
+	BackendRef string
+	Region     string
+	Address    string
+	Status     string
+}
+
+// EventView is one ring-buffer entry on the fleet detail timeline.
+type EventView struct {
+	ID         int64
+	Status     string
+	Address    string
+	ErrMessage string
+	CreatedAt  time.Time
+}
+
+// FleetView is the data rendered by the per-project fleet page.
+type FleetView struct {
+	UserEmail       string
+	CSRFToken       string
+	TenantID        int64
+	ProjectID       int64
+	BackendName     string
+	Enabled         bool
+	IncludeTerminal bool
+	Allocations     []AllocationView
+	Total           int64
+	Page            int
+	HasPrev         bool
+	HasNext         bool
+	Message         string
+}
+
+// FleetDetailView is the data rendered by the per-allocation page.
+type FleetDetailView struct {
+	UserEmail  string
+	CSRFToken  string
+	TenantID   int64
+	ProjectID  int64
+	Allocation AllocationView
+	Events     []EventView
+	Message    string
+}
+
+// NewAllocationView is the data rendered by the manual-allocate form.
+type NewAllocationView struct {
+	UserEmail   string
+	CSRFToken   string
+	TenantID    int64
+	ProjectID   int64
+	BackendName string
+	Enabled     bool
+	Region      string
+	GameMode    string
+	Capacity    int
+	Error       string
+	FieldErrors map[string]string
+}
+
+// DeallocateConfirmView is the data rendered by the type-the-ID confirm page.
+type DeallocateConfirmView struct {
+	UserEmail  string
+	CSRFToken  string
+	TenantID   int64
+	ProjectID  int64
+	Allocation AllocationView
+	Error      string
+}
+
+// BackendRowView is one backend row on the tenant backends page.
+type BackendRowView struct {
+	Name            string
+	AllocationCount int64
+}
+
+// FleetBackendsView is the data rendered by the tenant-scoped backends page.
+type FleetBackendsView struct {
+	UserEmail      string
+	CSRFToken      string
+	TenantID       int64
+	ConfiguredName string
+	Enabled        bool
+	HealthErr      string
+	Backends       []BackendRowView
+}
+
+// MatchmakerBucketView is one (region, game_mode, status) bucket row.
+type MatchmakerBucketView struct {
+	Region   string
+	GameMode string
+	Status   string
+	Count    int64
+	Oldest   time.Time
+}
+
+// MatchmakerQueueView is the data rendered by the matchmaker queue page.
+type MatchmakerQueueView struct {
+	UserEmail string
+	CSRFToken string
+	TenantID  int64
+	ProjectID int64
+	Buckets   []MatchmakerBucketView
+}
+
+// PlatformPluginsView is the data rendered by /admin/plugins.
+type PlatformPluginsView struct {
+	UserEmail string
+	CSRFToken string
+	Snapshot  *PluginSnapshot
+}
+
 func stringFromInt(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+// fleetBasePathTpl is the templ-side equivalent of fleetBasePath in
+// fleet.go; both must agree on the path shape.
+func fleetBasePathTpl(tenantID, projectID int64) string {
+	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+}
+
+// fleetQuery preserves the include-terminal toggle + current page across
+// the polled fragment URL so the timer-driven refresh doesn't reset filters.
+func fleetQuery(vm FleetView) string {
+	q := "page=" + strconv.Itoa(vm.Page)
+	if vm.IncludeTerminal {
+		q += "&all=1"
+	}
+	return q
+}
+
+func capacityString(c int) string {
+	if c <= 0 {
+		return "1"
+	}
+	return strconv.Itoa(c)
+}
+
+// allocationTerminal mirrors fleet.Status.IsTerminal for use in templates,
+// which only see the string form of status.
+func allocationTerminal(status string) bool {
+	return status == "shutdown" || status == "failed"
 }
 
 func timeString(t time.Time) string {

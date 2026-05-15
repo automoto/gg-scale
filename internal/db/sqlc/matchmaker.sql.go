@@ -107,6 +107,56 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 	return i, err
 }
 
+const listMatchmakerBucketsForProject = `-- name: ListMatchmakerBucketsForProject :many
+SELECT region,
+       game_mode,
+       status::text AS status,
+       count(*)::bigint AS ticket_count,
+       min(created_at)::timestamptz AS oldest
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+GROUP BY region, game_mode, status
+ORDER BY region, game_mode, status
+`
+
+type ListMatchmakerBucketsForProjectRow struct {
+	Region      string
+	GameMode    string
+	Status      string
+	TicketCount int64
+	Oldest      pgtype.Timestamptz
+}
+
+// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
+// the current tenant's project, plus oldest queued ticket so operators can
+// spot stuck buckets at a glance.
+func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listMatchmakerBucketsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMatchmakerBucketsForProjectRow
+	for rows.Next() {
+		var i ListMatchmakerBucketsForProjectRow
+		if err := rows.Scan(
+			&i.Region,
+			&i.GameMode,
+			&i.Status,
+			&i.TicketCount,
+			&i.Oldest,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReadyMatchmakerBuckets = `-- name: ListReadyMatchmakerBuckets :many
 SELECT tenant_id, project_id, region, game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets

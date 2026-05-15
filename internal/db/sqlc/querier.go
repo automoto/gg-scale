@@ -12,6 +12,7 @@ type Querier interface {
 	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
 	ClearDashboardVerificationCode(ctx context.Context, id int64) error
 	ClearEndUserVerificationCode(ctx context.Context, id int64) error
+	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
@@ -53,11 +54,25 @@ type Querier interface {
 	GetDashboardInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetDashboardInvitationByCodeHashRow, error)
 	GetDashboardInvitationByID(ctx context.Context, id int64) (GetDashboardInvitationByIDRow, error)
 	GetDashboardMembership(ctx context.Context, arg GetDashboardMembershipParams) (GetDashboardMembershipRow, error)
+	// Joined to dashboard_users so the session dies as soon as a platform
+	// admin sets disabled_at, without needing a separate session-purge step
+	// on every request path. requireSession maps ErrNoRows to a redirect to
+	// /login, which is what we want for disabled accounts.
 	GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error)
+	// Status-blind variant used ONLY by the invite-accept code path so we
+	// can distinguish "no row" (truly new email — create user) from "row
+	// exists but disabled" (refuse with errInviteForDisabledAccount).
+	// DO NOT use this for authentication.
 	GetDashboardUserAnyStatusByEmail(ctx context.Context, email string) (GetDashboardUserAnyStatusByEmailRow, error)
+	// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+	// /v1/dashboard/login behaves identically to an unknown email — same
+	// dummy bcrypt + invalid_credentials response.
 	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
 	GetDashboardUserByID(ctx context.Context, id int64) (GetDashboardUserByIDRow, error)
 	GetDashboardUserVerificationState(ctx context.Context, id int64) (GetDashboardUserVerificationStateRow, error)
+	// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+	// /v1/auth/login behaves identically to an unknown email — same dummy
+	// bcrypt + invalid_credentials response.
 	GetEndUserByEmail(ctx context.Context, arg GetEndUserByEmailParams) (GetEndUserByEmailRow, error)
 	// Privileged variant of GetEndUserByEmail used by the player UI before
 	// the tenant context is set; the caller already knows the project_id from
@@ -76,24 +91,44 @@ type Querier interface {
 	// Project → tenant lookup (privileged; used by the player UI which knows
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
+	// Joined to end_users so refresh fails for disabled / deleted accounts
+	// even if the refresh token is still otherwise valid.
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	IncrementDashboardVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementEndUserVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
+	// Append an event for the watch stream. The trim trigger keeps history
+	// bounded per allocation_id; callers can fire-and-forget.
+	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
+	// Distinct backends seen across this tenant's recent allocations. Drives
+	// the backends-health page so operators see which backends actually serve
+	// traffic, not just the one currently configured.
+	ListAllocationBackendsForTenant(ctx context.Context) ([]ListAllocationBackendsForTenantRow, error)
+	ListAllocationEvents(ctx context.Context, arg ListAllocationEventsParams) ([]ListAllocationEventsRow, error)
+	// Dashboard fleet list: optionally include terminal rows (shutdown/failed)
+	// and paginate. include_terminal=false keeps the page focused on live
+	// allocations; the UI toggles it via a query param.
+	ListAllocationsForProject(ctx context.Context, arg ListAllocationsForProjectParams) ([]ListAllocationsForProjectRow, error)
 	ListDashboardInvitationsForTenant(ctx context.Context, tenantID *int64) ([]ListDashboardInvitationsForTenantRow, error)
 	ListDashboardMembersForTenant(ctx context.Context, tenantID int64) ([]ListDashboardMembersForTenantRow, error)
 	ListDashboardTenantsForPlatformAdmin(ctx context.Context) ([]ListDashboardTenantsForPlatformAdminRow, error)
 	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
+	// Powers the /v1/dashboard/admin/users page. tenant_count is a
+	// correlated subquery so users with zero memberships still appear.
 	ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error)
 	ListEndUserInvitationsForProject(ctx context.Context, projectID int64) ([]ListEndUserInvitationsForProjectRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
+	// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
+	// the current tenant's project, plus oldest queued ticket so operators can
+	// spot stuck buckets at a glance.
+	ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error)
 	ListPlatformAdminInvitations(ctx context.Context) ([]ListPlatformAdminInvitationsRow, error)
 	ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsRow, error)
 	// Dashboard-side player management queries. Privileged: the dashboard
@@ -112,13 +147,17 @@ type Querier interface {
 	MarkMatchmakerFailed(ctx context.Context, dollar_1 []int64) error
 	MarkMatchmakerMatched(ctx context.Context, arg MarkMatchmakerMatchedParams) error
 	MarkPlayerVerified(ctx context.Context, id int64) error
-	PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error)
-	PromoteDashboardUserToPlatformAdmin(ctx context.Context, id int64) error
-	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 	// page. Returns the tenant_id so the caller can SET app.tenant_id and
 	// continue under normal RLS enforcement.
+	//
+	// The per-column casts give sqlc concrete types: it cannot introspect
+	// SECURITY DEFINER table functions, so it would otherwise fall back to
+	// interface{} for every column.
 	PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error)
+	PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error)
+	PromoteDashboardUserToPlatformAdmin(ctx context.Context, id int64) error
+	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
 	// Optimistic concurrency variant — only updates if the row's current
 	// version matches expected. RETURNING NULL row on mismatch.
@@ -134,13 +173,17 @@ type Querier interface {
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
 	RevokeDashboardInvitation(ctx context.Context, id int64) error
-	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
 	RevokeDashboardSession(ctx context.Context, id int64) error
 	RevokeEndUserInvitation(ctx context.Context, id int64) error
+	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
+	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
+	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
 	RevokeSession(ctx context.Context, id int64) error
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
+	// Nullable timestamptz so the same query handles disable (now()) and
+	// enable (NULL).
 	SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error
 	SetDashboardUserVerificationCode(ctx context.Context, arg SetDashboardUserVerificationCodeParams) error
 	SetEndUserVerificationCode(ctx context.Context, arg SetEndUserVerificationCodeParams) error

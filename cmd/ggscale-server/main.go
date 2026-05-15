@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
 	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
+	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
@@ -122,6 +123,7 @@ func run() error {
 	if fleetCloser != nil {
 		defer func() { _ = fleetCloser.Close() }()
 	}
+	pluginInfo := pluginInfoFromCloser(ctx, fleetMgr, fleetCloser)
 
 	hub := realtime.NewHub()
 
@@ -185,7 +187,8 @@ func run() error {
 			Mount:        cfg.PlayersEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,
 		},
-		DashboardBootstrap: dashboardBootstrap,
+		DashboardBootstrap:  dashboardBootstrap,
+		DashboardPluginInfo: pluginInfo,
 	})
 
 	srv := &http.Server{
@@ -258,6 +261,37 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		backend,
 		fleet.ManagerOptions{Retries: 3},
 	), closer, nil
+}
+
+// pluginInfoFromCloser returns a snapshot closure for the dashboard's
+// admin/plugins page when the fleet backend is a plugin supervisor. Returns
+// nil for non-plugin backends (docker, agones), in which case the page
+// renders "no plugin backend configured".
+func pluginInfoFromCloser(ctx context.Context, mgr *fleet.Manager, closer io.Closer) func() *dashboard.PluginSnapshot {
+	sup, ok := closer.(*fleetplugin.Supervisor)
+	if !ok {
+		return nil
+	}
+	return func() *dashboard.PluginSnapshot {
+		snap := &dashboard.PluginSnapshot{
+			Pid:               sup.Pid(),
+			RestartCount:      sup.RestartCount(),
+			TotalRestartCount: sup.TotalRestartCount(),
+		}
+		if mf := sup.Manifest(); mf != nil {
+			snap.Name = mf.Name
+			snap.Version = mf.Version
+			snap.ProtocolVersion = mf.ProtocolVersion
+		}
+		if mgr != nil {
+			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if err := mgr.Backend().HealthCheck(probeCtx); err != nil {
+				snap.HealthErr = err.Error()
+			}
+		}
+		return snap
+	}
 }
 
 func newLogger(level string) *slog.Logger {

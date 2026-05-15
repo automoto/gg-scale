@@ -206,6 +206,17 @@ func (s *Supervisor) Pid() int {
 	return s.current.Pid()
 }
 
+// Manifest returns the parsed manifest from the live plugin, or nil if no
+// plugin is live or no sidecar was found.
+func (s *Supervisor) Manifest() *Manifest {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.current == nil {
+		return nil
+	}
+	return s.current.Manifest()
+}
+
 // RestartCount is the number of consecutive failed lifecycles since the
 // last healthy Ping; reset on every successful probe.
 func (s *Supervisor) RestartCount() int {

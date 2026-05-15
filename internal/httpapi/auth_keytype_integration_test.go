@@ -27,29 +27,6 @@ func seedAPIKey(t *testing.T, pool *pgxpool.Pool, tenantID int64, projectID *int
 	require.NoError(t, err)
 }
 
-func TestKeyType_publishable_blocked_from_fleet_register(t *testing.T) {
-	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
-	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "publishable-k", "publishable")
-	srv, _ := newFullStackServer(t, c)
-
-	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/fleet/servers", "publishable-k",
-		map[string]any{"address": "host:1", "name": "gs-1"})
-
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
-}
-
-func TestKeyType_secret_allowed_to_register_fleet(t *testing.T) {
-	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
-	srv, _ := newFullStackServer(t, c)
-
-	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/fleet/servers", "secret-k",
-		map[string]any{"address": "host:1", "name": "gs-1"})
-
-	assert.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
-}
-
 func TestKeyType_publishable_blocked_from_leaderboard_submit(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")

@@ -41,3 +41,6 @@ ALTER TABLE game_server_allocations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY game_server_allocations_isolation ON game_server_allocations
     FOR ALL
     USING (tenant_id = current_setting('app.tenant_id', true)::bigint);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON game_server_allocations TO ggscale_app;
+GRANT USAGE, SELECT ON SEQUENCE game_server_allocations_id_seq TO ggscale_app;

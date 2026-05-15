@@ -37,3 +37,6 @@ ALTER TABLE matchmaking_tickets ENABLE ROW LEVEL SECURITY;
 CREATE POLICY matchmaking_tickets_isolation ON matchmaking_tickets
     FOR ALL
     USING (tenant_id = current_setting('app.tenant_id', true)::bigint);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON matchmaking_tickets TO ggscale_app;
+GRANT USAGE, SELECT ON SEQUENCE matchmaking_tickets_id_seq TO ggscale_app;

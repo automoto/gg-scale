@@ -68,6 +68,10 @@ type Deps struct {
 
 	Dashboard          dashboard.Config
 	DashboardBootstrap *dashboard.Bootstrap
+	// DashboardPluginInfo is the closure the admin/plugins page calls to
+	// snapshot the running fleet plugin. nil when no plugin backend is
+	// configured — the page renders "no plugin backend" in that case.
+	DashboardPluginInfo func() *dashboard.PluginSnapshot
 
 	// Players controls whether the player-facing /v1/players/p/{projectID}/
 	// site is mounted.
@@ -124,13 +128,15 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/healthz", healthzHandler(d))
 		if d.Dashboard.Enabled() {
 			r.Mount("/dashboard", dashboard.New(dashboard.Deps{
-				Pool:      d.Pool,
-				Cache:     d.Cache,
-				Limiter:   d.Limiter,
-				Registry:  reg,
-				Config:    d.Dashboard,
-				Bootstrap: d.DashboardBootstrap,
-				Mailer:    d.Mailer,
+				Pool:       d.Pool,
+				Cache:      d.Cache,
+				Limiter:    d.Limiter,
+				Registry:   reg,
+				Config:     d.Dashboard,
+				Bootstrap:  d.DashboardBootstrap,
+				Mailer:     d.Mailer,
+				Fleet:      d.Fleet,
+				PluginInfo: d.DashboardPluginInfo,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {

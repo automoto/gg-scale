@@ -307,5 +307,16 @@ WHERE id = $1;
 -- Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 -- page. Returns the tenant_id so the caller can SET app.tenant_id and
 -- continue under normal RLS enforcement.
-SELECT id, tenant_id, project_id, email::text AS email, expires_at, project_name
-FROM player_invite_lookup(sqlc.arg(code_hash));
+--
+-- The per-column casts give sqlc concrete types: it cannot introspect
+-- SECURITY DEFINER table functions, so it would otherwise fall back to
+-- interface{} for every column.
+SELECT
+    (lookup.id)::bigint           AS id,
+    (lookup.tenant_id)::bigint    AS tenant_id,
+    (lookup.project_id)::bigint   AS project_id,
+    (lookup.email)::text          AS email,
+    (lookup.expires_at)::timestamptz AS expires_at,
+    (lookup.project_name)::text   AS project_name
+FROM player_invite_lookup(sqlc.arg(code_hash))
+    AS lookup(id, tenant_id, project_id, email, expires_at, project_name);
