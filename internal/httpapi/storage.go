@@ -14,6 +14,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const storageListMaxLimit = 100
@@ -98,7 +99,7 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "storage put: tx", err)
+			webutil.InternalError(w, "storage put: tx", err)
 			return
 		}
 
@@ -140,7 +141,7 @@ func storageGetHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "storage get: tx", err)
+			webutil.InternalError(w, "storage get: tx", err)
 			return
 		}
 		writeJSON(w, resp)
@@ -165,7 +166,7 @@ func storageDeleteHandler(d Deps) http.HandlerFunc {
 			})
 		})
 		if err != nil {
-			internalError(w, "storage delete: tx", err)
+			webutil.InternalError(w, "storage delete: tx", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -207,7 +208,7 @@ func storageListHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			internalError(w, "storage list: tx", err)
+			webutil.InternalError(w, "storage list: tx", err)
 			return
 		}
 		var next string

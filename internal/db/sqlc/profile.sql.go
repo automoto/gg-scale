@@ -44,10 +44,13 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 
 const updateProfileEmail = `-- name: UpdateProfileEmail :exec
 UPDATE end_users
-SET email                          = $2,
-    email_verified_at              = NULL,
-    email_verification_hash        = $3,
-    email_verification_expires_at  = $4
+SET email                           = $2,
+    email_verified_at               = NULL,
+    email_verification_code_hash    = $3,
+    email_verification_salt         = $4,
+    email_verification_expires_at   = $5,
+    email_verification_attempts     = 0,
+    email_verification_last_sent_at = now()
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
@@ -56,7 +59,8 @@ WHERE id = $1
 type UpdateProfileEmailParams struct {
 	ID                         int64
 	Email                      *string
-	EmailVerificationHash      []byte
+	EmailVerificationCodeHash  []byte
+	EmailVerificationSalt      []byte
 	EmailVerificationExpiresAt pgtype.Timestamptz
 }
 
@@ -67,7 +71,8 @@ func (q *Queries) UpdateProfileEmail(ctx context.Context, arg UpdateProfileEmail
 	_, err := q.db.Exec(ctx, updateProfileEmail,
 		arg.ID,
 		arg.Email,
-		arg.EmailVerificationHash,
+		arg.EmailVerificationCodeHash,
+		arg.EmailVerificationSalt,
 		arg.EmailVerificationExpiresAt,
 	)
 	return err

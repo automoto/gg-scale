@@ -335,8 +335,13 @@ func seedDashboardUser(t *testing.T, c *cluster, email, password string, platfor
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	require.NoError(t, err)
 	var id int64
+	// Seeded test users are pre-verified — the migration backfill only
+	// covers rows that existed at migration time, but the integration
+	// suite inserts users after that. Without this, login redirects to
+	// /verify and home-page CSRF lookups break.
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`INSERT INTO dashboard_users (email, password_hash, is_platform_admin) VALUES ($1, $2, $3) RETURNING id`,
+		`INSERT INTO dashboard_users (email, password_hash, is_platform_admin, email_verified_at)
+		 VALUES ($1, $2, $3, now()) RETURNING id`,
 		email, hash, platformAdmin).Scan(&id))
 	return id
 }

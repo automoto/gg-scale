@@ -12,6 +12,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const (
@@ -34,7 +35,7 @@ func (h *Handler) setupTokenPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
 		return
 	}
-	render(r, w, SetupTokenPage(SetupTokenView{TokenFilePath: h.bootstrap.TokenFilePath()}))
+	webutil.Render(r, w, SetupTokenPage(SetupTokenView{TokenFilePath: h.bootstrap.TokenFilePath()}))
 }
 
 func (h *Handler) verifySetupToken(w http.ResponseWriter, r *http.Request) {
@@ -42,23 +43,24 @@ func (h *Handler) verifySetupToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
 		return
 	}
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	token := r.Form.Get("bootstrap_token")
 	if !h.bootstrap.tokenMatches(token) {
 		w.WriteHeader(http.StatusUnauthorized)
-		render(r, w, SetupTokenPage(SetupTokenView{
+		webutil.Render(r, w, SetupTokenPage(SetupTokenView{
 			TokenFilePath: h.bootstrap.TokenFilePath(),
 			FieldErrors:   map[string]string{"bootstrap_token": "Invalid bootstrap token"},
 		}))
+
 		return
 	}
-	render(r, w, SetupAdminPage(SetupAdminView{Token: token}))
+	webutil.Render(r, w, SetupAdminPage(SetupAdminView{Token: token}))
 }
 
 func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	in := setupInput{
@@ -74,10 +76,11 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, errInvalidCredentials):
 		w.WriteHeader(http.StatusUnauthorized)
-		render(r, w, SetupTokenPage(SetupTokenView{
+		webutil.Render(r, w, SetupTokenPage(SetupTokenView{
 			TokenFilePath: h.bootstrap.TokenFilePath(),
 			Error:         "Bootstrap token no longer valid. Please re-enter it.",
 		}))
+
 	case errors.Is(err, errBootstrapUnavailable):
 		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
 	case errors.Is(err, errInvalidSignup):
@@ -89,23 +92,34 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 			view.FieldErrors["password"] = "Password must be at least 12 characters"
 		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		render(r, w, SetupAdminPage(view))
+		webutil.Render(r, w, SetupAdminPage(view))
 	default:
 		http.Error(w, "Setup failed", http.StatusInternalServerError)
 	}
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
-	render(r, w, LoginPage(LoginView{}))
+	webutil.Render(r, w, LoginPage(LoginView{}))
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	email := normalizeEmail(r.Form.Get("email"))
 	password := r.Form.Get("password")
 	user, err := h.authenticate(r, email, password)
+	if errors.Is(err, errVerifyRequired) {
+		// Password is correct but email isn't verified: mint a fresh code
+		// and bounce them to the verify page instead of failing.
+		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
+			http.Error(w, "verification start failed", http.StatusInternalServerError)
+			return
+		}
+		h.setVerifyPendingCookie(w, verifyPendingPayload{UserID: user.ID, Email: user.Email})
+		htmxRedirect(w, r, "/v1/dashboard/verify")
+		return
+	}
 	if err != nil {
 		status := http.StatusUnauthorized
 		msg := "Invalid email or password"
@@ -114,7 +128,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			msg = "Account is temporarily locked"
 		}
 		w.WriteHeader(status)
-		render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
+		webutil.Render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
 		return
 	}
 	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
@@ -206,8 +220,13 @@ func (h *Handler) authenticate(r *http.Request, email, password string) (dashboa
 	}); err != nil {
 		return dashboardUser{}, err
 	}
+	if !row.EmailVerifiedAt.Valid {
+		return dashboardUser{ID: row.ID, Email: row.Email, IsPlatformAdmin: row.IsPlatformAdmin}, errVerifyRequired
+	}
 	return dashboardUser{ID: row.ID, Email: row.Email, IsPlatformAdmin: row.IsPlatformAdmin}, nil
 }
+
+var errVerifyRequired = errors.New("dashboard: verify required")
 
 func (h *Handler) recordLoginFailure(r *http.Request, row sqlcgen.GetDashboardUserByEmailRow) error {
 	failures := row.LoginFailures + 1

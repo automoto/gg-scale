@@ -10,10 +10,13 @@ WHERE id = $1
 -- enumerated server-side may change. PATCHing email re-triggers the
 -- verify flow (handler clears email_verified_at).
 UPDATE end_users
-SET email                          = $2,
-    email_verified_at              = NULL,
-    email_verification_hash        = $3,
-    email_verification_expires_at  = $4
+SET email                           = $2,
+    email_verified_at               = NULL,
+    email_verification_code_hash    = $3,
+    email_verification_salt         = $4,
+    email_verification_expires_at   = $5,
+    email_verification_attempts     = 0,
+    email_verification_last_sent_at = now()
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL;

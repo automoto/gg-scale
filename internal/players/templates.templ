@@ -1,0 +1,152 @@
+package players
+
+import "strconv"
+
+func pid(n int64) string { return strconv.FormatInt(n, 10) }
+
+templ playerLayout(title string) {
+	<!doctype html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="color-scheme" content="light dark"/>
+			<title>{ title }</title>
+			<style>
+				body{font-family:system-ui,-apple-system,sans-serif;max-width:24rem;margin:3rem auto;padding:0 1rem;color:#222}
+				h1{font-size:1.5rem;margin-bottom:.25rem}
+				form{display:flex;flex-direction:column;gap:.75rem;margin-top:1.5rem}
+				input{padding:.5rem;font-size:1rem;border:1px solid #ccc;border-radius:.25rem}
+				button{padding:.5rem 1rem;font-size:1rem;background:#0a7;color:#fff;border:0;border-radius:.25rem;cursor:pointer}
+				button.secondary{background:transparent;color:#0a7;border:1px solid #0a7}
+				.error{color:#a00;background:#fee;padding:.5rem;border-radius:.25rem}
+				.flash{color:#070;background:#efe;padding:.5rem;border-radius:.25rem}
+				.subtitle{color:#666;margin-bottom:1rem}
+				code{background:#eee;padding:.1rem .3rem;border-radius:.2rem}
+				a{color:#0a7}
+			</style>
+		</head>
+		<body>
+			{ children... }
+		</body>
+	</html>
+}
+
+type LoginView struct {
+	ProjectID int64
+	Email     string
+	Error     string
+}
+
+templ LoginPage(vm LoginView) {
+	@playerLayout("Sign in") {
+		<h1>Sign in</h1>
+		<p class="subtitle">Sign in to play.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/login") }>
+			<label>Email
+				<input name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			</label>
+			<label>Password
+				<input name="password" type="password" autocomplete="current-password" required/>
+			</label>
+			<button type="submit">Sign in</button>
+		</form>
+		<p><a href={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/signup") }>Create an account</a></p>
+	}
+}
+
+type SignupView struct {
+	ProjectID   int64
+	Email       string
+	Error       string
+	FieldErrors map[string]string
+}
+
+templ SignupPage(vm SignupView) {
+	@playerLayout("Sign up") {
+		<h1>Create an account</h1>
+		<p class="subtitle">We'll send a 6-digit code to verify your email.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/signup") }>
+			<label>Email
+				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
+				if msg, ok := vm.FieldErrors["email"]; ok {
+					<small class="error">{ msg }</small>
+				}
+			</label>
+			<label>Password (≥ 8 chars)
+				<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
+				if msg, ok := vm.FieldErrors["password"]; ok {
+					<small class="error">{ msg }</small>
+				}
+			</label>
+			<button type="submit">Create account</button>
+		</form>
+		<p><a href={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/login") }>I already have an account</a></p>
+	}
+}
+
+type VerifyView struct {
+	ProjectID int64
+	Email     string
+	Error     string
+}
+
+templ VerifyPage(vm VerifyView) {
+	@playerLayout("Verify email") {
+		<h1>Verify your email</h1>
+		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/verify") }>
+			<label>Verification code
+				<input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus/>
+			</label>
+			<button type="submit">Verify</button>
+		</form>
+	}
+}
+
+type AccountView struct {
+	ProjectID int64
+	Email     string
+}
+
+templ InviteAcceptPage(vm InviteAcceptView) {
+	@playerLayout("Accept invite") {
+		<h1>Accept invite</h1>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		} else {
+			<p class="subtitle">You've been invited to <strong>{ vm.ProjectName }</strong>.</p>
+			<p>Email: <code>{ vm.Email }</code></p>
+			<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/invite/accept") }>
+				<input type="hidden" name="code" value={ vm.Code }/>
+				<label>Set a password (≥ 8 chars)
+					<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
+					if msg, ok := vm.FieldErrors["password"]; ok {
+						<small class="error">{ msg }</small>
+					}
+				</label>
+				<button type="submit">Accept invite</button>
+			</form>
+		}
+	}
+}
+
+templ AccountPage(vm AccountView) {
+	@playerLayout("Account") {
+		<h1>Your account</h1>
+		<p class="subtitle">Welcome back, <code>{ vm.Email }</code>.</p>
+		<p>Friends, leaderboards, and account-linking land here in a future release.</p>
+		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/logout") }>
+			<button class="secondary" type="submit">Sign out</button>
+		</form>
+	}
+}

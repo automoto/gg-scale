@@ -31,6 +31,7 @@ import (
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
@@ -176,6 +177,12 @@ func run() error {
 		RelayIssuer:          relayIssuer,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,
+			CookieSecure: cfg.DashboardCookieSecure,
+			BaseURL:      cfg.DashboardBaseURL,
+			MailFrom:     cfg.MailFrom,
+		},
+		Players: players.Config{
+			Mount:        cfg.PlayersEnabled,
 			CookieSecure: cfg.DashboardCookieSecure,
 		},
 		DashboardBootstrap: dashboardBootstrap,

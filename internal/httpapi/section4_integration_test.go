@@ -22,7 +22,6 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -46,7 +45,6 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 		Signer:  signer,
 		Mailer:  rec,
 		Cache:   c.cache,
-		Fleet:   fleet.NewRegistry(30 * time.Second),
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -117,11 +115,11 @@ func anonymousLoginWithID(t *testing.T, baseURL, apiKey string) (string, int64) 
 
 func extractVerifyToken(t *testing.T, body string) string {
 	t.Helper()
-	const marker = "valid 24h):\n\n"
+	const marker = "code is "
 	i := strings.Index(body, marker)
 	require.GreaterOrEqual(t, i, 0, "verify body shape changed: %q", body)
 	rest := body[i+len(marker):]
-	end := strings.Index(rest, "\n")
+	end := strings.IndexAny(rest, " \n")
 	require.Greater(t, end, 0)
 	return rest[:end]
 }
@@ -140,7 +138,7 @@ func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 	verifyToken := extractVerifyToken(t, rec.Sent[0].Body)
 
 	resp, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/verify", "k",
-		map[string]string{"token": verifyToken})
+		map[string]string{"email": "alice@example.com", "code": verifyToken})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",
@@ -195,7 +193,7 @@ func TestLogin_with_wrong_password_returns_401(t *testing.T) {
 		map[string]string{"email": "bob@example.com", "password": "rightpass1"})
 	verifyToken := extractVerifyToken(t, rec.Sent[0].Body)
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/verify", "k",
-		map[string]string{"token": verifyToken})
+		map[string]string{"email": "bob@example.com", "code": verifyToken})
 
 	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",
 		map[string]string{"email": "bob@example.com", "password": "wrongpass"})

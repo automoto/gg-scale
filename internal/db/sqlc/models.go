@@ -124,6 +124,19 @@ type AuditLog struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type DashboardInvitation struct {
+	ID              int64
+	Email           string
+	TenantID        *int64
+	Role            string
+	CodeHash        []byte
+	ExpiresAt       pgtype.Timestamptz
+	AcceptedAt      pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+	InvitedByUserID int64
+	CreatedAt       pgtype.Timestamptz
+}
+
 type DashboardMembership struct {
 	ID              int64
 	DashboardUserID int64
@@ -146,28 +159,51 @@ type DashboardSession struct {
 }
 
 type DashboardUser struct {
-	ID              int64
-	Email           string
-	PasswordHash    []byte
-	IsPlatformAdmin bool
-	LoginFailures   int32
-	LockedUntil     pgtype.Timestamptz
-	LastLoginAt     pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
+	ID                          int64
+	Email                       string
+	PasswordHash                []byte
+	IsPlatformAdmin             bool
+	LoginFailures               int32
+	LockedUntil                 pgtype.Timestamptz
+	LastLoginAt                 pgtype.Timestamptz
+	CreatedAt                   pgtype.Timestamptz
+	EmailVerifiedAt             pgtype.Timestamptz
+	EmailVerificationCodeHash   []byte
+	EmailVerificationSalt       []byte
+	EmailVerificationExpiresAt  pgtype.Timestamptz
+	EmailVerificationAttempts   int32
+	EmailVerificationLastSentAt pgtype.Timestamptz
 }
 
 type EndUser struct {
-	ID                         int64
-	TenantID                   int64
-	ProjectID                  int64
-	ExternalID                 string
-	Email                      *string
-	EmailVerifiedAt            pgtype.Timestamptz
-	PasswordHash               []byte
-	CreatedAt                  pgtype.Timestamptz
-	DeletedAt                  pgtype.Timestamptz
-	EmailVerificationHash      []byte
-	EmailVerificationExpiresAt pgtype.Timestamptz
+	ID                          int64
+	TenantID                    int64
+	ProjectID                   int64
+	ExternalID                  string
+	Email                       *string
+	EmailVerifiedAt             pgtype.Timestamptz
+	PasswordHash                []byte
+	CreatedAt                   pgtype.Timestamptz
+	DeletedAt                   pgtype.Timestamptz
+	EmailVerificationCodeHash   []byte
+	EmailVerificationExpiresAt  pgtype.Timestamptz
+	EmailVerificationSalt       []byte
+	EmailVerificationAttempts   int32
+	EmailVerificationLastSentAt pgtype.Timestamptz
+	DisabledAt                  pgtype.Timestamptz
+}
+
+type EndUserInvitation struct {
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	Email           string
+	CodeHash        []byte
+	ExpiresAt       pgtype.Timestamptz
+	AcceptedAt      pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+	InvitedByUserID int64
+	CreatedAt       pgtype.Timestamptz
 }
 
 // One directed edge per (tenant, from, to). Status transitions are managed via UPSERT in the handler: a re-request after rejection updates status pending; pending/accepted are idempotent; blocked is terminal. See migration 0012 for the contract.

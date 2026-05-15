@@ -10,20 +10,37 @@ import (
 
 type Querier interface {
 	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
+	ClearDashboardVerificationCode(ctx context.Context, id int64) error
+	ClearEndUserVerificationCode(ctx context.Context, id int64) error
 	CountDashboardUsers(ctx context.Context) (int64, error)
+	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
+	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousEndUser(ctx context.Context, arg CreateAnonymousEndUserParams) (CreateAnonymousEndUserRow, error)
 	CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error)
+	// Dashboard team invitations (operator-side: platform / tenant admins).
+	CreateDashboardInvitation(ctx context.Context, arg CreateDashboardInvitationParams) (CreateDashboardInvitationRow, error)
+	CreateDashboardMembership(ctx context.Context, arg CreateDashboardMembershipParams) (int64, error)
 	CreateDashboardSession(ctx context.Context, arg CreateDashboardSessionParams) (CreateDashboardSessionRow, error)
 	CreateDashboardUser(ctx context.Context, arg CreateDashboardUserParams) (CreateDashboardUserRow, error)
 	CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUserParams) (int64, error)
+	// End-user (player) invitations.
+	CreateEndUserInvitation(ctx context.Context, arg CreateEndUserInvitationParams) (CreateEndUserInvitationRow, error)
 	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
 	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
+	// Used by the player UI signup flow; takes project_id explicitly because
+	// the player site doesn't have an api_key bearer.
+	CreatePlayerEndUser(ctx context.Context, arg CreatePlayerEndUserParams) (CreatePlayerEndUserRow, error)
+	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	// Used by invite acceptance: creates a new user who is verified by
+	// definition (they had to click the invite link in their inbox).
+	CreateVerifiedDashboardUser(ctx context.Context, arg CreateVerifiedDashboardUserParams) (CreateVerifiedDashboardUserRow, error)
 	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
+	DeleteDashboardMembership(ctx context.Context, arg DeleteDashboardMembershipParams) error
 	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier + key_type. Runs without an
@@ -33,36 +50,75 @@ type Querier interface {
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
+	GetDashboardInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetDashboardInvitationByCodeHashRow, error)
+	GetDashboardInvitationByID(ctx context.Context, id int64) (GetDashboardInvitationByIDRow, error)
 	GetDashboardMembership(ctx context.Context, arg GetDashboardMembershipParams) (GetDashboardMembershipRow, error)
 	GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error)
+	GetDashboardUserAnyStatusByEmail(ctx context.Context, email string) (GetDashboardUserAnyStatusByEmailRow, error)
 	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
 	GetDashboardUserByID(ctx context.Context, id int64) (GetDashboardUserByIDRow, error)
+	GetDashboardUserVerificationState(ctx context.Context, id int64) (GetDashboardUserVerificationStateRow, error)
 	GetEndUserByEmail(ctx context.Context, arg GetEndUserByEmailParams) (GetEndUserByEmailRow, error)
+	// Privileged variant of GetEndUserByEmail used by the player UI before
+	// the tenant context is set; the caller already knows the project_id from
+	// the URL and looks up tenant + verification state in one shot.
+	GetEndUserByEmailProject(ctx context.Context, arg GetEndUserByEmailProjectParams) (GetEndUserByEmailProjectRow, error)
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
+	GetEndUserInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetEndUserInvitationByCodeHashRow, error)
+	GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error)
 	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
 	GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error)
+	GetPlayerForProject(ctx context.Context, arg GetPlayerForProjectParams) (GetPlayerForProjectRow, error)
+	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
+	GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error)
 	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
+	// Project → tenant lookup (privileged; used by the player UI which knows
+	// the project from the URL but has no tenant context yet).
+	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
 	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
+	IncrementDashboardVerificationAttempts(ctx context.Context, id int64) (int32, error)
+	IncrementEndUserVerificationAttempts(ctx context.Context, id int64) (int32, error)
+	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
+	ListDashboardInvitationsForTenant(ctx context.Context, tenantID *int64) ([]ListDashboardInvitationsForTenantRow, error)
+	ListDashboardMembersForTenant(ctx context.Context, tenantID int64) ([]ListDashboardMembersForTenantRow, error)
 	ListDashboardTenantsForPlatformAdmin(ctx context.Context) ([]ListDashboardTenantsForPlatformAdminRow, error)
 	ListDashboardTenantsForUser(ctx context.Context, dashboardUserID int64) ([]ListDashboardTenantsForUserRow, error)
+	ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error)
+	ListEndUserInvitationsForProject(ctx context.Context, projectID int64) ([]ListEndUserInvitationsForProjectRow, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
+	ListPlatformAdminInvitations(ctx context.Context) ([]ListPlatformAdminInvitationsRow, error)
+	ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsRow, error)
+	// Dashboard-side player management queries. Privileged: the dashboard
+	// runs them as platform/tenant admin via BootstrapQ, so we filter by
+	// tenant_id explicitly rather than relying on RLS.
+	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	MarkAllocationFailed(ctx context.Context, id int64) error
 	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
+	MarkDashboardInvitationAccepted(ctx context.Context, id int64) error
+	MarkDashboardUserVerified(ctx context.Context, id int64) error
+	MarkEndUserInvitationAccepted(ctx context.Context, id int64) error
+	MarkEndUserVerified(ctx context.Context, id int64) error
 	MarkMatchmakerFailed(ctx context.Context, dollar_1 []int64) error
 	MarkMatchmakerMatched(ctx context.Context, arg MarkMatchmakerMatchedParams) error
+	MarkPlayerVerified(ctx context.Context, id int64) error
 	PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error)
+	PromoteDashboardUserToPlatformAdmin(ctx context.Context, id int64) error
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
+	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
+	// page. Returns the tenant_id so the caller can SET app.tenant_id and
+	// continue under normal RLS enforcement.
+	PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error)
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
 	// Optimistic concurrency variant — only updates if the row's current
 	// version matches expected. RETURNING NULL row on mismatch.
@@ -77,11 +133,21 @@ type Querier interface {
 	RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
+	RevokeDashboardInvitation(ctx context.Context, id int64) error
+	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
 	RevokeDashboardSession(ctx context.Context, id int64) error
+	RevokeEndUserInvitation(ctx context.Context, id int64) error
+	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
 	RevokeSession(ctx context.Context, id int64) error
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
+	SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error
+	SetDashboardUserVerificationCode(ctx context.Context, arg SetDashboardUserVerificationCodeParams) error
+	SetEndUserVerificationCode(ctx context.Context, arg SetEndUserVerificationCodeParams) error
 	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
+	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
+	SetPlayerDisabledByTenant(ctx context.Context, arg SetPlayerDisabledByTenantParams) error
+	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
@@ -95,7 +161,6 @@ type Querier interface {
 	// Custom-token flow: find existing end_user with this external_id under
 	// (tenant, project) or create one. Idempotent across repeated calls.
 	UpsertEndUserByExternalID(ctx context.Context, arg UpsertEndUserByExternalIDParams) (int64, error)
-	VerifyEmailByTokenHash(ctx context.Context, emailVerificationHash []byte) (int64, error)
 	WriteAudit(ctx context.Context, arg WriteAuditParams) error
 	WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error
 }

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +16,6 @@ import (
 	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -97,7 +95,6 @@ func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_
 		Signer:  signer,
 		Mailer:  &mailer.Recorder{},
 		Cache:   c.cache,
-		Fleet:   fleet.NewRegistry(30 * time.Second),
 	})
 	srv2 := httptest.NewServer(router)
 	t.Cleanup(srv2.Close)

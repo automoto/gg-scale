@@ -7,15 +7,16 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+	webutil.Render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
 func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -23,11 +24,12 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	next := r.Form.Get("new_password")
 	if len(next) < minDashboardPassLen {
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		render(r, w, AccountPage(AccountView{
+		webutil.Render(r, w, AccountPage(AccountView{
 			UserEmail:   session.User.Email,
 			CSRFToken:   session.CSRFToken,
 			FieldErrors: map[string]string{"new_password": "Password must be at least 12 characters"},
 		}))
+
 		return
 	}
 
@@ -42,11 +44,12 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(current)) != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		render(r, w, AccountPage(AccountView{
+		webutil.Render(r, w, AccountPage(AccountView{
 			UserEmail:   session.User.Email,
 			CSRFToken:   session.CSRFToken,
 			FieldErrors: map[string]string{"current_password": "Current password is incorrect"},
 		}))
+
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcryptCost)

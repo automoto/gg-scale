@@ -77,6 +77,12 @@ type Config struct {
 	DashboardBootstrapTokenFile string
 	// DashboardCookieSecure sets the Secure flag on the dashboard session cookie.
 	DashboardCookieSecure bool
+	// DashboardBaseURL is the externally-visible origin prefixed onto magic
+	// links emitted in dashboard invite emails. Empty means relative paths
+	// (fine for local dev; bad for production).
+	DashboardBaseURL string
+	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
+	PlayersEnabled bool
 
 	// Cache backend selection. CacheBackend is one of "memory" or "olric".
 	// "memory" is the default and is appropriate for single-process
@@ -156,6 +162,18 @@ var declared = []varDecl{
 			return fmt.Errorf("DASHBOARD_COOKIE_SECURE %q: %w", v, err)
 		}
 		c.DashboardCookieSecure = secure
+		return nil
+	}},
+	{name: "DASHBOARD_BASE_URL", defval: "", set: func(c *Config, v string) error {
+		c.DashboardBaseURL = v
+		return nil
+	}},
+	{name: "PLAYERS_ENABLED", defval: "true", set: func(c *Config, v string) error {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("PLAYERS_ENABLED %q: %w", v, err)
+		}
+		c.PlayersEnabled = enabled
 		return nil
 	}},
 

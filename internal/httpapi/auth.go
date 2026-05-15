@@ -2,9 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,17 +22,21 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const (
 	accessTokenTTL       = 15 * time.Minute
 	refreshTokenTTL      = 30 * 24 * time.Hour
-	verifyTokenTTL       = 24 * time.Hour
-	bcryptCost           = 12
 	maxJSONBodyBytes     = 1 << 20
 	mailerVerifySubject  = "Verify your ggscale email"
-	mailerVerifyBodyTmpl = "Your verification token (valid 24h):\n\n%s\n\nSubmit it to POST /v1/auth/verify."
+	mailerVerifyBodyTmpl = "Your ggscale verification code is %s (valid 15 minutes)."
 )
+
+// bcryptCost is webutil.BcryptCost re-bound locally so existing call
+// sites stay untouched after the helper extraction.
+const bcryptCost = webutil.BcryptCost
 
 type anonymousResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -56,7 +59,8 @@ type signupRequest struct {
 }
 
 type verifyRequest struct {
-	Token string `json:"token"`
+	Email string `json:"email"`
+	Code  string `json:"code"`
 }
 
 type loginRequest struct {
@@ -87,14 +91,14 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 
-		externalID, err := randomHex("anon_", 16)
+		externalID, err := webutil.RandomHex("anon_", 16)
 		if err != nil {
-			internalError(w, "anonymous: external_id rand", err)
+			webutil.InternalError(w, "anonymous: external_id rand", err)
 			return
 		}
-		refreshToken, err := randomHex("", 32)
+		refreshToken, err := webutil.RandomHex("", 32)
 		if err != nil {
-			internalError(w, "anonymous: refresh rand", err)
+			webutil.InternalError(w, "anonymous: refresh rand", err)
 			return
 		}
 
@@ -116,7 +120,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID})
 		})
 		if err != nil {
-			internalError(w, "anonymous: tx", err)
+			webutil.InternalError(w, "anonymous: tx", err)
 			return
 		}
 
@@ -125,7 +129,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 			ExpiresAt: accessExpiresAt,
 		})
 		if err != nil {
-			internalError(w, "anonymous: sign", err)
+			webutil.InternalError(w, "anonymous: sign", err)
 			return
 		}
 
@@ -158,31 +162,37 @@ func signupHandler(d Deps) http.HandlerFunc {
 
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
 		if err != nil {
-			internalError(w, "signup: bcrypt", err)
+			webutil.InternalError(w, "signup: bcrypt", err)
 			return
 		}
-		verifyToken, err := randomHex("", 32)
+		code, err := verifycode.GenerateCode()
 		if err != nil {
-			internalError(w, "signup: verify rand", err)
+			webutil.InternalError(w, "signup: code", err)
 			return
 		}
-		verifyHash := sha256.Sum256([]byte(verifyToken))
-		externalID, err := randomHex("user_", 16)
+		salt, err := verifycode.NewSalt()
 		if err != nil {
-			internalError(w, "signup: ext_id rand", err)
+			webutil.InternalError(w, "signup: salt", err)
+			return
+		}
+		codeHash := verifycode.Hash(salt, code)
+		externalID, err := webutil.RandomHex("user_", 16)
+		if err != nil {
+			webutil.InternalError(w, "signup: ext_id rand", err)
 			return
 		}
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
-			expires := pgtype.Timestamptz{Time: time.Now().Add(verifyTokenTTL), Valid: true}
+			expires := pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true}
 			id, err := q.CreateEmailEndUser(ctx, sqlcgen.CreateEmailEndUserParams{
 				ProjectID:                  projectID,
 				ExternalID:                 externalID,
 				Email:                      &email,
 				PasswordHash:               hash,
-				EmailVerificationHash:      verifyHash[:],
+				EmailVerificationCodeHash:  codeHash,
+				EmailVerificationSalt:      salt,
 				EmailVerificationExpiresAt: expires,
 			})
 			if err != nil {
@@ -191,11 +201,11 @@ func signupHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, id, "auth.signup", email, nil)
 		})
 		if err != nil {
-			if isUniqueViolation(err) {
+			if webutil.IsUniqueViolation(err) {
 				http.Error(w, "email already in use", http.StatusConflict)
 				return
 			}
-			internalError(w, "signup: tx", err)
+			webutil.InternalError(w, "signup: tx", err)
 			return
 		}
 
@@ -203,7 +213,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 			msg := mailer.Message{
 				From: d.MailFrom, To: []string{req.Email},
 				Subject: mailerVerifySubject,
-				Body:    fmt.Sprintf(mailerVerifyBodyTmpl, verifyToken),
+				Body:    fmt.Sprintf(mailerVerifyBodyTmpl, code),
 			}
 			if err := d.Mailer.Send(ctx, msg); err != nil {
 				slog.Error("signup: mailer", "error", err)
@@ -214,36 +224,78 @@ func signupHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// verifyHandler — m1.md 4.1.2
+// verifyHandler — m1.md 4.1.2. Accepts {email, code}; matches by salt+hash
+// after looking up the row; enforces a 5-attempt cap before clearing.
 func verifyHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req verifyRequest
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		if req.Token == "" {
-			http.Error(w, "token required", http.StatusBadRequest)
+		if req.Email == "" || req.Code == "" {
+			http.Error(w, "email and code required", http.StatusBadRequest)
 			return
 		}
-		hash := sha256.Sum256([]byte(req.Token))
 
 		ctx := r.Context()
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			http.Error(w, "api key has no project pin", http.StatusBadRequest)
+			return
+		}
+
 		var endUserID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			id, err := q.VerifyEmailByTokenHash(ctx, hash[:])
+			email := req.Email
+			row, err := q.GetEndUserVerificationState(ctx, sqlcgen.GetEndUserVerificationStateParams{
+				ProjectID: projectID,
+				Email:     &email,
+			})
 			if err != nil {
 				return err
 			}
-			endUserID = id
-			return auditlog.Write(ctx, tx, id, "auth.verify", "", nil)
+			if row.EmailVerifiedAt.Valid {
+				endUserID = row.ID
+				return nil
+			}
+			if verifycode.AttemptsExhausted(int(row.EmailVerificationAttempts)) {
+				return errVerifyExhausted
+			}
+			if verifycode.Expired(row.EmailVerificationExpiresAt.Time, time.Now()) {
+				return errVerifyExpired
+			}
+			if len(row.EmailVerificationSalt) == 0 || len(row.EmailVerificationCodeHash) == 0 {
+				return errVerifyExpired
+			}
+			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
+			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) == 1 {
+				if err := q.MarkEndUserVerified(ctx, row.ID); err != nil {
+					return err
+				}
+				endUserID = row.ID
+				return auditlog.Write(ctx, tx, row.ID, "auth.verify", "", nil)
+			}
+			if _, err := q.IncrementEndUserVerificationAttempts(ctx, row.ID); err != nil {
+				return err
+			}
+			return errVerifyBadCode
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "invalid or expired token", http.StatusBadRequest)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			http.Error(w, "invalid email or code", http.StatusBadRequest)
 			return
-		}
-		if err != nil {
-			internalError(w, "verify: tx", err)
+		case errors.Is(err, errVerifyBadCode):
+			http.Error(w, "invalid email or code", http.StatusBadRequest)
+			return
+		case errors.Is(err, errVerifyExpired):
+			http.Error(w, "code expired", http.StatusBadRequest)
+			return
+		case errors.Is(err, errVerifyExhausted):
+			http.Error(w, "too many attempts", http.StatusTooManyRequests)
+			return
+		case err != nil:
+			webutil.InternalError(w, "verify: tx", err)
 			return
 		}
 
@@ -267,9 +319,9 @@ func loginHandler(d Deps) http.HandlerFunc {
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 
-		refreshToken, err := randomHex("", 32)
+		refreshToken, err := webutil.RandomHex("", 32)
 		if err != nil {
-			internalError(w, "login: refresh rand", err)
+			webutil.InternalError(w, "login: refresh rand", err)
 			return
 		}
 		var endUserID int64
@@ -302,7 +354,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "login: tx", err)
+			webutil.InternalError(w, "login: tx", err)
 			return
 		}
 
@@ -312,7 +364,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			ExpiresAt: expiresAt,
 		})
 		if err != nil {
-			internalError(w, "login: sign", err)
+			webutil.InternalError(w, "login: sign", err)
 			return
 		}
 		writeJSON(w, sessionResponse{
@@ -342,9 +394,9 @@ func refreshHandler(d Deps) http.HandlerFunc {
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 		oldHash := sha256.Sum256([]byte(req.RefreshToken))
-		newRefresh, err := randomHex("", 32)
+		newRefresh, err := webutil.RandomHex("", 32)
 		if err != nil {
-			internalError(w, "refresh: rand", err)
+			webutil.InternalError(w, "refresh: rand", err)
 			return
 		}
 
@@ -372,7 +424,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "refresh: tx", err)
+			webutil.InternalError(w, "refresh: tx", err)
 			return
 		}
 
@@ -382,7 +434,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			ExpiresAt: expiresAt,
 		})
 		if err != nil {
-			internalError(w, "refresh: sign", err)
+			webutil.InternalError(w, "refresh: sign", err)
 			return
 		}
 		writeJSON(w, sessionResponse{
@@ -414,7 +466,7 @@ func logoutHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, 0, "auth.logout", "", nil)
 		})
 		if err != nil {
-			internalError(w, "logout: tx", err)
+			webutil.InternalError(w, "logout: tx", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -449,9 +501,9 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			refreshTok string
 		)
 		var err error
-		refreshTok, err = randomHex("", 32)
+		refreshTok, err = webutil.RandomHex("", 32)
 		if err != nil {
-			internalError(w, "custom-token: rand", err)
+			webutil.InternalError(w, "custom-token: rand", err)
 			return
 		}
 
@@ -501,7 +553,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid custom token", http.StatusUnauthorized)
 			return
 		case err != nil:
-			internalError(w, "custom-token: tx", err)
+			webutil.InternalError(w, "custom-token: tx", err)
 			return
 		}
 
@@ -511,7 +563,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			ExpiresAt: expiresAt,
 		})
 		if err != nil {
-			internalError(w, "custom-token: sign", err)
+			webutil.InternalError(w, "custom-token: sign", err)
 			return
 		}
 		writeJSON(w, sessionResponse{
@@ -531,6 +583,9 @@ var (
 	errSessionRevoked           = errors.New("auth: session revoked or expired")
 	errCustomTokenNotConfigured = errors.New("auth: custom token secret not set")
 	errCustomTokenInvalid       = errors.New("auth: custom token invalid")
+	errVerifyBadCode            = errors.New("auth: bad verification code")
+	errVerifyExpired            = errors.New("auth: verification code expired")
+	errVerifyExhausted          = errors.New("auth: verification attempts exhausted")
 )
 
 // dummyBcryptHash is a valid bcryptCost=12 hash used to flatten login timing
@@ -560,14 +615,6 @@ func insertSession(ctx context.Context, tx pgx.Tx, endUserID int64, refreshToken
 	return nil
 }
 
-func randomHex(prefix string, nbytes int) (string, error) {
-	buf := make([]byte, nbytes)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return prefix + hex.EncodeToString(buf), nil
-}
-
 func decodeJSON(w http.ResponseWriter, r *http.Request, into any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	dec := json.NewDecoder(r.Body)
@@ -590,30 +637,8 @@ func writeJSON(w http.ResponseWriter, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func internalError(w http.ResponseWriter, msg string, err error) {
-	slog.Error(msg, "error", err)
-	http.Error(w, "internal error", http.StatusInternalServerError)
-}
-
 func validateEmail(s string) bool {
 	at := strings.IndexByte(s, '@')
 	dot := strings.LastIndexByte(s, '.')
 	return at > 0 && dot > at && len(s) >= 5
 }
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgxPgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505"
-	}
-	// Fallback for the wrapped path — pgconn.PgError wrapped via %w from sqlc.
-	return strings.Contains(err.Error(), "23505")
-}
-
-// pgxPgError is a thin shim so we don't pull pgconn into this file; the
-// substring check above covers the practical case for now.
-type pgxPgError struct {
-	Code string
-}
-
-func (e *pgxPgError) Error() string { return "pg error " + e.Code }

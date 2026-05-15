@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearEndUserVerificationCode = `-- name: ClearEndUserVerificationCode :exec
+UPDATE end_users
+SET email_verification_code_hash    = NULL,
+    email_verification_salt         = NULL,
+    email_verification_expires_at   = NULL,
+    email_verification_attempts     = 0
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+`
+
+func (q *Queries) ClearEndUserVerificationCode(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, clearEndUserVerificationCode, id)
+	return err
+}
+
 const createAnonymousEndUser = `-- name: CreateAnonymousEndUser :one
 INSERT INTO end_users (tenant_id, project_id, external_id)
 VALUES (
@@ -42,11 +57,12 @@ func (q *Queries) CreateAnonymousEndUser(ctx context.Context, arg CreateAnonymou
 const createEmailEndUser = `-- name: CreateEmailEndUser :one
 INSERT INTO end_users (
     tenant_id, project_id, external_id, email, password_hash,
-    email_verification_hash, email_verification_expires_at
+    email_verification_code_hash, email_verification_salt,
+    email_verification_expires_at, email_verification_last_sent_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, now()
 )
 RETURNING id
 `
@@ -56,7 +72,8 @@ type CreateEmailEndUserParams struct {
 	ExternalID                 string
 	Email                      *string
 	PasswordHash               []byte
-	EmailVerificationHash      []byte
+	EmailVerificationCodeHash  []byte
+	EmailVerificationSalt      []byte
 	EmailVerificationExpiresAt pgtype.Timestamptz
 }
 
@@ -66,7 +83,8 @@ func (q *Queries) CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUser
 		arg.ExternalID,
 		arg.Email,
 		arg.PasswordHash,
-		arg.EmailVerificationHash,
+		arg.EmailVerificationCodeHash,
+		arg.EmailVerificationSalt,
 		arg.EmailVerificationExpiresAt,
 	)
 	var id int64
@@ -102,12 +120,16 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (C
 }
 
 const getEndUserByEmail = `-- name: GetEndUserByEmail :one
+-- Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+-- /v1/auth/login behaves identically to an unknown email — same dummy
+-- bcrypt + invalid_credentials response.
 SELECT id, project_id, password_hash, email_verified_at
 FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND email = $2
   AND deleted_at IS NULL
+  AND disabled_at IS NULL
 `
 
 type GetEndUserByEmailParams struct {
@@ -161,11 +183,62 @@ func (q *Queries) GetEndUserByExternalID(ctx context.Context, arg GetEndUserByEx
 	return i, err
 }
 
-const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT id, end_user_id, expires_at, revoked_at
-FROM sessions
+const getEndUserVerificationState = `-- name: GetEndUserVerificationState :one
+SELECT
+    id,
+    email_verified_at,
+    email_verification_code_hash,
+    email_verification_salt,
+    email_verification_expires_at,
+    email_verification_attempts,
+    email_verification_last_sent_at
+FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND refresh_hash = $1
+  AND project_id = $1
+  AND email = $2
+  AND deleted_at IS NULL
+`
+
+type GetEndUserVerificationStateParams struct {
+	ProjectID int64
+	Email     *string
+}
+
+type GetEndUserVerificationStateRow struct {
+	ID                          int64
+	EmailVerifiedAt             pgtype.Timestamptz
+	EmailVerificationCodeHash   []byte
+	EmailVerificationSalt       []byte
+	EmailVerificationExpiresAt  pgtype.Timestamptz
+	EmailVerificationAttempts   int32
+	EmailVerificationLastSentAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error) {
+	row := q.db.QueryRow(ctx, getEndUserVerificationState, arg.ProjectID, arg.Email)
+	var i GetEndUserVerificationStateRow
+	err := row.Scan(
+		&i.ID,
+		&i.EmailVerifiedAt,
+		&i.EmailVerificationCodeHash,
+		&i.EmailVerificationSalt,
+		&i.EmailVerificationExpiresAt,
+		&i.EmailVerificationAttempts,
+		&i.EmailVerificationLastSentAt,
+	)
+	return i, err
+}
+
+const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
+-- Joined to end_users so refresh fails for disabled / deleted accounts
+-- even if the refresh token is still otherwise valid.
+SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at
+FROM sessions s
+JOIN end_users u ON u.id = s.end_user_id
+WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND s.refresh_hash = $1
+  AND u.deleted_at IS NULL
+  AND u.disabled_at IS NULL
 `
 
 type GetSessionByRefreshHashRow struct {
@@ -200,6 +273,37 @@ func (q *Queries) GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error
 	return custom_token_secret, err
 }
 
+const incrementEndUserVerificationAttempts = `-- name: IncrementEndUserVerificationAttempts :one
+UPDATE end_users
+SET email_verification_attempts = email_verification_attempts + 1
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+RETURNING email_verification_attempts
+`
+
+func (q *Queries) IncrementEndUserVerificationAttempts(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementEndUserVerificationAttempts, id)
+	var email_verification_attempts int32
+	err := row.Scan(&email_verification_attempts)
+	return email_verification_attempts, err
+}
+
+const markEndUserVerified = `-- name: MarkEndUserVerified :exec
+UPDATE end_users
+SET email_verified_at               = now(),
+    email_verification_code_hash    = NULL,
+    email_verification_salt         = NULL,
+    email_verification_expires_at   = NULL,
+    email_verification_attempts     = 0
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+`
+
+func (q *Queries) MarkEndUserVerified(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markEndUserVerified, id)
+	return err
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions
 SET revoked_at = now()
@@ -226,6 +330,37 @@ func (q *Queries) RevokeSessionByRefreshHash(ctx context.Context, refreshHash []
 	return err
 }
 
+const setEndUserVerificationCode = `-- name: SetEndUserVerificationCode :exec
+UPDATE end_users
+SET email_verification_code_hash    = $3,
+    email_verification_salt         = $4,
+    email_verification_expires_at   = $5,
+    email_verification_attempts     = 0,
+    email_verification_last_sent_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+`
+
+type SetEndUserVerificationCodeParams struct {
+	ProjectID                  int64
+	ID                         int64
+	EmailVerificationCodeHash  []byte
+	EmailVerificationSalt      []byte
+	EmailVerificationExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) SetEndUserVerificationCode(ctx context.Context, arg SetEndUserVerificationCodeParams) error {
+	_, err := q.db.Exec(ctx, setEndUserVerificationCode,
+		arg.ProjectID,
+		arg.ID,
+		arg.EmailVerificationCodeHash,
+		arg.EmailVerificationSalt,
+		arg.EmailVerificationExpiresAt,
+	)
+	return err
+}
+
 const upsertEndUserByExternalID = `-- name: UpsertEndUserByExternalID :one
 INSERT INTO end_users (tenant_id, project_id, external_id)
 VALUES (
@@ -247,24 +382,6 @@ type UpsertEndUserByExternalIDParams struct {
 // (tenant, project) or create one. Idempotent across repeated calls.
 func (q *Queries) UpsertEndUserByExternalID(ctx context.Context, arg UpsertEndUserByExternalIDParams) (int64, error) {
 	row := q.db.QueryRow(ctx, upsertEndUserByExternalID, arg.ProjectID, arg.ExternalID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
-}
-
-const verifyEmailByTokenHash = `-- name: VerifyEmailByTokenHash :one
-UPDATE end_users
-SET email_verified_at              = now(),
-    email_verification_hash        = NULL,
-    email_verification_expires_at  = NULL
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND email_verification_hash = $1
-  AND email_verification_expires_at > now()
-RETURNING id
-`
-
-func (q *Queries) VerifyEmailByTokenHash(ctx context.Context, emailVerificationHash []byte) (int64, error) {
-	row := q.db.QueryRow(ctx, verifyEmailByTokenHash, emailVerificationHash)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

@@ -15,6 +15,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 // leaderboardTopTTL bounds how stale a memoised top-N reply may be. Short
@@ -78,7 +79,7 @@ func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "leaderboard submit: tx", err)
+			webutil.InternalError(w, "leaderboard submit: tx", err)
 			return
 		}
 
@@ -117,13 +118,13 @@ func leaderboardTopHandler(d Deps) http.HandlerFunc {
 
 		entries, err := topFromPostgres(ctx, d, leaderboardID, limit)
 		if err != nil {
-			internalError(w, "leaderboard top: postgres", err)
+			webutil.InternalError(w, "leaderboard top: postgres", err)
 			return
 		}
 
 		payload, err := json.Marshal(map[string]any{"entries": entries})
 		if err != nil {
-			internalError(w, "leaderboard top: marshal", err)
+			webutil.InternalError(w, "leaderboard top: marshal", err)
 			return
 		}
 
@@ -155,7 +156,7 @@ func leaderboardAroundMeHandler(d Deps) http.HandlerFunc {
 
 		entries, selfRank, err := aroundMeFromPostgres(ctx, d, leaderboardID, userID, int64(radius))
 		if err != nil {
-			internalError(w, "leaderboard around-me", err)
+			webutil.InternalError(w, "leaderboard around-me", err)
 			return
 		}
 		writeJSON(w, map[string]any{"entries": entries, "self_rank": selfRank})

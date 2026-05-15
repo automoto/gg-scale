@@ -9,6 +9,7 @@ import (
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 type friendEntry struct {
@@ -65,7 +66,7 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 			return err
 		})
 		if err != nil {
-			internalError(w, "friend request: tx", err)
+			webutil.InternalError(w, "friend request: tx", err)
 			return
 		}
 
@@ -108,7 +109,7 @@ func friendDeleteHandler(d Deps) http.HandlerFunc {
 			})
 		})
 		if err != nil {
-			internalError(w, "friend delete: tx", err)
+			webutil.InternalError(w, "friend delete: tx", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -160,7 +161,7 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 			http.Error(w, "illegal transition", http.StatusConflict)
 			return
 		case err != nil:
-			internalError(w, "friend status: tx", err)
+			webutil.InternalError(w, "friend status: tx", err)
 			return
 		}
 		writeJSON(w, map[string]any{"status": newStatus})
@@ -204,7 +205,7 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			internalError(w, "friends list: tx", err)
+			webutil.InternalError(w, "friends list: tx", err)
 			return
 		}
 		var next string

@@ -1,0 +1,197 @@
+//go:build integration
+
+package httpapi_test
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/ggscale/ggscale/internal/dashboard"
+	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/players"
+	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
+)
+
+// newDashboardAndPlayerServer wires the dashboard AND the player UI
+// together so the cross-stack player-invite test can simulate the full
+// invite-accept flow.
+func newDashboardAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
+	t.Helper()
+	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	require.NoError(t, err)
+	rec := &mailer.Recorder{}
+
+	router := httpapi.NewRouter(httpapi.Deps{
+		Version:  "v1",
+		Commit:   "test",
+		Pool:     db.NewPool(c.appPool),
+		Lookup:   tenant.NewSQLLookup(c.appPool),
+		Limiter:  ratelimit.NewCacheLimiter(c.cache),
+		Signer:   signer,
+		Cache:    c.cache,
+		Mailer:   rec,
+		MailFrom: "no-reply@example.test",
+		Dashboard: dashboard.Config{
+			Mount:    true,
+			BaseURL:  "http://app.example.test",
+			MailFrom: "no-reply@example.test",
+		},
+		DashboardBootstrap: dashboard.DisabledBootstrap(),
+		Players:            players.Config{Mount: true},
+	})
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// TestPlayerInvite_rejects_project_belonging_to_other_tenant covers H2:
+// a tenant-admin must not be able to create a player invite against a
+// project that belongs to a DIFFERENT tenant by crafting the URL.
+func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
+	c := startCluster(t)
+
+	// Tenant A with project A — actor is admin here.
+	tenantA, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	// Tenant B with project B — actor must NOT be able to invite into.
+	_, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-b")
+
+	adminID := seedDashboardUser(t, c, "admin-a@example.com", "correct-horse-battery-staple", false)
+	seedDashboardMembership(t, c, adminID, tenantA, "admin")
+
+	srv, _ := newDashboardAndPlayerServer(t, c)
+	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "admin-a@example.com", "correct-horse-battery-staple")
+
+	form := url.Values{"_csrf": {csrf}, "email": {"player@example.com"}}
+	target := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
+		"/projects/" + strconv.FormatInt(projectB, 10) + "/players/invite"
+
+	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Pre-fix would have returned 303 redirect to "/players?flash=Invite sent…".
+	// Post-fix it surfaces a 404 with the "project does not belong to this tenant" copy.
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), "does not belong")
+
+	// And no row was inserted.
+	var count int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM end_user_invitations WHERE email = 'player@example.com'`).Scan(&count))
+	assert.Equal(t, int64(0), count)
+}
+
+// TestPlayerInvite_happy_path_creates_account_and_logs_in covers H6:
+// dashboard admin invites a player; the magic-link URL in the email
+// actually resolves (was a 404 pre-fix); accepting it creates the
+// end_user, marks them verified, and issues a player session.
+func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
+	c := startCluster(t)
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	adminID := seedDashboardUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedDashboardMembership(t, c, adminID, tenantA, "admin")
+
+	srv, rec := newDashboardAndPlayerServer(t, c)
+	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+
+	// 1) Admin sends the invite.
+	form := url.Values{"_csrf": {csrf}, "email": {"newplayer@example.com"}}
+	invitePath := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/players/invite"
+	req, err := http.NewRequest(http.MethodPost, invitePath, strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	resp, err := noRedirectClient().Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.Len(t, rec.Sent, 1)
+
+	// 2) Extract the magic-link URL from the email body.
+	body := rec.Sent[0].Body
+	const marker = "/v1/players/p/"
+	i := strings.Index(body, marker)
+	require.GreaterOrEqual(t, i, 0, "email body should contain the player invite URL: %q", body)
+	rest := body[i:]
+	end := strings.IndexAny(rest, " \n\r\t")
+	if end < 0 {
+		end = len(rest)
+	}
+	linkPath := rest[:end]
+	// The link is encoded as full URL; trim the scheme/host so we hit our test server.
+	if idx := strings.Index(linkPath, marker); idx > 0 {
+		linkPath = linkPath[idx:]
+	}
+
+	// 3) GET the invite-accept page (used to be 404 pre-fix).
+	getResp, err := http.Get(srv.URL + linkPath)
+	require.NoError(t, err)
+	getBody, _ := io.ReadAll(getResp.Body)
+	getResp.Body.Close()
+	require.Equal(t, http.StatusOK, getResp.StatusCode, string(getBody))
+	assert.Contains(t, string(getBody), "newplayer@example.com")
+
+	// 4) POST the password to accept.
+	codeParam, err := url.ParseQuery(strings.SplitN(linkPath, "?", 2)[1])
+	require.NoError(t, err)
+	require.NotEmpty(t, codeParam.Get("code"))
+
+	acceptForm := url.Values{
+		"code":     {codeParam.Get("code")},
+		"password": {"playerpass1"},
+	}
+	acceptPath := strings.SplitN(linkPath, "?", 2)[0]
+	acceptReq, err := http.NewRequest(http.MethodPost, srv.URL+acceptPath,
+		strings.NewReader(acceptForm.Encode()))
+	require.NoError(t, err)
+	acceptReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	acceptResp, err := noRedirectClient().Do(acceptReq)
+	require.NoError(t, err)
+	acceptResp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, acceptResp.StatusCode)
+
+	// 5) Player row exists and is verified.
+	var endUserID int64
+	var verifiedAt, disabledAt *string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT id, email_verified_at::text, disabled_at::text FROM end_users WHERE email = 'newplayer@example.com'`).
+		Scan(&endUserID, &verifiedAt, &disabledAt))
+	assert.Greater(t, endUserID, int64(0))
+	assert.NotNil(t, verifiedAt)
+	assert.Nil(t, disabledAt)
+
+	// 6) Invitation row marked accepted.
+	var accepted *string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT accepted_at::text FROM end_user_invitations WHERE email = 'newplayer@example.com'`).Scan(&accepted))
+	assert.NotNil(t, accepted)
+
+	// 7) Session cookie was issued.
+	var sawSession bool
+	for _, ck := range acceptResp.Cookies() {
+		if ck.Name == "ggscale_player_session" {
+			sawSession = true
+		}
+	}
+	assert.True(t, sawSession, "expected ggscale_player_session cookie after accept")
+}

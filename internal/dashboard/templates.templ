@@ -135,7 +135,13 @@ templ HomePage(vm HomeView) {
 				<h1>Tenants</h1>
 				<p class="subtitle">Tenants you have access to.</p>
 			</div>
-			<a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+			<div class="actions-cell">
+				if vm.IsPlatformAdmin {
+					<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Platform users</a>
+					<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
+				}
+				<a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+			</div>
 		</div>
 		<section class="card">
 			if len(vm.Tenants) == 0 {
@@ -160,6 +166,7 @@ templ HomePage(vm HomeView) {
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/projects") } role="button" class="secondary outline">Projects</a>
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenant.ID) + "/team") } role="button" class="secondary outline">Team</a>
 								</td>
 							</tr>
 						}
@@ -248,6 +255,7 @@ templ ProjectsPage(vm ProjectsView) {
 								<td>{ p.Name }</td>
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
 								</td>
 							</tr>
@@ -559,6 +567,525 @@ templ AccountPage(vm AccountView) {
 					<button type="submit" class="btn-inline">Update password</button>
 				</div>
 			</form>
+		</section>
+	}
+}
+
+templ TeamPage(vm TeamView) {
+	@appLayout("Team — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Team</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Team</p>
+				<h1>Tenant team</h1>
+				<p class="subtitle">Members of tenant #{ stringFromInt(vm.TenantID) }.</p>
+			</div>
+			<a href={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") } role="button" class="btn-inline">+ Invite teammate</a>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<section class="card">
+			<h2>Members</h2>
+			if len(vm.Members) == 0 {
+				<div class="empty-state"><p>No members yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, m := range vm.Members {
+							<tr>
+								<td>{ m.Email }</td>
+								<td><span class="badge badge-role">{ m.Role }</span></td>
+								<td>{ timeString(m.JoinedAt) }</td>
+								<td class="actions-cell">
+									if m.UserID == vm.IsOwnerID {
+										<span class="badge">you</span>
+									} else {
+										<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/members/" + stringFromInt(m.MembershipID) + "/remove") } onsubmit="return confirm('Remove this member?')">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="secondary outline btn-inline">Remove</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+		<section class="card">
+			<h2>Pending invites</h2>
+			if len(vm.Pending) == 0 {
+				<div class="empty-state"><p>No pending invites.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							<th>Expires</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Pending {
+							<tr>
+								<td>{ p.Email }</td>
+								<td><span class="badge badge-role">{ p.Role }</span></td>
+								<td>{ timeString(p.ExpiresAt) }</td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invites/" + stringFromInt(p.ID) + "/revoke") } onsubmit="return confirm('Revoke this invite?')">
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="secondary outline btn-inline">Revoke</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ InviteTeamPage(vm InviteTeamView) {
+	@appLayout("Invite teammate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL(tenantTeamPath(vm.TenantID)) }>Team</a> / Invite
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite teammate</p>
+				<h1>Invite a teammate</h1>
+				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<label>
+					Role
+					<select name="role" aria-describedby="role-error">
+						if vm.Role == "tenant_member" {
+							<option value="tenant_admin">Tenant admin</option>
+							<option value="tenant_member" selected>Tenant member</option>
+						} else {
+							<option value="tenant_admin" selected>Tenant admin</option>
+							<option value="tenant_member">Tenant member</option>
+						}
+					</select>
+					@fieldError(vm.FieldErrors, "role")
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL(tenantTeamPath(vm.TenantID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlatformTeamPage(vm PlatformTeamView) {
+	@appLayout("Platform admins — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">Platform admins</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Platform admins</p>
+				<h1>Platform admins</h1>
+				<p class="subtitle">Users with full administrative access to every tenant.</p>
+			</div>
+			<div class="actions-cell">
+				<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Platform users</a>
+				<a href="/v1/dashboard/admin/team/invite" role="button" class="btn-inline">+ Invite platform admin</a>
+			</div>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card">
+			<h2>Admins</h2>
+			if len(vm.Admins) == 0 {
+				<div class="empty-state"><p>No platform admins yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Last login</th>
+							<th>Joined</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, a := range vm.Admins {
+							<tr>
+								<td>{ a.Email }</td>
+								<td>{ timeString(a.LastLoginAt) }</td>
+								<td>{ timeString(a.JoinedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+		<section class="card">
+			<h2>Pending invites</h2>
+			if len(vm.Pending) == 0 {
+				<div class="empty-state"><p>No pending invites.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Expires</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Pending {
+							<tr>
+								<td>{ p.Email }</td>
+								<td>{ timeString(p.ExpiresAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
+	@appLayout("Invite platform admin — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard/admin/team">Platform admins</a> / Invite</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite platform admin</p>
+				<h1>Invite a platform admin</h1>
+				<p class="subtitle">They will have full administrative access to every tenant.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action="/v1/dashboard/admin/team/invite">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<div class="form-actions">
+					<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlayersPage(vm PlayersView) {
+	@appLayout("Players — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Players
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Players</p>
+				<h1>Players</h1>
+				<p class="subtitle">Game players in project #{ stringFromInt(vm.ProjectID) }.</p>
+			</div>
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") } role="button" class="btn-inline">+ Invite player</a>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card">
+			<form method="get" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email contains…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Players) == 0 {
+				<div class="empty-state"><p>No players yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>External ID</th>
+							<th>Verified</th>
+							<th>Status</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Players {
+							<tr>
+								<td>{ p.Email }</td>
+								<td><code>{ p.ExternalID }</code></td>
+								<td>
+									if !p.EmailVerifiedAt.IsZero() {
+										<span class="badge">verified</span>
+									} else {
+										<span class="badge">unverified</span>
+									}
+								</td>
+								<td>
+									if !p.DisabledAt.IsZero() {
+										<span class="badge">disabled</span>
+									} else {
+										<span class="badge badge-role">active</span>
+									}
+								</td>
+								<td>{ timeString(p.CreatedAt) }</td>
+								<td><a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(p.ID)) } role="button" class="secondary outline">View</a></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p>Showing { stringFromInt(int64(len(vm.Players))) } of { stringFromInt(vm.Total) }.</p>
+			}
+		</section>
+	}
+}
+
+templ InvitePlayerPage(vm InvitePlayerView) {
+	@appLayout("Invite player — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / Invite
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite player</p>
+				<h1>Invite a player</h1>
+				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlayerDetailPage(vm PlayerDetailView) {
+	@appLayout("Player — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / { vm.Player.Email }
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player</p>
+				<h1>{ vm.Player.Email }</h1>
+				<p class="subtitle">External ID <code>{ vm.Player.ExternalID }</code></p>
+			</div>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card">
+			<dl class="kv">
+				<dt>Email verified</dt>
+				<dd>{ timeString(vm.Player.EmailVerifiedAt) }</dd>
+				<dt>Disabled</dt>
+				<dd>{ timeString(vm.Player.DisabledAt) }</dd>
+				<dt>Created</dt>
+				<dd>{ timeString(vm.Player.CreatedAt) }</dd>
+			</dl>
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/disable") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				if !vm.Player.DisabledAt.IsZero() {
+					<input type="hidden" name="enable" value="true"/>
+					<button type="submit" class="btn-inline">Re-enable player</button>
+				} else {
+					<input type="hidden" name="enable" value="false"/>
+					<button type="submit" class="secondary outline btn-inline">Disable player</button>
+				}
+			</form>
+		</section>
+	}
+}
+
+templ VerifyPage(vm VerifyView) {
+	@authLayout("Verify email — ggscale") {
+		<h1>Verify your email</h1>
+		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>. Enter it below.</p>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<form method="post" action="/v1/dashboard/verify">
+			<label for="code">Verification code</label>
+			<input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus aria-describedby="code-error"/>
+			<div class="form-actions">
+				<button type="submit" class="btn-inline">Verify</button>
+			</div>
+		</form>
+		<form method="post" action="/v1/dashboard/verify/resend">
+			<button type="submit" class="secondary outline btn-inline">Send a new code</button>
+		</form>
+	}
+}
+
+templ AcceptInvitePage(vm AcceptInviteView) {
+	@authLayout("Accept invite — ggscale") {
+		<h1>Accept invite</h1>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		} else {
+			if vm.IsPlatform {
+				<p class="subtitle">You've been invited to ggscale as a <strong>platform admin</strong>.</p>
+			} else {
+				<p class="subtitle">You've been invited to <strong>{ vm.TenantName }</strong> as <strong>{ vm.Role }</strong>.</p>
+			}
+			<p>Email: <code>{ vm.Email }</code></p>
+			<form method="post" action="/v1/dashboard/invite/accept">
+				<input type="hidden" name="code" value={ vm.Code }/>
+				if vm.NewUser {
+					<label>
+						Set a password (≥ 12 chars)
+						<input name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				} else {
+					<p>Enter your existing ggscale password to confirm and attach this role to your account.</p>
+					<label>
+						Password
+						<input name="password" type="password" autocomplete="current-password" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				}
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Accept invite</button>
+				</div>
+			</form>
+		}
+	}
+}
+
+templ PlatformUsersPage(vm PlatformUsersView) {
+	@appLayout("Platform users — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Platform users</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Platform users</p>
+				<h1>Platform users</h1>
+				<p class="subtitle">Every dashboard user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
+			</div>
+			<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
+		</div>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<section class="card">
+			<form method="get" action="/v1/dashboard/admin/users">
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email contains…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Users) == 0 {
+				<div class="empty-state"><p>No dashboard users yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							<th>Tenants</th>
+							<th>Status</th>
+							<th>Last login</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, u := range vm.Users {
+							<tr>
+								<td>{ u.Email }</td>
+								<td>
+									if u.IsPlatformAdmin {
+										<span class="badge badge-role">platform admin</span>
+									} else {
+										<span class="badge">member</span>
+									}
+								</td>
+								<td>{ stringFromInt(u.TenantCount) }</td>
+								<td>
+									if !u.DisabledAt.IsZero() {
+										<span class="badge badge-revoked">disabled</span>
+									} else {
+										<span class="badge badge-active">active</span>
+									}
+								</td>
+								<td>{ timeString(u.LastLoginAt) }</td>
+								<td>{ timeString(u.CreatedAt) }</td>
+								<td class="actions-cell">
+									if u.IsSelf {
+										<span class="badge">you</span>
+									} else if !u.DisabledAt.IsZero() {
+										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/enable") } onsubmit="return confirm('Re-enable this user?')">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="secondary outline btn-inline">Re-enable</button>
+										</form>
+									} else {
+										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/disable") } onsubmit="return confirm('Disable this user? Their active sessions and pending invitations will be revoked.')">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="contrast outline btn-inline">Disable</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { stringFromInt(vm.Total) }.</p>
+			}
 		</section>
 	}
 }

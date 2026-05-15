@@ -85,7 +85,7 @@ test-plugins:
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
 up: preflight
-	docker compose up -d --wait
+	docker compose up -d --build --wait
 
 down:
 	docker compose down --remove-orphans

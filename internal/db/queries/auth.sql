@@ -10,21 +10,78 @@ RETURNING id, external_id, created_at;
 -- name: CreateEmailEndUser :one
 INSERT INTO end_users (
     tenant_id, project_id, external_id, email, password_hash,
-    email_verification_hash, email_verification_expires_at
+    email_verification_code_hash, email_verification_salt,
+    email_verification_expires_at, email_verification_last_sent_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, now()
 )
 RETURNING id;
 
 -- name: GetEndUserByEmail :one
+-- Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
+-- /v1/auth/login behaves identically to an unknown email — same dummy
+-- bcrypt + invalid_credentials response.
 SELECT id, project_id, password_hash, email_verified_at
 FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND email = $2
+  AND deleted_at IS NULL
+  AND disabled_at IS NULL;
+
+-- name: GetEndUserVerificationState :one
+SELECT
+    id,
+    email_verified_at,
+    email_verification_code_hash,
+    email_verification_salt,
+    email_verification_expires_at,
+    email_verification_attempts,
+    email_verification_last_sent_at
+FROM end_users
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND email = $2
   AND deleted_at IS NULL;
+
+-- name: SetEndUserVerificationCode :exec
+UPDATE end_users
+SET email_verification_code_hash    = $3,
+    email_verification_salt         = $4,
+    email_verification_expires_at   = $5,
+    email_verification_attempts     = 0,
+    email_verification_last_sent_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2;
+
+-- name: IncrementEndUserVerificationAttempts :one
+UPDATE end_users
+SET email_verification_attempts = email_verification_attempts + 1
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+RETURNING email_verification_attempts;
+
+-- name: ClearEndUserVerificationCode :exec
+UPDATE end_users
+SET email_verification_code_hash    = NULL,
+    email_verification_salt         = NULL,
+    email_verification_expires_at   = NULL,
+    email_verification_attempts     = 0
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1;
+
+-- name: MarkEndUserVerified :exec
+UPDATE end_users
+SET email_verified_at               = now(),
+    email_verification_code_hash    = NULL,
+    email_verification_salt         = NULL,
+    email_verification_expires_at   = NULL,
+    email_verification_attempts     = 0
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1;
 
 -- name: GetEndUserByExternalID :one
 SELECT id, project_id, email_verified_at
@@ -34,15 +91,6 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND external_id = $2
   AND deleted_at IS NULL;
 
--- name: VerifyEmailByTokenHash :one
-UPDATE end_users
-SET email_verified_at              = now(),
-    email_verification_hash        = NULL,
-    email_verification_expires_at  = NULL
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND email_verification_hash = $1
-  AND email_verification_expires_at > now()
-RETURNING id;
 
 -- name: CreateSession :one
 INSERT INTO sessions (tenant_id, end_user_id, refresh_hash, expires_at)
@@ -53,10 +101,15 @@ VALUES (
 RETURNING id, created_at;
 
 -- name: GetSessionByRefreshHash :one
-SELECT id, end_user_id, expires_at, revoked_at
-FROM sessions
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND refresh_hash = $1;
+-- Joined to end_users so refresh fails for disabled / deleted accounts
+-- even if the refresh token is still otherwise valid.
+SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at
+FROM sessions s
+JOIN end_users u ON u.id = s.end_user_id
+WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND s.refresh_hash = $1
+  AND u.deleted_at IS NULL
+  AND u.disabled_at IS NULL;
 
 -- name: RevokeSession :exec
 UPDATE sessions

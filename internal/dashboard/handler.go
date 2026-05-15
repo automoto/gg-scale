@@ -1,8 +1,8 @@
 package dashboard
 
 import (
+	"crypto/rand"
 	"embed"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,19 +10,31 @@ import (
 	"strings"
 	"time"
 
-	"github.com/a-h/templ"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
-
-const maxFormBodyBytes = 1 << 20
 
 //go:embed static
 var staticFS embed.FS
+
+// Deps groups everything dashboard.New needs. Using a struct (instead
+// of seven positional params) keeps the call site readable as
+// dependencies grow.
+type Deps struct {
+	Pool      *db.Pool
+	Cache     cache.Store
+	Limiter   ratelimit.Limiter
+	Registry  prometheus.Registerer
+	Config    Config
+	Bootstrap *Bootstrap
+	Mailer    mailer.Mailer
+}
 
 // Handler owns dashboard HTTP routes.
 type Handler struct {
@@ -32,37 +44,55 @@ type Handler struct {
 	reg       prometheus.Registerer
 	cfg       Config
 	bootstrap *Bootstrap
+	mailer    mailer.Mailer
 	now       func() time.Time
+	// verifySigningKey signs the short-lived verify-pending cookie.
+	// Generated once at handler construction so each process has a fresh
+	// secret; restarts invalidate in-flight verify cookies (acceptable —
+	// users re-enter from login).
+	verifySigningKey []byte
 }
 
 // New builds the dashboard router. Callers should only mount it when
-// Config.Enabled returns true.
-func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg prometheus.Registerer, cfg Config, bootstrap *Bootstrap) http.Handler {
+// d.Config.Enabled returns true.
+func New(d Deps) http.Handler {
+	bootstrap := d.Bootstrap
 	if bootstrap == nil {
 		bootstrap = DisabledBootstrap()
 	}
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		// crypto/rand failure is unrecoverable; this only fires at process
+		// startup so panicking is appropriate.
+		panic("dashboard: rand: " + err.Error())
+	}
 	h := &Handler{
-		pool:      pool,
-		cache:     store,
-		limiter:   limiter,
-		reg:       reg,
-		cfg:       cfg,
-		bootstrap: bootstrap,
-		now:       time.Now,
+		pool:             d.Pool,
+		cache:            d.Cache,
+		limiter:          d.Limiter,
+		reg:              d.Registry,
+		cfg:              d.Config,
+		bootstrap:        bootstrap,
+		mailer:           d.Mailer,
+		now:              time.Now,
+		verifySigningKey: key,
 	}
 
 	r := chi.NewRouter()
-	r.Use(securityHeaders)
+	r.Use(webutil.SecurityHeaders)
 	r.Get("/assets/*", h.assetHandler)
 	r.Group(func(r chi.Router) {
-		if limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, reg))
+		if d.Limiter != nil {
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
 		}
 		r.Get("/setup", h.setupTokenPage)
 		r.Post("/setup/token", h.verifySetupToken)
 		r.Post("/setup", h.completeSetup)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
+		r.Get("/verify", h.verifyPage)
+		r.Post("/verify", h.verifyHandler)
+		r.Post("/verify/resend", h.verifyResendHandler)
 	})
 
 	r.Group(func(r chi.Router) {
@@ -85,8 +115,35 @@ func New(pool *db.Pool, store cache.Store, limiter ratelimit.Limiter, reg promet
 			r.Post("/api-keys", h.createAPIKeyHandler)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
+			r.Get("/team", h.teamPage)
+			r.Get("/team/invite", h.inviteTeamPage)
+			r.Post("/team/invite", h.inviteTeammateHandler)
+			r.Post("/team/invites/{inviteID}/revoke", h.revokeInviteHandler)
+			r.Post("/team/members/{membershipID}/remove", h.removeMemberHandler)
+			r.Get("/projects/{projectID}/players", h.playersListPage)
+			r.Get("/projects/{projectID}/players/{playerID}", h.playerDetailPage)
+			r.Post("/projects/{projectID}/players/{playerID}/disable", h.playerToggleDisableHandler)
+			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
+			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
+		})
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(h.requirePlatformAdmin)
+			r.Get("/team", h.platformTeamPage)
+			r.Get("/team/invite", h.invitePlatformAdminPage)
+			r.Post("/team/invite", h.invitePlatformAdminHandler)
+			r.Get("/users", h.platformUsersPage)
+			r.Post("/users/{userID}/disable", h.disableDashboardUserHandler)
+			r.Post("/users/{userID}/enable", h.enableDashboardUserHandler)
 		})
 		r.Post("/logout", h.logout)
+	})
+
+	// Invite acceptance is reachable without a session — the magic link
+	// IS the session bootstrap. CSRF middleware skips the GET; the POST
+	// uses double-submit via the form's code field (the secret itself).
+	r.Group(func(r chi.Router) {
+		r.Get("/invite/accept", h.acceptInvitePage)
+		r.Post("/invite/accept", h.acceptInviteHandler)
 	})
 
 	return r
@@ -109,17 +166,23 @@ func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tenant list failed", http.StatusInternalServerError)
 		return
 	}
-	render(r, w, HomePage(HomeView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken, Tenants: tenants}))
+	webutil.Render(r, w, HomePage(HomeView{
+		UserEmail:       session.User.Email,
+		CSRFToken:       session.CSRFToken,
+		Tenants:         tenants,
+		IsPlatformAdmin: session.User.IsPlatformAdmin,
+	}))
+
 }
 
 func (h *Handler) helpPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, HelpPage(HelpView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+	webutil.Render(r, w, HelpPage(HelpView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
 func (h *Handler) newTenantPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, NewTenantPage(NewTenantView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+	webutil.Render(r, w, NewTenantPage(NewTenantView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
 func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
@@ -133,13 +196,14 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, ProjectsPage(ProjectsView{
+	webutil.Render(r, w, ProjectsPage(ProjectsView{
 		UserEmail: session.User.Email,
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Projects:  projects,
 		Message:   r.URL.Query().Get("created"),
 	}))
+
 }
 
 func (h *Handler) newProjectPage(w http.ResponseWriter, r *http.Request) {
@@ -148,11 +212,12 @@ func (h *Handler) newProjectPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, NewProjectPage(NewProjectView{
+	webutil.Render(r, w, NewProjectPage(NewProjectView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
 		TenantID:  tenantID,
 	}))
+
 }
 
 func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +225,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	name := r.Form.Get("name")
@@ -186,7 +251,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			view.FieldErrors = map[string]string{"name": "A project with that name already exists"}
 		}
 		w.WriteHeader(status)
-		render(r, w, NewProjectPage(view))
+		webutil.Render(r, w, NewProjectPage(view))
 		return
 	}
 	target := "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Project \""+strings.TrimSpace(name)+"\" created.")
@@ -195,7 +260,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "HX-Request")
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -213,10 +278,10 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 			msg = "Tenant name and project name are required"
 		}
 		w.WriteHeader(status)
-		render(r, w, FormErrorFragment(msg))
+		webutil.Render(r, w, FormErrorFragment(msg))
 		return
 	}
-	render(r, w, SignupSuccessPage(SignupSuccessView(result)))
+	webutil.Render(r, w, SignupSuccessPage(SignupSuccessView(result)))
 }
 
 func (h *Handler) openTenant(w http.ResponseWriter, r *http.Request) {
@@ -240,13 +305,14 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, APIKeysPage(APIKeysView{
+	webutil.Render(r, w, APIKeysPage(APIKeysView{
 		UserEmail: session.User.Email,
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Keys:      keys,
 		Message:   r.URL.Query().Get("created"),
 	}))
+
 }
 
 func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
@@ -260,12 +326,13 @@ func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	render(r, w, NewAPIKeyPage(NewAPIKeyView{
+	webutil.Render(r, w, NewAPIKeyPage(NewAPIKeyView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
 		TenantID:  tenantID,
 		Projects:  projects,
 	}))
+
 }
 
 func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -273,7 +340,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -300,11 +367,12 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
-	render(r, w, APIKeyCreatedPage(SignupSuccessView{
+	webutil.Render(r, w, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: tenantID,
 		APIKeyID: result.APIKeyID,
 		APIKey:   result.APIKey,
 	}, session.User.Email, session.CSRFToken))
+
 }
 
 // renderNewAPIKeyError re-renders the new API key page with field errors
@@ -317,7 +385,7 @@ func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, t
 		return
 	}
 	w.WriteHeader(status)
-	render(r, w, NewAPIKeyPage(NewAPIKeyView{
+	webutil.Render(r, w, NewAPIKeyPage(NewAPIKeyView{
 		UserEmail:   session.User.Email,
 		CSRFToken:   session.CSRFToken,
 		TenantID:    tenantID,
@@ -327,6 +395,7 @@ func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, t
 		Error:       errorMsg,
 		FieldErrors: fieldErrors,
 	}))
+
 }
 
 func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +403,7 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	if err := h.updateAPIKeyLabel(r.Context(), tenantID, apiKeyID, r.Form.Get("label")); err != nil {
@@ -349,7 +418,7 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !parseForm(w, r) {
+	if !webutil.ParseForm(w, r) {
 		return
 	}
 	if err := h.revokeAPIKey(r.Context(), tenantID, apiKeyID); err != nil {
@@ -357,15 +426,6 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys")
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "same-origin")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (h *Handler) requireSession(next http.Handler) http.Handler {
@@ -376,6 +436,21 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(contextWithSession(r.Context(), session)))
+	})
+}
+
+func (h *Handler) requirePlatformAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, ok := sessionFromContext(r.Context())
+		if !ok {
+			http.Error(w, "missing session", http.StatusUnauthorized)
+			return
+		}
+		if !session.User.IsPlatformAdmin {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -402,14 +477,6 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 			}
 			next.ServeHTTP(w, r)
 		})
-	}
-}
-
-func render(r *http.Request, w http.ResponseWriter, component templ.Component) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := component.Render(r.Context(), w); err != nil {
-		slog.ErrorContext(r.Context(), "dashboard template render failed", "err", err)
-		http.Error(w, "render error", http.StatusInternalServerError)
 	}
 }
 
@@ -444,18 +511,6 @@ func parsePathID(w http.ResponseWriter, r *http.Request, name string) (int64, bo
 		return 0, false
 	}
 	return id, true
-}
-
-func parseForm(w http.ResponseWriter, r *http.Request) bool {
-	if r.Form != nil {
-		return true
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBodyBytes)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", http.StatusBadRequest)
-		return false
-	}
-	return true
 }
 
 // clientIP extracts the real client IP for audit purposes.

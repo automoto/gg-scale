@@ -25,6 +25,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
@@ -67,6 +68,10 @@ type Deps struct {
 
 	Dashboard          dashboard.Config
 	DashboardBootstrap *dashboard.Bootstrap
+
+	// Players controls whether the player-facing /v1/players/p/{projectID}/
+	// site is mounted.
+	Players players.Config
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -118,7 +123,25 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewObservability(reg))
 		r.Get("/healthz", healthzHandler(d))
 		if d.Dashboard.Enabled() {
-			r.Mount("/dashboard", dashboard.New(d.Pool, d.Cache, d.Limiter, reg, d.Dashboard, d.DashboardBootstrap))
+			r.Mount("/dashboard", dashboard.New(dashboard.Deps{
+				Pool:      d.Pool,
+				Cache:     d.Cache,
+				Limiter:   d.Limiter,
+				Registry:  reg,
+				Config:    d.Dashboard,
+				Bootstrap: d.DashboardBootstrap,
+				Mailer:    d.Mailer,
+			}))
+		}
+		if d.Players.Enabled() && d.Pool != nil {
+			r.Mount("/players", players.New(players.Deps{
+				Pool:     d.Pool,
+				Mailer:   d.Mailer,
+				MailFrom: d.MailFrom,
+				Config:   d.Players,
+				Limiter:  d.Limiter,
+				Registry: reg,
+			}))
 		}
 
 		if d.hasAuthDeps() {

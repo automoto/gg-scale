@@ -28,7 +28,7 @@ func TestLogin_access_token_verifies_with_hmac_signer(t *testing.T) {
 	verifyToken := extractVerifyToken(t, rec.Sent[0].Body)
 
 	resp, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/verify", "k",
-		map[string]string{"token": verifyToken})
+		map[string]string{"email": "jwtverify@example.com", "code": verifyToken})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",

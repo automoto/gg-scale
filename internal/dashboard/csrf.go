@@ -3,6 +3,8 @@ package dashboard
 import (
 	"crypto/subtle"
 	"net/http"
+
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const csrfHeader = "X-CSRF-Token"
@@ -21,7 +23,7 @@ func (h *Handler) requireCSRF(next http.Handler) http.Handler {
 		}
 		token := r.Header.Get(csrfHeader)
 		if token == "" {
-			if !parseForm(w, r) {
+			if !webutil.ParseForm(w, r) {
 				return
 			}
 			token = r.Form.Get("_csrf")

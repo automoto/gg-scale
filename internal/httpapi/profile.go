@@ -1,8 +1,8 @@
 package httpapi
 
 import (
-	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -12,6 +12,8 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 type profileResponse struct {
@@ -60,7 +62,7 @@ func profileGetHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			internalError(w, "profile get: tx", err)
+			webutil.InternalError(w, "profile get: tx", err)
 			return
 		}
 		writeJSON(w, resp)
@@ -93,23 +95,29 @@ func profilePatchHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		verifyToken, err := randomHex("", 32)
+		code, err := verifycode.GenerateCode()
 		if err != nil {
-			internalError(w, "profile patch: rand", err)
+			webutil.InternalError(w, "profile patch: code", err)
 			return
 		}
-		verifyHash := sha256.Sum256([]byte(verifyToken))
+		salt, err := verifycode.NewSalt()
+		if err != nil {
+			webutil.InternalError(w, "profile patch: salt", err)
+			return
+		}
+		codeHash := verifycode.Hash(salt, code)
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			return sqlcgen.New(tx).UpdateProfileEmail(ctx, sqlcgen.UpdateProfileEmailParams{
 				ID:                         me,
 				Email:                      &newEmail,
-				EmailVerificationHash:      verifyHash[:],
-				EmailVerificationExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verifyTokenTTL), Valid: true},
+				EmailVerificationCodeHash:  codeHash,
+				EmailVerificationSalt:      salt,
+				EmailVerificationExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true},
 			})
 		})
 		if err != nil {
-			internalError(w, "profile patch: tx", err)
+			webutil.InternalError(w, "profile patch: tx", err)
 			return
 		}
 
@@ -117,7 +125,7 @@ func profilePatchHandler(d Deps) http.HandlerFunc {
 			_ = d.Mailer.Send(ctx, mailer.Message{
 				From: d.MailFrom, To: []string{newEmail},
 				Subject: mailerVerifySubject,
-				Body:    "Verification token: " + verifyToken + " (valid 24h)",
+				Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
 			})
 		}
 		w.WriteHeader(http.StatusAccepted)
