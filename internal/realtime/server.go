@@ -25,6 +25,11 @@ type Options struct {
 	Cache        cache.Store
 	MaxPerTenant int64
 
+	// MaxPerEndUser caps simultaneous connections from a single end-user
+	// (one player). Stops a single player from opening N sockets and
+	// burning the entire per-tenant budget. 0 disables the per-user cap.
+	MaxPerEndUser int64
+
 	// HeartbeatInterval controls server-initiated WebSocket pings. Zero
 	// uses 30s in production; tests pass a large value to disable.
 	HeartbeatInterval time.Duration
@@ -69,6 +74,30 @@ func ServeWS(opts Options) http.HandlerFunc {
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
+		}
+
+		// Per-end-user cap first: a single misbehaving player can't drain
+		// the per-tenant budget for everyone else. The order matters —
+		// failing the user-level cap before the tenant one means a
+		// flapping user doesn't briefly hold a tenant slot before being
+		// rejected.
+		if opts.MaxPerEndUser > 0 && opts.Cache != nil {
+			userKey := slotKeyForEndUser(tenantID, endUserID)
+			acquired, _, slotErr := opts.Cache.AcquireSlot(r.Context(), userKey, opts.MaxPerEndUser, slotTTL)
+			if slotErr != nil {
+				logger.Error("realtime: AcquireSlot (end_user) failed", "err", slotErr, "tenant_id", tenantID, "end_user_id", endUserID)
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			if !acquired {
+				http.Error(w, "too many connections for this user", http.StatusServiceUnavailable)
+				return
+			}
+			defer func() {
+				if rerr := opts.Cache.ReleaseSlot(context.Background(), userKey); rerr != nil {
+					logger.Warn("realtime: ReleaseSlot (end_user) failed", "err", rerr, "tenant_id", tenantID, "end_user_id", endUserID)
+				}
+			}()
 		}
 
 		slotKey := slotKeyForTenant(tenantID)
@@ -171,4 +200,8 @@ func (w *wsWriter) Close() error {
 
 func slotKeyForTenant(tenantID int64) string {
 	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10)
+}
+
+func slotKeyForEndUser(tenantID, endUserID int64) string {
+	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10) + ":user:" + strconv.FormatInt(endUserID, 10)
 }

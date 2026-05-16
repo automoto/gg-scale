@@ -42,6 +42,10 @@ type Config struct {
 	// RealtimeMaxPerTenant caps concurrent /v1/ws connections per tenant.
 	// 0 disables the cap (the cache.Store layer is bypassed entirely).
 	RealtimeMaxPerTenant int64
+	// RealtimeMaxPerEndUser caps concurrent /v1/ws connections from a
+	// single player so one misbehaving end-user can't drain the per-tenant
+	// budget. 0 disables. Default 4.
+	RealtimeMaxPerEndUser int64
 
 	// MatchmakerBucketSize is the number of queued tickets that must
 	// accumulate in a (tenant, project, region, game_mode) bucket before
@@ -259,6 +263,14 @@ var declared = []varDecl{
 			return fmt.Errorf("REALTIME_MAX_PER_TENANT %q: must be a non-negative integer", v)
 		}
 		c.RealtimeMaxPerTenant = n
+		return nil
+	}},
+	{name: "REALTIME_MAX_PER_END_USER", defval: "4", set: func(c *Config, v string) error {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("REALTIME_MAX_PER_END_USER %q: must be a non-negative integer", v)
+		}
+		c.RealtimeMaxPerEndUser = n
 		return nil
 	}},
 

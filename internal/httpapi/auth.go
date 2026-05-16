@@ -273,14 +273,36 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				endUserID = row.ID
 				return nil
 			}
-			if verifycode.AttemptsExhausted(int(row.EmailVerificationAttempts)) {
-				return errVerifyExhausted
+			if row.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(row.EmailVerificationLockedUntil.Time, time.Now()) {
+				return errVerifyAccountLocked
 			}
 			if verifycode.Expired(row.EmailVerificationExpiresAt.Time, time.Now()) {
 				return errVerifyExpired
 			}
 			if len(row.EmailVerificationSalt) == 0 || len(row.EmailVerificationCodeHash) == 0 {
 				return errVerifyExpired
+			}
+			// Atomic check-and-bump replaces the prior fetch-then-increment
+			// pattern that could undercount concurrent wrong codes.
+			reserved, err := q.ReserveEndUserVerifyAttempt(ctx, sqlcgen.ReserveEndUserVerifyAttemptParams{
+				ID:          row.ID,
+				MaxAttempts: int32(verifycode.MaxAttempts),
+			})
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return errVerifyExhausted
+				}
+				return err
+			}
+			// Lifetime cap survives /resend; trip the long lockout.
+			if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
+				lockedUntil := pgtype.Timestamptz{Time: time.Now().Add(verifycode.LockoutDuration), Valid: true}
+				if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
+					ID: row.ID, LockedUntil: lockedUntil,
+				}); lerr != nil {
+					return lerr
+				}
+				return errVerifyAccountLocked
 			}
 			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
 			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) == 1 {
@@ -289,9 +311,6 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				}
 				endUserID = row.ID
 				return auditlog.Write(ctx, tx, row.ID, "auth.verify", "", nil)
-			}
-			if _, err := q.IncrementEndUserVerificationAttempts(ctx, row.ID); err != nil {
-				return err
 			}
 			return errVerifyBadCode
 		})
@@ -307,6 +326,9 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			return
 		case errors.Is(err, errVerifyExhausted):
 			http.Error(w, "too many attempts", http.StatusTooManyRequests)
+			return
+		case errors.Is(err, errVerifyAccountLocked):
+			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
 			return
 		case err != nil:
 			webutil.InternalError(w, "verify: tx", err)
@@ -621,6 +643,7 @@ var (
 	errVerifyBadCode            = errors.New("auth: bad verification code")
 	errVerifyExpired            = errors.New("auth: verification code expired")
 	errVerifyExhausted          = errors.New("auth: verification attempts exhausted")
+	errVerifyAccountLocked      = errors.New("auth: account locked after too many verification attempts")
 )
 
 // dummyBcryptHash is a valid bcryptCost=12 hash used to flatten login timing

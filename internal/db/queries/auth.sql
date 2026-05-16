@@ -39,12 +39,20 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND email = $2
   AND deleted_at IS NULL;
+
+-- name: LockEndUserVerification :exec
+UPDATE end_users
+SET email_verification_locked_until = sqlc.arg(locked_until)::timestamptz
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = sqlc.arg(id);
 
 -- name: SetEndUserVerificationCode :exec
 UPDATE end_users
@@ -63,6 +71,17 @@ SET email_verification_attempts = email_verification_attempts + 1
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
 RETURNING email_verification_attempts;
+
+-- name: ReserveEndUserVerifyAttempt :one
+-- Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
+-- TOCTOU explanation). Returns 0 rows when already at cap.
+UPDATE end_users
+SET email_verification_attempts = email_verification_attempts + 1,
+    email_verification_lifetime_attempts = email_verification_lifetime_attempts + 1
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = sqlc.arg('id')
+  AND email_verification_attempts < sqlc.arg('max_attempts')::int
+RETURNING email_verification_attempts, email_verification_lifetime_attempts;
 
 -- name: ClearEndUserVerificationCode :exec
 UPDATE end_users

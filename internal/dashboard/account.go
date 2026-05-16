@@ -6,6 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -65,7 +66,10 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 		}); err != nil {
 			return err
 		}
-		return q.RevokeAllDashboardSessionsForUser(r.Context(), session.User.ID)
+		if err := q.RevokeAllDashboardSessionsForUser(r.Context(), session.User.ID); err != nil {
+			return err
+		}
+		return auditlog.WritePlatform(r.Context(), tx, session.User.ID, "dashboard.password_change", "", nil)
 	}); err != nil {
 		http.Error(w, "password update failed", http.StatusInternalServerError)
 		return

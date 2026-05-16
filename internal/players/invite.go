@@ -24,6 +24,7 @@ type InviteAcceptView struct {
 	ProjectName string
 	Error       string
 	FieldErrors map[string]string
+	CSRFToken   string
 }
 
 var (
@@ -44,6 +45,7 @@ func (h *Handler) inviteAcceptPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.Code = code
+	view.CSRFToken = h.csrf(r)
 	webutil.Render(r, w, InviteAcceptPage(view))
 }
 
@@ -64,6 +66,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.Code = code
+	view.CSRFToken = h.csrf(r)
 	if len(password) < minPlayerPasswordLength {
 		view.FieldErrors = map[string]string{"password": "Password must be at least 8 characters."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -196,5 +199,5 @@ func (h *Handler) renderInviteLookupError(w http.ResponseWriter, r *http.Request
 		status, msg = http.StatusInternalServerError, "Could not load invite."
 	}
 	w.WriteHeader(status)
-	webutil.Render(r, w, InviteAcceptPage(InviteAcceptView{ProjectID: projectID, Error: msg}))
+	webutil.Render(r, w, InviteAcceptPage(InviteAcceptView{ProjectID: projectID, Error: msg, CSRFToken: h.csrf(r)}))
 }

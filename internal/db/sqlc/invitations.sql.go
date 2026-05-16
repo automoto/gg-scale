@@ -482,18 +482,22 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM end_users
 WHERE id = $1
 `
 
 type GetPlayerVerificationStateByIDRow struct {
-	EmailVerifiedAt             pgtype.Timestamptz
-	EmailVerificationCodeHash   []byte
-	EmailVerificationSalt       []byte
-	EmailVerificationExpiresAt  pgtype.Timestamptz
-	EmailVerificationAttempts   int32
-	EmailVerificationLastSentAt pgtype.Timestamptz
+	EmailVerifiedAt                   pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationSalt             []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationAttempts         int32
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
+	EmailVerificationLastSentAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error) {
@@ -505,6 +509,8 @@ func (q *Queries) GetPlayerVerificationStateByID(ctx context.Context, id int64) 
 		&i.EmailVerificationSalt,
 		&i.EmailVerificationExpiresAt,
 		&i.EmailVerificationAttempts,
+		&i.EmailVerificationLifetimeAttempts,
+		&i.EmailVerificationLockedUntil,
 		&i.EmailVerificationLastSentAt,
 	)
 	return i, err

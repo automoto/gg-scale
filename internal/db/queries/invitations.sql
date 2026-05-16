@@ -286,6 +286,8 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM end_users
 WHERE id = sqlc.arg(id);

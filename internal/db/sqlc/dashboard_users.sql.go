@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bumpDashboardLoginFailure = `-- name: BumpDashboardLoginFailure :one
+UPDATE dashboard_users
+SET login_failures = login_failures + 1,
+    locked_until = CASE
+        WHEN login_failures + 1 >= $1::int
+            THEN $2::timestamptz
+        ELSE locked_until
+    END
+WHERE id = $3
+RETURNING login_failures, locked_until
+`
+
+type BumpDashboardLoginFailureParams struct {
+	FailureLimit int32
+	LockoutUntil pgtype.Timestamptz
+	ID           int64
+}
+
+type BumpDashboardLoginFailureRow struct {
+	LoginFailures int32
+	LockedUntil   pgtype.Timestamptz
+}
+
+// Atomic increment + conditional lockout. The previous read-then-write
+// pattern was TOCTOU-racy: N parallel failed logins all read the same value
+// and wrote N+1, so 10 simultaneous wrong passwords landed at login_failures=1
+// and the lockout never fired. UPDATE...RETURNING serialises under the row
+// lock pgx already takes.
+func (q *Queries) BumpDashboardLoginFailure(ctx context.Context, arg BumpDashboardLoginFailureParams) (BumpDashboardLoginFailureRow, error) {
+	row := q.db.QueryRow(ctx, bumpDashboardLoginFailure, arg.FailureLimit, arg.LockoutUntil, arg.ID)
+	var i BumpDashboardLoginFailureRow
+	err := row.Scan(&i.LoginFailures, &i.LockedUntil)
+	return i, err
+}
+
 const clearDashboardVerificationCode = `-- name: ClearDashboardVerificationCode :exec
 UPDATE dashboard_users
 SET email_verification_code_hash    = NULL,
@@ -388,20 +423,24 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM dashboard_users
 WHERE id = $1
 `
 
 type GetDashboardUserVerificationStateRow struct {
-	ID                          int64
-	Email                       string
-	EmailVerifiedAt             pgtype.Timestamptz
-	EmailVerificationCodeHash   []byte
-	EmailVerificationSalt       []byte
-	EmailVerificationExpiresAt  pgtype.Timestamptz
-	EmailVerificationAttempts   int32
-	EmailVerificationLastSentAt pgtype.Timestamptz
+	ID                                int64
+	Email                             string
+	EmailVerifiedAt                   pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationSalt             []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationAttempts         int32
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
+	EmailVerificationLastSentAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetDashboardUserVerificationState(ctx context.Context, id int64) (GetDashboardUserVerificationStateRow, error) {
@@ -415,6 +454,8 @@ func (q *Queries) GetDashboardUserVerificationState(ctx context.Context, id int6
 		&i.EmailVerificationSalt,
 		&i.EmailVerificationExpiresAt,
 		&i.EmailVerificationAttempts,
+		&i.EmailVerificationLifetimeAttempts,
+		&i.EmailVerificationLockedUntil,
 		&i.EmailVerificationLastSentAt,
 	)
 	return i, err
@@ -583,6 +624,25 @@ func (q *Queries) ListDashboardUsersForPlatformAdmin(ctx context.Context, arg Li
 	return items, nil
 }
 
+const lockDashboardUserVerification = `-- name: LockDashboardUserVerification :exec
+UPDATE dashboard_users
+SET email_verification_locked_until = $1::timestamptz
+WHERE id = $2
+`
+
+type LockDashboardUserVerificationParams struct {
+	LockedUntil pgtype.Timestamptz
+	ID          int64
+}
+
+// Set the lockout window on an account that just tipped over
+// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
+// duration stays a single source of truth.
+func (q *Queries) LockDashboardUserVerification(ctx context.Context, arg LockDashboardUserVerificationParams) error {
+	_, err := q.db.Exec(ctx, lockDashboardUserVerification, arg.LockedUntil, arg.ID)
+	return err
+}
+
 const markDashboardUserVerified = `-- name: MarkDashboardUserVerified :exec
 UPDATE dashboard_users
 SET email_verified_at               = now(),
@@ -598,32 +658,6 @@ func (q *Queries) MarkDashboardUserVerified(ctx context.Context, id int64) error
 	return err
 }
 
-const recordDashboardLoginFailure = `-- name: RecordDashboardLoginFailure :one
-UPDATE dashboard_users
-SET login_failures = $1,
-    locked_until = $2::timestamptz
-WHERE id = $3
-RETURNING login_failures, locked_until
-`
-
-type RecordDashboardLoginFailureParams struct {
-	LoginFailures int32
-	LockedUntil   pgtype.Timestamptz
-	ID            int64
-}
-
-type RecordDashboardLoginFailureRow struct {
-	LoginFailures int32
-	LockedUntil   pgtype.Timestamptz
-}
-
-func (q *Queries) RecordDashboardLoginFailure(ctx context.Context, arg RecordDashboardLoginFailureParams) (RecordDashboardLoginFailureRow, error) {
-	row := q.db.QueryRow(ctx, recordDashboardLoginFailure, arg.LoginFailures, arg.LockedUntil, arg.ID)
-	var i RecordDashboardLoginFailureRow
-	err := row.Scan(&i.LoginFailures, &i.LockedUntil)
-	return i, err
-}
-
 const recordDashboardLoginSuccess = `-- name: RecordDashboardLoginSuccess :exec
 UPDATE dashboard_users
 SET login_failures = 0,
@@ -635,6 +669,37 @@ WHERE id = $1
 func (q *Queries) RecordDashboardLoginSuccess(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, recordDashboardLoginSuccess, id)
 	return err
+}
+
+const reserveDashboardVerifyAttempt = `-- name: ReserveDashboardVerifyAttempt :one
+UPDATE dashboard_users
+SET email_verification_attempts = email_verification_attempts + 1,
+    email_verification_lifetime_attempts = email_verification_lifetime_attempts + 1
+WHERE id = $1
+  AND email_verification_attempts < $2::int
+RETURNING email_verification_attempts, email_verification_lifetime_attempts
+`
+
+type ReserveDashboardVerifyAttemptParams struct {
+	ID          int64
+	MaxAttempts int32
+}
+
+type ReserveDashboardVerifyAttemptRow struct {
+	EmailVerificationAttempts         int32
+	EmailVerificationLifetimeAttempts int32
+}
+
+// Atomic check-and-bump used in place of the previous fetch-then-increment
+// pattern: two parallel wrong codes used to both pass the cap check before
+// either incremented, so the lockout could be overshot. The WHERE clause
+// now folds the bound into the same statement that mutates the counter.
+// Returns 0 rows when already at cap (caller treats as errVerifyLocked).
+func (q *Queries) ReserveDashboardVerifyAttempt(ctx context.Context, arg ReserveDashboardVerifyAttemptParams) (ReserveDashboardVerifyAttemptRow, error) {
+	row := q.db.QueryRow(ctx, reserveDashboardVerifyAttempt, arg.ID, arg.MaxAttempts)
+	var i ReserveDashboardVerifyAttemptRow
+	err := row.Scan(&i.EmailVerificationAttempts, &i.EmailVerificationLifetimeAttempts)
+	return i, err
 }
 
 const revokeAllDashboardSessionsForUser = `-- name: RevokeAllDashboardSessionsForUser :exec

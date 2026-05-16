@@ -984,6 +984,7 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 			}
 			<p>Email: <code>{ vm.Email }</code></p>
 			<form method="post" action="/v1/dashboard/invite/accept">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<input type="hidden" name="code" value={ vm.Code }/>
 				if vm.NewUser {
 					<label>

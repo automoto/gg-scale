@@ -132,7 +132,8 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invite not found", http.StatusNotFound)
 		return
 	}
-	if err := h.revokeInvite(r.Context(), inviteID); err != nil {
+	session, _ := sessionFromContext(r.Context())
+	if err := h.revokeInvite(r.Context(), session.User.ID, inviteID); err != nil {
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
@@ -254,6 +255,7 @@ func (h *Handler) acceptInvitePage(w http.ResponseWriter, r *http.Request) {
 		IsPlatform: res.Role == roleInvitePlatformAdmin,
 		NewUser:    !res.IsExisting,
 		ExpiresAt:  res.ExpiresAt,
+		CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
 	}))
 
 }
@@ -281,6 +283,7 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 			IsPlatform: lookup.Role == roleInvitePlatformAdmin,
 			NewUser:    !lookup.IsExisting,
 			ExpiresAt:  lookup.ExpiresAt,
+			CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
 		}
 		status := http.StatusInternalServerError
 		switch {
@@ -352,7 +355,7 @@ func (h *Handler) renderInviteLookupError(w http.ResponseWriter, r *http.Request
 		msg = "Could not load invite."
 	}
 	w.WriteHeader(status)
-	webutil.Render(r, w, AcceptInvitePage(AcceptInviteView{Error: msg}))
+	webutil.Render(r, w, AcceptInvitePage(AcceptInviteView{Error: msg, CSRFToken: webutil.CSRFTokenFromContext(r.Context())}))
 }
 
 // sendInviteEmail mails the invite recipient the magic link. Failure is

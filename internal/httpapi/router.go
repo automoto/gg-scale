@@ -57,8 +57,9 @@ type Deps struct {
 	Fleet *fleet.Manager
 
 	// Hub fans WS messages out to connected end-users. nil disables /v1/ws.
-	Hub                  *realtime.Hub
-	RealtimeMaxPerTenant int64
+	Hub                   *realtime.Hub
+	RealtimeMaxPerTenant  int64
+	RealtimeMaxPerEndUser int64
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
@@ -187,6 +188,7 @@ func NewRouter(d Deps) http.Handler {
 				// End-user authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
 					r.Use(enduser.New(d.Signer))
+					r.Use(ratelimit.NewEndUserLimiter(d.Limiter, ratelimit.EndUserRate, ratelimit.EndUserBurst, reg))
 					mountStorageRoutes(r, d)
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)

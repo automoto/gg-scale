@@ -191,6 +191,8 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM end_users
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -205,13 +207,15 @@ type GetEndUserVerificationStateParams struct {
 }
 
 type GetEndUserVerificationStateRow struct {
-	ID                          int64
-	EmailVerifiedAt             pgtype.Timestamptz
-	EmailVerificationCodeHash   []byte
-	EmailVerificationSalt       []byte
-	EmailVerificationExpiresAt  pgtype.Timestamptz
-	EmailVerificationAttempts   int32
-	EmailVerificationLastSentAt pgtype.Timestamptz
+	ID                                int64
+	EmailVerifiedAt                   pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationSalt             []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationAttempts         int32
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
+	EmailVerificationLastSentAt       pgtype.Timestamptz
 }
 
 func (q *Queries) GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error) {
@@ -224,6 +228,8 @@ func (q *Queries) GetEndUserVerificationState(ctx context.Context, arg GetEndUse
 		&i.EmailVerificationSalt,
 		&i.EmailVerificationExpiresAt,
 		&i.EmailVerificationAttempts,
+		&i.EmailVerificationLifetimeAttempts,
+		&i.EmailVerificationLockedUntil,
 		&i.EmailVerificationLastSentAt,
 	)
 	return i, err
@@ -288,6 +294,23 @@ func (q *Queries) IncrementEndUserVerificationAttempts(ctx context.Context, id i
 	return email_verification_attempts, err
 }
 
+const lockEndUserVerification = `-- name: LockEndUserVerification :exec
+UPDATE end_users
+SET email_verification_locked_until = $1::timestamptz
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $2
+`
+
+type LockEndUserVerificationParams struct {
+	LockedUntil pgtype.Timestamptz
+	ID          int64
+}
+
+func (q *Queries) LockEndUserVerification(ctx context.Context, arg LockEndUserVerificationParams) error {
+	_, err := q.db.Exec(ctx, lockEndUserVerification, arg.LockedUntil, arg.ID)
+	return err
+}
+
 const markEndUserVerified = `-- name: MarkEndUserVerified :exec
 UPDATE end_users
 SET email_verified_at               = now(),
@@ -302,6 +325,35 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 func (q *Queries) MarkEndUserVerified(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markEndUserVerified, id)
 	return err
+}
+
+const reserveEndUserVerifyAttempt = `-- name: ReserveEndUserVerifyAttempt :one
+UPDATE end_users
+SET email_verification_attempts = email_verification_attempts + 1,
+    email_verification_lifetime_attempts = email_verification_lifetime_attempts + 1
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND email_verification_attempts < $2::int
+RETURNING email_verification_attempts, email_verification_lifetime_attempts
+`
+
+type ReserveEndUserVerifyAttemptParams struct {
+	ID          int64
+	MaxAttempts int32
+}
+
+type ReserveEndUserVerifyAttemptRow struct {
+	EmailVerificationAttempts         int32
+	EmailVerificationLifetimeAttempts int32
+}
+
+// Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
+// TOCTOU explanation). Returns 0 rows when already at cap.
+func (q *Queries) ReserveEndUserVerifyAttempt(ctx context.Context, arg ReserveEndUserVerifyAttemptParams) (ReserveEndUserVerifyAttemptRow, error) {
+	row := q.db.QueryRow(ctx, reserveEndUserVerifyAttempt, arg.ID, arg.MaxAttempts)
+	var i ReserveEndUserVerifyAttemptRow
+	err := row.Scan(&i.EmailVerificationAttempts, &i.EmailVerificationLifetimeAttempts)
+	return i, err
 }
 
 const revokeSession = `-- name: RevokeSession :exec

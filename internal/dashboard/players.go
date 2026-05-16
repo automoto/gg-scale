@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/verifycode"
@@ -169,13 +170,18 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 		players []PlayerView
 		total   int64
 	)
-	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+	// Use Q + WithTenant so RLS enforces tenant isolation as defense-in-depth.
+	// The query still passes TenantID — both layers must agree on which
+	// tenant the request is for, so a forgotten WHERE clause downstream
+	// can't leak rows across tenants.
+	ctx := db.WithTenant(r.Context(), tenantID)
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		var filter *string
 		if search != "" {
 			filter = &search
 		}
-		rows, err := q.ListPlayersForProject(r.Context(), sqlcgen.ListPlayersForProjectParams{
+		rows, err := q.ListPlayersForProject(ctx, sqlcgen.ListPlayersForProjectParams{
 			TenantID:    tenantID,
 			ProjectID:   projectID,
 			EmailFilter: filter,
@@ -196,7 +202,7 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			pv.DisabledAt = row.DisabledAt.Time
 			players = append(players, pv)
 		}
-		count, err := q.CountPlayersForProject(r.Context(), sqlcgen.CountPlayersForProjectParams{
+		count, err := q.CountPlayersForProject(ctx, sqlcgen.CountPlayersForProjectParams{
 			TenantID:    tenantID,
 			ProjectID:   projectID,
 			EmailFilter: filter,
@@ -241,10 +247,11 @@ func (h *Handler) playerDetailPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx := db.WithTenant(r.Context(), tenantID)
 	var row sqlcgen.GetPlayerForProjectRow
-	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
 		var err error
-		row, err = sqlcgen.New(tx).GetPlayerForProject(r.Context(), sqlcgen.GetPlayerForProjectParams{
+		row, err = sqlcgen.New(tx).GetPlayerForProject(ctx, sqlcgen.GetPlayerForProjectParams{
 			TenantID:  tenantID,
 			ProjectID: projectID,
 			ID:        playerID,
@@ -373,8 +380,9 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	if !enable {
 		disabledAt = pgtype.Timestamptz{Time: h.now(), Valid: true}
 	}
-	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerDisabledByTenant(r.Context(), sqlcgen.SetPlayerDisabledByTenantParams{
+	ctx := db.WithTenant(r.Context(), tenantID)
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).SetPlayerDisabledByTenant(ctx, sqlcgen.SetPlayerDisabledByTenantParams{
 			ID:         playerID,
 			ProjectID:  projectID,
 			TenantID:   tenantID,

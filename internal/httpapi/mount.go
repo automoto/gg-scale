@@ -53,9 +53,10 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		return
 	}
 	r.Get("/ws", realtime.ServeWS(realtime.Options{
-		Hub:          d.Hub,
-		Cache:        d.Cache,
-		MaxPerTenant: d.RealtimeMaxPerTenant,
+		Hub:           d.Hub,
+		Cache:         d.Cache,
+		MaxPerTenant:  d.RealtimeMaxPerTenant,
+		MaxPerEndUser: d.RealtimeMaxPerEndUser,
 	}))
 }
 

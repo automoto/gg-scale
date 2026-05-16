@@ -37,7 +37,12 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 
 		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		if err != nil {
-			http.Error(w, "body too large or unreadable", http.StatusBadRequest)
+			var maxErr *http.MaxBytesError
+			if errors.As(err, &maxErr) {
+				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "unreadable body", http.StatusBadRequest)
 			return
 		}
 		if !json.Valid(raw) {

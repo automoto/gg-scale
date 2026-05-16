@@ -9,6 +9,12 @@ import (
 )
 
 type Querier interface {
+	// Atomic increment + conditional lockout. The previous read-then-write
+	// pattern was TOCTOU-racy: N parallel failed logins all read the same value
+	// and wrote N+1, so 10 simultaneous wrong passwords landed at login_failures=1
+	// and the lockout never fired. UPDATE...RETURNING serialises under the row
+	// lock pgx already takes.
+	BumpDashboardLoginFailure(ctx context.Context, arg BumpDashboardLoginFailureParams) (BumpDashboardLoginFailureRow, error)
 	// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 	// CommitClaim will find zero rows and deallocate the orphan server.
 	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
@@ -176,6 +182,11 @@ type Querier interface {
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	// Set the lockout window on an account that just tipped over
+	// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
+	// duration stays a single source of truth.
+	LockDashboardUserVerification(ctx context.Context, arg LockDashboardUserVerificationParams) error
+	LockEndUserVerification(ctx context.Context, arg LockEndUserVerificationParams) error
 	MarkAllocationFailed(ctx context.Context, id int64) error
 	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
 	MarkDashboardInvitationAccepted(ctx context.Context, id int64) error
@@ -197,7 +208,6 @@ type Querier interface {
 	// Optimistic concurrency variant — only updates if the row's current
 	// version matches expected. RETURNING NULL row on mismatch.
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
-	RecordDashboardLoginFailure(ctx context.Context, arg RecordDashboardLoginFailureParams) (RecordDashboardLoginFailureRow, error)
 	RecordDashboardLoginSuccess(ctx context.Context, id int64) error
 	ReleaseAllocation(ctx context.Context, id int64) error
 	// Worker-driven release: allocator failed (or the worker is giving up).
@@ -208,6 +218,15 @@ type Querier interface {
 	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
 	// terminal (the WHERE clause omits it). See migration 0012.
 	RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error)
+	// Atomic check-and-bump used in place of the previous fetch-then-increment
+	// pattern: two parallel wrong codes used to both pass the cap check before
+	// either incremented, so the lockout could be overshot. The WHERE clause
+	// now folds the bound into the same statement that mutates the counter.
+	// Returns 0 rows when already at cap (caller treats as errVerifyLocked).
+	ReserveDashboardVerifyAttempt(ctx context.Context, arg ReserveDashboardVerifyAttemptParams) (ReserveDashboardVerifyAttemptRow, error)
+	// Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
+	// TOCTOU explanation). Returns 0 rows when already at cap.
+	ReserveEndUserVerifyAttempt(ctx context.Context, arg ReserveEndUserVerifyAttemptParams) (ReserveEndUserVerifyAttemptRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
 	RevokeDashboardInvitation(ctx context.Context, id int64) error

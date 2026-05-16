@@ -183,9 +183,16 @@ func New(d Deps) http.Handler {
 	})
 
 	// Invite acceptance is reachable without a session — the magic link
-	// IS the session bootstrap. CSRF middleware skips the GET; the POST
-	// uses double-submit via the form's code field (the secret itself).
+	// IS the session bootstrap. The dashboard's session-bound CSRF
+	// middleware doesn't apply here; instead we use the double-submit
+	// cookie helper so the POST handler can still verify intent.
 	r.Group(func(r chi.Router) {
+		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
+			Path:     "/v1/dashboard",
+			Secure:   h.cfg.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+		}))
+		r.Use(webutil.RequireCSRF)
 		r.Get("/invite/accept", h.acceptInvitePage)
 		r.Post("/invite/accept", h.acceptInviteHandler)
 	})
@@ -401,7 +408,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = &id
 	}
-	result, err := h.createAPIKey(r.Context(), createKeyInput{
+	result, err := h.createAPIKey(r.Context(), session.User.ID, createKeyInput{
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Label:     label,
@@ -450,7 +457,8 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	if err := h.updateAPIKeyLabel(r.Context(), tenantID, apiKeyID, r.Form.Get("label")); err != nil {
+	session, _ := sessionFromContext(r.Context())
+	if err := h.updateAPIKeyLabel(r.Context(), session.User.ID, tenantID, apiKeyID, r.Form.Get("label")); err != nil {
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
 		return
 	}
@@ -465,7 +473,8 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	if err := h.revokeAPIKey(r.Context(), tenantID, apiKeyID); err != nil {
+	session, _ := sessionFromContext(r.Context())
+	if err := h.revokeAPIKey(r.Context(), session.User.ID, tenantID, apiKeyID); err != nil {
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)
 		return
 	}

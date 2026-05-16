@@ -264,6 +264,7 @@ type AcceptInviteView struct {
 	FieldErrors map[string]string
 	ExpiresAt   time.Time
 	AcceptedAt  time.Time
+	CSRFToken   string
 }
 
 // AllocationView is one row in the fleet list and the snapshot on the

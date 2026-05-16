@@ -99,6 +99,18 @@ func New(d Deps) http.Handler {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
 		}
+		// Anonymous-form CSRF (double-submit cookie). The player site has
+		// no session before login/verify, so the dashboard's session-bound
+		// CSRF token doesn't apply — RequireCSRF + CSRFCookie work
+		// together: the cookie middleware mints a per-page nonce on GET,
+		// templates render it as a hidden field, RequireCSRF enforces the
+		// match on every mutating method.
+		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
+			Path:     "/v1/players",
+			Secure:   d.Config.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+		}))
+		r.Use(webutil.RequireCSRF)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
 		r.Get("/signup", h.signupPage)
@@ -113,12 +125,19 @@ func New(d Deps) http.Handler {
 	return r
 }
 
+// csrf is shorthand for the CSRF token pulled off the request context by
+// the CSRFCookie middleware. Every render site stamps it onto the view so
+// the form's hidden _csrf field can be compared on the matching POST.
+func (h *Handler) csrf(r *http.Request) string {
+	return webutil.CSRFTokenFromContext(r.Context())
+}
+
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := parseProjectID(w, r)
 	if !ok {
 		return
 	}
-	webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID}))
+	webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, CSRFToken: h.csrf(r)}))
 }
 
 func (h *Handler) signupPage(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +145,7 @@ func (h *Handler) signupPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	webutil.Render(r, w, SignupPage(SignupView{ProjectID: projectID}))
+	webutil.Render(r, w, SignupPage(SignupView{ProjectID: projectID, CSRFToken: h.csrf(r)}))
 }
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +158,7 @@ func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, playerLoginPath(projectID), http.StatusSeeOther)
 		return
 	}
-	webutil.Render(r, w, AccountPage(AccountView{ProjectID: projectID, Email: session.Email}))
+	webutil.Render(r, w, AccountPage(AccountView{ProjectID: projectID, Email: session.Email, CSRFToken: h.csrf(r)}))
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +184,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		w.WriteHeader(http.StatusUnauthorized)
-		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password."}))
+		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
 	}
 	if err != nil {
@@ -174,12 +193,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) != nil {
 		w.WriteHeader(http.StatusUnauthorized)
-		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password."}))
+		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
 	}
 	if row.DisabledAt.Valid {
 		w.WriteHeader(http.StatusForbidden)
-		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "This account has been disabled."}))
+		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "This account has been disabled.", CSRFToken: h.csrf(r)}))
 		return
 	}
 	if !row.EmailVerifiedAt.Valid {
@@ -206,7 +225,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.ToLower(strings.TrimSpace(r.Form.Get("email")))
 	password := r.Form.Get("password")
-	view := SignupView{ProjectID: projectID, Email: email}
+	view := SignupView{ProjectID: projectID, Email: email, CSRFToken: h.csrf(r)}
 	if !validEmail(email) {
 		view.FieldErrors = map[string]string{"email": "Enter a valid email."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -290,7 +309,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, playerLoginPath(projectID), http.StatusSeeOther)
 		return
 	}
-	webutil.Render(r, w, VerifyPage(VerifyView{ProjectID: projectID, Email: p.Email}))
+	webutil.Render(r, w, VerifyPage(VerifyView{ProjectID: projectID, Email: p.Email, CSRFToken: h.csrf(r)}))
 }
 
 func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +326,7 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code := strings.TrimSpace(r.Form.Get("code"))
-	view := VerifyView{ProjectID: projectID, Email: p.Email}
+	view := VerifyView{ProjectID: projectID, Email: p.Email, CSRFToken: h.csrf(r)}
 	if len(code) != 6 {
 		view.Error = "Enter the 6-digit code from your email."
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -332,6 +351,11 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, errVerifyLocked):
 		view.Error = "Too many attempts. Sign in again to request a fresh code."
+		w.WriteHeader(http.StatusTooManyRequests)
+		webutil.Render(r, w, VerifyPage(view))
+		return
+	case errors.Is(err, errVerifyAccountLocked):
+		view.Error = "This account is locked after too many verification attempts. Contact support to unlock."
 		w.WriteHeader(http.StatusTooManyRequests)
 		webutil.Render(r, w, VerifyPage(view))
 		return
@@ -371,6 +395,11 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 	})
 	if err != nil {
 		return err
+	}
+	if state.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(state.EmailVerificationLockedUntil.Time, h.now()) {
+		// Locked-out accounts can't refresh their code either; resend
+		// would otherwise loop the per-code attempt budget forever.
+		return errVerifyAccountLocked
 	}
 	if !verifycode.CanResend(state.EmailVerificationLastSentAt.Time, h.now()) {
 		return nil // silently no-op; user can wait and re-submit
@@ -416,8 +445,8 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 		if state.EmailVerifiedAt.Valid {
 			return errAlreadyVerified
 		}
-		if verifycode.AttemptsExhausted(int(state.EmailVerificationAttempts)) {
-			return errVerifyLocked
+		if state.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(state.EmailVerificationLockedUntil.Time, h.now()) {
+			return errVerifyAccountLocked
 		}
 		if verifycode.Expired(state.EmailVerificationExpiresAt.Time, h.now()) {
 			return errVerifyExpired
@@ -425,11 +454,29 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 		if len(state.EmailVerificationSalt) == 0 || len(state.EmailVerificationCodeHash) == 0 {
 			return errVerifyExpired
 		}
+		// Atomic per-code cap (replaces fetch-then-bump).
+		reserved, rerr := q.ReserveEndUserVerifyAttempt(ctx, sqlcgen.ReserveEndUserVerifyAttemptParams{
+			ID:          userID,
+			MaxAttempts: int32(verifycode.MaxAttempts),
+		})
+		if rerr != nil {
+			if errors.Is(rerr, pgx.ErrNoRows) {
+				return errVerifyLocked
+			}
+			return rerr
+		}
+		// Lifetime cap survives /resend; trip the long lockout.
+		if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
+			lockedUntil := pgtype.Timestamptz{Time: h.now().Add(verifycode.LockoutDuration), Valid: true}
+			if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
+				ID: userID, LockedUntil: lockedUntil,
+			}); lerr != nil {
+				return lerr
+			}
+			return errVerifyAccountLocked
+		}
 		expected := verifycode.Hash(state.EmailVerificationSalt, code)
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
-			if _, ierr := q.IncrementPlayerVerificationAttempts(ctx, userID); ierr != nil {
-				return ierr
-			}
 			return errBadVerifyCode
 		}
 		return q.MarkPlayerVerified(ctx, userID)
@@ -539,19 +586,28 @@ func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
 // verifyCookiePayload is the user ID + project ID + email parked while
 // the player types the 6-digit code. Signed with a process-local HMAC
 // key so an attacker can't forge a payload for another user / project.
+// ExpiresAt is a server-checked Unix-seconds expiry — the cookie MaxAge
+// is client-controlled and not trusted.
 type verifyCookiePayload struct {
 	EndUserID int64
 	ProjectID int64
+	ExpiresAt int64
 	Email     string
 }
 
+// playerVerifyTTL is the lifetime of a verify-pending cookie. Mirrors the
+// dashboard ttl; baked into the signed cookie payload as a server-checked
+// expiry so a cookie can't be replayed past it.
+const playerVerifyTTL = 30 * time.Minute
+
 func (h *Handler) setVerifyCookie(w http.ResponseWriter, userID int64, email string, projectID int64) {
-	val := encodeVerifyCookie(verifyCookiePayload{EndUserID: userID, ProjectID: projectID, Email: email}, h.verifySigningKey)
+	expiresAt := time.Now().Add(playerVerifyTTL).Unix()
+	val := encodeVerifyCookie(verifyCookiePayload{EndUserID: userID, ProjectID: projectID, ExpiresAt: expiresAt, Email: email}, h.verifySigningKey)
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyCookieName,
 		Value:    val,
 		Path:     "/v1/players/p/" + strconv.FormatInt(projectID, 10),
-		MaxAge:   int((30 * time.Minute).Seconds()),
+		MaxAge:   int(playerVerifyTTL.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   h.cfg.CookieSecure,
@@ -575,14 +631,23 @@ func (h *Handler) verifyCookie(r *http.Request) (verifyCookiePayload, bool) {
 	if err != nil {
 		return verifyCookiePayload{}, false
 	}
-	return decodeVerifyCookie(c.Value, h.verifySigningKey)
+	p, ok := decodeVerifyCookie(c.Value, h.verifySigningKey)
+	if !ok {
+		return verifyCookiePayload{}, false
+	}
+	// MaxAge is advisory; the signed payload's ExpiresAt is authoritative.
+	if p.ExpiresAt > 0 && time.Now().Unix() > p.ExpiresAt {
+		return verifyCookiePayload{}, false
+	}
+	return p, true
 }
 
 // encodeVerifyCookie returns base64(payload) + "." + base64(HMAC-SHA256(key, payload)).
-// Payload is "<endUserID>:<projectID>:<email>". Binding the projectID
-// stops a forged cookie from authenticating against a different project.
+// Payload is "<endUserID>:<projectID>:<expiresAtUnix>:<email>". Binding the
+// projectID stops a forged cookie from authenticating against a different
+// project; the expiry stops replay past the TTL even if MaxAge is ignored.
 func encodeVerifyCookie(p verifyCookiePayload, key []byte) string {
-	payload := strconv.FormatInt(p.EndUserID, 10) + ":" + strconv.FormatInt(p.ProjectID, 10) + ":" + p.Email
+	payload := strconv.FormatInt(p.EndUserID, 10) + ":" + strconv.FormatInt(p.ProjectID, 10) + ":" + strconv.FormatInt(p.ExpiresAt, 10) + ":" + p.Email
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(payload))
 	sig := mac.Sum(nil)
@@ -590,15 +655,15 @@ func encodeVerifyCookie(p verifyCookiePayload, key []byte) string {
 }
 
 func decodeVerifyCookie(raw string, key []byte) (verifyCookiePayload, bool) {
-	parts := strings.SplitN(raw, ".", 2)
-	if len(parts) != 2 {
+	encPayload, encSig, ok := strings.Cut(raw, ".")
+	if !ok {
 		return verifyCookiePayload{}, false
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := base64.RawURLEncoding.DecodeString(encPayload)
 	if err != nil {
 		return verifyCookiePayload{}, false
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, err := base64.RawURLEncoding.DecodeString(encSig)
 	if err != nil {
 		return verifyCookiePayload{}, false
 	}
@@ -607,34 +672,42 @@ func decodeVerifyCookie(raw string, key []byte) (verifyCookiePayload, bool) {
 	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return verifyCookiePayload{}, false
 	}
-	s := string(payload)
-	firstColon := strings.IndexByte(s, ':')
-	if firstColon < 1 {
+	// Layout: endUserID:projectID:expiresAtUnix:email
+	idRaw, rest, ok := strings.Cut(string(payload), ":")
+	if !ok {
 		return verifyCookiePayload{}, false
 	}
-	secondColon := strings.IndexByte(s[firstColon+1:], ':')
-	if secondColon < 1 {
+	pidRaw, rest, ok := strings.Cut(rest, ":")
+	if !ok {
 		return verifyCookiePayload{}, false
 	}
-	secondColon += firstColon + 1
-	id, err := strconv.ParseInt(s[:firstColon], 10, 64)
+	expRaw, email, ok := strings.Cut(rest, ":")
+	if !ok {
+		return verifyCookiePayload{}, false
+	}
+	id, err := strconv.ParseInt(idRaw, 10, 64)
 	if err != nil {
 		return verifyCookiePayload{}, false
 	}
-	pid, err := strconv.ParseInt(s[firstColon+1:secondColon], 10, 64)
+	pid, err := strconv.ParseInt(pidRaw, 10, 64)
 	if err != nil {
 		return verifyCookiePayload{}, false
 	}
-	return verifyCookiePayload{EndUserID: id, ProjectID: pid, Email: s[secondColon+1:]}, true
+	exp, err := strconv.ParseInt(expRaw, 10, 64)
+	if err != nil {
+		return verifyCookiePayload{}, false
+	}
+	return verifyCookiePayload{EndUserID: id, ProjectID: pid, ExpiresAt: exp, Email: email}, true
 }
 
 // Shared errors. Their string forms aren't user-facing — the handlers
 // translate them to friendly messages.
 var (
-	errBadVerifyCode   = errors.New("players: bad verify code")
-	errVerifyExpired   = errors.New("players: verify code expired")
-	errVerifyLocked    = errors.New("players: verify attempts exhausted")
-	errAlreadyVerified = errors.New("players: account already verified")
+	errBadVerifyCode       = errors.New("players: bad verify code")
+	errVerifyExpired       = errors.New("players: verify code expired")
+	errVerifyLocked        = errors.New("players: verify attempts exhausted")
+	errAlreadyVerified     = errors.New("players: account already verified")
+	errVerifyAccountLocked = errors.New("players: account locked after too many verification attempts")
 )
 
 func parseProjectID(w http.ResponseWriter, r *http.Request) (int64, bool) {

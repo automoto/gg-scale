@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/matchmaker"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 type matchmakerTicketRequest struct {
@@ -52,17 +52,14 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+		req, err := webutil.DecodeJSON[matchmakerTicketRequest](w, r, 64<<10)
 		if err != nil {
-			http.Error(w, "body too large", http.StatusBadRequest)
-			return
-		}
-		var req matchmakerTicketRequest
-		if len(raw) > 0 {
-			if err := json.Unmarshal(raw, &req); err != nil {
-				http.Error(w, "invalid json", http.StatusBadRequest)
+			if errors.Is(err, webutil.ErrBodyTooLarge) {
+				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
 				return
 			}
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
 		}
 		if len(req.Attributes) > 0 && !json.Valid(req.Attributes) {
 			http.Error(w, "attributes must be valid JSON", http.StatusBadRequest)

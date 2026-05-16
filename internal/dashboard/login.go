@@ -229,16 +229,15 @@ func (h *Handler) authenticate(r *http.Request, email, password string) (dashboa
 var errVerifyRequired = errors.New("dashboard: verify required")
 
 func (h *Handler) recordLoginFailure(r *http.Request, row sqlcgen.GetDashboardUserByEmailRow) error {
-	failures := row.LoginFailures + 1
-	var lockedUntil pgtype.Timestamptz
-	if failures >= loginFailureLimit {
-		lockedUntil = pgtype.Timestamptz{Time: h.now().Add(loginLockoutPeriod), Valid: true}
-	}
+	// Compute the lockout-until timestamp the SQL CASE branches on. The
+	// branch only fires when the increment would tip the row over
+	// loginFailureLimit, so the value is only consulted at that boundary.
+	lockoutUntil := pgtype.Timestamptz{Time: h.now().Add(loginLockoutPeriod), Valid: true}
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		_, err := sqlcgen.New(tx).RecordDashboardLoginFailure(r.Context(), sqlcgen.RecordDashboardLoginFailureParams{
-			ID:            row.ID,
-			LoginFailures: failures,
-			LockedUntil:   lockedUntil,
+		_, err := sqlcgen.New(tx).BumpDashboardLoginFailure(r.Context(), sqlcgen.BumpDashboardLoginFailureParams{
+			ID:           row.ID,
+			FailureLimit: int32(loginFailureLimit),
+			LockoutUntil: lockoutUntil,
 		})
 		return err
 	})

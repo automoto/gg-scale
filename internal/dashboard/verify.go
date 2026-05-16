@@ -36,6 +36,7 @@ var (
 	errVerifyLocked        = errors.New("dashboard: verify attempts exhausted")
 	errVerifyResendTooSoon = errors.New("dashboard: resend too soon")
 	errAlreadyVerified     = errors.New("dashboard: account already verified")
+	errVerifyAccountLocked = errors.New("dashboard: account locked after too many verification attempts")
 )
 
 // VerifyView is the data rendered by the verification code page.
@@ -47,13 +48,19 @@ type VerifyView struct {
 
 // verifyPendingPayload is the user ID stored in the verify-pending cookie.
 // We sign it with the dashboard bootstrap signing key so a stolen cookie
-// can't grant verification of a different user.
+// can't grant verification of a different user. ExpiresAt is a server-
+// checked Unix-seconds expiry: the cookie's own MaxAge is client-controlled
+// and not trusted.
 type verifyPendingPayload struct {
-	UserID int64
-	Email  string
+	UserID    int64
+	Email     string
+	ExpiresAt int64
 }
 
 func (h *Handler) setVerifyPendingCookie(w http.ResponseWriter, p verifyPendingPayload) {
+	if p.ExpiresAt == 0 {
+		p.ExpiresAt = h.now().Add(verifyPendingTTL).Unix()
+	}
 	value := encodeVerifyCookie(p, h.verifyCookieKey())
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyPendingCookieName,
@@ -84,7 +91,15 @@ func (h *Handler) verifyPendingFromCookie(r *http.Request) (verifyPendingPayload
 		return verifyPendingPayload{}, false
 	}
 	p, ok := decodeVerifyCookie(c.Value, h.verifyCookieKey())
-	return p, ok
+	if !ok {
+		return verifyPendingPayload{}, false
+	}
+	// MaxAge is advisory (client-controlled); enforce the server-checked
+	// expiry baked into the signed payload.
+	if p.ExpiresAt > 0 && h.now().Unix() > p.ExpiresAt {
+		return verifyPendingPayload{}, false
+	}
+	return p, true
 }
 
 // verifyCookieKey returns the HMAC key for the verify-pending cookie.
@@ -95,7 +110,7 @@ func (h *Handler) verifyCookieKey() []byte {
 }
 
 func encodeVerifyCookie(p verifyPendingPayload, key []byte) string {
-	payload := fmt.Sprintf("%d:%s", p.UserID, p.Email)
+	payload := fmt.Sprintf("%d:%d:%s", p.UserID, p.ExpiresAt, p.Email)
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(payload))
 	sig := mac.Sum(nil)
@@ -103,15 +118,15 @@ func encodeVerifyCookie(p verifyPendingPayload, key []byte) string {
 }
 
 func decodeVerifyCookie(raw string, key []byte) (verifyPendingPayload, bool) {
-	parts := strings.SplitN(raw, ".", 2)
-	if len(parts) != 2 {
+	encPayload, encSig, ok := strings.Cut(raw, ".")
+	if !ok {
 		return verifyPendingPayload{}, false
 	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+	payload, err := base64.RawURLEncoding.DecodeString(encPayload)
 	if err != nil {
 		return verifyPendingPayload{}, false
 	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
+	sig, err := base64.RawURLEncoding.DecodeString(encSig)
 	if err != nil {
 		return verifyPendingPayload{}, false
 	}
@@ -120,15 +135,24 @@ func decodeVerifyCookie(raw string, key []byte) (verifyPendingPayload, bool) {
 	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return verifyPendingPayload{}, false
 	}
-	colon := strings.IndexByte(string(payload), ':')
-	if colon < 1 {
+	// payload layout: userID:expiresAtUnix:email
+	idRaw, rest, ok := strings.Cut(string(payload), ":")
+	if !ok {
 		return verifyPendingPayload{}, false
 	}
-	id, err := strconv.ParseInt(string(payload[:colon]), 10, 64)
+	expRaw, email, ok := strings.Cut(rest, ":")
+	if !ok {
+		return verifyPendingPayload{}, false
+	}
+	id, err := strconv.ParseInt(idRaw, 10, 64)
 	if err != nil {
 		return verifyPendingPayload{}, false
 	}
-	return verifyPendingPayload{UserID: id, Email: string(payload[colon+1:])}, true
+	exp, err := strconv.ParseInt(expRaw, 10, 64)
+	if err != nil {
+		return verifyPendingPayload{}, false
+	}
+	return verifyPendingPayload{UserID: id, ExpiresAt: exp, Email: email}, true
 }
 
 // startVerification mints a fresh 6-digit code, persists it, and emails
@@ -137,6 +161,11 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 	state, err := h.fetchDashboardVerifyState(ctx, userID)
 	if err != nil {
 		return err
+	}
+	if state.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(state.EmailVerificationLockedUntil.Time, h.now()) {
+		// Lifetime lockout blocks resend too — otherwise an attacker
+		// loops fresh codes around the per-code attempts cap forever.
+		return errVerifyAccountLocked
 	}
 	if !verifycode.CanResend(state.EmailVerificationLastSentAt.Time, h.now()) {
 		return errVerifyResendTooSoon
@@ -191,8 +220,8 @@ func (h *Handler) confirmVerification(ctx context.Context, userID int64, code st
 	if state.EmailVerifiedAt.Valid {
 		return errAlreadyVerified
 	}
-	if verifycode.AttemptsExhausted(int(state.EmailVerificationAttempts)) {
-		return errVerifyLocked
+	if state.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(state.EmailVerificationLockedUntil.Time, h.now()) {
+		return errVerifyAccountLocked
 	}
 	if verifycode.Expired(state.EmailVerificationExpiresAt.Time, h.now()) {
 		return errVerifyExpired
@@ -200,15 +229,39 @@ func (h *Handler) confirmVerification(ctx context.Context, userID int64, code st
 	if len(state.EmailVerificationSalt) == 0 || len(state.EmailVerificationCodeHash) == 0 {
 		return errVerifyExpired
 	}
+	// Reserve the attempt atomically. Two parallel wrong codes used to both
+	// read attempts < cap and both proceed; this query folds the check into
+	// the same UPDATE so only one passes when the cap would otherwise be
+	// crossed. Zero rows → already at cap.
+	var reserved sqlcgen.ReserveDashboardVerifyAttemptRow
+	resErr := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		reserved, qerr = sqlcgen.New(tx).ReserveDashboardVerifyAttempt(ctx, sqlcgen.ReserveDashboardVerifyAttemptParams{
+			ID:          userID,
+			MaxAttempts: int32(verifycode.MaxAttempts),
+		})
+		return qerr
+	})
+	if errors.Is(resErr, pgx.ErrNoRows) {
+		return errVerifyLocked
+	}
+	if resErr != nil {
+		return resErr
+	}
+	// Lifetime cap survives /resend (which only resets the per-code
+	// counter). Reaching it locks the account for LockoutDuration so an
+	// attacker can't loop resend → 5 attempts → resend → … forever.
+	if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
+		lockedUntil := pgtype.Timestamptz{Time: h.now().Add(verifycode.LockoutDuration), Valid: true}
+		_ = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+			return sqlcgen.New(tx).LockDashboardUserVerification(ctx, sqlcgen.LockDashboardUserVerificationParams{
+				ID: userID, LockedUntil: lockedUntil,
+			})
+		})
+		return errVerifyAccountLocked
+	}
 	expected := verifycode.Hash(state.EmailVerificationSalt, code)
 	if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
-		// bump attempt counter
-		if perr := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-			_, err := sqlcgen.New(tx).IncrementDashboardVerificationAttempts(ctx, userID)
-			return err
-		}); perr != nil {
-			return perr
-		}
 		return errBadVerifyCode
 	}
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
@@ -261,6 +314,10 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Error: "Too many attempts. Request a new code."}))
 		return
+	case errors.Is(err, errVerifyAccountLocked):
+		w.WriteHeader(http.StatusTooManyRequests)
+		webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Error: "This account is locked after too many verification attempts. Contact support to unlock."}))
+		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "dashboard verify confirm", "err", err)
 		http.Error(w, "verification error", http.StatusInternalServerError)
@@ -291,6 +348,10 @@ func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errVerifyResendTooSoon):
 		w.WriteHeader(http.StatusTooManyRequests)
 		webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Error: "Wait a minute between resends."}))
+		return
+	case errors.Is(err, errVerifyAccountLocked):
+		w.WriteHeader(http.StatusTooManyRequests)
+		webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Error: "This account is locked after too many verification attempts. Contact support to unlock."}))
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "dashboard verify resend", "err", err)

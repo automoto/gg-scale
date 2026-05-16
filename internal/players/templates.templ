@@ -36,6 +36,7 @@ type LoginView struct {
 	ProjectID int64
 	Email     string
 	Error     string
+	CSRFToken string
 }
 
 templ LoginPage(vm LoginView) {
@@ -46,6 +47,7 @@ templ LoginPage(vm LoginView) {
 			<p class="error">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/login") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<label>Email
 				<input name="email" type="email" value={ vm.Email } autocomplete="username" required/>
 			</label>
@@ -63,6 +65,7 @@ type SignupView struct {
 	Email       string
 	Error       string
 	FieldErrors map[string]string
+	CSRFToken   string
 }
 
 templ SignupPage(vm SignupView) {
@@ -73,6 +76,7 @@ templ SignupPage(vm SignupView) {
 			<p class="error">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/signup") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<label>Email
 				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
 				if msg, ok := vm.FieldErrors["email"]; ok {
@@ -95,6 +99,7 @@ type VerifyView struct {
 	ProjectID int64
 	Email     string
 	Error     string
+	CSRFToken string
 }
 
 templ VerifyPage(vm VerifyView) {
@@ -105,6 +110,7 @@ templ VerifyPage(vm VerifyView) {
 			<p class="error">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/verify") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<label>Verification code
 				<input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus/>
 			</label>
@@ -116,6 +122,7 @@ templ VerifyPage(vm VerifyView) {
 type AccountView struct {
 	ProjectID int64
 	Email     string
+	CSRFToken string
 }
 
 templ InviteAcceptPage(vm InviteAcceptView) {
@@ -127,6 +134,7 @@ templ InviteAcceptPage(vm InviteAcceptView) {
 			<p class="subtitle">You've been invited to <strong>{ vm.ProjectName }</strong>.</p>
 			<p>Email: <code>{ vm.Email }</code></p>
 			<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/invite/accept") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<input type="hidden" name="code" value={ vm.Code }/>
 				<label>Set a password (≥ 8 chars)
 					<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
@@ -146,6 +154,7 @@ templ AccountPage(vm AccountView) {
 		<p class="subtitle">Welcome back, <code>{ vm.Email }</code>.</p>
 		<p>Friends, leaderboards, and account-linking land here in a future release.</p>
 		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/logout") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<button class="secondary" type="submit">Sign out</button>
 		</form>
 	}

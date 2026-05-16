@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/verifycode"
 )
@@ -95,7 +97,10 @@ func (h *Handler) createInvite(ctx context.Context, in inviteTeammateInput) (inv
 			return qerr
 		}
 		row = r
-		return nil
+		return auditlog.WritePlatform(ctx, tx, in.InvitedBy, "dashboard.invite.create", strconv.FormatInt(r.ID, 10), map[string]any{
+			"email": email,
+			"role":  in.Role,
+		})
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -198,9 +203,12 @@ func (h *Handler) listPlatformTeam(ctx context.Context) ([]TeamMemberView, []Pen
 // revokeInvite marks an invite revoked. Caller must have already verified
 // that the actor is allowed to revoke this invite (platform admin always,
 // tenant admin only if the invite's tenant matches).
-func (h *Handler) revokeInvite(ctx context.Context, inviteID int64) error {
+func (h *Handler) revokeInvite(ctx context.Context, actorID, inviteID int64) error {
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).RevokeDashboardInvitation(ctx, inviteID)
+		if err := sqlcgen.New(tx).RevokeDashboardInvitation(ctx, inviteID); err != nil {
+			return err
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.invite.revoke", strconv.FormatInt(inviteID, 10), nil)
 	})
 }
 
@@ -225,6 +233,6 @@ func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, mem
 			// the same message.
 			return errCannotRemoveSelf
 		}
-		return nil
+		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.membership.remove", strconv.FormatInt(membershipID, 10), map[string]any{"tenant_id": tenantID})
 	})
 }

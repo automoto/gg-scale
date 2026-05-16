@@ -34,6 +34,17 @@ const (
 	// is invalidated and the user has to request a new one.
 	MaxAttempts = 5
 
+	// MaxLifetimeAttempts is the per-account cap that survives /resend.
+	// Without this, an attacker could mint a fresh code each minute and
+	// keep burning the MaxAttempts budget forever; this counter only
+	// resets on successful verification.
+	MaxLifetimeAttempts = 20
+
+	// LockoutDuration is how long an account stays locked after hitting
+	// MaxLifetimeAttempts. Operator support unlocks earlier by clearing
+	// the column.
+	LockoutDuration = 24 * time.Hour
+
 	saltBytes       = 16
 	inviteCodeBytes = 24
 )
@@ -101,4 +112,18 @@ func Expired(expiresAt, now time.Time) bool {
 // MaxAttempts.
 func AttemptsExhausted(attempts int) bool {
 	return attempts >= MaxAttempts
+}
+
+// LifetimeExhausted reports whether the lifetime attempt counter has
+// reached MaxLifetimeAttempts — the account is locked at this point.
+func LifetimeExhausted(attempts int) bool {
+	return attempts >= MaxLifetimeAttempts
+}
+
+// AccountLocked reports whether lockedUntil is in the future.
+func AccountLocked(lockedUntil, now time.Time) bool {
+	if lockedUntil.IsZero() {
+		return false
+	}
+	return lockedUntil.After(now)
 }

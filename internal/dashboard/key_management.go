@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -127,7 +129,7 @@ func (h *Handler) createProject(ctx context.Context, tenantID int64, name string
 	return out, err
 }
 
-func (h *Handler) createAPIKey(ctx context.Context, in createKeyInput) (createKeyResult, error) {
+func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyInput) (createKeyResult, error) {
 	if in.TenantID <= 0 {
 		return createKeyResult{}, errInvalidTenant
 	}
@@ -153,7 +155,10 @@ func (h *Handler) createAPIKey(ctx context.Context, in createKeyInput) (createKe
 		if err != nil {
 			return fmt.Errorf("create api key: %w", err)
 		}
-		return nil
+		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.create", strconv.FormatInt(row.ID, 10), map[string]any{
+			"label":      in.Label,
+			"project_id": in.ProjectID,
+		})
 	})
 	if err != nil {
 		return createKeyResult{}, err
@@ -161,26 +166,32 @@ func (h *Handler) createAPIKey(ctx context.Context, in createKeyInput) (createKe
 	return createKeyResult{APIKeyID: row.ID, APIKey: apiKey}, nil
 }
 
-func (h *Handler) updateAPIKeyLabel(ctx context.Context, tenantID, apiKeyID int64, label string) error {
+func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiKeyID int64, label string) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{
+		if err := sqlcgen.New(tx).UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{
 			ID:    apiKeyID,
 			Label: strings.TrimSpace(label),
-		})
+		}); err != nil {
+			return err
+		}
+		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label})
 	})
 }
 
-func (h *Handler) revokeAPIKey(ctx context.Context, tenantID, apiKeyID int64) error {
+func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID int64) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).RevokeAPIKey(ctx, apiKeyID)
+		if err := sqlcgen.New(tx).RevokeAPIKey(ctx, apiKeyID); err != nil {
+			return err
+		}
+		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.revoke", strconv.FormatInt(apiKeyID, 10), nil)
 	}); err != nil {
 		return err
 	}

@@ -53,8 +53,18 @@ SELECT
     email_verification_salt,
     email_verification_expires_at,
     email_verification_attempts,
+    email_verification_lifetime_attempts,
+    email_verification_locked_until,
     email_verification_last_sent_at
 FROM dashboard_users
+WHERE id = sqlc.arg(id);
+
+-- name: LockDashboardUserVerification :exec
+-- Set the lockout window on an account that just tipped over
+-- MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
+-- duration stays a single source of truth.
+UPDATE dashboard_users
+SET email_verification_locked_until = sqlc.arg(locked_until)::timestamptz
 WHERE id = sqlc.arg(id);
 
 -- name: SetDashboardUserVerificationCode :exec
@@ -71,6 +81,19 @@ UPDATE dashboard_users
 SET email_verification_attempts = email_verification_attempts + 1
 WHERE id = sqlc.arg(id)
 RETURNING email_verification_attempts;
+
+-- name: ReserveDashboardVerifyAttempt :one
+-- Atomic check-and-bump used in place of the previous fetch-then-increment
+-- pattern: two parallel wrong codes used to both pass the cap check before
+-- either incremented, so the lockout could be overshot. The WHERE clause
+-- now folds the bound into the same statement that mutates the counter.
+-- Returns 0 rows when already at cap (caller treats as errVerifyLocked).
+UPDATE dashboard_users
+SET email_verification_attempts = email_verification_attempts + 1,
+    email_verification_lifetime_attempts = email_verification_lifetime_attempts + 1
+WHERE id = sqlc.arg(id)
+  AND email_verification_attempts < sqlc.arg(max_attempts)::int
+RETURNING email_verification_attempts, email_verification_lifetime_attempts;
 
 -- name: ClearDashboardVerificationCode :exec
 UPDATE dashboard_users
@@ -105,10 +128,19 @@ SET login_failures = 0,
     last_login_at = now()
 WHERE id = sqlc.arg(id);
 
--- name: RecordDashboardLoginFailure :one
+-- name: BumpDashboardLoginFailure :one
+-- Atomic increment + conditional lockout. The previous read-then-write
+-- pattern was TOCTOU-racy: N parallel failed logins all read the same value
+-- and wrote N+1, so 10 simultaneous wrong passwords landed at login_failures=1
+-- and the lockout never fired. UPDATE...RETURNING serialises under the row
+-- lock pgx already takes.
 UPDATE dashboard_users
-SET login_failures = sqlc.arg(login_failures),
-    locked_until = sqlc.narg(locked_until)::timestamptz
+SET login_failures = login_failures + 1,
+    locked_until = CASE
+        WHEN login_failures + 1 >= sqlc.arg(failure_limit)::int
+            THEN sqlc.arg(lockout_until)::timestamptz
+        ELSE locked_until
+    END
 WHERE id = sqlc.arg(id)
 RETURNING login_failures, locked_until;
 
