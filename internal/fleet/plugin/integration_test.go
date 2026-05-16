@@ -72,10 +72,11 @@ func TestSupervisor_RestartsAfterCrash(t *testing.T) {
 	assert.NotEmpty(t, a2.Address)
 
 	// Supervisor did not over-restart (no flapping). TotalRestartCount is
-	// the right check here — RestartCount resets after the healthy
-	// post-restart probe.
+	// the right check here — RestartCount no longer drops to 0 after a
+	// single healthy probe (that let a flapping plugin restart forever);
+	// it now requires HealthResetThreshold consecutive successful pings,
+	// which won't have elapsed by the time this assertion runs.
 	assert.Equal(t, 1, sup.TotalRestartCount())
-	assert.Equal(t, 0, sup.RestartCount())
 }
 
 // TestSupervisor_GivesUpAfterRepeatedPingFailures spawns an example plugin

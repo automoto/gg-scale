@@ -76,6 +76,20 @@ func (s *stubBackend) HealthCheck(_ context.Context) error {
 	return errors.New("backend unreachable: stub set to unhealthy")
 }
 
+// seedFleetTemplate inserts a fleet row whose `backend` column matches the
+// stub's Name() so manager.Allocate dispatches to it. Returns the fleet
+// name (callers pass it as the form's "fleet" field).
+func seedFleetTemplate(t *testing.T, c *cluster, tenantID, projectID int64, backendName string) string {
+	t.Helper()
+	name := "fleet-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, $3, $4, '{}'::jsonb)`,
+		tenantID, projectID, name, backendName)
+	require.NoError(t, err)
+	return name
+}
+
 // newDashboardFleetServer wires the dashboard with a real PostgresStore-backed
 // fleet.Manager pointed at the cluster, and the given backend stub.
 func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *dashboard.PluginSnapshot) (*httptest.Server, *fleet.Manager) {
@@ -117,9 +131,10 @@ func TestDashboardFleet_list_then_allocate_then_appears_in_table(t *testing.T) {
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
 	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
 
 	base := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
-		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 
 	// Empty state first.
 	emptyBody := getWithCookie(t, base, cookie)
@@ -128,6 +143,7 @@ func TestDashboardFleet_list_then_allocate_then_appears_in_table(t *testing.T) {
 	// Manual allocate.
 	form := url.Values{
 		"_csrf":     {csrf},
+		"fleet":     {fleetName},
 		"region":    {"us-east-1"},
 		"game_mode": {"deathmatch"},
 		"capacity":  {"4"},
@@ -164,12 +180,13 @@ func TestDashboardFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
 	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
 
 	base := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
-		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 
 	allocResp := postFormWithCookie(t, base, url.Values{
-		"_csrf": {csrf}, "region": {"eu-1"}, "capacity": {"1"},
+		"_csrf": {csrf}, "fleet": {fleetName}, "region": {"eu-1"}, "capacity": {"1"},
 	}, cookie)
 	defer allocResp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, allocResp.StatusCode)
@@ -200,12 +217,13 @@ func TestDashboardFleet_deallocate_rejects_wrong_typed_id_then_succeeds(t *testi
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
 	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
 
 	base := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
-		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 
 	allocResp := postFormWithCookie(t, base, url.Values{
-		"_csrf": {csrf}, "region": {"us-east-1"}, "capacity": {"1"},
+		"_csrf": {csrf}, "fleet": {fleetName}, "region": {"us-east-1"}, "capacity": {"1"},
 	}, cookie)
 	defer allocResp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, allocResp.StatusCode)
@@ -265,13 +283,14 @@ func TestDashboardFleet_RLS_isolates_allocations_across_tenants(t *testing.T) {
 
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
+	fleetA := seedFleetTemplate(t, c, tenantA, projectA, backend.Name())
 
 	// Alice allocates in tenant A.
 	aliceCookie, aliceCSRF := dashboardLoginCookieAndCSRF(t, srv.URL, "alice@example.com", "correct-horse-battery-staple")
 	aliceBase := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
-		"/projects/" + strconv.FormatInt(projectA, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/allocations"
 	aliceAllocResp := postFormWithCookie(t, aliceBase, url.Values{
-		"_csrf": {aliceCSRF}, "region": {"us-east-1"}, "capacity": {"1"},
+		"_csrf": {aliceCSRF}, "fleet": {fleetA}, "region": {"us-east-1"}, "capacity": {"1"},
 	}, aliceCookie)
 	defer aliceAllocResp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, aliceAllocResp.StatusCode)
@@ -292,7 +311,7 @@ func TestDashboardFleet_RLS_isolates_allocations_across_tenants(t *testing.T) {
 
 	// Bob viewing his own tenant's fleet sees no allocations (RLS proper).
 	bobBase := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantB, 10) +
-		"/projects/" + strconv.FormatInt(projectB, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectB, 10) + "/allocations"
 	bobListBody := getWithCookie(t, bobBase, bobCookie)
 	assert.Contains(t, bobListBody, "No allocations")
 	assert.NotContains(t, bobListBody, "ref-1", "Bob must not see Alice's backend_ref")

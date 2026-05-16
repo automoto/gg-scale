@@ -436,7 +436,13 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 }
 
 func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) error {
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	// locked is set inside the tx when the lifetime cap is crossed; the
+	// closure commits (lock + reserve bump persist together) and the
+	// outer function surfaces the locked state as an error. Returning the
+	// error from inside the closure would roll the tx back and undo
+	// both writes.
+	var locked bool
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		state, err := q.GetPlayerVerificationStateByID(ctx, userID)
 		if err != nil {
@@ -465,7 +471,6 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 			}
 			return rerr
 		}
-		// Lifetime cap survives /resend; trip the long lockout.
 		if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
 			lockedUntil := pgtype.Timestamptz{Time: h.now().Add(verifycode.LockoutDuration), Valid: true}
 			if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
@@ -473,7 +478,8 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 			}); lerr != nil {
 				return lerr
 			}
-			return errVerifyAccountLocked
+			locked = true
+			return nil
 		}
 		expected := verifycode.Hash(state.EmailVerificationSalt, code)
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
@@ -481,6 +487,13 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 		}
 		return q.MarkPlayerVerified(ctx, userID)
 	})
+	if err != nil {
+		return err
+	}
+	if locked {
+		return errVerifyAccountLocked
+	}
+	return nil
 }
 
 // playerSession is the public view of a logged-in player.

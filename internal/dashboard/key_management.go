@@ -155,9 +155,10 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		if err != nil {
 			return fmt.Errorf("create api key: %w", err)
 		}
-		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.create", strconv.FormatInt(row.ID, 10), map[string]any{
+		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.create", strconv.FormatInt(row.ID, 10), map[string]any{
 			"label":      in.Label,
 			"project_id": in.ProjectID,
+			"tenant_id":  in.TenantID,
 		})
 	})
 	if err != nil {
@@ -178,7 +179,7 @@ func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiK
 		}); err != nil {
 			return err
 		}
-		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label})
+		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label, "tenant_id": tenantID})
 	})
 }
 
@@ -191,7 +192,7 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 		if err := sqlcgen.New(tx).RevokeAPIKey(ctx, apiKeyID); err != nil {
 			return err
 		}
-		return auditlog.Write(ctx, tx, actorID, "dashboard.api_key.revoke", strconv.FormatInt(apiKeyID, 10), nil)
+		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.revoke", strconv.FormatInt(apiKeyID, 10), map[string]any{"tenant_id": tenantID})
 	}); err != nil {
 		return err
 	}

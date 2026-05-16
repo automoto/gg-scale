@@ -294,7 +294,11 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				}
 				return err
 			}
-			// Lifetime cap survives /resend; trip the long lockout.
+			// Lifetime cap survives /resend; trip the long lockout. The
+			// Lock write happens in the same tx as the Reserve increment
+			// so the bump that crossed the cap and the lock both commit
+			// together; we return nil here and surface the lock via the
+			// dedicated guard at the head of the closure on the next call.
 			if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
 				lockedUntil := pgtype.Timestamptz{Time: time.Now().Add(verifycode.LockoutDuration), Valid: true}
 				if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
@@ -302,7 +306,8 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				}); lerr != nil {
 					return lerr
 				}
-				return errVerifyAccountLocked
+				endUserID = -1 // sentinel: closure succeeded but caller must surface locked status
+				return nil
 			}
 			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
 			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) == 1 {
@@ -332,6 +337,13 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			return
 		case err != nil:
 			webutil.InternalError(w, "verify: tx", err)
+			return
+		}
+		// Sentinel: lifetime cap was tripped inside the tx (lock + bump
+		// both committed); the response is the same as the pre-existing
+		// locked guard above.
+		if endUserID < 0 {
+			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
 			return
 		}
 

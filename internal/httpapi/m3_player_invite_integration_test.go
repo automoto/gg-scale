@@ -6,8 +6,10 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -143,20 +145,28 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 		linkPath = linkPath[idx:]
 	}
 
-	// 3) GET the invite-accept page (used to be 404 pre-fix).
-	getResp, err := http.Get(srv.URL + linkPath)
+	// 3) GET the invite-accept page (used to be 404 pre-fix). The same
+	// request sets the CSRF cookie; harvest it for the POST below.
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	getClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	getResp, err := getClient.Get(srv.URL + linkPath)
 	require.NoError(t, err)
 	getBody, _ := io.ReadAll(getResp.Body)
 	getResp.Body.Close()
 	require.Equal(t, http.StatusOK, getResp.StatusCode, string(getBody))
 	assert.Contains(t, string(getBody), "newplayer@example.com")
 
-	// 4) POST the password to accept.
+	// Pull the CSRF token out of the rendered hidden field.
+	csrfToken := extractCSRFFromForm(t, string(getBody))
+
+	// 4) POST the password to accept (with CSRF cookie + field).
 	codeParam, err := url.ParseQuery(strings.SplitN(linkPath, "?", 2)[1])
 	require.NoError(t, err)
 	require.NotEmpty(t, codeParam.Get("code"))
 
 	acceptForm := url.Values{
+		"_csrf":    {csrfToken},
 		"code":     {codeParam.Get("code")},
 		"password": {"playerpass1"},
 	}
@@ -165,7 +175,8 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 		strings.NewReader(acceptForm.Encode()))
 	require.NoError(t, err)
 	acceptReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	acceptResp, err := noRedirectClient().Do(acceptReq)
+	acceptClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	acceptResp, err := acceptClient.Do(acceptReq)
 	require.NoError(t, err)
 	acceptResp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, acceptResp.StatusCode)
@@ -194,4 +205,16 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 		}
 	}
 	assert.True(t, sawSession, "expected ggscale_player_session cookie after accept")
+}
+
+// csrfHiddenFieldRE matches the rendered `<input ... name="_csrf" value="…">`
+// element in any of the player/dashboard templates. Used by integration
+// tests that drive form posts and need to round-trip the CSRF token.
+var csrfHiddenFieldRE = regexp.MustCompile(`name="_csrf"\s+value="([^"]+)"`)
+
+func extractCSRFFromForm(t *testing.T, body string) string {
+	t.Helper()
+	m := csrfHiddenFieldRE.FindStringSubmatch(body)
+	require.Len(t, m, 2, "expected _csrf hidden input in body")
+	return m[1]
 }
