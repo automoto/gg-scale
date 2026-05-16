@@ -1,18 +1,16 @@
 # Self-hosting ggscale
 
-ggscale runs on any Linux box with Docker and Postgres. Game server hosting has three tiers — start with the simplest one and move up when you need to.
+ggscale runs on any Linux box with Docker and Postgres. Game server hosting has two paths — start with the simpler one and move up when you outgrow a single host.
 
-## Which tier?
+## Which path?
 
 ```
-Do you need more than ~20 concurrent game server instances?
-  No  → Tier 0 (compose). No Kubernetes, static containers.
-  Yes → Do you need multiple VMs?
-          No  → Tier 1 (Docker SDK). Single host, dynamic containers. (Phase 2)
-          Yes → Tier 2 (Agones). Kubernetes, multi-node. (Phase 2)
+Do you need to span more than one VM?
+  No  → Docker backend (compose/fleet-docker.yml). Single host, dynamic containers.
+  Yes → Agones backend (compose/fleet-agones.yml). k3s + Agones, multi-node, autoscaling.
 ```
 
-Tiers 1 and 2 ship in Phase 2. The migration path between tiers requires no game client code changes.
+Both paths use the same client SDK call (`AllocateServer()`); switching backends is an operator change, not a code change.
 
 ---
 
@@ -42,11 +40,11 @@ Set `GAME_SERVER_PUBLIC_IP` to the public IP or hostname of the machine running 
 
 ---
 
-## Tier 0 — Compose (static containers)
+## Docker backend (single host)
 
-Good for: up to ~20 concurrent servers, community runs, LAN events, studios that want to skip Kubernetes for now.
+ggscale spawns and tears down game-server containers on demand via the Docker socket. Single host, no Kubernetes.
 
-The constraint is fixed capacity. Each game server instance is a service you define in the compose file — no autoscaling. When you need more servers, edit the file and restart.
+Good for: community runs, LAN events, studios that want to skip Kubernetes, anything that fits on one VM.
 
 ### Setup
 
@@ -55,59 +53,38 @@ The constraint is fixed capacity. Each game server instance is a service you def
    ```
    GAME_SERVER_PUBLIC_IP=203.0.113.1   # your VPS public IP
    FLEET_SECRET=<strong-random-secret>
+   DOCKER_GAMESERVER_IMAGE=ghcr.io/ggscale/doomerang-server:latest
    ```
 
 2. Start the stack:
 
    ```sh
-   make up-gameserver
+   make up-fleet-docker
    ```
 
-   Starts postgres, ggscale-server, and one `doomerang-server` instance.
+   Starts postgres, mailhog, and ggscale-server with `FLEET_BACKEND=docker` and the Docker socket mounted.
 
 3. Check everything came up:
 
    ```sh
-   docker compose -f docker-compose.yml -f ops/docker-compose.gameserver.yml ps
+   docker compose -f compose/fleet-docker.yml ps
    ```
 
-4. Open UDP port 7654 on your host. Read the UDP security section below before doing this.
+4. Open UDP port 7654 (or whatever your game-server image listens on) for clients. Read the UDP security section below before doing this.
 
-### Running multiple instances
+### Capacity
 
-Uncomment the `doomerang-server-2` block in `ops/docker-compose.gameserver.prod.yml`, increment the host port, and run the three-file compose:
-
-```sh
-docker compose \
-  -f docker-compose.yml \
-  -f ops/docker-compose.gameserver.yml \
-  -f ops/docker-compose.gameserver.prod.yml \
-  up -d --wait
-```
-
-The prod overlay also adds `restart: unless-stopped` and CPU/memory limits.
-
-This works well up to ~20 instances. Beyond that, managing static port assignments by hand gets tedious — that's when Tier 1 makes more sense.
+The Docker backend handles burst capacity within the limits of one host — RAM, CPU, file descriptors, and how many concurrent containers your daemon can manage. When you need to span multiple hosts, move to the Agones backend.
 
 ---
 
-## Tier 1 — Docker SDK backend (Phase 2)
-
-ggscale spawns and tears down game server containers on demand via the Docker socket. Single host, no Kubernetes.
-
-Move here when you need burst capacity or want ggscale to manage container lifecycle automatically.
-
-To migrate from Tier 0: set `FLEET_BACKEND=docker` and restart `ggscale-server`. The Docker socket is already mounted in `ops/docker-compose.gameserver.yml`, so no compose changes are needed. Game client code stays the same.
-
----
-
-## Tier 2 — Agones (Phase 2)
+## Agones backend (multi-host)
 
 k3s + Agones. Multi-node, Kubernetes-native lifecycle (Ready → Allocated → Draining), autoscaling.
 
 Move here when you need to span multiple machines or want fleet autoscaling.
 
-To migrate from Tier 1: run `make up-k8s && make agones-install`, set `FLEET_BACKEND=agones`, restart `ggscale-server`. Game client code stays the same.
+To migrate from the Docker backend: bring up k3s + Agones (`make up-fleet-agones && make agones-install`), set `FLEET_BACKEND=agones` in `.env`, restart `ggscale-server`. Game client code stays the same.
 
 ---
 
@@ -156,8 +133,7 @@ For titles with a large player base, put a scrubbing service in front at the net
 
 | From | To | What to change |
 |------|----|----------------|
-| Tier 0 → Tier 1 | `FLEET_BACKEND=docker`, restart ggscale-server | No client changes |
-| Tier 1 → Tier 2 | `make up-k8s && make agones-install`, `FLEET_BACKEND=agones`, restart | No client changes |
-| Any → Tier 0 | `FLEET_BACKEND=static` (or unset), restart | No client changes |
+| Docker → Agones | `make up-fleet-agones && make agones-install`, `FLEET_BACKEND=agones`, restart | No client changes |
+| Agones → Docker | `FLEET_BACKEND=docker`, restart ggscale-server | No client changes |
 
-The game client SDK always calls `AllocateServer()`. Which backend handles it is an operator concern — game code doesn't change between tiers.
+The game client SDK always calls `AllocateServer()`. Which backend handles it is an operator concern — game code doesn't change between backends.

@@ -8,14 +8,20 @@ observability on `/metrics`. Strategic sequencing lives in [`mvp.md`](mvp.md).
 
 ## Deployment topology
 
-There are two distinct compose profiles:
+There are four compose scenarios, each in its own file:
 
-- **simple / lite** (default `make up`, root `docker-compose.yml`) — Postgres, migrate,
+- **basic dev** (default `make up`, root `docker-compose.yml`) — Postgres, migrate,
   `ggscale-server`, MailHog. Dashboard on host port **3001** (mapped to the server).
   No Prometheus sidecar in this file; scrape `/metrics` from your own collector or use
-  `make up-dev` (`ops/full-stack-docker-compose.yml`) for bundled Prometheus.
-- **k8s** (`make up-k8s`) — adds k3s (single-node, `--network=host`) and an Agones install
-  job. Required for the Agones e2e smoke test when kubeconfig is present.
+  `make up-full` (`compose/full.yml`) for bundled Prometheus.
+- **fleet/docker** (`make up-fleet-docker`, `compose/fleet-docker.yml`) — basic dev plus
+  `FLEET_BACKEND=docker` and a `/var/run/docker.sock` mount so `ggscale-server`
+  allocates game-server containers on demand.
+- **fleet/agones** (`make up-fleet-agones`, `compose/fleet-agones.yml`) — basic dev plus
+  k3s (single-node, `--network=host`) and an Agones install job. Required for the
+  Agones e2e smoke test.
+- **full** (`make up-full`, `compose/full.yml`) — fleet/docker plus Prometheus and
+  stripe-mock for the contributor environment.
 
 ```
                    ┌──────────────────────────────────────────────┐
@@ -48,8 +54,8 @@ There are two distinct compose profiles:
 | `ggscale-server` | build `Dockerfile` | 8080, 3001→8080 | `/v1/*` HTTP API, `/metrics`, HTMX dashboard at `/v1/dashboard/*`. |
 | `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for auth/profile verification mail in dev. |
 
-**Full dev stack** (`ops/full-stack-docker-compose.yml`, `make up-dev`) adds Prometheus,
-Stripe mock, and optional k8s — see that file for the extended service matrix.
+**Full dev stack** (`compose/full.yml`, `make up-full`) adds Prometheus and
+Stripe mock on top of the Docker fleet backend — see that file for the extended service matrix.
 
 ## Dashboard bootstrap
 
@@ -100,7 +106,7 @@ That's the parity contract the MVP §"CI parity" forbids breaking.
 ### macOS caveat
 
 Docker Desktop's host networking on darwin is unreliable (the daemon runs in
-a Linux VM). For `make up-k8s` on macOS, run **Colima** with host networking
+a Linux VM). For `make up-fleet-agones` on macOS, run **Colima** with host networking
 exposed:
 
 ```

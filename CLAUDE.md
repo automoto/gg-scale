@@ -24,6 +24,6 @@
 - Only after tests are written, implement minimal code to pass
 
 ## Project Specific Instructions
-- Go version preference: Use Go 1.26.2 for this project
+- Go version preference: Use Go 1.26.3 for this project
 - CI runner cost constraint: Linux only in CI; macOS/Windows runners cost money
 - After each task is completed, update our planning document to reflect any tasks we have completed for a milestone(phase).
