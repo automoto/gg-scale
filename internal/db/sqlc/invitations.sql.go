@@ -213,6 +213,30 @@ func (q *Queries) DeleteDashboardMembership(ctx context.Context, arg DeleteDashb
 	return err
 }
 
+const deleteDashboardMembershipUnlessSelf = `-- name: DeleteDashboardMembershipUnlessSelf :execrows
+DELETE FROM dashboard_memberships
+WHERE id = $1
+  AND tenant_id = $2
+  AND dashboard_user_id <> $3
+`
+
+type DeleteDashboardMembershipUnlessSelfParams struct {
+	ID          int64
+	TenantID    int64
+	ActorUserID int64
+}
+
+// Removes a membership row but refuses to delete the actor's own row. The
+// previous approach loaded every member to do this check client-side; this
+// predicate folds it into one statement.
+func (q *Queries) DeleteDashboardMembershipUnlessSelf(ctx context.Context, arg DeleteDashboardMembershipUnlessSelfParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDashboardMembershipUnlessSelf, arg.ID, arg.TenantID, arg.ActorUserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDashboardInvitationByCodeHash = `-- name: GetDashboardInvitationByCodeHash :one
 SELECT
     i.id,

@@ -119,10 +119,7 @@ func TemplateFromConfig(cfg map[string]string) Template {
 // surfaced as errors so the manager can retry or fail.
 func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
 	tmpl := TemplateFromConfig(req.Config)
-	namespace := tmpl.Namespace
-	if namespace == "" {
-		namespace = b.cfg.Namespace
-	}
+	namespace := b.resolveNamespace(tmpl.Namespace)
 	gsa := &allocationv1.GameServerAllocation{
 		Spec: allocationv1.GameServerAllocationSpec{
 			Selectors: []allocationv1.GameServerSelector{
@@ -147,32 +144,51 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 		return nil, fmt.Errorf("agones: allocated gs %q has no address/port", result.Status.GameServerName)
 	}
 	return &fleet.Allocation{
-		BackendRef: result.Status.GameServerName,
+		BackendRef: namespace + "/" + result.Status.GameServerName,
 		Address:    fmt.Sprintf("%s:%d", result.Status.Address, port),
 		Status:     fleet.StatusReady,
 	}, nil
 }
 
+// splitBackendRef parses "<namespace>/<gsName>" produced by Allocate. Older
+// allocations from before this format are routed to b.cfg.Namespace as a
+// fallback (the format change is backwards-compatible at read time).
+func (b *Backend) splitBackendRef(ref string) (ns, name string) {
+	if i := strings.IndexByte(ref, '/'); i >= 0 {
+		return ref[:i], ref[i+1:]
+	}
+	return b.cfg.Namespace, ref
+}
+
+func (b *Backend) resolveNamespace(tmplNamespace string) string {
+	if tmplNamespace != "" {
+		return tmplNamespace
+	}
+	return b.cfg.Namespace
+}
+
 // Deallocate deletes the GameServer CR; Agones reaps the underlying pod.
 // A "not found" delete is treated as success (idempotent shutdown).
 func (b *Backend) Deallocate(ctx context.Context, _ fleet.AllocationID, backendRef string) error {
-	if err := b.cfg.API.DeleteGameServer(ctx, b.cfg.Namespace, backendRef, metav1.DeleteOptions{}); err != nil {
+	namespace, name := b.splitBackendRef(backendRef)
+	if err := b.cfg.API.DeleteGameServer(ctx, namespace, name, metav1.DeleteOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
 		}
-		return fmt.Errorf("agones: delete gs %q: %w", backendRef, err)
+		return fmt.Errorf("agones: delete gs %q: %w", name, err)
 	}
 	return nil
 }
 
 // Status maps the current GameServer CR state into the fleet lifecycle.
 func (b *Backend) Status(ctx context.Context, _ fleet.AllocationID, backendRef string) (fleet.Status, error) {
-	gs, err := b.cfg.API.GetGameServer(ctx, b.cfg.Namespace, backendRef)
+	namespace, name := b.splitBackendRef(backendRef)
+	gs, err := b.cfg.API.GetGameServer(ctx, namespace, name)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fleet.StatusShutdown, nil
 		}
-		return fleet.StatusFailed, fmt.Errorf("agones: get gs %q: %w", backendRef, err)
+		return fleet.StatusFailed, fmt.Errorf("agones: get gs %q: %w", name, err)
 	}
 	return translateState(gs.Status.State), nil
 }
@@ -181,9 +197,10 @@ func (b *Backend) Status(ctx context.Context, _ fleet.AllocationID, backendRef s
 // StatusUpdates. The channel closes when the source closes or ctx is
 // cancelled.
 func (b *Backend) Watch(ctx context.Context, _ fleet.AllocationID, backendRef string) (<-chan fleet.StatusUpdate, error) {
-	src, err := b.cfg.API.WatchGameServer(ctx, b.cfg.Namespace, backendRef)
+	namespace, name := b.splitBackendRef(backendRef)
+	src, err := b.cfg.API.WatchGameServer(ctx, namespace, name)
 	if err != nil {
-		return nil, fmt.Errorf("agones: watch gs %q: %w", backendRef, err)
+		return nil, fmt.Errorf("agones: watch gs %q: %w", name, err)
 	}
 	out := make(chan fleet.StatusUpdate, 4)
 	go func() {

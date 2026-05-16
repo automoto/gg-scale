@@ -3,6 +3,8 @@ package plugin
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,10 +18,18 @@ type SupervisorConfig struct {
 	Launch       LaunchConfig
 	MaxRestarts  int           // default 3
 	PollInterval time.Duration // default 1s
+	// MaxBackoff caps the exponential backoff applied between restart
+	// attempts. Default 30s.
+	MaxBackoff time.Duration
 
 	// PingInterval catches hung-but-alive plugins that Exited() can't see.
 	PingInterval      time.Duration // default 10s
 	PingFailureBudget int           // default 3
+	// HealthResetThreshold is how many consecutive successful pings reset
+	// the restart counter. A single healthy probe used to do it, which
+	// let a flapping plugin restart forever; default 30 (~5 min at 10s
+	// PingInterval).
+	HealthResetThreshold int
 }
 
 // Supervisor wraps Plugin lifecycle: detects subprocess exit, restarts up to
@@ -60,6 +70,12 @@ func NewSupervisor(cfg SupervisorConfig) (*Supervisor, error) {
 	if cfg.PingFailureBudget == 0 {
 		cfg.PingFailureBudget = 3
 	}
+	if cfg.MaxBackoff == 0 {
+		cfg.MaxBackoff = 30 * time.Second
+	}
+	if cfg.HealthResetThreshold == 0 {
+		cfg.HealthResetThreshold = 30
+	}
 	p, err := Launch(cfg.Launch)
 	if err != nil {
 		return nil, err
@@ -97,29 +113,34 @@ func (s *Supervisor) watch() {
 
 // pingLoop probes the live plugin's gRPC Ping. After PingFailureBudget
 // consecutive failures it force-kills the subprocess; the watch loop then
-// observes the death and runs the normal restart path. Each healthy probe
-// also resets the global restartCount so a once-in-a-blue-moon crash
-// doesn't accumulate into permanent abandonment.
+// observes the death and runs the normal restart path. The restartCount
+// only resets after HealthResetThreshold consecutive healthy pings — a
+// single OK probe used to wipe the budget, which let a flapping plugin
+// crash-loop forever.
 func (s *Supervisor) pingLoop() {
 	defer s.wg.Done()
 	t := time.NewTicker(s.cfg.PingInterval)
 	defer t.Stop()
-	consecutive := 0
+	consecutiveFail := 0
+	consecutiveOK := 0
+	var lastPinged *Plugin
 	for {
 		select {
 		case <-s.done:
 			return
 		case <-t.C:
-			// Reading current under RLock then dropping it leaves a small
-			// window where swap can occur before Ping is sent. The error
-			// path (incl. force-kill) re-checks current==p, so a stale
-			// Ping is at worst accounted to the wrong consecutive counter
-			// for one cycle.
 			s.mu.RLock()
 			p := s.current
 			s.mu.RUnlock()
 			if p == nil {
 				continue
+			}
+			// If the supervised plugin has swapped under us, the per-plugin
+			// counters are stale — reset.
+			if p != lastPinged {
+				consecutiveFail = 0
+				consecutiveOK = 0
+				lastPinged = p
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), s.cfg.PingInterval/2)
@@ -127,12 +148,16 @@ func (s *Supervisor) pingLoop() {
 			cancel()
 
 			if err == nil {
-				consecutive = 0
-				s.restartCount.Store(0)
+				consecutiveFail = 0
+				consecutiveOK++
+				if consecutiveOK >= s.cfg.HealthResetThreshold {
+					s.restartCount.Store(0)
+				}
 				continue
 			}
-			consecutive++
-			if consecutive < s.cfg.PingFailureBudget {
+			consecutiveOK = 0
+			consecutiveFail++
+			if consecutiveFail < s.cfg.PingFailureBudget {
 				continue
 			}
 			// Force the subprocess down — but only if it's still the
@@ -144,7 +169,7 @@ func (s *Supervisor) pingLoop() {
 			if stillCurrent {
 				_ = p.Close()
 			}
-			consecutive = 0
+			consecutiveFail = 0
 		}
 	}
 }
@@ -155,24 +180,40 @@ func (s *Supervisor) handleExit() {
 		s.shutdown() // permanent give-up; stop both goroutines
 		return
 	}
+	// Exponential backoff between restart attempts caps fork-bomb risk on
+	// a plugin that crashes immediately. Wait for the configured delay or
+	// for the supervisor to be told to shut down.
+	if backoff := s.restartBackoff(); backoff > 0 {
+		select {
+		case <-time.After(backoff):
+		case <-s.done:
+			return
+		}
+	}
 	s.restartCount.Add(1)
 	s.totalRestarts.Add(1)
 	p, err := Launch(s.cfg.Launch)
 	if err != nil {
-		// Slot already consumed; the next tick retries until exhaustion.
+		slog.Warn("fleet plugin: restart launch failed", "err", err, "restarts", s.restartCount.Load())
 		s.swap(nil)
 		return
 	}
 	s.swap(p)
+}
 
-	// Immediate liveness probe resets the budget if the new plugin is
-	// healthy — covers fast crash-loops where pingLoop's cadence is slower
-	// than the crashes.
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.PingInterval/2)
-	if perr := p.Ping(ctx); perr == nil {
-		s.restartCount.Store(0)
+// restartBackoff returns the exponential backoff between restart attempts:
+// PollInterval * 2^restartCount, clamped to MaxBackoff. restartCount of 0
+// means "first death", which doesn't pause.
+func (s *Supervisor) restartBackoff() time.Duration {
+	rc := s.restartCount.Load()
+	if rc <= 0 {
+		return 0
 	}
-	cancel()
+	d := time.Duration(float64(s.cfg.PollInterval) * math.Pow(2, float64(rc)))
+	if d > s.cfg.MaxBackoff {
+		return s.cfg.MaxBackoff
+	}
+	return d
 }
 
 // swap replaces s.current with p and closes the previous plugin. If the

@@ -115,7 +115,11 @@ func storageGetHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := chi.URLParam(r, "key")
 		ctx := r.Context()
-		projectID, _ := db.ProjectFromContext(ctx)
+		projectID, projectOK := db.ProjectFromContext(ctx)
+		if !projectOK {
+			http.Error(w, "project pin required", http.StatusBadRequest)
+			return
+		}
 		ownerID, ok := enduser.IDFromContext(ctx)
 		if !ok {
 			http.Error(w, "no end user", http.StatusUnauthorized)
@@ -153,7 +157,11 @@ func storageDeleteHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := chi.URLParam(r, "key")
 		ctx := r.Context()
-		projectID, _ := db.ProjectFromContext(ctx)
+		projectID, projectOK := db.ProjectFromContext(ctx)
+		if !projectOK {
+			http.Error(w, "project pin required", http.StatusBadRequest)
+			return
+		}
 		ownerID, ok := enduser.IDFromContext(ctx)
 		if !ok {
 			http.Error(w, "no end user", http.StatusUnauthorized)
@@ -177,7 +185,11 @@ func storageDeleteHandler(d Deps) http.HandlerFunc {
 func storageListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		projectID, _ := db.ProjectFromContext(ctx)
+		projectID, projectOK := db.ProjectFromContext(ctx)
+		if !projectOK {
+			http.Error(w, "project pin required", http.StatusBadRequest)
+			return
+		}
 		ownerID, ok := enduser.IDFromContext(ctx)
 		if !ok {
 			http.Error(w, "no end user", http.StatusUnauthorized)

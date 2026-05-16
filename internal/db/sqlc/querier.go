@@ -9,9 +9,23 @@ import (
 )
 
 type Querier interface {
+	// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
+	// CommitClaim will find zero rows and deallocate the orphan server.
 	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
+	// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+	// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
+	// subsequent ClaimBucket (different worker) skips them. The caller commits
+	// via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+	// a crashed caller's claim is released by the sweeper once
+	// claim_expires_at < now().
+	ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmakerBucketParams) ([]ClaimMatchmakerBucketRow, error)
 	ClearDashboardVerificationCode(ctx context.Context, id int64) error
 	ClearEndUserVerificationCode(ctx context.Context, id int64) error
+	// Flip every still-queued ticket holding this claim_id to 'matched' and
+	// stamp the address. Rows that drifted (cancelled, swept) won't match the
+	// WHERE and are excluded — the caller branches on rows-affected and
+	// deallocates the orphan server when 0.
+	CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error)
 	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
@@ -47,7 +61,14 @@ type Querier interface {
 	CreateVerifiedDashboardUser(ctx context.Context, arg CreateVerifiedDashboardUserParams) (CreateVerifiedDashboardUserRow, error)
 	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
 	DeleteDashboardMembership(ctx context.Context, arg DeleteDashboardMembershipParams) error
-	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error
+	// Removes a membership row but refuses to delete the actor's own row. The
+	// previous approach loaded every member to do this check client-side; this
+	// predicate folds it into one statement.
+	DeleteDashboardMembershipUnlessSelf(ctx context.Context, arg DeleteDashboardMembershipUnlessSelfParams) (int64, error)
+	// Symmetric unfriend: the caller can be on either side of the edge. The
+	// previous one-directional query silently no-op'd when the friendship was
+	// inbound, so a "delete" returned 204 without actually removing anything.
+	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) (int64, error)
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier + key_type. Runs without an
 	// app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
@@ -138,6 +159,10 @@ type Querier interface {
 	// for a future "archive" view but not wired through the UI yet.
 	ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
+	// Caller-aware list. For 'blocked', only rows where the caller initiated
+	// the block are returned — never rows where the caller is the blockee
+	// (which would let a blocked user enumerate who blocked them).
+	ListFriendsByStatusForCaller(ctx context.Context, arg ListFriendsByStatusForCallerParams) ([]ListFriendsByStatusForCallerRow, error)
 	// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
 	// the current tenant's project, plus oldest queued ticket so operators can
 	// spot stuck buckets at a glance.
@@ -157,8 +182,6 @@ type Querier interface {
 	MarkDashboardUserVerified(ctx context.Context, id int64) error
 	MarkEndUserInvitationAccepted(ctx context.Context, id int64) error
 	MarkEndUserVerified(ctx context.Context, id int64) error
-	MarkMatchmakerFailed(ctx context.Context, dollar_1 []int64) error
-	MarkMatchmakerMatched(ctx context.Context, arg MarkMatchmakerMatchedParams) error
 	MarkPlayerVerified(ctx context.Context, id int64) error
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 	// page. Returns the tenant_id so the caller can SET app.tenant_id and
@@ -168,7 +191,6 @@ type Querier interface {
 	// SECURITY DEFINER table functions, so it would otherwise fall back to
 	// interface{} for every column.
 	PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error)
-	PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error)
 	PromoteDashboardUserToPlatformAdmin(ctx context.Context, id int64) error
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
@@ -178,6 +200,9 @@ type Querier interface {
 	RecordDashboardLoginFailure(ctx context.Context, arg RecordDashboardLoginFailureParams) (RecordDashboardLoginFailureRow, error)
 	RecordDashboardLoginSuccess(ctx context.Context, id int64) error
 	ReleaseAllocation(ctx context.Context, id int64) error
+	// Worker-driven release: allocator failed (or the worker is giving up).
+	// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
+	ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error)
 	// The unique index keeps one current row per directed pair, so re-requests
 	// after rejection update in place. Pending/accepted are idempotent (the
 	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
@@ -193,7 +218,7 @@ type Querier interface {
 	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
 	RevokeSession(ctx context.Context, id int64) error
-	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error
+	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
 	// Nullable timestamptz so the same query handles disable (now()) and
 	// enable (NULL).
@@ -207,6 +232,10 @@ type Querier interface {
 	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
+	// Release every claim whose lease has expired. Same accounting as
+	// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
+	// detached context so it isn't tied to any request lifetime.
+	SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (int64, error)
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
 	TouchDashboardSession(ctx context.Context, arg TouchDashboardSessionParams) error
 	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error

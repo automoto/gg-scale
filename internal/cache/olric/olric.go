@@ -92,10 +92,10 @@ func New(ctx context.Context, c Config) (*Store, error) {
 	case err := <-startErr:
 		return nil, fmt.Errorf("olric: start: %w", err)
 	case <-time.After(timeout):
-		_ = db.Shutdown(ctx)
+		shutdownOlric(db)
 		return nil, fmt.Errorf("olric: start: timeout after %s", timeout)
 	case <-ctx.Done():
-		_ = db.Shutdown(context.Background())
+		shutdownOlric(db)
 		return nil, ctx.Err()
 	}
 
@@ -103,17 +103,17 @@ func New(ctx context.Context, c Config) (*Store, error) {
 
 	buckets, err := client.NewDMap("ratelimit")
 	if err != nil {
-		_ = db.Shutdown(ctx)
+		shutdownOlric(db)
 		return nil, fmt.Errorf("olric: dmap ratelimit: %w", err)
 	}
 	slots, err := client.NewDMap("slots")
 	if err != nil {
-		_ = db.Shutdown(ctx)
+		shutdownOlric(db)
 		return nil, fmt.Errorf("olric: dmap slots: %w", err)
 	}
 	kv, err := client.NewDMap("kv")
 	if err != nil {
-		_ = db.Shutdown(ctx)
+		shutdownOlric(db)
 		return nil, fmt.Errorf("olric: dmap kv: %w", err)
 	}
 
@@ -124,6 +124,22 @@ func New(ctx context.Context, c Config) (*Store, error) {
 		slots:   slots,
 		kv:      kv,
 	}, nil
+}
+
+// shutdownOlric runs db.Shutdown against a fresh background context with a
+// short timeout. The startup context may have been cancelled (the caller's
+// New() can be invoked under a request ctx), so reusing it on the error
+// path can strand goroutines and sockets.
+func shutdownOlric(db olricShutdowner) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = db.Shutdown(ctx)
+}
+
+// olricShutdowner is the slice of *olric.Olric shutdownOlric uses, kept as
+// an interface so the helper is testable without spinning a real cluster.
+type olricShutdowner interface {
+	Shutdown(context.Context) error
 }
 
 // TokenBucket implements cache.Store.

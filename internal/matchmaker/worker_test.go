@@ -19,12 +19,14 @@ import (
 )
 
 type fakeAllocator struct {
-	mu       sync.Mutex
-	called   atomic.Int64
-	address  string
-	err      error
-	gotReqs  []fleet.AllocationRequest
-	gotCtxes []context.Context
+	mu          sync.Mutex
+	called      atomic.Int64
+	address     string
+	err         error
+	gotReqs     []fleet.AllocationRequest
+	gotCtxes    []context.Context
+	deallocated []fleet.AllocationID
+	nextID      atomic.Int64
 }
 
 func (f *fakeAllocator) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
@@ -36,12 +38,30 @@ func (f *fakeAllocator) Allocate(ctx context.Context, req fleet.AllocationReques
 	if f.err != nil {
 		return nil, f.err
 	}
-	return &fleet.Allocation{Address: f.address, Status: fleet.StatusReady}, nil
+	id := fleet.AllocationID(f.nextID.Add(1))
+	return &fleet.Allocation{ID: id, Address: f.address, Status: fleet.StatusReady}, nil
+}
+
+func (f *fakeAllocator) Deallocate(_ context.Context, id fleet.AllocationID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deallocated = append(f.deallocated, id)
+	return nil
 }
 
 // Called returns the number of Allocate invocations. Use this in tests
 // that run the worker on a goroutine.
 func (f *fakeAllocator) Called() int64 { return f.called.Load() }
+
+// Deallocated returns the AllocationIDs that have been released. Tests
+// assert orphan-cleanup paths by checking this.
+func (f *fakeAllocator) Deallocated() []fleet.AllocationID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]fleet.AllocationID, len(f.deallocated))
+	copy(out, f.deallocated)
+	return out
+}
 
 type fakeNotifier struct {
 	mu      sync.Mutex
@@ -129,10 +149,10 @@ func TestWorkerForwardsTenantContextToAllocator(t *testing.T) {
 	assert.Equal(t, int64(7), pid)
 }
 
-func TestWorkerMarksTicketsFailedWhenAllocateFails(t *testing.T) {
+func TestWorkerFailsTicketAfterMaxAttempts(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{err: errors.New("backend down")}
-	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1})
+	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1, MaxAttempts: 1})
 	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	require.NoError(t, w.Tick(context.Background()))
@@ -142,15 +162,66 @@ func TestWorkerMarksTicketsFailedWhenAllocateFails(t *testing.T) {
 	assert.Equal(t, matchmaker.StatusFailed, got.Status)
 }
 
+func TestWorkerRetriesUnderAttemptCap(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	alloc := &fakeAllocator{err: errors.New("backend down")}
+	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1, MaxAttempts: 3})
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID)
+	require.NoError(t, err)
+	assert.Equal(t, matchmaker.StatusQueued, got.Status, "first allocator failure under cap should leave the ticket queued")
+}
+
+func TestWorkerDeallocatesOrphanWhenCommitFindsNoRows(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	hub := &fakeNotifier{}
+	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+
+	// Race: player cancels mid-allocate. Allocate takes long enough that
+	// the cancel runs between ClaimBucket and CommitClaim; CommitClaim then
+	// affects 0 rows and the worker should release the orphan allocation.
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		_ = q.Cancel(db.WithTenant(context.Background(), 1), t1.ID)
+	}()
+	delayed := &delayingAllocator{inner: alloc, delay: 20 * time.Millisecond}
+	w := matchmaker.NewWorker(q, delayed, hub, matchmaker.WorkerConfig{BucketSize: 1})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	assert.Equal(t, int64(1), alloc.Called(), "Allocate should have run once")
+	require.Eventually(t, func() bool { return len(alloc.Deallocated()) == 1 }, time.Second, 5*time.Millisecond,
+		"orphan allocation should have been released")
+	assert.Empty(t, hub.Sent(), "no MatchReady should be sent when CommitClaim affects 0 rows")
+}
+
+// delayingAllocator wraps another allocator and sleeps in Allocate so tests
+// can race a Cancel against the commit step.
+type delayingAllocator struct {
+	inner *fakeAllocator
+	delay time.Duration
+}
+
+func (d *delayingAllocator) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
+	time.Sleep(d.delay)
+	return d.inner.Allocate(ctx, req)
+}
+
+func (d *delayingAllocator) Deallocate(ctx context.Context, id fleet.AllocationID) error {
+	return d.inner.Deallocate(ctx, id)
+}
+
 func TestWorkerIsolatesTenantsAndProjects(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 2})
 
-	// Two tickets for tenant 1 / project 7 -> bucket fills.
 	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 1, Region: "r", GameMode: "g"})
 	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 2, Region: "r", GameMode: "g"})
-	// One ticket for tenant 2 / project 7 -> bucket does NOT fill.
 	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 2, ProjectID: 7, EndUserID: 1, Region: "r", GameMode: "g"})
 
 	require.NoError(t, w.Tick(context.Background()))
@@ -187,7 +258,6 @@ func TestWorkerProcessesBucketOnListenerEvent(t *testing.T) {
 	q := newListenerQueue()
 	alloc := &fakeAllocator{address: "10.0.0.42:7777"}
 	hub := &fakeNotifier{}
-	// Long fallback so any processing has to come from the listener event.
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{
 		BucketSize: 1,
 		Interval:   time.Hour,
@@ -214,4 +284,29 @@ func TestWorkerToleratesNotifierErrors(t *testing.T) {
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())
+}
+
+func TestWorkerRunWaitsForGoroutinesOnShutdown(t *testing.T) {
+	q := newListenerQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{
+		BucketSize:    1,
+		Interval:      time.Hour,
+		SweepInterval: time.Hour,
+		WorkerCount:   2,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Worker.Run did not return after ctx cancel — goroutines leaked")
+	}
 }

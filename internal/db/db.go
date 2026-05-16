@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -60,7 +61,8 @@ func ProjectFromContext(ctx context.Context) (int64, bool) {
 
 // Pool wraps a pgxpool with a tenant-aware transaction helper.
 type Pool struct {
-	pool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	statementTimeout time.Duration
 }
 
 // NewPool constructs a Pool from an existing pgxpool. The caller retains
@@ -69,9 +71,17 @@ func NewPool(p *pgxpool.Pool) *Pool {
 	return &Pool{pool: p}
 }
 
+// NewPoolWithTimeout is like NewPool but also installs a per-transaction
+// statement timeout. Zero means "leave the server default."
+func NewPoolWithTimeout(p *pgxpool.Pool, statementTimeout time.Duration) *Pool {
+	return &Pool{pool: p, statementTimeout: statementTimeout}
+}
+
 // Q runs fn inside a transaction with `app.tenant_id` set to the tenant
 // extracted from ctx. The transaction is committed if fn returns nil and
-// rolled back otherwise.
+// rolled back otherwise. A deferred rollback guarded by `committed` runs on
+// every exit path — including a commit error — so a partially failed
+// commit cannot leak a dangling tx into the connection pool.
 func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 	tenantID, err := TenantFromContext(ctx)
 	if err != nil {
@@ -82,23 +92,35 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
 	if _, err = tx.Exec(ctx,
 		"SELECT set_config('app.tenant_id', $1, true)",
 		strconv.FormatInt(tenantID, 10),
 	); err != nil {
-		_ = tx.Rollback(ctx)
 		return fmt.Errorf("set app.tenant_id: %w", err)
 	}
 
+	if p.statementTimeout > 0 {
+		ms := p.statementTimeout.Milliseconds()
+		if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", ms)); err != nil {
+			return fmt.Errorf("set statement_timeout: %w", err)
+		}
+	}
+
 	if err = fn(tx); err != nil {
-		_ = tx.Rollback(ctx)
 		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
+	committed = true
 	return nil
 }
 
@@ -147,14 +169,20 @@ func (p *Pool) BootstrapQ(ctx context.Context, fn func(pgx.Tx) error) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 
 	if err = fn(tx); err != nil {
-		_ = tx.Rollback(ctx)
 		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit: %w", err)
 	}
+	committed = true
 	return nil
 }

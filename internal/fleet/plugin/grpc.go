@@ -295,19 +295,22 @@ func (c *grpcClient) Status(ctx context.Context, id fleet.AllocationID, backendR
 }
 
 func (c *grpcClient) Watch(ctx context.Context, id fleet.AllocationID, backendRef string) (<-chan fleet.StatusUpdate, error) {
-	stream, err := c.client.Watch(ctx, &fleetpb.WatchRequest{AllocationId: int64(id), BackendRef: backendRef})
+	// Derive a cancellable child ctx so the gRPC stream is torn down as
+	// soon as the goroutine exits — whether the caller cancelled, the
+	// stream closed, or we returned because the caller stopped reading.
+	streamCtx, cancel := context.WithCancel(ctx)
+	stream, err := c.client.Watch(streamCtx, &fleetpb.WatchRequest{AllocationId: int64(id), BackendRef: backendRef})
 	if err != nil {
+		cancel()
 		return nil, errFromStatus(err)
 	}
 	out := make(chan fleet.StatusUpdate, 1)
 	go func() {
+		defer cancel()
 		defer close(out)
 		for {
 			msg, err := stream.Recv()
 			if err != nil {
-				// Stream close (clean EOF or transport error) is the
-				// manager's "no further updates" signal — surfacing
-				// transport errors here would break that contract.
 				return
 			}
 			upd := fleet.StatusUpdate{

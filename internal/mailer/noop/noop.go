@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	mailer.Register("noop", func(_, _, _, _ string) (mailer.Mailer, error) {
+	mailer.Register("noop", func(_, _, _, _, _ string) (mailer.Mailer, error) {
 		return &noopMailer{}, nil
 	})
 }

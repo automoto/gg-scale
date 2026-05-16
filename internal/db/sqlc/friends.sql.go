@@ -11,21 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteFriendEdge = `-- name: DeleteFriendEdge :exec
+const deleteFriendEdge = `-- name: DeleteFriendEdge :execrows
 DELETE FROM friend_edges
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND from_user_id = $1
-  AND to_user_id   = $2
+  AND ((from_user_id = $1 AND to_user_id = $2)
+       OR (from_user_id = $2 AND to_user_id = $1))
 `
 
 type DeleteFriendEdgeParams struct {
-	FromUserID int64
-	ToUserID   int64
+	Me    int64
+	Other int64
 }
 
-func (q *Queries) DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) error {
-	_, err := q.db.Exec(ctx, deleteFriendEdge, arg.FromUserID, arg.ToUserID)
-	return err
+// Symmetric unfriend: the caller can be on either side of the edge. The
+// previous one-directional query silently no-op'd when the friendship was
+// inbound, so a "delete" returned 204 without actually removing anything.
+func (q *Queries) DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFriendEdge, arg.Me, arg.Other)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getFriendEdge = `-- name: GetFriendEdge :one
@@ -94,6 +100,71 @@ func (q *Queries) ListFriendsByStatus(ctx context.Context, arg ListFriendsByStat
 	var items []ListFriendsByStatusRow
 	for rows.Next() {
 		var i ListFriendsByStatusRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FromUserID,
+			&i.ToUserID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFriendsByStatusForCaller = `-- name: ListFriendsByStatusForCaller :many
+SELECT id, from_user_id, to_user_id, status, created_at, updated_at
+FROM friend_edges
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND (($1::text != 'blocked'
+            AND (from_user_id = $2 OR to_user_id = $2))
+       OR ($1::text = 'blocked'
+            AND from_user_id = $2))
+  AND status = $1
+  AND id > $3
+ORDER BY id ASC
+LIMIT $4
+`
+
+type ListFriendsByStatusForCallerParams struct {
+	Status   string
+	Me       int64
+	Cursor   int64
+	RowLimit int32
+}
+
+type ListFriendsByStatusForCallerRow struct {
+	ID         int64
+	FromUserID int64
+	ToUserID   int64
+	Status     string
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+}
+
+// Caller-aware list. For 'blocked', only rows where the caller initiated
+// the block are returned — never rows where the caller is the blockee
+// (which would let a blocked user enumerate who blocked them).
+func (q *Queries) ListFriendsByStatusForCaller(ctx context.Context, arg ListFriendsByStatusForCallerParams) ([]ListFriendsByStatusForCallerRow, error) {
+	rows, err := q.db.Query(ctx, listFriendsByStatusForCaller,
+		arg.Status,
+		arg.Me,
+		arg.Cursor,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFriendsByStatusForCallerRow
+	for rows.Next() {
+		var i ListFriendsByStatusForCallerRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.FromUserID,

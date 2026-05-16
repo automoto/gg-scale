@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // MemQueue is an in-memory Queue used by worker tests and as a stand-in for
@@ -12,12 +14,21 @@ import (
 type MemQueue struct {
 	mu      sync.Mutex
 	nextID  int64
-	tickets map[int64]*Ticket
+	tickets map[int64]*memTicket
+}
+
+// memTicket is the internal storage row. The exported Ticket is constructed
+// by cloning out of this on read.
+type memTicket struct {
+	Ticket
+	claimID            string
+	claimExpiresAt     time.Time
+	allocationAttempts int
 }
 
 // NewMemQueue returns an empty in-memory queue.
 func NewMemQueue() *MemQueue {
-	return &MemQueue{tickets: make(map[int64]*Ticket)}
+	return &MemQueue{tickets: make(map[int64]*memTicket)}
 }
 
 // Enqueue inserts a queued ticket and returns the persisted view.
@@ -25,20 +36,22 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.nextID++
-	t := &Ticket{
-		ID:         q.nextID,
-		TenantID:   req.TenantID,
-		ProjectID:  req.ProjectID,
-		FleetID:    req.FleetID,
-		EndUserID:  req.EndUserID,
-		Region:     req.Region,
-		GameMode:   req.GameMode,
-		Attributes: req.Attributes,
-		Status:     StatusQueued,
-		CreatedAt:  time.Now().UTC(),
+	t := &memTicket{
+		Ticket: Ticket{
+			ID:         q.nextID,
+			TenantID:   req.TenantID,
+			ProjectID:  req.ProjectID,
+			FleetID:    req.FleetID,
+			EndUserID:  req.EndUserID,
+			Region:     req.Region,
+			GameMode:   req.GameMode,
+			Attributes: req.Attributes,
+			Status:     StatusQueued,
+			CreatedAt:  time.Now().UTC(),
+		},
 	}
 	q.tickets[t.ID] = t
-	return cloneTicket(t), nil
+	return cloneTicket(&t.Ticket), nil
 }
 
 // Get returns a tenant-scoped view of the ticket. The tenant id is read
@@ -54,11 +67,13 @@ func (q *MemQueue) Get(ctx context.Context, id int64) (*Ticket, error) {
 	if !ok || t.TenantID != tenantID {
 		return nil, ErrNotFound
 	}
-	return cloneTicket(t), nil
+	return cloneTicket(&t.Ticket), nil
 }
 
 // Cancel marks a queued ticket as cancelled. Returns ErrAlreadyTerminal when
-// the ticket has already reached matched/cancelled/failed.
+// the ticket has already reached matched/cancelled/failed. Cancelling a
+// claimed ticket clears the claim cols too, so the worker's CommitClaim
+// finds zero rows and deallocates the orphan.
 func (q *MemQueue) Cancel(ctx context.Context, id int64) error {
 	tenantID, err := tenantFromCtx(ctx)
 	if err != nil {
@@ -74,17 +89,19 @@ func (q *MemQueue) Cancel(ctx context.Context, id int64) error {
 		return ErrAlreadyTerminal
 	}
 	t.Status = StatusCancelled
+	t.claimID = ""
+	t.claimExpiresAt = time.Time{}
 	return nil
 }
 
-// ListReadyBuckets returns every (tenant, project, region, game_mode)
-// bucket that currently holds at least minTickets queued entries.
+// ListReadyBuckets returns every (tenant, project, fleet, region, game_mode)
+// bucket that currently holds at least minTickets unclaimed queued entries.
 func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	counts := make(map[Bucket]int)
 	for _, t := range q.tickets {
-		if t.Status != StatusQueued {
+		if t.Status != StatusQueued || t.claimID != "" {
 			continue
 		}
 		counts[Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, FleetID: t.FleetID, Region: t.Region, GameMode: t.GameMode}]++
@@ -113,15 +130,14 @@ func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket
 	return out, nil
 }
 
-// PopBucket atomically claims up to n queued tickets in the bucket,
-// marking them 'matched' (placeholder; the worker fills in the address
-// afterwards via MarkMatched).
-func (q *MemQueue) PopBucket(_ context.Context, bucket Bucket, n int) ([]*Ticket, error) {
+// ClaimBucket stakes a claim on up to n unclaimed queued tickets. Returns
+// nil on short count.
+func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, n int, ttl time.Duration) (*Claim, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	candidates := make([]*Ticket, 0)
+	candidates := make([]*memTicket, 0)
 	for _, t := range q.tickets {
-		if t.Status != StatusQueued {
+		if t.Status != StatusQueued || t.claimID != "" {
 			continue
 		}
 		if t.TenantID != bucket.TenantID || t.ProjectID != bucket.ProjectID {
@@ -136,49 +152,92 @@ func (q *MemQueue) PopBucket(_ context.Context, bucket Bucket, n int) ([]*Ticket
 		candidates = append(candidates, t)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].CreatedAt.Equal(candidates[j].CreatedAt) {
+			return candidates[i].ID < candidates[j].ID
+		}
 		return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
 	})
 	if len(candidates) < n {
 		return nil, nil
 	}
 	taken := candidates[:n]
+	claimID := uuid.NewString()
+	expires := time.Now().UTC().Add(ttl)
 	out := make([]*Ticket, 0, n)
 	for _, t := range taken {
-		t.Status = StatusMatched
-		out = append(out, cloneTicket(t))
+		t.claimID = claimID
+		t.claimExpiresAt = expires
+		out = append(out, cloneTicket(&t.Ticket))
 	}
-	return out, nil
+	return &Claim{ID: claimID, Tickets: out}, nil
 }
 
-// MarkMatched sets address + matched_at on each id (and re-asserts matched
-// status in case of replay).
-func (q *MemQueue) MarkMatched(_ context.Context, ids []int64, address string) error {
+// CommitClaim flips every still-queued row with the given claim id to
+// 'matched' with the address. Returns rows-affected (0 if the claim drifted).
+func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress string) (int64, error) {
+	if claim == nil || claim.ID == "" {
+		return 0, nil
+	}
 	now := time.Now().UTC()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, id := range ids {
-		t, ok := q.tickets[id]
-		if !ok {
+	var affected int64
+	for _, t := range q.tickets {
+		if t.claimID != claim.ID || t.Status != StatusQueued {
 			continue
 		}
 		t.Status = StatusMatched
-		t.MatchAddress = address
+		t.MatchAddress = matchAddress
 		t.MatchedAt = &now
+		t.claimID = ""
+		t.claimExpiresAt = time.Time{}
+		affected++
 	}
-	return nil
+	return affected, nil
 }
 
-// MarkFailed restores the previously-popped tickets to a terminal failed
-// state.
-func (q *MemQueue) MarkFailed(_ context.Context, ids []int64) error {
+// ReleaseClaim clears the claim, bumps attempts, and flips to 'failed' at
+// the cap.
+func (q *MemQueue) ReleaseClaim(_ context.Context, claim *Claim, maxAttempts int) error {
+	if claim == nil || claim.ID == "" {
+		return nil
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, id := range ids {
-		if t, ok := q.tickets[id]; ok {
+	for _, t := range q.tickets {
+		if t.claimID != claim.ID || t.Status != StatusQueued {
+			continue
+		}
+		t.allocationAttempts++
+		t.claimID = ""
+		t.claimExpiresAt = time.Time{}
+		if t.allocationAttempts >= maxAttempts {
 			t.Status = StatusFailed
 		}
 	}
 	return nil
+}
+
+// SweepStaleClaims releases every expired claim. MemQueue implements Sweeper
+// for symmetry with PGQueue and for cleanup tests.
+func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, error) {
+	now := time.Now().UTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var released int64
+	for _, t := range q.tickets {
+		if t.claimID == "" || t.Status != StatusQueued || !t.claimExpiresAt.Before(now) {
+			continue
+		}
+		t.allocationAttempts++
+		t.claimID = ""
+		t.claimExpiresAt = time.Time{}
+		if t.allocationAttempts >= maxAttempts {
+			t.Status = StatusFailed
+		}
+		released++
+	}
+	return released, nil
 }
 
 func cloneTicket(t *Ticket) *Ticket {

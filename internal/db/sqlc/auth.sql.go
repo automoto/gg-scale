@@ -317,17 +317,20 @@ func (q *Queries) RevokeSession(ctx context.Context, id int64) error {
 	return err
 }
 
-const revokeSessionByRefreshHash = `-- name: RevokeSessionByRefreshHash :exec
+const revokeSessionByRefreshHash = `-- name: RevokeSessionByRefreshHash :one
 UPDATE sessions
 SET revoked_at = now()
 WHERE refresh_hash = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL
+RETURNING end_user_id
 `
 
-func (q *Queries) RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) error {
-	_, err := q.db.Exec(ctx, revokeSessionByRefreshHash, refreshHash)
-	return err
+func (q *Queries) RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, revokeSessionByRefreshHash, refreshHash)
+	var end_user_id int64
+	err := row.Scan(&end_user_id)
+	return end_user_id, err
 }
 
 const setEndUserVerificationCode = `-- name: SetEndUserVerificationCode :exec

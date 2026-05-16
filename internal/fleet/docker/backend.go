@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,22 @@ type Config struct {
 	// the daemon is not on localhost or when the published port isn't
 	// reachable on 127.0.0.1.
 	PublicIP string
+	// BindIP is the host interface published container ports bind to.
+	// Default "127.0.0.1". Use the public IP for production multi-host.
+	BindIP string
+	// DefaultMemoryBytes / DefaultNanoCPUs / DefaultPidsLimit are the
+	// per-container resource caps applied when a fleet template does not
+	// specify its own. Zero leaves the daemon default (unbounded).
+	DefaultMemoryBytes int64
+	DefaultNanoCPUs    int64
+	DefaultPidsLimit   int64
+	// RegistryAllowlist restricts which registries may run. Empty disables
+	// the check; non-empty rejects images whose canonical reference does
+	// not start with one of the listed prefixes.
+	RegistryAllowlist []string
+	// RequireDigest enforces that every image carries an @sha256:… pin.
+	// Recommended on for production deployments.
+	RequireDigest bool
 }
 
 // Backend allocates game-server containers via Docker.
@@ -87,12 +104,23 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("docker: Client is required")
 	}
+	if cfg.BindIP == "" {
+		cfg.BindIP = "127.0.0.1"
+	}
+	// PublicIP-pointing-at-loopback is a config smell rather than a hard
+	// error: legitimate dev/CI setups bind both PublicIP and BindIP to
+	// 127.0.0.1. config.Validate flags this in production.
 	timeout := cfg.ProbeTimeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
 	return &Backend{cfg: cfg, probeTimeout: timeout}, nil
 }
+
+// validProbePath restricts the operator-supplied path on each template to
+// printable URL-path characters. Prevents a malformed value from
+// constructing a probe URL that escapes the container address.
+var validProbePath = regexp.MustCompile(`^/[A-Za-z0-9._~!$&'()*+,;=:@/%-]*$`)
 
 // Name returns the backend identifier persisted on every allocation row.
 func (b *Backend) Name() string { return "docker" }
@@ -113,7 +141,7 @@ type Template struct {
 // and validates the required fields (image, port). Returns a meaningful
 // error if either is missing or malformed so the dashboard can surface it
 // against the fleet row.
-func TemplateFromConfig(cfg map[string]string) (Template, error) {
+func (b *Backend) TemplateFromConfig(cfg map[string]string) (Template, error) {
 	t := Template{
 		Image:     cfg["image"],
 		ProbeType: cfg["probe_type"],
@@ -121,6 +149,12 @@ func TemplateFromConfig(cfg map[string]string) (Template, error) {
 	}
 	if t.Image == "" {
 		return Template{}, errors.New("docker: fleet config missing \"image\"")
+	}
+	if err := b.validateImage(t.Image); err != nil {
+		return Template{}, err
+	}
+	if t.ProbePath != "" && !validProbePath.MatchString(t.ProbePath) {
+		return Template{}, fmt.Errorf("docker: fleet config invalid \"probe_path\" %q", t.ProbePath)
 	}
 	if raw := cfg["port"]; raw != "" {
 		port, err := strconv.Atoi(raw)
@@ -135,11 +169,34 @@ func TemplateFromConfig(cfg map[string]string) (Template, error) {
 	return t, nil
 }
 
+// TemplateFromConfig is the package-level shim used by callers that don't
+// have a backend instance handy (notably the dashboard fleet form, which
+// validates templates before persisting). Registry policy isn't checked
+// without a backend; the request-time path still does.
+func TemplateFromConfig(cfg map[string]string) (Template, error) {
+	return (&Backend{}).TemplateFromConfig(cfg)
+}
+
+func (b *Backend) validateImage(image string) error {
+	if b.cfg.RequireDigest && !strings.Contains(image, "@sha256:") {
+		return fmt.Errorf("docker: image %q lacks digest pin (require_digest is set)", image)
+	}
+	if len(b.cfg.RegistryAllowlist) == 0 {
+		return nil
+	}
+	for _, prefix := range b.cfg.RegistryAllowlist {
+		if strings.HasPrefix(image, prefix) {
+			return nil
+		}
+	}
+	return fmt.Errorf("docker: image %q not in registry allowlist", image)
+}
+
 // Allocate creates, starts, and probes a container. On any failure past
 // ContainerCreate the container is force-removed so a failed Allocate
 // leaves no orphan resources behind.
 func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
-	tmpl, err := TemplateFromConfig(req.Config)
+	tmpl, err := b.TemplateFromConfig(req.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +212,11 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 		return nil, fmt.Errorf("docker: port: %w", err)
 	}
 
+	pidsLimit := b.cfg.DefaultPidsLimit
+	var pidsPtr *int64
+	if pidsLimit > 0 {
+		pidsPtr = &pidsLimit
+	}
 	created, err := b.cfg.Client.ContainerCreate(ctx,
 		&dockercontainer.Config{
 			Image:        tmpl.Image,
@@ -170,7 +232,7 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 		},
 		&dockercontainer.HostConfig{
 			PortBindings: nat.PortMap{
-				containerPort: []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: "0"}},
+				containerPort: []nat.PortBinding{{HostIP: b.cfg.BindIP, HostPort: "0"}},
 			},
 			AutoRemove: false,
 			// Safe defaults for a multi-tenant platform: game servers
@@ -178,8 +240,14 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 			// high port, no CAP_NET_BIND_SERVICE required). Operators
 			// who need to relax this should add a config knob rather
 			// than weaken the default.
-			SecurityOpt: []string{"no-new-privileges:true"},
-			CapDrop:     []string{"ALL"},
+			SecurityOpt:    []string{"no-new-privileges:true"},
+			CapDrop:        []string{"ALL"},
+			ReadonlyRootfs: true,
+			Resources: dockercontainer.Resources{
+				Memory:    b.cfg.DefaultMemoryBytes,
+				NanoCPUs:  b.cfg.DefaultNanoCPUs,
+				PidsLimit: pidsPtr,
+			},
 		},
 		nil, nil, "")
 	if err != nil {

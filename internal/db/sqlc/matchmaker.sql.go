@@ -13,18 +13,152 @@ import (
 
 const cancelMatchmakingTicket = `-- name: CancelMatchmakingTicket :one
 UPDATE matchmaking_tickets
-SET status = 'cancelled'
+SET status           = 'cancelled',
+    claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
   AND status = 'queued'
 RETURNING id
 `
 
+// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
+// CommitClaim will find zero rows and deallocate the orphan server.
 func (q *Queries) CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error) {
 	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, id)
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const claimMatchmakerBucket = `-- name: ClaimMatchmakerBucket :many
+WITH candidates AS (
+    SELECT mt.id
+    FROM matchmaking_tickets mt
+    WHERE mt.status = 'queued'
+      AND mt.claim_id IS NULL
+      AND mt.tenant_id  = $1
+      AND mt.project_id = $2
+      AND mt.fleet_id   = $3
+      AND mt.region     = $4
+      AND mt.game_mode  = $5
+    ORDER BY mt.created_at, mt.id
+    LIMIT $8::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE matchmaking_tickets t
+SET claim_id         = $6::uuid,
+    claimed_at       = now(),
+    claim_expires_at = now() + $7::interval
+FROM candidates c
+WHERE t.id = c.id
+RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
+          t.game_mode, t.attributes, t.status::text AS status,
+          t.match_address, t.created_at, t.matched_at
+`
+
+type ClaimMatchmakerBucketParams struct {
+	TenantID  int64
+	ProjectID int64
+	FleetID   *int64
+	Region    string
+	GameMode  string
+	ClaimID   pgtype.UUID
+	Ttl       pgtype.Interval
+	Limit     int32
+}
+
+type ClaimMatchmakerBucketRow struct {
+	ID           int64
+	TenantID     int64
+	ProjectID    int64
+	FleetID      *int64
+	EndUserID    int64
+	Region       string
+	GameMode     string
+	Attributes   []byte
+	Status       string
+	MatchAddress string
+	CreatedAt    pgtype.Timestamptz
+	MatchedAt    pgtype.Timestamptz
+}
+
+// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
+// subsequent ClaimBucket (different worker) skips them. The caller commits
+// via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+// a crashed caller's claim is released by the sweeper once
+// claim_expires_at < now().
+func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmakerBucketParams) ([]ClaimMatchmakerBucketRow, error) {
+	rows, err := q.db.Query(ctx, claimMatchmakerBucket,
+		arg.TenantID,
+		arg.ProjectID,
+		arg.FleetID,
+		arg.Region,
+		arg.GameMode,
+		arg.ClaimID,
+		arg.Ttl,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClaimMatchmakerBucketRow
+	for rows.Next() {
+		var i ClaimMatchmakerBucketRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ProjectID,
+			&i.FleetID,
+			&i.EndUserID,
+			&i.Region,
+			&i.GameMode,
+			&i.Attributes,
+			&i.Status,
+			&i.MatchAddress,
+			&i.CreatedAt,
+			&i.MatchedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const commitMatchmakerClaim = `-- name: CommitMatchmakerClaim :execrows
+UPDATE matchmaking_tickets
+SET status           = 'matched',
+    match_address    = $1,
+    matched_at       = now(),
+    claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
+WHERE claim_id = $2::uuid
+  AND status = 'queued'
+`
+
+type CommitMatchmakerClaimParams struct {
+	MatchAddress string
+	ClaimID      pgtype.UUID
+}
+
+// Flip every still-queued ticket holding this claim_id to 'matched' and
+// stamp the address. Rows that drifted (cancelled, swept) won't match the
+// WHERE and are excluded — the caller branches on rows-affected and
+// deallocates the orphan server when 0.
+func (q *Queries) CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, commitMatchmakerClaim, arg.MatchAddress, arg.ClaimID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
@@ -165,6 +299,7 @@ const listReadyMatchmakerBuckets = `-- name: ListReadyMatchmakerBuckets :many
 SELECT tenant_id, project_id, fleet_id, region, game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets
 WHERE status = 'queued'
+  AND claim_id IS NULL
   AND fleet_id IS NOT NULL
 GROUP BY tenant_id, project_id, fleet_id, region, game_mode
 HAVING count(*) >= $1::int
@@ -207,117 +342,59 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32
 	return items, nil
 }
 
-const markMatchmakerFailed = `-- name: MarkMatchmakerFailed :exec
+const releaseMatchmakerClaim = `-- name: ReleaseMatchmakerClaim :execrows
 UPDATE matchmaking_tickets
-SET status = 'failed'
-WHERE id = ANY($1::bigint[])
+SET claim_id            = NULL,
+    claimed_at          = NULL,
+    claim_expires_at    = NULL,
+    allocation_attempts = allocation_attempts + 1,
+    status = CASE
+        WHEN allocation_attempts + 1 >= $1::int
+            THEN 'failed'::ticket_status
+        ELSE status
+    END
+WHERE claim_id = $2::uuid
+  AND status = 'queued'
 `
 
-func (q *Queries) MarkMatchmakerFailed(ctx context.Context, dollar_1 []int64) error {
-	_, err := q.db.Exec(ctx, markMatchmakerFailed, dollar_1)
-	return err
+type ReleaseMatchmakerClaimParams struct {
+	MaxAttempts int32
+	ClaimID     pgtype.UUID
 }
 
-const markMatchmakerMatched = `-- name: MarkMatchmakerMatched :exec
-UPDATE matchmaking_tickets
-SET match_address = $2,
-    matched_at    = now()
-WHERE id = ANY($1::bigint[])
-`
-
-type MarkMatchmakerMatchedParams struct {
-	Column1      []int64
-	MatchAddress string
-}
-
-func (q *Queries) MarkMatchmakerMatched(ctx context.Context, arg MarkMatchmakerMatchedParams) error {
-	_, err := q.db.Exec(ctx, markMatchmakerMatched, arg.Column1, arg.MatchAddress)
-	return err
-}
-
-const popMatchmakerBucket = `-- name: PopMatchmakerBucket :many
-WITH candidates AS (
-    SELECT mt.id
-    FROM matchmaking_tickets mt
-    WHERE mt.status = 'queued'
-      AND mt.tenant_id = $1
-      AND mt.project_id = $2
-      AND mt.fleet_id  = $3
-      AND mt.region    = $4
-      AND mt.game_mode = $5
-    ORDER BY mt.created_at, mt.id
-    LIMIT $6::int
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE matchmaking_tickets t
-SET status = 'matched'
-FROM candidates c
-WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
-          t.game_mode, t.attributes, t.status::text AS status,
-          t.match_address, t.created_at, t.matched_at
-`
-
-type PopMatchmakerBucketParams struct {
-	TenantID  int64
-	ProjectID int64
-	FleetID   *int64
-	Region    string
-	GameMode  string
-	Column6   int32
-}
-
-type PopMatchmakerBucketRow struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	FleetID      *int64
-	EndUserID    int64
-	Region       string
-	GameMode     string
-	Attributes   []byte
-	Status       string
-	MatchAddress string
-	CreatedAt    pgtype.Timestamptz
-	MatchedAt    pgtype.Timestamptz
-}
-
-func (q *Queries) PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBucketParams) ([]PopMatchmakerBucketRow, error) {
-	rows, err := q.db.Query(ctx, popMatchmakerBucket,
-		arg.TenantID,
-		arg.ProjectID,
-		arg.FleetID,
-		arg.Region,
-		arg.GameMode,
-		arg.Column6,
-	)
+// Worker-driven release: allocator failed (or the worker is giving up).
+// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
+func (q *Queries) ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseMatchmakerClaim, arg.MaxAttempts, arg.ClaimID)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	defer rows.Close()
-	var items []PopMatchmakerBucketRow
-	for rows.Next() {
-		var i PopMatchmakerBucketRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.ProjectID,
-			&i.FleetID,
-			&i.EndUserID,
-			&i.Region,
-			&i.GameMode,
-			&i.Attributes,
-			&i.Status,
-			&i.MatchAddress,
-			&i.CreatedAt,
-			&i.MatchedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
+	return result.RowsAffected(), nil
+}
+
+const sweepStaleMatchmakerClaims = `-- name: SweepStaleMatchmakerClaims :execrows
+UPDATE matchmaking_tickets
+SET claim_id            = NULL,
+    claimed_at          = NULL,
+    claim_expires_at    = NULL,
+    allocation_attempts = allocation_attempts + 1,
+    status = CASE
+        WHEN allocation_attempts + 1 >= $1::int
+            THEN 'failed'::ticket_status
+        ELSE status
+    END
+WHERE claim_id IS NOT NULL
+  AND status = 'queued'
+  AND claim_expires_at < now()
+`
+
+// Release every claim whose lease has expired. Same accounting as
+// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
+// detached context so it isn't tied to any request lifetime.
+func (q *Queries) SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (int64, error) {
+	result, err := q.db.Exec(ctx, sweepStaleMatchmakerClaims, maxAttempts)
+	if err != nil {
+		return 0, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return result.RowsAffected(), nil
 }

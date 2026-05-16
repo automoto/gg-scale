@@ -117,6 +117,16 @@ DELETE FROM dashboard_memberships
 WHERE id = sqlc.arg(id)
   AND tenant_id = sqlc.arg(tenant_id);
 
+-- name: DeleteDashboardMembershipUnlessSelf :execrows
+-- Removes a membership row but refuses to delete the actor's own row. The
+-- previous approach loaded every member to do this check client-side; this
+-- predicate folds it into one statement.
+DELETE FROM dashboard_memberships
+WHERE id = sqlc.arg(id)
+  AND tenant_id = sqlc.arg(tenant_id)
+  AND dashboard_user_id <> sqlc.arg(actor_user_id);
+
+
 -- name: CreateDashboardMembership :one
 INSERT INTO dashboard_memberships (dashboard_user_id, tenant_id, role)
 VALUES (sqlc.arg(dashboard_user_id), sqlc.arg(tenant_id), sqlc.arg(role))

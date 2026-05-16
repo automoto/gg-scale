@@ -119,7 +119,9 @@ func TestBackend_Allocate_creates_allocation_with_fleet_and_region_selectors(t *
 
 	got, err := be.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
-	assert.Equal(t, "gs-1", got.BackendRef)
+	// BackendRef encodes the namespace so per-template namespace overrides
+	// can be honored on the teardown/observe path.
+	assert.Equal(t, "ggscale/gs-1", got.BackendRef)
 	assert.Equal(t, "10.0.0.5:7654", got.Address)
 	assert.Equal(t, fleet.StatusReady, got.Status)
 

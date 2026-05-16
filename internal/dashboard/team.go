@@ -204,24 +204,27 @@ func (h *Handler) revokeInvite(ctx context.Context, inviteID int64) error {
 	})
 }
 
-// removeMember deletes a tenant membership. Refuses to remove the actor
-// from their own tenant (use revoke + recreate or have another admin do it).
+// removeMember deletes a tenant membership. Refuses to remove the actor's
+// own row — the SQL WHERE clause folds the self-check into a single
+// statement so we don't have to scan every member row to enforce it.
 func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, membershipID int64) error {
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		// Look up the membership to find the user so we can reject self-removal.
-		rows, err := q.ListDashboardMembersForTenant(ctx, tenantID)
+		n, err := q.DeleteDashboardMembershipUnlessSelf(ctx, sqlcgen.DeleteDashboardMembershipUnlessSelfParams{
+			ID:          membershipID,
+			TenantID:    tenantID,
+			ActorUserID: actorID,
+		})
 		if err != nil {
 			return err
 		}
-		for _, m := range rows {
-			if m.MembershipID == membershipID && m.UserID == actorID {
-				return errCannotRemoveSelf
-			}
+		if n == 0 {
+			// Either the row doesn't exist or it's the actor's own — the
+			// caller treats both as "refused". GetDashboardMembership
+			// would disambiguate but the dashboard surfaces either with
+			// the same message.
+			return errCannotRemoveSelf
 		}
-		return q.DeleteDashboardMembership(ctx, sqlcgen.DeleteDashboardMembershipParams{
-			ID:       membershipID,
-			TenantID: tenantID,
-		})
+		return nil
 	})
 }

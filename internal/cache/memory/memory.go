@@ -33,15 +33,73 @@ type Store struct {
 	slots   map[string]*slot
 	kv      map[string]*kvEntry
 	now     func() time.Time
+
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
-// New returns a fresh in-memory Store.
+// sweepInterval is how often the janitor wakes to evict idle/expired keys.
+// Short enough that a churning rate-limiter doesn't accumulate memory;
+// long enough that the sweep overhead is invisible.
+const sweepInterval = time.Minute
+
+// New returns a fresh in-memory Store with a background janitor that
+// reclaims expired kv entries, stale slots, and idle rate-limit buckets.
+// The janitor exits on Close.
 func New() *Store {
-	return &Store{
+	s := &Store{
 		buckets: make(map[string]*bucket),
 		slots:   make(map[string]*slot),
 		kv:      make(map[string]*kvEntry),
 		now:     time.Now,
+		stop:    make(chan struct{}),
+	}
+	go s.janitor(sweepInterval)
+	return s
+}
+
+// janitor sweeps every interval until Close. Two-phase scan (collect keys
+// under the lock, delete in a follow-up critical section) keeps the
+// critical section short even for large maps.
+func (s *Store) janitor(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-t.C:
+			s.sweep()
+		}
+	}
+}
+
+// sweep removes:
+//   - kv entries past their expiry
+//   - slot entries whose count is 0 AND expires < now
+//   - buckets at full capacity that haven't been touched in 10× the
+//     sweep interval (idle bucket: the next request rebuilds it)
+func (s *Store) sweep() {
+	now := s.now()
+	idleCutoff := now.Add(-10 * sweepInterval)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for k, e := range s.kv {
+		if !e.expires.IsZero() && e.expires.Before(now) {
+			delete(s.kv, k)
+		}
+	}
+	for k, sl := range s.slots {
+		if sl.count == 0 && sl.expires.Before(now) {
+			delete(s.slots, k)
+		}
+	}
+	for k, b := range s.buckets {
+		if b.last.Before(idleCutoff) {
+			delete(s.buckets, k)
+		}
 	}
 }
 
@@ -165,5 +223,9 @@ func (s *Store) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-// Close implements cache.Store. Memory backend has nothing to release.
-func (s *Store) Close(_ context.Context) error { return nil }
+// Close implements cache.Store. Stops the background janitor; calling
+// Close twice is safe (the underlying channel close is once-guarded).
+func (s *Store) Close(_ context.Context) error {
+	s.stopOnce.Do(func() { close(s.stop) })
+	return nil
+}

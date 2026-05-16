@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -202,7 +201,22 @@ func signupHandler(d Deps) http.HandlerFunc {
 		})
 		if err != nil {
 			if webutil.IsUniqueViolation(err) {
-				http.Error(w, "email already in use", http.StatusConflict)
+				// Uniform 202 on both insert and conflict so the response
+				// status doesn't disclose whether the email already has an
+				// account (account-enumeration oracle). The "you already
+				// have an account" hint goes to the address itself, which
+				// only the legitimate owner can read.
+				if d.Mailer != nil {
+					existing := mailer.Message{
+						From: d.MailFrom, To: []string{req.Email},
+						Subject: "Your ggscale account",
+						Body:    "Someone tried to sign up using this email. If that was you, sign in directly — your account already exists.",
+					}
+					if err := d.Mailer.Send(ctx, existing); err != nil {
+						slog.Error("signup: existing-account mailer", "error", err)
+					}
+				}
+				w.WriteHeader(http.StatusAccepted)
 				return
 			}
 			webutil.InternalError(w, "signup: tx", err)
@@ -460,10 +474,17 @@ func logoutHandler(d Deps) http.HandlerFunc {
 		hash := sha256.Sum256([]byte(req.RefreshToken))
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if err := q.RevokeSessionByRefreshHash(ctx, hash[:]); err != nil {
+			endUserID, err := q.RevokeSessionByRefreshHash(ctx, hash[:])
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					// Unknown or already-revoked refresh token. Treat the
+					// logout as a no-op rather than 500 — the client's
+					// goal (no live session for this token) is satisfied.
+					return nil
+				}
 				return err
 			}
-			return auditlog.Write(ctx, tx, 0, "auth.logout", "", nil)
+			return auditlog.Write(ctx, tx, endUserID, "auth.logout", "", nil)
 		})
 		if err != nil {
 			webutil.InternalError(w, "logout: tx", err)
@@ -519,15 +540,24 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			secret = s
 
 			parsed := &customTokenClaims{}
-			if _, err := jwt.ParseWithClaims(req.Token, parsed, func(t *jwt.Token) (any, error) {
-				if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-					return nil, fmt.Errorf("unsupported alg %v", t.Method.Alg())
-				}
+			parser := jwt.NewParser(
+				jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+				jwt.WithExpirationRequired(),
+				jwt.WithAudience(customTokenAudience),
+				jwt.WithLeeway(30*time.Second),
+			)
+			if _, err := parser.ParseWithClaims(req.Token, parsed, func(_ *jwt.Token) (any, error) {
 				return secret, nil
 			}); err != nil {
 				return errCustomTokenInvalid
 			}
 			if parsed.External == "" {
+				return errCustomTokenInvalid
+			}
+			// Reject tokens minted with a future iat — a small skew is
+			// permitted by jwt.WithLeeway above; anything beyond that is
+			// either a clock fault or a forged token.
+			if parsed.IssuedAt != nil && parsed.IssuedAt.After(time.Now().Add(5*time.Minute)) {
 				return errCustomTokenInvalid
 			}
 			externalID = parsed.External
@@ -577,6 +607,11 @@ type customTokenClaims struct {
 	jwt.RegisteredClaims
 	External string `json:"external_id"`
 }
+
+// customTokenAudience is the required aud claim on tenant-signed custom
+// tokens. Pinning aud prevents a token issued for another system that
+// happens to share the secret from being replayed against ggscale.
+const customTokenAudience = "ggscale-custom-token" //nolint:gosec // aud claim value, not a credential
 
 var (
 	errBadCredentials           = errors.New("auth: bad credentials")
@@ -638,7 +673,6 @@ func writeJSON(w http.ResponseWriter, body any) {
 }
 
 func validateEmail(s string) bool {
-	at := strings.IndexByte(s, '@')
-	dot := strings.LastIndexByte(s, '.')
-	return at > 0 && dot > at && len(s) >= 5
+	_, err := webutil.ValidateEmail(s)
+	return err == nil
 }

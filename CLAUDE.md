@@ -6,6 +6,7 @@
 - Reduce Code Nesting Where Possible: To ensure code readability, try to reduce code nesting (Nesting Depth) unless its needed.
 - Keep code simple and concise. Try not to do overly complex or clever code unless its needed.
 - Avoid verbose comments, only add comments where extra context is really needed.
+- Prefer standard-library helpers (e.g. `unicode.IsControl`, `unicode.IsSpace`, `net/mail.ParseAddress`) over bare numeric literals or hex constants like `0x20` or `0x7f`. Named helpers are self-documenting; ASCII range checks force the reader to recall the table.
 
 
 ## Testing Conventions

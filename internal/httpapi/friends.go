@@ -103,13 +103,20 @@ func friendDeleteHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
+		var affected int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			return sqlcgen.New(tx).DeleteFriendEdge(ctx, sqlcgen.DeleteFriendEdgeParams{
-				FromUserID: fromUser, ToUserID: toUser,
+			n, qerr := sqlcgen.New(tx).DeleteFriendEdge(ctx, sqlcgen.DeleteFriendEdgeParams{
+				Me: fromUser, Other: toUser,
 			})
+			affected = n
+			return qerr
 		})
 		if err != nil {
 			webutil.InternalError(w, "friend delete: tx", err)
+			return
+		}
+		if affected == 0 {
+			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -168,6 +175,16 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 	}
 }
 
+// allowedFriendStatuses guards friendsListHandler so callers can't pass
+// arbitrary text into the SQL filter. "blocked" is allowed but the
+// caller-aware query only returns rows the caller initiated.
+var allowedFriendStatuses = map[string]struct{}{
+	"pending":  {},
+	"accepted": {},
+	"rejected": {},
+	"blocked":  {},
+}
+
 // GET /v1/friends?status=...
 func friendsListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -181,14 +198,18 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 		if status == "" {
 			status = "accepted"
 		}
+		if _, allowed := allowedFriendStatuses[status]; !allowed {
+			http.Error(w, "invalid status", http.StatusBadRequest)
+			return
+		}
 		limit := parseLimit(r.URL.Query().Get("limit"), 50, 100)
 		cursor := parseCursor(r.URL.Query().Get("cursor"))
 
 		var items []friendEntry
 		var lastID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			rows, qerr := sqlcgen.New(tx).ListFriendsByStatus(ctx, sqlcgen.ListFriendsByStatusParams{
-				FromUserID: me, Status: status, ID: cursor, Limit: limit,
+			rows, qerr := sqlcgen.New(tx).ListFriendsByStatusForCaller(ctx, sqlcgen.ListFriendsByStatusForCallerParams{
+				Me: me, Status: status, Cursor: cursor, RowLimit: limit,
 			})
 			if qerr != nil {
 				return qerr

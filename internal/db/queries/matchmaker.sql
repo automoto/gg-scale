@@ -17,8 +17,13 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: CancelMatchmakingTicket :one
+-- Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
+-- CommitClaim will find zero rows and deallocate the orphan server.
 UPDATE matchmaking_tickets
-SET status = 'cancelled'
+SET status           = 'cancelled',
+    claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
   AND status = 'queued'
@@ -28,43 +33,91 @@ RETURNING id;
 SELECT tenant_id, project_id, fleet_id, region, game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets
 WHERE status = 'queued'
+  AND claim_id IS NULL
   AND fleet_id IS NOT NULL
 GROUP BY tenant_id, project_id, fleet_id, region, game_mode
 HAVING count(*) >= $1::int
 ORDER BY tenant_id, project_id, fleet_id, region, game_mode;
 
--- name: PopMatchmakerBucket :many
+-- name: ClaimMatchmakerBucket :many
+-- Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+-- stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
+-- subsequent ClaimBucket (different worker) skips them. The caller commits
+-- via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+-- a crashed caller's claim is released by the sweeper once
+-- claim_expires_at < now().
 WITH candidates AS (
     SELECT mt.id
     FROM matchmaking_tickets mt
     WHERE mt.status = 'queued'
-      AND mt.tenant_id = $1
+      AND mt.claim_id IS NULL
+      AND mt.tenant_id  = $1
       AND mt.project_id = $2
-      AND mt.fleet_id  = $3
-      AND mt.region    = $4
-      AND mt.game_mode = $5
+      AND mt.fleet_id   = $3
+      AND mt.region     = $4
+      AND mt.game_mode  = $5
     ORDER BY mt.created_at, mt.id
-    LIMIT $6::int
+    LIMIT sqlc.arg('limit')::int
     FOR UPDATE SKIP LOCKED
 )
 UPDATE matchmaking_tickets t
-SET status = 'matched'
+SET claim_id         = sqlc.arg('claim_id')::uuid,
+    claimed_at       = now(),
+    claim_expires_at = now() + sqlc.arg('ttl')::interval
 FROM candidates c
 WHERE t.id = c.id
 RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.created_at, t.matched_at;
 
--- name: MarkMatchmakerMatched :exec
+-- name: CommitMatchmakerClaim :execrows
+-- Flip every still-queued ticket holding this claim_id to 'matched' and
+-- stamp the address. Rows that drifted (cancelled, swept) won't match the
+-- WHERE and are excluded — the caller branches on rows-affected and
+-- deallocates the orphan server when 0.
 UPDATE matchmaking_tickets
-SET match_address = $2,
-    matched_at    = now()
-WHERE id = ANY($1::bigint[]);
+SET status           = 'matched',
+    match_address    = sqlc.arg('match_address'),
+    matched_at       = now(),
+    claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
+WHERE claim_id = sqlc.arg('claim_id')::uuid
+  AND status = 'queued';
 
--- name: MarkMatchmakerFailed :exec
+-- name: ReleaseMatchmakerClaim :execrows
+-- Worker-driven release: allocator failed (or the worker is giving up).
+-- Bump allocation_attempts; flip to 'failed' on the Nth attempt.
 UPDATE matchmaking_tickets
-SET status = 'failed'
-WHERE id = ANY($1::bigint[]);
+SET claim_id            = NULL,
+    claimed_at          = NULL,
+    claim_expires_at    = NULL,
+    allocation_attempts = allocation_attempts + 1,
+    status = CASE
+        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+            THEN 'failed'::ticket_status
+        ELSE status
+    END
+WHERE claim_id = sqlc.arg('claim_id')::uuid
+  AND status = 'queued';
+
+-- name: SweepStaleMatchmakerClaims :execrows
+-- Release every claim whose lease has expired. Same accounting as
+-- ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
+-- detached context so it isn't tied to any request lifetime.
+UPDATE matchmaking_tickets
+SET claim_id            = NULL,
+    claimed_at          = NULL,
+    claim_expires_at    = NULL,
+    allocation_attempts = allocation_attempts + 1,
+    status = CASE
+        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+            THEN 'failed'::ticket_status
+        ELSE status
+    END
+WHERE claim_id IS NOT NULL
+  AND status = 'queued'
+  AND claim_expires_at < now();
 
 -- name: ListMatchmakerBucketsForProject :many
 -- Dashboard matchmaker page: queue depth per (region, game_mode) bucket for

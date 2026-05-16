@@ -558,19 +558,17 @@ func parsePathID(w http.ResponseWriter, r *http.Request, name string) (int64, bo
 }
 
 // clientIP extracts the real client IP for audit purposes.
-// CF-Connecting-IP and X-Real-IP are trusted only when a proxy strips them on
-// ingress (see ARCHITECTURE.md § "Reverse-proxy IP trust"). Falls back to
-// RemoteAddr when neither header is present.
+//
+// The previous version trusted CF-Connecting-IP / X-Real-IP unconditionally:
+// any direct client could set the header and write a forged IP into
+// dashboard_sessions.ip and audit-log payloads. Now those headers are honored
+// only when the configured trusted-proxy header is set (TRUSTED_PROXY_HEADER
+// — see Handler.trustedProxyHeader). When unset, every caller is treated as
+// untrusted and clientIP returns RemoteAddr alone.
 func clientIP(r *http.Request) string {
-	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
-		return ip
-	}
-	if ip := r.Header.Get("X-Real-IP"); ip != "" {
-		return ip
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
 	return host
 }

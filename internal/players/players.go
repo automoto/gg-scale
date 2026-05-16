@@ -647,9 +647,8 @@ func parseProjectID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 func validEmail(s string) bool {
-	at := strings.IndexByte(s, '@')
-	dot := strings.LastIndexByte(s, '.')
-	return at > 0 && dot > at && len(s) >= 5
+	_, err := webutil.ValidateEmail(s)
+	return err == nil
 }
 
 // URL helpers.

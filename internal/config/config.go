@@ -52,6 +52,20 @@ type Config struct {
 	// milliseconds; this ticker only catches tickets queued during a
 	// listener reconnect gap. Default 5s.
 	MatchmakerInterval time.Duration
+	// MatchmakerClaimTTL bounds how long a worker holds a claim before the
+	// sweeper reclaims it. Should be larger than the slowest expected
+	// Allocate latency. Default 60s.
+	MatchmakerClaimTTL time.Duration
+	// MatchmakerMaxAttempts is how many allocate-failed releases a ticket
+	// survives before flipping to 'failed'. Default 3.
+	MatchmakerMaxAttempts int
+	// MatchmakerWorkerCount is the size of the bucket-processing fan-out
+	// pool. Default 4. Higher lets slow backends run in parallel without
+	// back-pressuring the LISTEN reader.
+	MatchmakerWorkerCount int
+	// MatchmakerSweepInterval is how often the cleanup goroutine releases
+	// claims whose lease has expired. Default 60s.
+	MatchmakerSweepInterval time.Duration
 
 	// TURN relay tunables. The relay is disabled unless RelayPublicIP and
 	// RelaySharedSecret are both set.
@@ -100,6 +114,46 @@ type Config struct {
 	// CacheOlricPeers is the comma-separated host:port list of memberlist
 	// endpoints to join. Empty means a cluster of one.
 	CacheOlricPeers []string
+
+	// CORSAllowedOrigins is the comma-separated list of origins permitted by
+	// the API router. Empty in dev allows "*"; in production an empty list
+	// is rejected by Validate.
+	CORSAllowedOrigins []string
+
+	// DBMaxConns / DBMinConns size the pgx pool. Defaults: 25 / 2. The
+	// LISTEN connection holds one slot for the process lifetime, so
+	// effective request concurrency is DBMaxConns - 1 - matchmaker workers.
+	DBMaxConns        int
+	DBMinConns        int
+	DBMaxConnLifetime time.Duration
+	// DBStatementTimeout bounds runaway queries. Set via SET LOCAL in Q().
+	DBStatementTimeout time.Duration
+
+	// SMTPTLS selects how the mailer establishes TLS: "off", "starttls"
+	// (default; hard-fails if the server doesn't advertise it), or
+	// "implicit" (TLS from connect, typically port 465).
+	SMTPTLS string
+
+	// DockerBindIP is the host interface the docker fleet backend binds
+	// container ports to. Default "127.0.0.1"; set to a public IP for
+	// production multi-host setups.
+	DockerBindIP string
+	// DockerDefaultMemory / CPUs / Pids are the per-container resource
+	// caps applied when a fleet template doesn't specify its own.
+	DockerDefaultMemory int64
+	DockerDefaultCPUs   float64
+	DockerDefaultPids   int64
+	// DockerRegistryAllowlist restricts which image registries may run.
+	// Empty disables the check.
+	DockerRegistryAllowlist []string
+	// DockerRequireDigest forces every image to carry an @sha256:… pin.
+	// Required in production when FleetBackend=docker.
+	DockerRequireDigest bool
+
+	// TrustedProxyHeader names a request header (e.g. "CF-Connecting-IP")
+	// to honor when RemoteAddr is in a trusted-proxy network. Empty
+	// disables forwarded-IP trust.
+	TrustedProxyHeader string
 
 	// Mail provider and connection settings.
 	// MailProvider selects the registered provider: "smtp" (default) or "noop".
@@ -224,6 +278,38 @@ var declared = []varDecl{
 		c.MatchmakerInterval = d
 		return nil
 	}},
+	{name: "MATCHMAKER_CLAIM_TTL", defval: "60s", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("MATCHMAKER_CLAIM_TTL %q: must be a positive duration", v)
+		}
+		c.MatchmakerClaimTTL = d
+		return nil
+	}},
+	{name: "MATCHMAKER_MAX_ATTEMPTS", defval: "3", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("MATCHMAKER_MAX_ATTEMPTS %q: must be a positive integer", v)
+		}
+		c.MatchmakerMaxAttempts = n
+		return nil
+	}},
+	{name: "MATCHMAKER_WORKER_COUNT", defval: "4", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("MATCHMAKER_WORKER_COUNT %q: must be a positive integer", v)
+		}
+		c.MatchmakerWorkerCount = n
+		return nil
+	}},
+	{name: "MATCHMAKER_SWEEP_INTERVAL", defval: "60s", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("MATCHMAKER_SWEEP_INTERVAL %q: must be a positive duration", v)
+		}
+		c.MatchmakerSweepInterval = d
+		return nil
+	}},
 
 	{name: "RELAY_PUBLIC_IP", defval: "", set: func(c *Config, v string) error {
 		c.RelayPublicIP = v
@@ -316,6 +402,99 @@ var declared = []varDecl{
 		c.MailFrom = v
 		return nil
 	}},
+
+	{name: "CORS_ALLOWED_ORIGINS", defval: "", set: func(c *Config, v string) error {
+		c.CORSAllowedOrigins = splitCSV(v)
+		return nil
+	}},
+	{name: "SMTP_TLS", defval: "starttls", set: func(c *Config, v string) error {
+		switch v {
+		case "off", "starttls", "implicit":
+			c.SMTPTLS = v
+			return nil
+		default:
+			return fmt.Errorf("SMTP_TLS %q: must be one of off|starttls|implicit", v)
+		}
+	}},
+	{name: "DB_MAX_CONNS", defval: "25", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("DB_MAX_CONNS %q: must be a positive integer", v)
+		}
+		c.DBMaxConns = n
+		return nil
+	}},
+	{name: "DB_MIN_CONNS", defval: "2", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("DB_MIN_CONNS %q: must be a non-negative integer", v)
+		}
+		c.DBMinConns = n
+		return nil
+	}},
+	{name: "DB_MAX_CONN_LIFETIME", defval: "1h", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("DB_MAX_CONN_LIFETIME %q: must be a positive duration", v)
+		}
+		c.DBMaxConnLifetime = d
+		return nil
+	}},
+	{name: "DB_STATEMENT_TIMEOUT", defval: "30s", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("DB_STATEMENT_TIMEOUT %q: must be a positive duration", v)
+		}
+		c.DBStatementTimeout = d
+		return nil
+	}},
+	{name: "DOCKER_BIND_IP", defval: "127.0.0.1", set: func(c *Config, v string) error {
+		c.DockerBindIP = v
+		return nil
+	}},
+	{name: "DOCKER_DEFAULT_MEMORY", defval: "536870912", set: func(c *Config, v string) error {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("DOCKER_DEFAULT_MEMORY %q: must be a non-negative integer", v)
+		}
+		c.DockerDefaultMemory = n
+		return nil
+	}},
+	{name: "DOCKER_DEFAULT_CPUS", defval: "1.0", set: func(c *Config, v string) error {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil || f < 0 {
+			return fmt.Errorf("DOCKER_DEFAULT_CPUS %q: must be a non-negative number", v)
+		}
+		c.DockerDefaultCPUs = f
+		return nil
+	}},
+	{name: "DOCKER_DEFAULT_PIDS", defval: "256", set: func(c *Config, v string) error {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("DOCKER_DEFAULT_PIDS %q: must be a non-negative integer", v)
+		}
+		c.DockerDefaultPids = n
+		return nil
+	}},
+	{name: "DOCKER_REGISTRY_ALLOWLIST", defval: "", set: func(c *Config, v string) error {
+		c.DockerRegistryAllowlist = splitCSV(v)
+		return nil
+	}},
+	{name: "DOCKER_REQUIRE_DIGEST", defval: "false", set: func(c *Config, v string) error {
+		switch strings.ToLower(v) {
+		case "true", "1", "yes":
+			c.DockerRequireDigest = true
+		case "false", "0", "no", "":
+			c.DockerRequireDigest = false
+		default:
+			return fmt.Errorf("DOCKER_REQUIRE_DIGEST %q: must be true|false", v)
+		}
+		return nil
+	}},
+	{name: "TRUSTED_PROXY_HEADER", defval: "", set: func(c *Config, v string) error {
+		c.TrustedProxyHeader = v
+		return nil
+	}},
 }
 
 // Load reads the environment and returns a populated Config or an error if
@@ -336,6 +515,9 @@ func Load() (*Config, error) {
 		if err := v.set(cfg, val); err != nil {
 			return nil, err
 		}
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

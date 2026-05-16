@@ -118,12 +118,13 @@ WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL;
 
--- name: RevokeSessionByRefreshHash :exec
+-- name: RevokeSessionByRefreshHash :one
 UPDATE sessions
 SET revoked_at = now()
 WHERE refresh_hash = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND revoked_at IS NULL;
+  AND revoked_at IS NULL
+RETURNING end_user_id;
 
 -- name: GetTenantCustomTokenSecret :one
 SELECT custom_token_secret

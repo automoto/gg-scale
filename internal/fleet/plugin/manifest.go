@@ -16,6 +16,11 @@ type Manifest struct {
 	Name            string
 	Version         string
 	ProtocolVersion int
+	// SHA256 is the hex-encoded expected hash of the plugin binary. Empty
+	// means the manifest declines integrity enforcement (warn-only path);
+	// a non-empty value is verified before launch and a mismatch refuses
+	// to start the plugin.
+	SHA256 string
 }
 
 // manifestMaxBytes caps the sidecar file size. A real manifest is well
@@ -67,6 +72,8 @@ func readManifest(binaryPath string) (*Manifest, error) {
 			m.Name = v
 		case "version":
 			m.Version = v
+		case "sha256":
+			m.SHA256 = strings.ToLower(v)
 		case "protocol_version":
 			n, perr := strconv.Atoi(v)
 			if perr != nil || n < 0 {

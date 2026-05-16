@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/ggscale/ggscale/internal/observability"
 )
 
 const (
@@ -76,12 +78,10 @@ func NewObservability(reg prometheus.Registerer) func(http.Handler) http.Handler
 			next.ServeHTTP(rec, r)
 			elapsed := time.Since(start).Seconds()
 
-			// Use the URL path's route shape rather than the raw URL to keep
-			// label cardinality bounded. chi.RouteContext exposes the matched
-			// pattern, but since we don't have chi here we use r.URL.Path —
-			// for low-cardinality routes (small in Phase 1) this is fine. A
-			// follow-up may swap to chi.RouteContext(r.Context()).RoutePattern().
-			route := r.URL.Path
+			// Use the matched chi route pattern instead of the raw URL —
+			// raw paths embed attacker-controlled segments (storage keys,
+			// leaderboard ids, user ids) and would explode cardinality.
+			route := observability.RouteLabel(r)
 			status := strconv.Itoa(rec.status)
 			dur.WithLabelValues(route, r.Method, status).Observe(elapsed)
 			if rec.status >= 400 {

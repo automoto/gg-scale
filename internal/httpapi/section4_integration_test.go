@@ -171,7 +171,7 @@ func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
-func TestSignup_rejects_duplicate_email(t *testing.T) {
+func TestSignup_responds_uniformly_on_duplicate(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
 	srv, _ := newFullStackServer(t, c)
@@ -181,7 +181,9 @@ func TestSignup_rejects_duplicate_email(t *testing.T) {
 	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
 		map[string]string{"email": "dup@example.com", "password": "supersecret"})
 
-	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+	// Uniform 202 on both insert and conflict — the previous 409 leaked
+	// account existence to unauthenticated callers (user-enumeration oracle).
+	assert.Equal(t, http.StatusAccepted, resp.StatusCode)
 }
 
 func TestLogin_with_wrong_password_returns_401(t *testing.T) {
@@ -228,6 +230,7 @@ func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"external_id": "steam_99",
 		"exp":         time.Now().Add(time.Hour).Unix(),
+		"aud":         "ggscale-custom-token",
 	})
 	signed, err := tok.SignedString(secret)
 	require.NoError(t, err)

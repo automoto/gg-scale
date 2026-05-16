@@ -159,39 +159,43 @@ type DashboardSession struct {
 }
 
 type DashboardUser struct {
-	ID                          int64
-	Email                       string
-	PasswordHash                []byte
-	IsPlatformAdmin             bool
-	LoginFailures               int32
-	LockedUntil                 pgtype.Timestamptz
-	LastLoginAt                 pgtype.Timestamptz
-	CreatedAt                   pgtype.Timestamptz
-	EmailVerifiedAt             pgtype.Timestamptz
-	EmailVerificationCodeHash   []byte
-	EmailVerificationSalt       []byte
-	EmailVerificationExpiresAt  pgtype.Timestamptz
-	EmailVerificationAttempts   int32
-	EmailVerificationLastSentAt pgtype.Timestamptz
-	DisabledAt                  pgtype.Timestamptz
+	ID                                int64
+	Email                             string
+	PasswordHash                      []byte
+	IsPlatformAdmin                   bool
+	LoginFailures                     int32
+	LockedUntil                       pgtype.Timestamptz
+	LastLoginAt                       pgtype.Timestamptz
+	CreatedAt                         pgtype.Timestamptz
+	EmailVerifiedAt                   pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationSalt             []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationAttempts         int32
+	EmailVerificationLastSentAt       pgtype.Timestamptz
+	DisabledAt                        pgtype.Timestamptz
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
 }
 
 type EndUser struct {
-	ID                          int64
-	TenantID                    int64
-	ProjectID                   int64
-	ExternalID                  string
-	Email                       *string
-	EmailVerifiedAt             pgtype.Timestamptz
-	PasswordHash                []byte
-	CreatedAt                   pgtype.Timestamptz
-	DeletedAt                   pgtype.Timestamptz
-	EmailVerificationCodeHash   []byte
-	EmailVerificationExpiresAt  pgtype.Timestamptz
-	EmailVerificationSalt       []byte
-	EmailVerificationAttempts   int32
-	EmailVerificationLastSentAt pgtype.Timestamptz
-	DisabledAt                  pgtype.Timestamptz
+	ID                                int64
+	TenantID                          int64
+	ProjectID                         int64
+	ExternalID                        string
+	Email                             *string
+	EmailVerifiedAt                   pgtype.Timestamptz
+	PasswordHash                      []byte
+	CreatedAt                         pgtype.Timestamptz
+	DeletedAt                         pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationSalt             []byte
+	EmailVerificationAttempts         int32
+	EmailVerificationLastSentAt       pgtype.Timestamptz
+	DisabledAt                        pgtype.Timestamptz
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
 }
 
 type EndUserInvitation struct {
@@ -276,18 +280,22 @@ type LeaderboardEntry struct {
 }
 
 type MatchmakingTicket struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	EndUserID    int64
-	Region       string
-	GameMode     string
-	Attributes   []byte
-	Status       TicketStatus
-	MatchAddress string
-	CreatedAt    pgtype.Timestamptz
-	MatchedAt    pgtype.Timestamptz
-	FleetID      *int64
+	ID                 int64
+	TenantID           int64
+	ProjectID          int64
+	EndUserID          int64
+	Region             string
+	GameMode           string
+	Attributes         []byte
+	Status             TicketStatus
+	MatchAddress       string
+	CreatedAt          pgtype.Timestamptz
+	MatchedAt          pgtype.Timestamptz
+	FleetID            *int64
+	ClaimID            pgtype.UUID
+	ClaimedAt          pgtype.Timestamptz
+	ClaimExpiresAt     pgtype.Timestamptz
+	AllocationAttempts int32
 }
 
 type PlatformAuditLog struct {

@@ -343,28 +343,55 @@ func parseFleetConfigForm(backend string, form url.Values) (map[string]string, m
 		if ns := strings.TrimSpace(form.Get("namespace")); ns != "" {
 			cfg["namespace"] = ns
 		}
-		for i, k := range form["selector_key[]"] {
+		keys := form["selector_key[]"]
+		if len(keys) > fleetFormKeyValuePairsCap {
+			errs["selector_key"] = "Too many selector keys."
+			keys = keys[:fleetFormKeyValuePairsCap]
+		}
+		for i, k := range keys {
 			k = strings.TrimSpace(k)
-			if k == "" || i >= len(form["selector_value[]"]) {
+			if k == "" || len(k) > fleetFormKeyOrValueLenCap || i >= len(form["selector_value[]"]) {
 				continue
 			}
-			cfg["selector."+k] = strings.TrimSpace(form["selector_value[]"][i])
+			v := strings.TrimSpace(form["selector_value[]"][i])
+			if len(v) > fleetFormKeyOrValueLenCap {
+				continue
+			}
+			cfg["selector."+k] = v
 		}
 		if cfg["fleet_name"] == "" {
 			errs["fleet_name"] = "Fleet name is required."
 		}
 	default:
 		// plugin:<name> — free-form key/value pairs.
-		for i, k := range form["config_key[]"] {
+		keys := form["config_key[]"]
+		if len(keys) > fleetFormKeyValuePairsCap {
+			errs["config_key"] = "Too many config keys."
+			keys = keys[:fleetFormKeyValuePairsCap]
+		}
+		for i, k := range keys {
 			k = strings.TrimSpace(k)
-			if k == "" || i >= len(form["config_value[]"]) {
+			if k == "" || len(k) > fleetFormKeyOrValueLenCap || i >= len(form["config_value[]"]) {
 				continue
 			}
-			cfg[k] = strings.TrimSpace(form["config_value[]"][i])
+			v := strings.TrimSpace(form["config_value[]"][i])
+			if len(v) > fleetFormKeyOrValueLenCap {
+				continue
+			}
+			cfg[k] = v
 		}
 	}
 	return cfg, errs
 }
+
+// fleetFormKeyValuePairsCap is the upper bound on selector_key[] / config_key[]
+// arrays. Bounded only by the overall form-body limit before this; a single
+// request used to be able to stuff thousands of entries into a fleet config,
+// JSON-serialise them, store them, and re-render them on the next page load.
+const fleetFormKeyValuePairsCap = 64
+
+// fleetFormKeyOrValueLenCap bounds a single key or value within those forms.
+const fleetFormKeyOrValueLenCap = 256
 
 // summarizeFleetConfig returns a one-line preview for the list page, so
 // operators can scan templates without opening each one.

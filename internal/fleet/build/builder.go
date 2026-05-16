@@ -29,6 +29,14 @@ type Config struct {
 	DockerHost    string
 	AgonesNS      string
 	AgonesKubecfg string
+
+	// Docker host-wide knobs surfaced from internal/config.
+	DockerBindIP            string
+	DockerDefaultMemory     int64
+	DockerDefaultNanoCPUs   int64
+	DockerDefaultPids       int64
+	DockerRegistryAllowlist []string
+	DockerRequireDigest     bool
 }
 
 // New constructs a fleet.Backend for the configured selector. An empty or
@@ -38,7 +46,13 @@ func New(c Config) (fleet.Backend, error) {
 	switch c.Backend {
 	case "docker":
 		return dockerbackend.NewFromEnv(dockerbackend.Config{
-			PublicIP: c.GameServerIP,
+			PublicIP:           c.GameServerIP,
+			BindIP:             c.DockerBindIP,
+			DefaultMemoryBytes: c.DockerDefaultMemory,
+			DefaultNanoCPUs:    c.DockerDefaultNanoCPUs,
+			DefaultPidsLimit:   c.DockerDefaultPids,
+			RegistryAllowlist:  c.DockerRegistryAllowlist,
+			RequireDigest:      c.DockerRequireDigest,
 		})
 	case "agones":
 		return agonesbackend.NewFromKubeconfig(agonesbackend.Config{

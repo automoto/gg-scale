@@ -37,9 +37,12 @@ type Message struct {
 // addr is the server address (host:port for SMTP, endpoint URL for managed
 // providers). user and password are credentials — may be empty for
 // unauthenticated relays like MailHog. from is the default sender address.
+// tlsMode selects the transport security policy: "off", "starttls"
+// (default; fails closed if the server doesn't advertise STARTTLS), or
+// "implicit" (TLS from connect, typically port 465).
 //
 // External providers implement this signature and call Register in init().
-type ProviderFunc func(addr, user, password, from string) (Mailer, error)
+type ProviderFunc func(addr, user, password, from, tlsMode string) (Mailer, error)
 
 var (
 	mu        sync.RWMutex
@@ -61,14 +64,14 @@ func Register(name string, fn ProviderFunc) {
 // New constructs the named provider. Returns an error if the provider was
 // never registered — typically means the import side-effect is missing in
 // main.go.
-func New(provider, addr, user, password, from string) (Mailer, error) {
+func New(provider, addr, user, password, from, tlsMode string) (Mailer, error) {
 	mu.RLock()
 	fn, ok := providers[provider]
 	mu.RUnlock()
 	if !ok {
 		return nil, fmt.Errorf("mailer: unknown provider %q (did you import the provider package?)", provider)
 	}
-	return fn(addr, user, password, from)
+	return fn(addr, user, password, from, tlsMode)
 }
 
 // Recorder is a Mailer that captures every Send. Useful as a test double

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
@@ -29,9 +32,6 @@ func NewPGQueue(pool *db.Pool) *PGQueue {
 // Enqueue persists a queued ticket. The caller must have an end-user
 // authenticated context (tenant_id is read via RLS).
 func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, error) {
-	// The attributes column is NOT NULL with a JSONB default of '{}'. The
-	// default only fires when the column is omitted from INSERT, but our
-	// sqlc query always passes it — so map nil/empty to literal "{}".
 	attrs := req.Attributes
 	if len(attrs) == 0 {
 		attrs = []byte("{}")
@@ -99,14 +99,12 @@ func derefFleetID(p *int64) int64 {
 	return *p
 }
 
-// Cancel sets a queued ticket to cancelled. Returns ErrAlreadyTerminal when
-// the ticket is past 'queued'.
+// Cancel sets a queued ticket to cancelled and clears any active claim.
+// Returns ErrAlreadyTerminal when the ticket is past 'queued'.
 func (q *PGQueue) Cancel(ctx context.Context, id int64) error {
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
 		_, qerr := sqlcgen.New(tx).CancelMatchmakingTicket(ctx, id)
 		if errors.Is(qerr, pgx.ErrNoRows) {
-			// Either not the tenant's row, or already past queued. Disambiguate
-			// with a Get so callers get the right error.
 			row, gerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, id)
 			if errors.Is(gerr, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -123,11 +121,12 @@ func (q *PGQueue) Cancel(ctx context.Context, id int64) error {
 	})
 }
 
-// ListReadyBuckets is privileged: it scans across all tenants.
+// ListReadyBuckets is privileged: it scans across all tenants for buckets
+// holding minTickets or more unclaimed queued entries.
 func (q *PGQueue) ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucket, error) {
 	var out []Bucket
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		rows, qerr := sqlcgen.New(tx).ListReadyMatchmakerBuckets(ctx, int32(minTickets)) //nolint:gosec // minTickets is operator-controlled config
+		rows, qerr := sqlcgen.New(tx).ListReadyMatchmakerBuckets(ctx, int32(minTickets)) //nolint:gosec // operator config (BucketSize), validated > 0 by NewWorker
 		if qerr != nil {
 			return qerr
 		}
@@ -145,59 +144,125 @@ func (q *PGQueue) ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucke
 	return out, err
 }
 
-// PopBucket atomically claims up to n queued tickets in the bucket and
-// flips them to 'matched'. The worker then fills in the address via
-// MarkMatched (or MarkFailed on allocation failure).
-func (q *PGQueue) PopBucket(ctx context.Context, bucket Bucket, n int) ([]*Ticket, error) {
-	var out []*Ticket
-	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+// ClaimBucket stakes a UUID-keyed claim on up to n unclaimed queued tickets.
+// Status stays 'queued'; only claim_id / claimed_at / claim_expires_at are
+// set. Returns nil on short count.
+func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, n int, ttl time.Duration) (*Claim, error) {
+	claimUUID, err := uuid.NewRandom()
+	if err != nil {
+		return nil, fmt.Errorf("matchmaker: generate claim uuid: %w", err)
+	}
+	pgUUID := pgtype.UUID{Bytes: claimUUID, Valid: true}
+	pgTTL := pgtype.Interval{Microseconds: ttl.Microseconds(), Valid: true}
+
+	var rows []sqlcgen.ClaimMatchmakerBucketRow
+	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		fleetID := bucket.FleetID
-		rows, qerr := sqlcgen.New(tx).PopMatchmakerBucket(ctx, sqlcgen.PopMatchmakerBucketParams{
+		r, qerr := sqlcgen.New(tx).ClaimMatchmakerBucket(ctx, sqlcgen.ClaimMatchmakerBucketParams{
 			TenantID:  bucket.TenantID,
 			ProjectID: bucket.ProjectID,
 			FleetID:   &fleetID,
 			Region:    bucket.Region,
 			GameMode:  bucket.GameMode,
-			Column6:   int32(n), //nolint:gosec // n is operator-controlled bucket size
+			ClaimID:   pgUUID,
+			Ttl:       pgTTL,
+			Limit:     int32(n), //nolint:gosec // operator config (BucketSize), validated > 0 by NewWorker
 		})
 		if qerr != nil {
 			return qerr
 		}
-		if len(rows) < n {
-			// Worker convention: don't allocate when the bucket short-counts
-			// (another worker won the race). The flipped rows stay 'matched'
-			// and will be marked failed downstream, but in practice this only
-			// happens with concurrent workers.
-			return nil
-		}
-		for _, r := range rows {
-			t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress)
-			t.CreatedAt = r.CreatedAt.Time
-			out = append(out, t)
-		}
+		rows = r
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) < n {
+		// Short count: another worker won the race. Release whatever we
+		// did claim so the bucket can be re-picked on the next tick.
+		// Pass a large headroom so a short-count release doesn't burn
+		// allocation_attempts — only worker-driven failures count toward
+		// the failure ceiling.
+		if len(rows) > 0 {
+			_ = q.releaseByClaimID(ctx, pgUUID, defaultRetryHeadroom)
+		}
+		return nil, nil
+	}
+	tickets := make([]*Ticket, 0, len(rows))
+	for _, r := range rows {
+		t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress)
+		t.CreatedAt = r.CreatedAt.Time
+		tickets = append(tickets, t)
+	}
+	return &Claim{ID: claimUUID.String(), Tickets: tickets}, nil
 }
 
-// MarkMatched stamps the address + matched_at on each id.
-func (q *PGQueue) MarkMatched(ctx context.Context, ids []int64, address string) error {
-	if len(ids) == 0 {
+// defaultRetryHeadroom keeps a short-count release from immediately failing
+// the ticket. Real failure-on-Nth-attempt accounting runs through the
+// worker-driven ReleaseClaim with the operator-configured maxAttempts.
+const defaultRetryHeadroom = 1 << 30
+
+// CommitClaim flips every still-queued row holding this claim to 'matched'
+// with the given address. Returns rows-affected so the caller can detect
+// 0-row commits (claim drifted) and deallocate the orphan server.
+func (q *PGQueue) CommitClaim(ctx context.Context, claim *Claim, matchAddress string) (int64, error) {
+	if claim == nil || claim.ID == "" {
+		return 0, nil
+	}
+	pgUUID, err := parseClaimID(claim.ID)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		n, qerr = sqlcgen.New(tx).CommitMatchmakerClaim(ctx, sqlcgen.CommitMatchmakerClaimParams{
+			MatchAddress: matchAddress,
+			ClaimID:      pgUUID,
+		})
+		return qerr
+	})
+	return n, err
+}
+
+// ReleaseClaim clears the claim, bumps allocation_attempts, and flips to
+// 'failed' on the Nth attempt.
+func (q *PGQueue) ReleaseClaim(ctx context.Context, claim *Claim, maxAttempts int) error {
+	if claim == nil || claim.ID == "" {
 		return nil
 	}
+	pgUUID, err := parseClaimID(claim.ID)
+	if err != nil {
+		return err
+	}
+	return q.releaseByClaimID(ctx, pgUUID, maxAttempts)
+}
+
+func (q *PGQueue) releaseByClaimID(ctx context.Context, pgUUID pgtype.UUID, maxAttempts int) error {
 	return q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).MarkMatchmakerMatched(ctx, sqlcgen.MarkMatchmakerMatchedParams{
-			Column1:      ids,
-			MatchAddress: address,
+		_, qerr := sqlcgen.New(tx).ReleaseMatchmakerClaim(ctx, sqlcgen.ReleaseMatchmakerClaimParams{
+			MaxAttempts: int32(maxAttempts), //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
+			ClaimID:     pgUUID,
 		})
+		return qerr
 	})
+}
+
+// SweepStaleClaims releases every claim whose lease has expired.
+func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64, error) {
+	var n int64
+	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		n, qerr = sqlcgen.New(tx).SweepStaleMatchmakerClaims(ctx, int32(maxAttempts)) //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
+		return qerr
+	})
+	return n, err
 }
 
 // Listen subscribes to the matchmaker_ticket NOTIFY channel and dispatches
-// each (tenant, project, region, game_mode) payload to fn. Returns nil on
-// ctx.Done() and a wrapped error if the underlying connection drops — the
-// caller is expected to back off and reconnect, with the worker's fallback
-// ticker covering any gap.
+// each bucket payload to fn. Returns nil on ctx.Done() and a wrapped error
+// if the underlying connection drops — the worker reconnects with backoff
+// and the fallback ticker covers any gap.
 func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 	return q.pool.ListenChannel(ctx, notifyChannel, func(payload string) {
 		var p struct {
@@ -208,20 +273,9 @@ func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 			GameMode  string `json:"game_mode"`
 		}
 		if err := json.Unmarshal([]byte(payload), &p); err != nil {
-			return // malformed payload; fallback tick will catch the ticket
+			return
 		}
 		fn(Bucket{TenantID: p.TenantID, ProjectID: p.ProjectID, FleetID: p.FleetID, Region: p.Region, GameMode: p.GameMode})
-	})
-}
-
-// MarkFailed flips ids from 'matched' (the placeholder set by PopBucket)
-// back to 'failed' so the player can see the result and retry.
-func (q *PGQueue) MarkFailed(ctx context.Context, ids []int64) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).MarkMatchmakerFailed(ctx, ids)
 	})
 }
 
@@ -238,4 +292,12 @@ func rowToTicket(id, tenantID, projectID, fleetID, endUserID int64, region, game
 		Status:       Status(status),
 		MatchAddress: matchAddress,
 	}
+}
+
+func parseClaimID(s string) (pgtype.UUID, error) {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("matchmaker: parse claim id %q: %w", s, err)
+	}
+	return pgtype.UUID{Bytes: u, Valid: true}, nil
 }

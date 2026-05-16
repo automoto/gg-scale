@@ -76,6 +76,11 @@ type Deps struct {
 	// Players controls whether the player-facing /v1/players/p/{projectID}/
 	// site is mounted.
 	Players players.Config
+
+	// CORSAllowedOrigins lists the origins the API router answers preflight
+	// from. Empty in dev falls back to "*"; config.Validate refuses an
+	// empty list in production.
+	CORSAllowedOrigins []string
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -111,8 +116,16 @@ func NewRouter(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(panicRecover())
+	allowedOrigins := d.CORSAllowedOrigins
+	devWildcard := false
+	if len(allowedOrigins) == 0 {
+		// Dev fallback: wildcard. config.Validate rejects this in prod.
+		allowedOrigins = []string{"*"}
+		devWildcard = true
+	}
+	_ = devWildcard // documents intent; the slice value is what's consumed
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Session-Token", "X-Request-Id", "If-Match"},
 		ExposedHeaders:   []string{"X-Request-Id", "X-API-Version", "Retry-After"},

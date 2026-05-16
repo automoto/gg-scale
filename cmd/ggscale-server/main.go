@@ -70,6 +70,9 @@ func run() error {
 		return err
 	}
 	poolCfg.ConnConfig.Tracer = observability.NewPgxTracer(registry)
+	poolCfg.MaxConns = int32(cfg.DBMaxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
+	poolCfg.MinConns = int32(cfg.DBMinConns) //nolint:gosec // operator config, validated >= 0
+	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return err
@@ -102,12 +105,12 @@ func run() error {
 		slog.Warn("JWT_SIGNING_KEY not set; using a random in-process key — sessions won't survive restart")
 	}
 
-	m, err := mailer.New(cfg.MailProvider, cfg.SMTPAddr, cfg.SMTPUser, cfg.SMTPPassword, cfg.MailFrom)
+	m, err := mailer.New(cfg.MailProvider, cfg.SMTPAddr, cfg.SMTPUser, cfg.SMTPPassword, cfg.MailFrom, cfg.SMTPTLS)
 	if err != nil {
 		return fmt.Errorf("mailer: %w", err)
 	}
 
-	appPool := db.NewPool(pool)
+	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
 	var dashboardBootstrap *dashboard.Bootstrap
 	if cfg.DashboardEnabled {
 		dashboardBootstrap, err = dashboard.LoadBootstrap(ctx, appPool, cfg.DashboardBootstrapTokenFile, logger)
@@ -148,16 +151,25 @@ func run() error {
 	}
 
 	mmQueue := matchmaker.NewPGQueue(appPool)
+	workerDone := make(chan struct{})
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
 	if fleetMgr != nil {
 		worker := matchmaker.NewWorker(mmQueue, fleetMgr, hub, matchmaker.WorkerConfig{
-			BucketSize: cfg.MatchmakerBucketSize,
-			Interval:   cfg.MatchmakerInterval,
-			Logger:     logger,
+			BucketSize:    cfg.MatchmakerBucketSize,
+			Interval:      cfg.MatchmakerInterval,
+			ClaimTTL:      cfg.MatchmakerClaimTTL,
+			MaxAttempts:   cfg.MatchmakerMaxAttempts,
+			WorkerCount:   cfg.MatchmakerWorkerCount,
+			SweepInterval: cfg.MatchmakerSweepInterval,
+			Logger:        logger,
 		})
-		workerCtx, cancelWorker := context.WithCancel(ctx)
-		defer cancelWorker()
-		go worker.Run(workerCtx)
+		go func() {
+			defer close(workerDone)
+			worker.Run(workerCtx)
+		}()
 	} else {
+		close(workerDone)
 		logger.Warn("matchmaker worker disabled: no fleet backend configured")
 	}
 
@@ -189,12 +201,16 @@ func run() error {
 		},
 		DashboardBootstrap:  dashboardBootstrap,
 		DashboardPluginInfo: pluginInfo,
+		CORSAllowedOrigins:  cfg.CORSAllowedOrigins,
 	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	errCh := make(chan error, 1)
@@ -214,7 +230,14 @@ func run() error {
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	cancelWorker()
+	select {
+	case <-workerDone:
+	case <-time.After(30 * time.Second):
+		slog.Warn("matchmaker worker did not drain in 30s; forcing shutdown")
+	}
+	return shutdownErr
 }
 
 // buildFleet wires the configured fleet backend. Returns (nil, nil, nil) when
@@ -232,14 +255,21 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		return nil, nil, nil
 	}
 
+	nanoCPUs := int64(cfg.DockerDefaultCPUs * 1e9)
 	backend, err := fleetbuild.New(fleetbuild.Config{
-		Backend:       cfg.FleetBackend,
-		Region:        cfg.FleetRegion,
-		PluginDir:     cfg.FleetPluginDir,
-		GameServerIP:  cfg.GameServerPublicIP,
-		DockerHost:    cfg.DockerHost,
-		AgonesNS:      cfg.AgonesNamespace,
-		AgonesKubecfg: cfg.AgonesKubeconfig,
+		Backend:                 cfg.FleetBackend,
+		Region:                  cfg.FleetRegion,
+		PluginDir:               cfg.FleetPluginDir,
+		GameServerIP:            cfg.GameServerPublicIP,
+		DockerHost:              cfg.DockerHost,
+		AgonesNS:                cfg.AgonesNamespace,
+		AgonesKubecfg:           cfg.AgonesKubeconfig,
+		DockerBindIP:            cfg.DockerBindIP,
+		DockerDefaultMemory:     cfg.DockerDefaultMemory,
+		DockerDefaultNanoCPUs:   nanoCPUs,
+		DockerDefaultPids:       cfg.DockerDefaultPids,
+		DockerRegistryAllowlist: cfg.DockerRegistryAllowlist,
+		DockerRequireDigest:     cfg.DockerRequireDigest,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("fleet: %w", err)
