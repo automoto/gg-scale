@@ -29,6 +29,11 @@ type Querier interface {
 	// End-user (player) invitations.
 	CreateEndUserInvitation(ctx context.Context, arg CreateEndUserInvitationParams) (CreateEndUserInvitationRow, error)
 	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
+	// Fleet templates: operator-defined recipes that allocations are drawn from.
+	// Lookup is by project-scoped name (the public identifier used by the SDK,
+	// matchmaker API, and dashboard URLs). Soft delete keeps historical
+	// allocations referenceable in the UI.
+	CreateFleet(ctx context.Context, arg CreateFleetParams) (Fleet, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
 	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
 	// Used by the player UI signup flow; takes project_id explicitly because
@@ -81,6 +86,11 @@ type Querier interface {
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
 	GetEndUserInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetEndUserInvitationByCodeHashRow, error)
 	GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error)
+	GetFleetByID(ctx context.Context, id int64) (Fleet, error)
+	// Resolves a project-scoped name to a fleet row. Soft-deleted rows are
+	// excluded so a retired fleet doesn't collide with a freshly created one
+	// under the same name.
+	GetFleetByName(ctx context.Context, arg GetFleetByNameParams) (Fleet, error)
 	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
 	GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error)
@@ -124,6 +134,9 @@ type Querier interface {
 	// correlated subquery so users with zero memberships still appear.
 	ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error)
 	ListEndUserInvitationsForProject(ctx context.Context, projectID int64) ([]ListEndUserInvitationsForProjectRow, error)
+	// Dashboard list. Soft-deleted rows are excluded; include_deleted is reserved
+	// for a future "archive" view but not wired through the UI yet.
+	ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
 	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
 	// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
 	// the current tenant's project, plus oldest queued ticket so operators can
@@ -191,12 +204,14 @@ type Querier interface {
 	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
 	SetPlayerDisabledByTenant(ctx context.Context, arg SetPlayerDisabledByTenantParams) error
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
+	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
 	TouchDashboardSession(ctx context.Context, arg TouchDashboardSessionParams) error
 	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error
 	UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) error
+	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error
 	// Profile updates are deliberately narrow — only fields explicitly
 	// enumerated server-side may change. PATCHing email re-triggers the
 	// verify flow (handler clears email_verified_at).

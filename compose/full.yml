@@ -1,0 +1,53 @@
+# Full development stack.
+#
+# Builds on the Docker fleet backend (`compose/fleet-docker.yml`) and adds
+# Prometheus for metrics scraping and stripe-mock for billing tests.
+#
+# Usage:
+#   make up-full
+#   # or manually:
+#   docker compose --project-directory . -f compose/full.yml up -d --wait
+#
+# Endpoints:
+#   ggscale-server:  http://localhost:8080
+#   dashboard:       http://localhost:3001
+#   prometheus:      http://localhost:9090
+#   mailhog UI:      http://localhost:8025
+#   stripe-mock:     http://localhost:12111 (http), 12112 (https)
+
+name: ggscale
+
+include:
+  - path: ./fleet-docker.yml
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  stripe-mock:
+    image: stripe/stripe-mock:v0.197.0
+    ports:
+      - "12111:12111"
+      - "12112:12112"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  prometheus-data:

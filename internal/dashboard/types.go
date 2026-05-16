@@ -4,6 +4,7 @@ package dashboard
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -322,11 +323,74 @@ type NewAllocationView struct {
 	ProjectID   int64
 	BackendName string
 	Enabled     bool
+	Fleet       string
+	Fleets      []FleetOption
 	Region      string
 	GameMode    string
 	Capacity    int
 	Error       string
 	FieldErrors map[string]string
+}
+
+// FleetOption is one entry in the fleet dropdown on the manual-allocate
+// form. BackendMatches is false when the template's backend doesn't match
+// what ggscale is running; the form disables those options with a hint.
+type FleetOption struct {
+	ID                int64
+	Name              string
+	Backend           string
+	BackendMatches    bool
+	BackendConfigured string
+}
+
+// FleetsListView is the data rendered by /fleets.
+type FleetsListView struct {
+	UserEmail         string
+	CSRFToken         string
+	TenantID          int64
+	ProjectID         int64
+	BackendConfigured string
+	Enabled           bool
+	Fleets            []FleetRowView
+	Message           string
+}
+
+// FleetRowView is one row on the fleets list.
+type FleetRowView struct {
+	ID             int64
+	Name           string
+	Backend        string
+	BackendMatches bool
+	Summary        string
+}
+
+// NewFleetView is the data rendered by /fleets/new and the create form.
+type NewFleetView struct {
+	UserEmail         string
+	CSRFToken         string
+	TenantID          int64
+	ProjectID         int64
+	BackendConfigured string
+	Name              string
+	Backend           string
+	Config            map[string]string
+	Error             string
+	FieldErrors       map[string]string
+}
+
+// EditFleetView is the data rendered by /fleets/{id}.
+type EditFleetView struct {
+	UserEmail         string
+	CSRFToken         string
+	TenantID          int64
+	ProjectID         int64
+	FleetID           int64
+	Name              string
+	Backend           string
+	Config            map[string]string
+	BackendConfigured string
+	Error             string
+	FieldErrors       map[string]string
 }
 
 // DeallocateConfirmView is the data rendered by the type-the-ID confirm page.
@@ -385,11 +449,59 @@ func stringFromInt(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
 
-// fleetBasePathTpl is the templ-side equivalent of fleetBasePath in
-// fleet.go; both must agree on the path shape.
-func fleetBasePathTpl(tenantID, projectID int64) string {
+// fleetBackendKind buckets a fleet.backend value ("docker"|"agones"|"plugin:<n>")
+// into one of three groups so the create-form switch stays exhaustive without
+// duplicating the prefix check at every call site.
+func fleetBackendKind(backend string) string {
+	switch backend {
+	case "docker":
+		return "docker"
+	case "agones":
+		return "agones"
+	}
+	if strings.HasPrefix(backend, "plugin") {
+		return "plugin"
+	}
+	return "docker"
+}
+
+// editToNewFleetView projects an EditFleetView onto the NewFleetView shape
+// so EditFleetPage can reuse FleetBackendFieldsFragment. templ struggles
+// with multi-line struct literals inside @-calls; the named helper keeps
+// the call site one expression.
+func editToNewFleetView(vm EditFleetView) NewFleetView {
+	return NewFleetView{
+		TenantID:    vm.TenantID,
+		ProjectID:   vm.ProjectID,
+		Backend:     vm.Backend,
+		Config:      vm.Config,
+		FieldErrors: vm.FieldErrors,
+	}
+}
+
+// fleetSelectorLabels strips the "selector." prefix from a fleet's config
+// map so the agones create form can render one input row per label.
+func fleetSelectorLabels(cfg map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range cfg {
+		if rest, ok := strings.CutPrefix(k, "selector."); ok && rest != "" {
+			out[rest] = v
+		}
+	}
+	return out
+}
+
+// allocationsBasePathTpl is the templ-side equivalent of allocationsBasePath
+// in allocations.go; both must agree on the path shape.
+func allocationsBasePathTpl(tenantID, projectID int64) string {
 	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
-		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+}
+
+// fleetsBasePathTpl is the templ-side equivalent of fleetsBasePath.
+func fleetsBasePathTpl(tenantID, projectID int64) string {
+	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
 }
 
 // fleetQuery preserves the include-terminal toggle + current page across

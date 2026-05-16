@@ -28,7 +28,7 @@ func (q *Queries) CancelMatchmakingTicket(ctx context.Context, id int64) (int64,
 }
 
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, end_user_id, region, game_mode,
+SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
        attributes, status::text AS status, match_address,
        created_at, matched_at
 FROM matchmaking_tickets
@@ -40,6 +40,7 @@ type GetMatchmakingTicketRow struct {
 	ID           int64
 	TenantID     int64
 	ProjectID    int64
+	FleetID      *int64
 	EndUserID    int64
 	Region       string
 	GameMode     string
@@ -57,6 +58,7 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchm
 		&i.ID,
 		&i.TenantID,
 		&i.ProjectID,
+		&i.FleetID,
 		&i.EndUserID,
 		&i.Region,
 		&i.GameMode,
@@ -71,17 +73,18 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchm
 
 const insertMatchmakingTicket = `-- name: InsertMatchmakingTicket :one
 INSERT INTO matchmaking_tickets (
-    tenant_id, project_id, end_user_id, region, game_mode, attributes
+    tenant_id, project_id, fleet_id, end_user_id, region, game_mode, attributes
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING id, status::text AS status, created_at
 `
 
 type InsertMatchmakingTicketParams struct {
 	ProjectID  int64
+	FleetID    *int64
 	EndUserID  int64
 	Region     string
 	GameMode   string
@@ -97,6 +100,7 @@ type InsertMatchmakingTicketRow struct {
 func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error) {
 	row := q.db.QueryRow(ctx, insertMatchmakingTicket,
 		arg.ProjectID,
+		arg.FleetID,
 		arg.EndUserID,
 		arg.Region,
 		arg.GameMode,
@@ -158,17 +162,19 @@ func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID
 }
 
 const listReadyMatchmakerBuckets = `-- name: ListReadyMatchmakerBuckets :many
-SELECT tenant_id, project_id, region, game_mode, count(*) AS ticket_count
+SELECT tenant_id, project_id, fleet_id, region, game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets
 WHERE status = 'queued'
-GROUP BY tenant_id, project_id, region, game_mode
+  AND fleet_id IS NOT NULL
+GROUP BY tenant_id, project_id, fleet_id, region, game_mode
 HAVING count(*) >= $1::int
-ORDER BY tenant_id, project_id, region, game_mode
+ORDER BY tenant_id, project_id, fleet_id, region, game_mode
 `
 
 type ListReadyMatchmakerBucketsRow struct {
 	TenantID    int64
 	ProjectID   int64
+	FleetID     *int64
 	Region      string
 	GameMode    string
 	TicketCount int64
@@ -186,6 +192,7 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32
 		if err := rows.Scan(
 			&i.TenantID,
 			&i.ProjectID,
+			&i.FleetID,
 			&i.Region,
 			&i.GameMode,
 			&i.TicketCount,
@@ -235,17 +242,18 @@ WITH candidates AS (
     WHERE mt.status = 'queued'
       AND mt.tenant_id = $1
       AND mt.project_id = $2
-      AND mt.region = $3
-      AND mt.game_mode = $4
+      AND mt.fleet_id  = $3
+      AND mt.region    = $4
+      AND mt.game_mode = $5
     ORDER BY mt.created_at, mt.id
-    LIMIT $5::int
+    LIMIT $6::int
     FOR UPDATE SKIP LOCKED
 )
 UPDATE matchmaking_tickets t
 SET status = 'matched'
 FROM candidates c
 WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.end_user_id, t.region,
+RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.created_at, t.matched_at
 `
@@ -253,15 +261,17 @@ RETURNING t.id, t.tenant_id, t.project_id, t.end_user_id, t.region,
 type PopMatchmakerBucketParams struct {
 	TenantID  int64
 	ProjectID int64
+	FleetID   *int64
 	Region    string
 	GameMode  string
-	Column5   int32
+	Column6   int32
 }
 
 type PopMatchmakerBucketRow struct {
 	ID           int64
 	TenantID     int64
 	ProjectID    int64
+	FleetID      *int64
 	EndUserID    int64
 	Region       string
 	GameMode     string
@@ -276,9 +286,10 @@ func (q *Queries) PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBuck
 	rows, err := q.db.Query(ctx, popMatchmakerBucket,
 		arg.TenantID,
 		arg.ProjectID,
+		arg.FleetID,
 		arg.Region,
 		arg.GameMode,
-		arg.Column5,
+		arg.Column6,
 	)
 	if err != nil {
 		return nil, err
@@ -291,6 +302,7 @@ func (q *Queries) PopMatchmakerBucket(ctx context.Context, arg PopMatchmakerBuck
 			&i.ID,
 			&i.TenantID,
 			&i.ProjectID,
+			&i.FleetID,
 			&i.EndUserID,
 			&i.Region,
 			&i.GameMode,

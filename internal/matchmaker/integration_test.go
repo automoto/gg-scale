@@ -73,12 +73,19 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	appPool := db.NewPool(pool)
 
 	ctx := context.Background()
-	var tenantID, projectID int64
+	var tenantID, projectID, fleetID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-listen-test') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
+	// The matchmaking_tickets.fleet_id FK is RESTRICT — every queued ticket
+	// must reference an existing fleet template, even in tests. Seed one
+	// before enqueuing.
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
 
 	queue := matchmaker.NewPGQueue(appPool)
 	alloc := &allocatorRecorder{address: "10.0.0.7:7777"}
@@ -100,6 +107,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	_, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID:  tenantID,
 		ProjectID: projectID,
+		FleetID:   fleetID,
 		EndUserID: 1,
 		Region:    "us-east-1",
 		GameMode:  "1v1",

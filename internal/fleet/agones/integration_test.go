@@ -71,13 +71,21 @@ func TestBackend_RealCluster_Allocate_to_Deallocate(t *testing.T) {
 	require.NoError(t, waitForState(ctx, t, gsClient, gsName, agonesv1.GameServerStateReady))
 
 	be, err := agonesbackend.NewFromKubeconfig(agonesbackend.Config{
-		Namespace:      ns,
-		SelectorLabels: map[string]string{"ggscale-suite": label},
+		Namespace: ns,
 	}, kcfg)
 	require.NoError(t, err)
 	require.NoError(t, be.HealthCheck(ctx))
 
-	got, err := be.Allocate(ctx, fleet.AllocationRequest{TenantID: 1, ProjectID: 1, Region: ""})
+	got, err := be.Allocate(ctx, fleet.AllocationRequest{
+		TenantID:  1,
+		ProjectID: 1,
+		FleetID:   1,
+		Backend:   "agones",
+		Config: map[string]string{
+			"selector.ggscale-suite": label,
+		},
+		Region: "",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, fleet.StatusReady, got.Status)
 	assert.NotEmpty(t, got.Address)

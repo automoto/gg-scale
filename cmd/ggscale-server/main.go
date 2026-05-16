@@ -227,8 +227,8 @@ func run() error {
 // Close() so the subprocess is reaped on shutdown. In-process backends
 // (docker, agones) return a nil closer.
 func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
-	if cfg.FleetBackend == "docker" && cfg.DockerGameServerImage == "" {
-		logger.Warn("fleet disabled: DOCKER_GAMESERVER_IMAGE unset; matchmaker will reject Allocate")
+	if cfg.FleetBackend == "" {
+		logger.Warn("fleet disabled: FLEET_BACKEND unset; matchmaker will reject Allocate until a backend + fleet template are configured")
 		return nil, nil, nil
 	}
 
@@ -237,15 +237,8 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		Region:        cfg.FleetRegion,
 		PluginDir:     cfg.FleetPluginDir,
 		GameServerIP:  cfg.GameServerPublicIP,
-		DockerImage:   cfg.DockerGameServerImage,
-		DockerPort:    cfg.DockerGameServerPort,
-		DockerProbe:   cfg.DockerProbeType,
-		DockerProbeP:  cfg.DockerProbePath,
-		DockerMaxSess: cfg.DockerMaxSessions,
 		DockerHost:    cfg.DockerHost,
 		AgonesNS:      cfg.AgonesNamespace,
-		AgonesFleet:   cfg.AgonesFleetName,
-		AgonesLabels:  cfg.AgonesSelectorLabels,
 		AgonesKubecfg: cfg.AgonesKubeconfig,
 	})
 	if err != nil {
@@ -258,6 +251,7 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 	}
 	return fleet.NewManager(
 		fleet.NewPostgresStore(pool),
+		fleet.NewPostgresFleetStore(pool),
 		backend,
 		fleet.ManagerOptions{Retries: 3},
 	), closer, nil

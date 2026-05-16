@@ -33,17 +33,18 @@ func (q *Queries) CountAllocationsForProject(ctx context.Context, arg CountAlloc
 
 const createPendingAllocation = `-- name: CreatePendingAllocation :one
 INSERT INTO game_server_allocations (
-    tenant_id, project_id, backend, region, status, metadata
+    tenant_id, project_id, fleet_id, backend, region, status, metadata
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, 'pending', $4
+    $1, $2, $3, $4, 'pending', $5
 )
 RETURNING id, requested_at
 `
 
 type CreatePendingAllocationParams struct {
 	ProjectID int64
+	FleetID   *int64
 	Backend   string
 	Region    string
 	Metadata  []byte
@@ -57,6 +58,7 @@ type CreatePendingAllocationRow struct {
 func (q *Queries) CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error) {
 	row := q.db.QueryRow(ctx, createPendingAllocation,
 		arg.ProjectID,
+		arg.FleetID,
 		arg.Backend,
 		arg.Region,
 		arg.Metadata,
@@ -67,7 +69,7 @@ func (q *Queries) CreatePendingAllocation(ctx context.Context, arg CreatePending
 }
 
 const getAllocation = `-- name: GetAllocation :one
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -78,6 +80,7 @@ type GetAllocationRow struct {
 	ID          int64
 	TenantID    int64
 	ProjectID   int64
+	FleetID     *int64
 	Backend     string
 	BackendRef  string
 	Region      string
@@ -96,6 +99,7 @@ func (q *Queries) GetAllocation(ctx context.Context, id int64) (GetAllocationRow
 		&i.ID,
 		&i.TenantID,
 		&i.ProjectID,
+		&i.FleetID,
 		&i.Backend,
 		&i.BackendRef,
 		&i.Region,
@@ -142,7 +146,7 @@ func (q *Queries) InsertAllocationEvent(ctx context.Context, arg InsertAllocatio
 }
 
 const listActiveAllocations = `-- name: ListActiveAllocations :many
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -161,6 +165,7 @@ type ListActiveAllocationsRow struct {
 	ID          int64
 	TenantID    int64
 	ProjectID   int64
+	FleetID     *int64
 	Backend     string
 	BackendRef  string
 	Region      string
@@ -185,6 +190,7 @@ func (q *Queries) ListActiveAllocations(ctx context.Context, arg ListActiveAlloc
 			&i.ID,
 			&i.TenantID,
 			&i.ProjectID,
+			&i.FleetID,
 			&i.Backend,
 			&i.BackendRef,
 			&i.Region,
@@ -292,7 +298,7 @@ func (q *Queries) ListAllocationEvents(ctx context.Context, arg ListAllocationEv
 }
 
 const listAllocationsForProject = `-- name: ListAllocationsForProject :many
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -314,6 +320,7 @@ type ListAllocationsForProjectRow struct {
 	ID          int64
 	TenantID    int64
 	ProjectID   int64
+	FleetID     *int64
 	Backend     string
 	BackendRef  string
 	Region      string
@@ -346,6 +353,7 @@ func (q *Queries) ListAllocationsForProject(ctx context.Context, arg ListAllocat
 			&i.ID,
 			&i.TenantID,
 			&i.ProjectID,
+			&i.FleetID,
 			&i.Backend,
 			&i.BackendRef,
 			&i.Region,

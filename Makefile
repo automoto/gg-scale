@@ -1,14 +1,15 @@
 .PHONY: build test test-integration test-plugins e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
 	proto build-example-plugin \
         up down logs psql migrate migrate-new \
-        up-dev down-dev \
-        up-k8s agones-install \
-        up-gameserver down-gameserver \
+        up-fleet-docker down-fleet-docker \
+        up-fleet-agones down-fleet-agones agones-install \
+        up-full down-full \
         docker-image docker-push \
-        preflight preflight-k8s clean clean-dev
+        preflight preflight-k8s clean clean-full
 
-FULL_STACK       := docker compose -f ops/full-stack-docker-compose.yml
-GAMESERVER_STACK := docker compose -f docker-compose.yml -f ops/docker-compose.gameserver.yml
+FLEET_DOCKER_STACK := docker compose -f compose/fleet-docker.yml
+FLEET_AGONES_STACK := docker compose -f compose/fleet-agones.yml
+FULL_STACK         := docker compose -f compose/full.yml
 
 # Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
 DOCKER_IMAGE ?= buildwrangler/ggscale
@@ -27,7 +28,7 @@ test-integration:
 	go test -race -tags=integration ./...
 
 # Runs the e2e suite against an already-running compose stack.
-# Use `make up-k8s && make agones-install && make e2e`.
+# Use `make up-fleet-agones && make agones-install && make e2e`.
 e2e:
 	go test -race -tags=e2e -timeout=180s ./e2e/...
 
@@ -38,7 +39,7 @@ e2e-docker:
 	go test -race -tags=integration -timeout=180s ./internal/fleet/docker/...
 
 # Runs the agones fleet-backend smoke test against the local K3s+Agones
-# cluster from `make up-k8s && make agones-install`. Set AGONES_E2E=1.
+# cluster from `make up-fleet-agones && make agones-install`. Set AGONES_E2E=1.
 e2e-agones:
 	AGONES_E2E=1 go test -tags=agones_e2e -timeout=180s ./internal/fleet/agones/...
 
@@ -109,32 +110,37 @@ migrate-new:
 clean:
 	docker compose down -v --remove-orphans
 
-# ─── Game server stack (tier-0 self-hosting, no k8s) ────────────────────
+# ─── Fleet feature: Docker backend ──────────────────────────────────────
 
-up-gameserver: preflight
-	$(GAMESERVER_STACK) up -d --wait
+up-fleet-docker: preflight
+	$(FLEET_DOCKER_STACK) up -d --wait
 
-down-gameserver:
-	$(GAMESERVER_STACK) down --remove-orphans
+down-fleet-docker:
+	$(FLEET_DOCKER_STACK) down --remove-orphans
 
-# ─── Full dev stack (prometheus, stripe-mock, dashboard, k8s) ───────────
+# ─── Fleet feature: k3s + Agones backend ────────────────────────────────
 
-up-dev: preflight
-	$(FULL_STACK) up -d --wait
-
-down-dev:
-	$(FULL_STACK) --profile k8s down --remove-orphans
-
-up-k8s: preflight-k8s
+up-fleet-agones: preflight-k8s
 	mkdir -p .k3s
-	$(FULL_STACK) --profile k8s up -d --wait k3s
+	$(FLEET_AGONES_STACK) up -d --wait k3s
+
+down-fleet-agones:
+	$(FLEET_AGONES_STACK) down --remove-orphans
+	rm -rf .k3s
 
 agones-install:
-	$(FULL_STACK) --profile k8s run --rm agones-install
+	$(FLEET_AGONES_STACK) run --rm agones-install
 
-clean-dev:
-	$(FULL_STACK) --profile k8s down -v --remove-orphans
-	rm -rf .k3s
+# ─── Full dev stack (prometheus + docker fleet + stripe-mock) ───────────
+
+up-full: preflight
+	$(FULL_STACK) up -d --wait
+
+down-full:
+	$(FULL_STACK) down --remove-orphans
+
+clean-full:
+	$(FULL_STACK) down -v --remove-orphans
 
 # ─── Docker Hub image (ggscale-server) ──────────────────────────────────
 

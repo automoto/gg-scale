@@ -174,6 +174,7 @@ func (w *Worker) processBucket(ctx context.Context, b Bucket) error {
 	alloc, err := w.alloc.Allocate(tenantCtx, fleet.AllocationRequest{
 		TenantID:  b.TenantID,
 		ProjectID: b.ProjectID,
+		FleetID:   b.FleetID,
 		Region:    b.Region,
 		GameMode:  b.GameMode,
 		Capacity:  len(tickets),

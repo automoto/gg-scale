@@ -11,10 +11,12 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 )
 
 type matchmakerTicketRequest struct {
+	Fleet      string          `json:"fleet"`
 	Region     string          `json:"region"`
 	GameMode   string          `json:"game_mode"`
 	Attributes json.RawMessage `json:"attributes,omitempty"`
@@ -66,10 +68,28 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "attributes must be valid JSON", http.StatusBadRequest)
 			return
 		}
+		if req.Fleet == "" {
+			http.Error(w, "fleet is required", http.StatusBadRequest)
+			return
+		}
+		if d.Fleet == nil {
+			http.Error(w, "fleet backend not configured", http.StatusServiceUnavailable)
+			return
+		}
+		f, ferr := d.Fleet.Fleets().GetByName(ctx, projectID, req.Fleet)
+		if errors.Is(ferr, fleet.ErrFleetNotFound) {
+			http.Error(w, "unknown fleet", http.StatusBadRequest)
+			return
+		}
+		if ferr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 
 		ticket, err := d.Matchmaker.Enqueue(ctx, matchmaker.EnqueueRequest{
 			TenantID:   tenantID,
 			ProjectID:  projectID,
+			FleetID:    f.ID,
 			EndUserID:  endUserID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,

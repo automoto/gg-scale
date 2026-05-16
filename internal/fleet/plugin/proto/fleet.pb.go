@@ -95,7 +95,9 @@ func (AllocationStatus) EnumDescriptor() ([]byte, []int) {
 	return file_internal_fleet_plugin_proto_fleet_proto_rawDescGZIP(), []int{0}
 }
 
-// AllocationRequest mirrors fleet.AllocationRequest.
+// AllocationRequest mirrors fleet.AllocationRequest. fleet_id identifies the
+// fleet template the host resolved before dispatching; config is the
+// flattened backend-specific recipe stored on that fleet.
 type AllocationRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TenantId      int64                  `protobuf:"varint,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
@@ -104,6 +106,9 @@ type AllocationRequest struct {
 	GameMode      string                 `protobuf:"bytes,4,opt,name=game_mode,json=gameMode,proto3" json:"game_mode,omitempty"`
 	Capacity      int32                  `protobuf:"varint,5,opt,name=capacity,proto3" json:"capacity,omitempty"`
 	Labels        map[string]string      `protobuf:"bytes,6,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	FleetId       int64                  `protobuf:"varint,7,opt,name=fleet_id,json=fleetId,proto3" json:"fleet_id,omitempty"`
+	Backend       string                 `protobuf:"bytes,8,opt,name=backend,proto3" json:"backend,omitempty"`
+	Config        map[string]string      `protobuf:"bytes,9,rep,name=config,proto3" json:"config,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -180,6 +185,27 @@ func (x *AllocationRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *AllocationRequest) GetFleetId() int64 {
+	if x != nil {
+		return x.FleetId
+	}
+	return 0
+}
+
+func (x *AllocationRequest) GetBackend() string {
+	if x != nil {
+		return x.Backend
+	}
+	return ""
+}
+
+func (x *AllocationRequest) GetConfig() map[string]string {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
 // Allocation mirrors fleet.Allocation. BackendRef is the plugin's opaque
 // identifier — the host stores it but never inspects it.
 type Allocation struct {
@@ -193,6 +219,7 @@ type Allocation struct {
 	Address       string                 `protobuf:"bytes,7,opt,name=address,proto3" json:"address,omitempty"`
 	Status        AllocationStatus       `protobuf:"varint,8,opt,name=status,proto3,enum=ggscale.fleet.v1.AllocationStatus" json:"status,omitempty"`
 	Metadata      map[string]string      `protobuf:"bytes,9,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	FleetId       int64                  `protobuf:"varint,10,opt,name=fleet_id,json=fleetId,proto3" json:"fleet_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -288,6 +315,13 @@ func (x *Allocation) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *Allocation) GetFleetId() int64 {
+	if x != nil {
+		return x.FleetId
+	}
+	return 0
 }
 
 type NameRequest struct {
@@ -905,7 +939,7 @@ var File_internal_fleet_plugin_proto_fleet_proto protoreflect.FileDescriptor
 
 const file_internal_fleet_plugin_proto_fleet_proto_rawDesc = "" +
 	"\n" +
-	"'internal/fleet/plugin/proto/fleet.proto\x12\x10ggscale.fleet.v1\"\xa4\x02\n" +
+	"'internal/fleet/plugin/proto/fleet.proto\x12\x10ggscale.fleet.v1\"\xdd\x03\n" +
 	"\x11AllocationRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\x03R\btenantId\x12\x1d\n" +
 	"\n" +
@@ -913,10 +947,16 @@ const file_internal_fleet_plugin_proto_fleet_proto_rawDesc = "" +
 	"\x06region\x18\x03 \x01(\tR\x06region\x12\x1b\n" +
 	"\tgame_mode\x18\x04 \x01(\tR\bgameMode\x12\x1a\n" +
 	"\bcapacity\x18\x05 \x01(\x05R\bcapacity\x12G\n" +
-	"\x06labels\x18\x06 \x03(\v2/.ggscale.fleet.v1.AllocationRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x06 \x03(\v2/.ggscale.fleet.v1.AllocationRequest.LabelsEntryR\x06labels\x12\x19\n" +
+	"\bfleet_id\x18\a \x01(\x03R\afleetId\x12\x18\n" +
+	"\abackend\x18\b \x01(\tR\abackend\x12G\n" +
+	"\x06config\x18\t \x03(\v2/.ggscale.fleet.v1.AllocationRequest.ConfigEntryR\x06config\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x86\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a9\n" +
+	"\vConfigEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa1\x03\n" +
 	"\n" +
 	"Allocation\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1b\n" +
@@ -929,7 +969,9 @@ const file_internal_fleet_plugin_proto_fleet_proto_rawDesc = "" +
 	"\x06region\x18\x06 \x01(\tR\x06region\x12\x18\n" +
 	"\aaddress\x18\a \x01(\tR\aaddress\x12:\n" +
 	"\x06status\x18\b \x01(\x0e2\".ggscale.fleet.v1.AllocationStatusR\x06status\x12F\n" +
-	"\bmetadata\x18\t \x03(\v2*.ggscale.fleet.v1.Allocation.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\t \x03(\v2*.ggscale.fleet.v1.Allocation.MetadataEntryR\bmetadata\x12\x19\n" +
+	"\bfleet_id\x18\n" +
+	" \x01(\x03R\afleetId\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\r\n" +
@@ -997,7 +1039,7 @@ func file_internal_fleet_plugin_proto_fleet_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_fleet_plugin_proto_fleet_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_fleet_plugin_proto_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_internal_fleet_plugin_proto_fleet_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_internal_fleet_plugin_proto_fleet_proto_goTypes = []any{
 	(AllocationStatus)(0),       // 0: ggscale.fleet.v1.AllocationStatus
 	(*AllocationRequest)(nil),   // 1: ggscale.fleet.v1.AllocationRequest
@@ -1017,35 +1059,37 @@ var file_internal_fleet_plugin_proto_fleet_proto_goTypes = []any{
 	(*PingRequest)(nil),         // 15: ggscale.fleet.v1.PingRequest
 	(*PingResponse)(nil),        // 16: ggscale.fleet.v1.PingResponse
 	nil,                         // 17: ggscale.fleet.v1.AllocationRequest.LabelsEntry
-	nil,                         // 18: ggscale.fleet.v1.Allocation.MetadataEntry
+	nil,                         // 18: ggscale.fleet.v1.AllocationRequest.ConfigEntry
+	nil,                         // 19: ggscale.fleet.v1.Allocation.MetadataEntry
 }
 var file_internal_fleet_plugin_proto_fleet_proto_depIdxs = []int32{
 	17, // 0: ggscale.fleet.v1.AllocationRequest.labels:type_name -> ggscale.fleet.v1.AllocationRequest.LabelsEntry
-	0,  // 1: ggscale.fleet.v1.Allocation.status:type_name -> ggscale.fleet.v1.AllocationStatus
-	18, // 2: ggscale.fleet.v1.Allocation.metadata:type_name -> ggscale.fleet.v1.Allocation.MetadataEntry
-	1,  // 3: ggscale.fleet.v1.AllocateRequest.request:type_name -> ggscale.fleet.v1.AllocationRequest
-	2,  // 4: ggscale.fleet.v1.AllocateResponse.allocation:type_name -> ggscale.fleet.v1.Allocation
-	0,  // 5: ggscale.fleet.v1.StatusResponse.status:type_name -> ggscale.fleet.v1.AllocationStatus
-	0,  // 6: ggscale.fleet.v1.StatusUpdate.status:type_name -> ggscale.fleet.v1.AllocationStatus
-	3,  // 7: ggscale.fleet.v1.FleetBackend.Name:input_type -> ggscale.fleet.v1.NameRequest
-	5,  // 8: ggscale.fleet.v1.FleetBackend.Allocate:input_type -> ggscale.fleet.v1.AllocateRequest
-	7,  // 9: ggscale.fleet.v1.FleetBackend.Deallocate:input_type -> ggscale.fleet.v1.DeallocateRequest
-	9,  // 10: ggscale.fleet.v1.FleetBackend.Status:input_type -> ggscale.fleet.v1.StatusRequest
-	11, // 11: ggscale.fleet.v1.FleetBackend.Watch:input_type -> ggscale.fleet.v1.WatchRequest
-	13, // 12: ggscale.fleet.v1.FleetBackend.HealthCheck:input_type -> ggscale.fleet.v1.HealthCheckRequest
-	15, // 13: ggscale.fleet.v1.FleetBackend.Ping:input_type -> ggscale.fleet.v1.PingRequest
-	4,  // 14: ggscale.fleet.v1.FleetBackend.Name:output_type -> ggscale.fleet.v1.NameResponse
-	6,  // 15: ggscale.fleet.v1.FleetBackend.Allocate:output_type -> ggscale.fleet.v1.AllocateResponse
-	8,  // 16: ggscale.fleet.v1.FleetBackend.Deallocate:output_type -> ggscale.fleet.v1.DeallocateResponse
-	10, // 17: ggscale.fleet.v1.FleetBackend.Status:output_type -> ggscale.fleet.v1.StatusResponse
-	12, // 18: ggscale.fleet.v1.FleetBackend.Watch:output_type -> ggscale.fleet.v1.StatusUpdate
-	14, // 19: ggscale.fleet.v1.FleetBackend.HealthCheck:output_type -> ggscale.fleet.v1.HealthCheckResponse
-	16, // 20: ggscale.fleet.v1.FleetBackend.Ping:output_type -> ggscale.fleet.v1.PingResponse
-	14, // [14:21] is the sub-list for method output_type
-	7,  // [7:14] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	18, // 1: ggscale.fleet.v1.AllocationRequest.config:type_name -> ggscale.fleet.v1.AllocationRequest.ConfigEntry
+	0,  // 2: ggscale.fleet.v1.Allocation.status:type_name -> ggscale.fleet.v1.AllocationStatus
+	19, // 3: ggscale.fleet.v1.Allocation.metadata:type_name -> ggscale.fleet.v1.Allocation.MetadataEntry
+	1,  // 4: ggscale.fleet.v1.AllocateRequest.request:type_name -> ggscale.fleet.v1.AllocationRequest
+	2,  // 5: ggscale.fleet.v1.AllocateResponse.allocation:type_name -> ggscale.fleet.v1.Allocation
+	0,  // 6: ggscale.fleet.v1.StatusResponse.status:type_name -> ggscale.fleet.v1.AllocationStatus
+	0,  // 7: ggscale.fleet.v1.StatusUpdate.status:type_name -> ggscale.fleet.v1.AllocationStatus
+	3,  // 8: ggscale.fleet.v1.FleetBackend.Name:input_type -> ggscale.fleet.v1.NameRequest
+	5,  // 9: ggscale.fleet.v1.FleetBackend.Allocate:input_type -> ggscale.fleet.v1.AllocateRequest
+	7,  // 10: ggscale.fleet.v1.FleetBackend.Deallocate:input_type -> ggscale.fleet.v1.DeallocateRequest
+	9,  // 11: ggscale.fleet.v1.FleetBackend.Status:input_type -> ggscale.fleet.v1.StatusRequest
+	11, // 12: ggscale.fleet.v1.FleetBackend.Watch:input_type -> ggscale.fleet.v1.WatchRequest
+	13, // 13: ggscale.fleet.v1.FleetBackend.HealthCheck:input_type -> ggscale.fleet.v1.HealthCheckRequest
+	15, // 14: ggscale.fleet.v1.FleetBackend.Ping:input_type -> ggscale.fleet.v1.PingRequest
+	4,  // 15: ggscale.fleet.v1.FleetBackend.Name:output_type -> ggscale.fleet.v1.NameResponse
+	6,  // 16: ggscale.fleet.v1.FleetBackend.Allocate:output_type -> ggscale.fleet.v1.AllocateResponse
+	8,  // 17: ggscale.fleet.v1.FleetBackend.Deallocate:output_type -> ggscale.fleet.v1.DeallocateResponse
+	10, // 18: ggscale.fleet.v1.FleetBackend.Status:output_type -> ggscale.fleet.v1.StatusResponse
+	12, // 19: ggscale.fleet.v1.FleetBackend.Watch:output_type -> ggscale.fleet.v1.StatusUpdate
+	14, // 20: ggscale.fleet.v1.FleetBackend.HealthCheck:output_type -> ggscale.fleet.v1.HealthCheckResponse
+	16, // 21: ggscale.fleet.v1.FleetBackend.Ping:output_type -> ggscale.fleet.v1.PingResponse
+	15, // [15:22] is the sub-list for method output_type
+	8,  // [8:15] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_internal_fleet_plugin_proto_fleet_proto_init() }
@@ -1059,7 +1103,7 @@ func file_internal_fleet_plugin_proto_fleet_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_fleet_plugin_proto_fleet_proto_rawDesc), len(file_internal_fleet_plugin_proto_fleet_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -37,6 +37,7 @@ func (s *PostgresStore) InsertPending(ctx context.Context, req AllocationRequest
 	err = s.pool.Q(ctx, func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).CreatePendingAllocation(ctx, sqlcgen.CreatePendingAllocationParams{
 			ProjectID: req.ProjectID,
+			FleetID:   &req.FleetID,
 			Backend:   backend,
 			Region:    req.Region,
 			Metadata:  meta,
@@ -218,10 +219,15 @@ func rowToAllocation(row sqlcgen.GetAllocationRow) (*Allocation, error) {
 	if err != nil {
 		return nil, err
 	}
+	var fleetID int64
+	if row.FleetID != nil {
+		fleetID = *row.FleetID
+	}
 	return &Allocation{
 		ID:         AllocationID(row.ID),
 		TenantID:   row.TenantID,
 		ProjectID:  row.ProjectID,
+		FleetID:    fleetID,
 		Backend:    row.Backend,
 		BackendRef: row.BackendRef,
 		Region:     row.Region,

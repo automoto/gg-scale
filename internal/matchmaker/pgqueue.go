@@ -40,6 +40,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 	err := q.pool.Q(ctx, func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).InsertMatchmakingTicket(ctx, sqlcgen.InsertMatchmakingTicketParams{
 			ProjectID:  req.ProjectID,
+			FleetID:    &req.FleetID,
 			EndUserID:  req.EndUserID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
@@ -52,6 +53,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 			ID:         row.ID,
 			TenantID:   req.TenantID,
 			ProjectID:  req.ProjectID,
+			FleetID:    req.FleetID,
 			EndUserID:  req.EndUserID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
@@ -79,7 +81,7 @@ func (q *PGQueue) Get(ctx context.Context, id int64) (*Ticket, error) {
 			}
 			return qerr
 		}
-		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, row.EndUserID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress)
+		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, derefFleetID(row.FleetID), row.EndUserID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress)
 		t.CreatedAt = row.CreatedAt.Time
 		if row.MatchedAt.Valid {
 			v := row.MatchedAt.Time
@@ -88,6 +90,13 @@ func (q *PGQueue) Get(ctx context.Context, id int64) (*Ticket, error) {
 		return nil
 	})
 	return t, err
+}
+
+func derefFleetID(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // Cancel sets a queued ticket to cancelled. Returns ErrAlreadyTerminal when
@@ -123,7 +132,13 @@ func (q *PGQueue) ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucke
 			return qerr
 		}
 		for _, r := range rows {
-			out = append(out, Bucket{TenantID: r.TenantID, ProjectID: r.ProjectID, Region: r.Region, GameMode: r.GameMode})
+			out = append(out, Bucket{
+				TenantID:  r.TenantID,
+				ProjectID: r.ProjectID,
+				FleetID:   derefFleetID(r.FleetID),
+				Region:    r.Region,
+				GameMode:  r.GameMode,
+			})
 		}
 		return nil
 	})
@@ -136,12 +151,14 @@ func (q *PGQueue) ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucke
 func (q *PGQueue) PopBucket(ctx context.Context, bucket Bucket, n int) ([]*Ticket, error) {
 	var out []*Ticket
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		fleetID := bucket.FleetID
 		rows, qerr := sqlcgen.New(tx).PopMatchmakerBucket(ctx, sqlcgen.PopMatchmakerBucketParams{
 			TenantID:  bucket.TenantID,
 			ProjectID: bucket.ProjectID,
+			FleetID:   &fleetID,
 			Region:    bucket.Region,
 			GameMode:  bucket.GameMode,
-			Column5:   int32(n), //nolint:gosec // n is operator-controlled bucket size
+			Column6:   int32(n), //nolint:gosec // n is operator-controlled bucket size
 		})
 		if qerr != nil {
 			return qerr
@@ -154,7 +171,7 @@ func (q *PGQueue) PopBucket(ctx context.Context, bucket Bucket, n int) ([]*Ticke
 			return nil
 		}
 		for _, r := range rows {
-			t := rowToTicket(r.ID, r.TenantID, r.ProjectID, r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress)
+			t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress)
 			t.CreatedAt = r.CreatedAt.Time
 			out = append(out, t)
 		}
@@ -186,13 +203,14 @@ func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 		var p struct {
 			TenantID  int64  `json:"tenant_id"`
 			ProjectID int64  `json:"project_id"`
+			FleetID   int64  `json:"fleet_id"`
 			Region    string `json:"region"`
 			GameMode  string `json:"game_mode"`
 		}
 		if err := json.Unmarshal([]byte(payload), &p); err != nil {
 			return // malformed payload; fallback tick will catch the ticket
 		}
-		fn(Bucket{TenantID: p.TenantID, ProjectID: p.ProjectID, Region: p.Region, GameMode: p.GameMode})
+		fn(Bucket{TenantID: p.TenantID, ProjectID: p.ProjectID, FleetID: p.FleetID, Region: p.Region, GameMode: p.GameMode})
 	})
 }
 
@@ -207,11 +225,12 @@ func (q *PGQueue) MarkFailed(ctx context.Context, ids []int64) error {
 	})
 }
 
-func rowToTicket(id, tenantID, projectID, endUserID int64, region, gameMode string, attrs []byte, status, matchAddress string) *Ticket {
+func rowToTicket(id, tenantID, projectID, fleetID, endUserID int64, region, gameMode string, attrs []byte, status, matchAddress string) *Ticket {
 	return &Ticket{
 		ID:           id,
 		TenantID:     tenantID,
 		ProjectID:    projectID,
+		FleetID:      fleetID,
 		EndUserID:    endUserID,
 		Region:       region,
 		GameMode:     gameMode,

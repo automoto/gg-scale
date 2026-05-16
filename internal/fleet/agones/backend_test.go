@@ -74,7 +74,26 @@ func (f *fakeAPI) WatchGameServer(_ context.Context, _, _ string) (<-chan agones
 func (f *fakeAPI) Ping(_ context.Context) error { return f.pingErr }
 
 func sampleReq() fleet.AllocationRequest {
-	return fleet.AllocationRequest{TenantID: 1, ProjectID: 2, Region: "us-east-1", Capacity: 4}
+	return reqWithFleet("doomerang", nil)
+}
+
+func reqWithFleet(fleetName string, selectors map[string]string) fleet.AllocationRequest {
+	cfg := map[string]string{}
+	if fleetName != "" {
+		cfg["fleet_name"] = fleetName
+	}
+	for k, v := range selectors {
+		cfg["selector."+k] = v
+	}
+	return fleet.AllocationRequest{
+		TenantID:  1,
+		ProjectID: 2,
+		FleetID:   42,
+		Backend:   "agones",
+		Config:    cfg,
+		Region:    "us-east-1",
+		Capacity:  4,
+	}
 }
 
 func allocatedResult(gs, addr string, port int32) *allocationv1.GameServerAllocation {
@@ -95,7 +114,6 @@ func TestBackend_Allocate_creates_allocation_with_fleet_and_region_selectors(t *
 	be, err := agonesbackend.New(agonesbackend.Config{
 		API:       fake,
 		Namespace: "ggscale",
-		FleetName: "doomerang",
 	})
 	require.NoError(t, err)
 
@@ -227,26 +245,6 @@ func TestBackend_HealthCheck_surfaces_ping_failure(t *testing.T) {
 	be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "ggscale"})
 	require.NoError(t, err)
 	require.Error(t, be.HealthCheck(context.Background()))
-}
-
-func TestParseSelectorLabels(t *testing.T) {
-	cases := []struct {
-		in   string
-		want map[string]string
-	}{
-		{"", map[string]string{}},
-		{"a=b", map[string]string{"a": "b"}},
-		{"a=b,c=d", map[string]string{"a": "b", "c": "d"}},
-		{"a = b , c=d", map[string]string{"a": "b", "c": "d"}},
-		{"=v,bare", map[string]string{}},
-		{"agones.dev/x=y", map[string]string{"agones.dev/x": "y"}},
-		{"k=", map[string]string{"k": ""}}, // empty value is a valid k8s label
-	}
-	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
-			assert.Equal(t, tc.want, agonesbackend.ParseSelectorLabels(tc.in))
-		})
-	}
 }
 
 func drainStatuses(t *testing.T, ch <-chan fleet.StatusUpdate) []fleet.Status {

@@ -41,13 +41,13 @@ type GameServerEvent struct {
 	Err   error
 }
 
-// Config carries the agones-specific knobs supplied by ggscale config. The
-// API field is set by NewFromConfig (production) or by tests directly.
+// Config carries the host-wide agones knobs. Per-template values (Agones
+// Fleet name and selector labels) come in through AllocationRequest.Config
+// on each Allocate. The API field is set by NewFromConfig (production) or
+// by tests directly.
 type Config struct {
-	API            API
-	Namespace      string
-	FleetName      string
-	SelectorLabels map[string]string
+	API       API
+	Namespace string
 }
 
 // Backend allocates Agones GameServers.
@@ -55,20 +55,14 @@ type Backend struct {
 	cfg Config
 }
 
-// New builds a Backend, validating that the operator supplied at least
-// enough config to point at a namespace and (typically) a fleet.
+// New builds a Backend, validating that the operator supplied enough
+// host-level config (API client + default namespace).
 func New(cfg Config) (*Backend, error) {
 	if cfg.API == nil {
 		return nil, errors.New("agones: API is required")
 	}
 	if cfg.Namespace == "" {
 		return nil, errors.New("agones: Namespace is required")
-	}
-	if cfg.SelectorLabels == nil {
-		cfg.SelectorLabels = map[string]string{}
-	}
-	if cfg.FleetName != "" {
-		cfg.SelectorLabels["agones.dev/fleet"] = cfg.FleetName
 	}
 	return &Backend{cfg: cfg}, nil
 }
@@ -92,20 +86,53 @@ func NewFromKubeconfig(cfg Config, kubeconfigPath string) (*Backend, error) {
 // Name is the identifier persisted on every allocation row.
 func (b *Backend) Name() string { return "agones" }
 
+// Template carries the per-allocation knobs the agones backend reads off
+// AllocationRequest.Config: the Agones Fleet to allocate from, optional
+// namespace override, and any additional selector labels.
+type Template struct {
+	Namespace      string
+	FleetName      string
+	SelectorLabels map[string]string
+}
+
+// TemplateFromConfig parses AllocationRequest.Config keys into a Template
+// and merges any "selector.<k>=v" entries into SelectorLabels.
+func TemplateFromConfig(cfg map[string]string) Template {
+	t := Template{
+		Namespace:      cfg["namespace"],
+		FleetName:      cfg["fleet_name"],
+		SelectorLabels: map[string]string{},
+	}
+	for k, v := range cfg {
+		if rest, ok := strings.CutPrefix(k, "selector."); ok && rest != "" {
+			t.SelectorLabels[rest] = v
+		}
+	}
+	if t.FleetName != "" {
+		t.SelectorLabels["agones.dev/fleet"] = t.FleetName
+	}
+	return t
+}
+
 // Allocate creates a GameServerAllocation CR and reads the synchronous
 // Status the Agones controller writes back. UnAllocated / Contention are
 // surfaced as errors so the manager can retry or fail.
 func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
+	tmpl := TemplateFromConfig(req.Config)
+	namespace := tmpl.Namespace
+	if namespace == "" {
+		namespace = b.cfg.Namespace
+	}
 	gsa := &allocationv1.GameServerAllocation{
 		Spec: allocationv1.GameServerAllocationSpec{
 			Selectors: []allocationv1.GameServerSelector{
 				{
-					LabelSelector: metav1.LabelSelector{MatchLabels: b.selectorWithRegion(req.Region)},
+					LabelSelector: metav1.LabelSelector{MatchLabels: selectorWithRegion(tmpl.SelectorLabels, req.Region)},
 				},
 			},
 		},
 	}
-	result, err := b.cfg.API.CreateGameServerAllocation(ctx, b.cfg.Namespace, gsa)
+	result, err := b.cfg.API.CreateGameServerAllocation(ctx, namespace, gsa)
 	if err != nil {
 		return nil, fmt.Errorf("agones: allocate: %w", err)
 	}
@@ -190,9 +217,9 @@ func (b *Backend) Watch(ctx context.Context, _ fleet.AllocationID, backendRef st
 // HealthCheck verifies the agones API server is reachable.
 func (b *Backend) HealthCheck(ctx context.Context) error { return b.cfg.API.Ping(ctx) }
 
-func (b *Backend) selectorWithRegion(region string) map[string]string {
-	out := make(map[string]string, len(b.cfg.SelectorLabels)+1)
-	for k, v := range b.cfg.SelectorLabels {
+func selectorWithRegion(labels map[string]string, region string) map[string]string {
+	out := make(map[string]string, len(labels)+1)
+	for k, v := range labels {
 		out[k] = v
 	}
 	if region != "" {
@@ -311,30 +338,3 @@ func (a clientsetAdapter) Ping(ctx context.Context) error {
 	_ = ctx
 	return nil
 }
-
-// parseSelectorLabels turns a "k=v,k2=v2" config string into a map. Empty
-// in → empty map (with non-nil backing) so callers can append without nil
-// checks.
-func parseSelectorLabels(s string) map[string]string {
-	out := map[string]string{}
-	for _, p := range strings.Split(s, ",") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		eq := strings.IndexByte(p, '=')
-		if eq <= 0 {
-			continue
-		}
-		k := strings.TrimSpace(p[:eq])
-		v := strings.TrimSpace(p[eq+1:])
-		if k != "" {
-			out[k] = v
-		}
-	}
-	return out
-}
-
-// ParseSelectorLabels exports parseSelectorLabels so the builder package
-// can produce the SelectorLabels map without re-implementing the parse.
-func ParseSelectorLabels(s string) map[string]string { return parseSelectorLabels(s) }

@@ -1,10 +1,10 @@
 -- name: CreatePendingAllocation :one
 INSERT INTO game_server_allocations (
-    tenant_id, project_id, backend, region, status, metadata
+    tenant_id, project_id, fleet_id, backend, region, status, metadata
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, 'pending', $4
+    $1, $2, $3, $4, 'pending', $5
 )
 RETURNING id, requested_at;
 
@@ -38,14 +38,14 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: GetAllocation :one
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: ListActiveAllocations :many
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -58,7 +58,7 @@ LIMIT $2;
 -- Dashboard fleet list: optionally include terminal rows (shutdown/failed)
 -- and paginate. include_terminal=false keeps the page focused on live
 -- allocations; the UI toggles it via a query param.
-SELECT id, tenant_id, project_id, backend, backend_ref, region, address,
+SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
 FROM game_server_allocations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint

@@ -207,6 +207,18 @@ type EndUserInvitation struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type Fleet struct {
+	ID        int64
+	TenantID  int64
+	ProjectID int64
+	Name      string
+	Backend   string
+	Config    []byte
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	DeletedAt pgtype.Timestamptz
+}
+
 type FleetAllocationEvent struct {
 	ID           int64
 	TenantID     int64
@@ -241,6 +253,7 @@ type GameServerAllocation struct {
 	RequestedAt pgtype.Timestamptz
 	ReadyAt     pgtype.Timestamptz
 	ReleasedAt  pgtype.Timestamptz
+	FleetID     *int64
 }
 
 type Leaderboard struct {
@@ -274,6 +287,7 @@ type MatchmakingTicket struct {
 	MatchAddress string
 	CreatedAt    pgtype.Timestamptz
 	MatchedAt    pgtype.Timestamptz
+	FleetID      *int64
 }
 
 type PlatformAuditLog struct {

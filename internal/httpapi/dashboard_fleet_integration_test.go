@@ -83,9 +83,12 @@ func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pl
 	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
 	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
-	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), backend, fleet.ManagerOptions{
-		Clock: func(int) time.Duration { return 0 },
-	})
+	mgr := fleet.NewManager(
+		fleet.NewPostgresStore(pool),
+		fleet.NewPostgresFleetStore(pool),
+		backend,
+		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }},
+	)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1",
 		Commit:  "test",

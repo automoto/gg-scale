@@ -111,7 +111,27 @@ func reservePort(t *testing.T) (host string, port int, keep net.Listener) {
 }
 
 func sampleReq() fleet.AllocationRequest {
-	return fleet.AllocationRequest{TenantID: 7, ProjectID: 11, Region: "local", Capacity: 4}
+	return reqWithDocker("ggscale/echo:latest", 7777, "tcp", "")
+}
+
+func reqWithDocker(image string, port int, probeType, probePath string) fleet.AllocationRequest {
+	cfg := map[string]string{
+		"image":      image,
+		"port":       strconv.Itoa(port),
+		"probe_type": probeType,
+	}
+	if probePath != "" {
+		cfg["probe_path"] = probePath
+	}
+	return fleet.AllocationRequest{
+		TenantID:  7,
+		ProjectID: 11,
+		FleetID:   42,
+		Backend:   "docker",
+		Config:    cfg,
+		Region:    "local",
+		Capacity:  4,
+	}
 }
 
 func inspectWithPortBinding(containerPort, hostIP string, hostPort int) dockercontainer.InspectResponse {
@@ -139,9 +159,6 @@ func TestBackend_Allocate_creates_starts_and_returns_host_address(t *testing.T) 
 
 	be, err := dockerbackend.New(dockerbackend.Config{
 		Client:       fake,
-		Image:        "ggscale/echo:latest",
-		Port:         7777,
-		ProbeType:    "tcp",
 		PublicIP:     host,
 		ProbeTimeout: 2 * time.Second,
 	})
@@ -155,6 +172,7 @@ func TestBackend_Allocate_creates_starts_and_returns_host_address(t *testing.T) 
 	assert.Equal(t, net.JoinHostPort(host, strconv.Itoa(port)), got.Address)
 	assert.Equal(t, "7", fake.lastCreateCfg.Labels["ggscale.tenant_id"])
 	assert.Equal(t, "11", fake.lastCreateCfg.Labels["ggscale.project_id"])
+	assert.Equal(t, "42", fake.lastCreateCfg.Labels["ggscale.fleet_id"])
 	assert.Equal(t, "ggscale.fleet", fake.lastCreateCfg.Labels["ggscale.managed_by"])
 
 	// Multi-tenant safety: containers must run with no-new-privileges
@@ -174,9 +192,6 @@ func TestBackend_Allocate_cleans_up_when_probe_never_succeeds(t *testing.T) {
 
 	be, err := dockerbackend.New(dockerbackend.Config{
 		Client:       fake,
-		Image:        "ggscale/echo:latest",
-		Port:         7777,
-		ProbeType:    "tcp",
 		PublicIP:     host,
 		ProbeTimeout: 200 * time.Millisecond,
 	})
@@ -204,16 +219,12 @@ func TestBackend_HTTPProbe_does_not_follow_redirects(t *testing.T) {
 
 	be, err := dockerbackend.New(dockerbackend.Config{
 		Client:       fake,
-		Image:        "ggscale/echo:latest",
-		Port:         7777,
-		ProbeType:    "http",
-		ProbePath:    "/",
 		PublicIP:     host,
 		ProbeTimeout: 200 * time.Millisecond,
 	})
 	require.NoError(t, err)
 
-	_, err = be.Allocate(context.Background(), sampleReq())
+	_, err = be.Allocate(context.Background(), reqWithDocker("ggscale/echo:latest", 7777, "http", "/"))
 	require.Error(t, err, "probe must fail when the server only redirects")
 	assert.Greater(t, got, 0, "probe must have hit the container's port")
 }
@@ -234,23 +245,19 @@ func TestBackend_Allocate_uses_http_probe_when_configured(t *testing.T) {
 
 	be, err := dockerbackend.New(dockerbackend.Config{
 		Client:       fake,
-		Image:        "ggscale/echo:latest",
-		Port:         7777,
-		ProbeType:    "http",
-		ProbePath:    "/healthz",
 		PublicIP:     host,
 		ProbeTimeout: 2 * time.Second,
 	})
 	require.NoError(t, err)
 
-	got, err := be.Allocate(context.Background(), sampleReq())
+	got, err := be.Allocate(context.Background(), reqWithDocker("ggscale/echo:latest", 7777, "http", "/healthz"))
 	require.NoError(t, err)
 	assert.Equal(t, net.JoinHostPort(host, strconv.Itoa(port)), got.Address)
 }
 
 func TestBackend_Deallocate_stops_and_removes(t *testing.T) {
 	fake := &fakeAPI{}
-	be, err := dockerbackend.New(dockerbackend.Config{Client: fake, Image: "ggscale/echo:latest", Port: 7777})
+	be, err := dockerbackend.New(dockerbackend.Config{Client: fake})
 	require.NoError(t, err)
 
 	require.NoError(t, be.Deallocate(context.Background(), fleet.AllocationID(1), "container-abc"))
@@ -260,7 +267,7 @@ func TestBackend_Deallocate_stops_and_removes(t *testing.T) {
 
 func TestBackend_HealthCheck_pings_daemon(t *testing.T) {
 	fake := &fakeAPI{}
-	be, err := dockerbackend.New(dockerbackend.Config{Client: fake, Image: "ggscale/echo:latest", Port: 7777})
+	be, err := dockerbackend.New(dockerbackend.Config{Client: fake})
 	require.NoError(t, err)
 	require.NoError(t, be.HealthCheck(context.Background()))
 
@@ -273,7 +280,7 @@ func TestBackend_Watch_translates_die_event_to_shutdown(t *testing.T) {
 		eventsCh:  make(chan dockerevents.Message, 1),
 		eventsErr: make(chan error, 1),
 	}
-	be, err := dockerbackend.New(dockerbackend.Config{Client: fake, Image: "ggscale/echo:latest", Port: 7777})
+	be, err := dockerbackend.New(dockerbackend.Config{Client: fake})
 	require.NoError(t, err)
 
 	ch, err := be.Watch(context.Background(), fleet.AllocationID(1), "container-abc")

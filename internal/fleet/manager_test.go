@@ -201,10 +201,81 @@ func (s *fakeStore) BackendsForTenant(_ context.Context) ([]fleet.BackendStats, 
 	return out, nil
 }
 
+// fakeFleetStore is a tiny in-memory FleetStore for manager tests. Tests
+// seed it with one fleet whose Backend matches the fakeBackend's name; the
+// manager resolves req.FleetID against this map before dispatching.
+type fakeFleetStore struct {
+	mu     sync.Mutex
+	next   int64
+	byID   map[int64]*fleet.Fleet
+	byName map[string]*fleet.Fleet
+}
+
+func newFakeFleetStore() *fakeFleetStore {
+	return &fakeFleetStore{byID: map[int64]*fleet.Fleet{}, byName: map[string]*fleet.Fleet{}}
+}
+
+func (s *fakeFleetStore) seed(projectID int64, name, backend string, cfg map[string]string) *fleet.Fleet {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.next++
+	f := &fleet.Fleet{ID: s.next, TenantID: 1, ProjectID: projectID, Name: name, Backend: backend, Config: cfg}
+	s.byID[s.next] = f
+	s.byName[name] = f
+	return f
+}
+
+func (s *fakeFleetStore) Create(_ context.Context, in fleet.FleetCreate) (*fleet.Fleet, error) {
+	return s.seed(in.ProjectID, in.Name, in.Backend, in.Config), nil
+}
+
+func (s *fakeFleetStore) GetByID(_ context.Context, id int64) (*fleet.Fleet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if f, ok := s.byID[id]; ok {
+		return f, nil
+	}
+	return nil, fleet.ErrFleetNotFound
+}
+
+func (s *fakeFleetStore) GetByName(_ context.Context, _ int64, name string) (*fleet.Fleet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if f, ok := s.byName[name]; ok {
+		return f, nil
+	}
+	return nil, fleet.ErrFleetNotFound
+}
+
+func (s *fakeFleetStore) ListForProject(_ context.Context, projectID int64) ([]*fleet.Fleet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*fleet.Fleet
+	for _, f := range s.byID {
+		if f.ProjectID == projectID {
+			out = append(out, f)
+		}
+	}
+	return out, nil
+}
+
+func (s *fakeFleetStore) Update(_ context.Context, _ fleet.FleetUpdate) error { return nil }
+func (s *fakeFleetStore) SoftDelete(_ context.Context, _ int64) error         { return nil }
+
+// newFakeFleetStoreSeed returns a fleet store seeded with one row whose
+// Backend matches backendName, so sampleReq() (which uses FleetID=1)
+// resolves cleanly inside the manager.
+func newFakeFleetStoreSeed(backendName string) *fakeFleetStore {
+	fs := newFakeFleetStore()
+	fs.seed(2, "default", backendName, map[string]string{})
+	return fs
+}
+
 func sampleReq() fleet.AllocationRequest {
 	return fleet.AllocationRequest{
 		TenantID:  1,
 		ProjectID: 2,
+		FleetID:   1, // matches the seeded "default" fleet (first row inserted by newTestManager)
 		Region:    "us-east-1",
 		GameMode:  "deathmatch",
 		Capacity:  16,
@@ -219,7 +290,7 @@ func TestManager_Allocate_persists_pending_then_ready(t *testing.T) {
 			return &fleet.Allocation{BackendRef: "container-abc", Address: "10.0.0.1:7777"}, nil
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
 
 	got, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
@@ -243,7 +314,7 @@ func TestManager_Allocate_retries_then_succeeds(t *testing.T) {
 			return &fleet.Allocation{BackendRef: "ok", Address: "10.0.0.2:7777"}, nil
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Retries: 3, Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Retries: 3, Clock: zeroClock})
 
 	got, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
@@ -259,7 +330,7 @@ func TestManager_Allocate_marks_failed_after_exhausting_retries(t *testing.T) {
 			return nil, errors.New("backend down")
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Retries: 2, Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Retries: 2, Clock: zeroClock})
 
 	got, err := mgr.Allocate(context.Background(), sampleReq())
 	require.Error(t, err)
@@ -281,7 +352,7 @@ func TestManager_Deallocate_calls_backend_and_releases_row(t *testing.T) {
 			return &fleet.Allocation{BackendRef: "ref-1", Address: "10.0.0.1:7777"}, nil
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 	a, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
 
@@ -307,7 +378,7 @@ func TestManager_Watch_pipes_backend_updates_to_caller(t *testing.T) {
 		},
 		watchImpl: func() <-chan fleet.StatusUpdate { return src },
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 	a, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
 
@@ -326,7 +397,7 @@ func TestManager_Allocate_appends_pending_and_ready_events(t *testing.T) {
 			return &fleet.Allocation{BackendRef: "ref", Address: "1.2.3.4:1"}, nil
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 	a, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
 
@@ -347,7 +418,7 @@ func TestManager_Allocate_appends_failed_event_after_exhausting_retries(t *testi
 			return nil, errors.New("backend down")
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Retries: 1, Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Retries: 1, Clock: zeroClock})
 	_, err := mgr.Allocate(context.Background(), sampleReq())
 	require.Error(t, err)
 
@@ -366,7 +437,7 @@ func TestManager_List_skips_terminal_when_excluded(t *testing.T) {
 			return &fleet.Allocation{BackendRef: "ref", Address: "1.2.3.4:1"}, nil
 		},
 	}
-	mgr := fleet.NewManager(store, backend, fleet.ManagerOptions{Clock: zeroClock})
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 	a, err := mgr.Allocate(context.Background(), sampleReq())
 	require.NoError(t, err)
 	require.NoError(t, mgr.Deallocate(context.Background(), a.ID))
@@ -384,9 +455,10 @@ func TestManager_List_skips_terminal_when_excluded(t *testing.T) {
 
 func TestManager_BackendsForTenant_returns_distinct_backends(t *testing.T) {
 	store := newFakeStore()
-	mgr := fleet.NewManager(store, &fakeBackend{name: "docker", allocateImpl: func(_ int) (*fleet.Allocation, error) {
+	backend := &fakeBackend{name: "docker", allocateImpl: func(_ int) (*fleet.Allocation, error) {
 		return &fleet.Allocation{}, nil
-	}}, fleet.ManagerOptions{Clock: zeroClock})
+	}}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 	_, _ = mgr.Allocate(context.Background(), sampleReq())
 	_, _ = mgr.Allocate(context.Background(), sampleReq())
 	stats, err := mgr.BackendsForTenant(context.Background())

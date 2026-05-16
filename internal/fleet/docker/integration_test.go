@@ -26,13 +26,8 @@ func TestBackend_RealDaemon_Allocate_to_Deallocate(t *testing.T) {
 	}
 
 	be, err := dockerbackend.NewFromEnv(dockerbackend.Config{
-		Image:        "traefik/whoami:latest",
-		Port:         80,
-		ProbeType:    "http",
-		ProbePath:    "/",
 		PublicIP:     "127.0.0.1",
 		ProbeTimeout: 30 * time.Second,
-		PullImage:    true,
 	})
 	require.NoError(t, err)
 
@@ -42,8 +37,17 @@ func TestBackend_RealDaemon_Allocate_to_Deallocate(t *testing.T) {
 	got, err := be.Allocate(context.Background(), fleet.AllocationRequest{
 		TenantID:  1,
 		ProjectID: 1,
-		Region:    "local",
-		Capacity:  1,
+		FleetID:   1,
+		Backend:   "docker",
+		Config: map[string]string{
+			"image":      "traefik/whoami:latest",
+			"port":       "80",
+			"probe_type": "http",
+			"probe_path": "/",
+			"pull_image": "true",
+		},
+		Region:   "local",
+		Capacity: 1,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {

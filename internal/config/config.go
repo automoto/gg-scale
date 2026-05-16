@@ -30,19 +30,14 @@ type Config struct {
 	// FleetBackend starts with "plugin:".
 	FleetPluginDir string
 
-	// Docker fleet-backend tunables. Only consulted when FleetBackend=docker.
-	DockerGameServerImage string
-	DockerGameServerPort  int
-	DockerProbeType       string
-	DockerProbePath       string
-	DockerMaxSessions     int
-	DockerHost            string
+	// Docker fleet-backend host-wide tunables. Per-template values (image,
+	// port, probe) live on the fleet template, not in env vars.
+	DockerHost string
 
-	// Agones fleet-backend tunables. Only consulted when FleetBackend=agones.
-	AgonesNamespace      string
-	AgonesFleetName      string
-	AgonesSelectorLabels string
-	AgonesKubeconfig     string
+	// Agones fleet-backend host-wide tunables. Per-template values (fleet
+	// name, selector labels) live on the fleet template, not in env vars.
+	AgonesNamespace  string
+	AgonesKubeconfig string
 
 	// RealtimeMaxPerTenant caps concurrent /v1/ws connections per tenant.
 	// 0 disables the cap (the cache.Store layer is bypassed entirely).
@@ -190,39 +185,6 @@ var declared = []varDecl{
 		return nil
 	}},
 
-	{name: "DOCKER_GAMESERVER_IMAGE", defval: "", set: func(c *Config, v string) error {
-		c.DockerGameServerImage = v
-		return nil
-	}},
-	{name: "DOCKER_GAMESERVER_PORT", defval: "7777", set: func(c *Config, v string) error {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("DOCKER_GAMESERVER_PORT %q: %w", v, err)
-		}
-		c.DockerGameServerPort = n
-		return nil
-	}},
-	{name: "DOCKER_PROBE_TYPE", defval: "tcp", set: func(c *Config, v string) error {
-		switch v {
-		case "", "tcp", "http":
-			c.DockerProbeType = v
-			return nil
-		default:
-			return fmt.Errorf("DOCKER_PROBE_TYPE %q: must be tcp|http (empty disables)", v)
-		}
-	}},
-	{name: "DOCKER_PROBE_PATH", defval: "/healthz", set: func(c *Config, v string) error {
-		c.DockerProbePath = v
-		return nil
-	}},
-	{name: "DOCKER_MAX_SESSIONS", defval: "0", set: func(c *Config, v string) error {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("DOCKER_MAX_SESSIONS %q: %w", v, err)
-		}
-		c.DockerMaxSessions = n
-		return nil
-	}},
 	{name: "DOCKER_HOST", defval: "", set: func(c *Config, v string) error {
 		c.DockerHost = v
 		return nil
@@ -230,14 +192,6 @@ var declared = []varDecl{
 
 	{name: "AGONES_NAMESPACE", defval: "default", set: func(c *Config, v string) error {
 		c.AgonesNamespace = v
-		return nil
-	}},
-	{name: "AGONES_FLEET_NAME", defval: "", set: func(c *Config, v string) error {
-		c.AgonesFleetName = v
-		return nil
-	}},
-	{name: "AGONES_SELECTOR_LABELS", defval: "", set: func(c *Config, v string) error {
-		c.AgonesSelectorLabels = v
 		return nil
 	}},
 	{name: "AGONES_KUBECONFIG", defval: "", set: func(c *Config, v string) error {

@@ -30,7 +30,7 @@ const (
 // dormant rather than seeing a misleading "no allocations" message.
 func (h *Handler) fleetEnabled() bool { return h.fleet != nil }
 
-func (h *Handler) fleetListPage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsListPage(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -61,10 +61,10 @@ func (h *Handler) fleetListPage(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-// fleetListFragment serves the polled body of the fleet list. Same view model
+// allocationsListFragment serves the polled body of the fleet list. Same view model
 // as the full page; the template renders only the table when invoked through
 // this entry point.
-func (h *Handler) fleetListFragment(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsListFragment(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -88,7 +88,7 @@ func (h *Handler) fleetListFragment(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-func (h *Handler) fleetDetailPage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsDetailPage(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -118,7 +118,7 @@ func (h *Handler) fleetDetailPage(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-func (h *Handler) fleetDetailFragment(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsDetailFragment(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -144,23 +144,27 @@ func (h *Handler) fleetDetailFragment(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-func (h *Handler) fleetNewPage(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsNewPage(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	webutil.Render(r, w, NewFleetAllocationPage(NewAllocationView{
+	view := NewAllocationView{
 		UserEmail:   session.User.Email,
 		CSRFToken:   session.CSRFToken,
 		TenantID:    tenantID,
 		ProjectID:   projectID,
 		BackendName: h.fleetBackendName(),
 		Enabled:     h.fleetEnabled(),
-	}))
+	}
+	if h.fleetEnabled() {
+		view.Fleets = h.loadFleetOptions(r.Context(), tenantID, projectID)
+	}
+	webutil.Render(r, w, NewFleetAllocationPage(view))
 }
 
-func (h *Handler) fleetAllocateHandler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -173,28 +177,53 @@ func (h *Handler) fleetAllocateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
+	fleetName := strings.TrimSpace(r.Form.Get("fleet"))
 	region := strings.TrimSpace(r.Form.Get("region"))
 	gameMode := strings.TrimSpace(r.Form.Get("game_mode"))
 	capacity, _ := strconv.Atoi(r.Form.Get("capacity"))
 	if capacity <= 0 {
 		capacity = 1
 	}
+	tenantCtx := db.WithTenant(r.Context(), tenantID)
 	view := NewAllocationView{
 		UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
 		TenantID: tenantID, ProjectID: projectID, BackendName: h.fleetBackendName(),
-		Enabled: true, Region: region, GameMode: gameMode, Capacity: capacity,
+		Enabled: true, Fleet: fleetName, Region: region, GameMode: gameMode, Capacity: capacity,
+		Fleets: h.loadFleetOptions(r.Context(), tenantID, projectID),
+	}
+	fieldErrors := map[string]string{}
+	if fleetName == "" {
+		fieldErrors["fleet"] = "Fleet is required."
 	}
 	if region == "" {
-		view.FieldErrors = map[string]string{"region": "Region is required."}
+		fieldErrors["region"] = "Region is required."
+	}
+	if len(fieldErrors) > 0 {
+		view.FieldErrors = fieldErrors
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
 
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
+	f, ferr := h.fleet.Fleets().GetByName(tenantCtx, projectID, fleetName)
+	if errors.Is(ferr, fleet.ErrFleetNotFound) {
+		view.FieldErrors = map[string]string{"fleet": "Unknown fleet for this project."}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		webutil.Render(r, w, NewFleetAllocationPage(view))
+		return
+	}
+	if ferr != nil {
+		slog.ErrorContext(r.Context(), "fleet lookup failed", "err", ferr, "fleet", fleetName)
+		view.Error = "Fleet lookup failed: " + ferr.Error()
+		w.WriteHeader(http.StatusInternalServerError)
+		webutil.Render(r, w, NewFleetAllocationPage(view))
+		return
+	}
+
 	alloc, err := h.fleet.Allocate(tenantCtx, fleet.AllocationRequest{
 		TenantID:  tenantID,
 		ProjectID: projectID,
+		FleetID:   f.ID,
 		Region:    region,
 		GameMode:  gameMode,
 		Capacity:  capacity,
@@ -208,18 +237,47 @@ func (h *Handler) fleetAllocateHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.allocate.manual", strconv.FormatInt(int64(alloc.ID), 10), map[string]any{
 		"project_id": projectID,
+		"fleet_id":   f.ID,
+		"fleet_name": f.Name,
 		"region":     region,
 		"game_mode":  gameMode,
 		"capacity":   capacity,
 	}); auditErr != nil {
 		slog.WarnContext(r.Context(), "audit log: fleet.allocate.manual", "err", auditErr)
 	}
-	target := fleetBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
+	target := allocationsBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
 		"?flash=" + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
-func (h *Handler) fleetDeallocatePage(w http.ResponseWriter, r *http.Request) {
+// loadFleetOptions fetches active fleet templates for the project so the
+// manual-allocate form can render a dropdown. Returns an empty slice on
+// error so the form still renders (with no fleets to pick from).
+func (h *Handler) loadFleetOptions(ctx context.Context, tenantID, projectID int64) []FleetOption {
+	if h.fleet == nil {
+		return nil
+	}
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	rows, err := h.fleet.Fleets().ListForProject(tenantCtx, projectID)
+	if err != nil {
+		slog.ErrorContext(ctx, "list fleets for allocation form", "err", err)
+		return nil
+	}
+	out := make([]FleetOption, 0, len(rows))
+	backend := h.fleetBackendName()
+	for _, f := range rows {
+		out = append(out, FleetOption{
+			ID:                f.ID,
+			Name:              f.Name,
+			Backend:           f.Backend,
+			BackendMatches:    f.Backend == backend,
+			BackendConfigured: backend,
+		})
+	}
+	return out
+}
+
+func (h *Handler) allocationsDeallocatePage(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -247,7 +305,7 @@ func (h *Handler) fleetDeallocatePage(w http.ResponseWriter, r *http.Request) {
 	}))
 }
 
-func (h *Handler) fleetDeallocateHandler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
 		return
@@ -291,7 +349,7 @@ func (h *Handler) fleetDeallocateHandler(w http.ResponseWriter, r *http.Request)
 		strconv.FormatInt(allocID, 10), map[string]any{"project_id": projectID}); auditErr != nil {
 		slog.WarnContext(r.Context(), "audit log: fleet.deallocate.manual", "err", auditErr)
 	}
-	target := fleetBasePath(tenantID, projectID) + "?flash=" + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
+	target := allocationsBasePath(tenantID, projectID) + "?flash=" + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -496,9 +554,14 @@ func pageParam(r *http.Request) int {
 	return p
 }
 
-func fleetBasePath(tenantID, projectID int64) string {
+func allocationsBasePath(tenantID, projectID int64) string {
 	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
-		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleet"
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+}
+
+func fleetsBasePath(tenantID, projectID int64) string {
+	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
 }
 
 func allocToView(a *fleet.Allocation) AllocationView {

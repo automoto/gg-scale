@@ -97,10 +97,24 @@ type AllocationID int64
 type AllocationRequest struct {
 	TenantID  int64
 	ProjectID int64
-	Region    string
-	GameMode  string
-	Capacity  int
-	Labels    map[string]string
+	// FleetID identifies the fleet template this allocation is drawn from.
+	// Required at the matchmaker / dashboard boundary; the Manager refuses
+	// to dispatch a request with FleetID == 0.
+	FleetID int64
+	// Backend is the backend name resolved from the fleet template. The
+	// Manager populates this from the fleet row before calling Backend.
+	// Allocate, then refuses to dispatch when it disagrees with the
+	// configured backend's Name().
+	Backend string
+	// Config is the per-backend recipe flattened to strings. Manager copies
+	// fleet.Config into this field; backends read keys they care about
+	// (docker: image/port/probe_*; agones: namespace/fleet_name/selector.*;
+	// plugin: whatever the plugin defines).
+	Config   map[string]string
+	Region   string
+	GameMode string
+	Capacity int
+	Labels   map[string]string
 }
 
 // Allocation is the manager's view of one game-server slot. BackendRef is
@@ -110,6 +124,7 @@ type Allocation struct {
 	ID         AllocationID
 	TenantID   int64
 	ProjectID  int64
+	FleetID    int64
 	Backend    string
 	BackendRef string
 	Region     string

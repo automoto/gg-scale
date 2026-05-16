@@ -1,15 +1,15 @@
 -- name: InsertMatchmakingTicket :one
 INSERT INTO matchmaking_tickets (
-    tenant_id, project_id, end_user_id, region, game_mode, attributes
+    tenant_id, project_id, fleet_id, end_user_id, region, game_mode, attributes
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4, $5
+    $1, $2, $3, $4, $5, $6
 )
 RETURNING id, status::text AS status, created_at;
 
 -- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, end_user_id, region, game_mode,
+SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
        attributes, status::text AS status, match_address,
        created_at, matched_at
 FROM matchmaking_tickets
@@ -25,12 +25,13 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 RETURNING id;
 
 -- name: ListReadyMatchmakerBuckets :many
-SELECT tenant_id, project_id, region, game_mode, count(*) AS ticket_count
+SELECT tenant_id, project_id, fleet_id, region, game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets
 WHERE status = 'queued'
-GROUP BY tenant_id, project_id, region, game_mode
+  AND fleet_id IS NOT NULL
+GROUP BY tenant_id, project_id, fleet_id, region, game_mode
 HAVING count(*) >= $1::int
-ORDER BY tenant_id, project_id, region, game_mode;
+ORDER BY tenant_id, project_id, fleet_id, region, game_mode;
 
 -- name: PopMatchmakerBucket :many
 WITH candidates AS (
@@ -39,17 +40,18 @@ WITH candidates AS (
     WHERE mt.status = 'queued'
       AND mt.tenant_id = $1
       AND mt.project_id = $2
-      AND mt.region = $3
-      AND mt.game_mode = $4
+      AND mt.fleet_id  = $3
+      AND mt.region    = $4
+      AND mt.game_mode = $5
     ORDER BY mt.created_at, mt.id
-    LIMIT $5::int
+    LIMIT $6::int
     FOR UPDATE SKIP LOCKED
 )
 UPDATE matchmaking_tickets t
 SET status = 'matched'
 FROM candidates c
 WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.end_user_id, t.region,
+RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.created_at, t.matched_at;
 

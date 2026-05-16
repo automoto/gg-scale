@@ -151,8 +151,13 @@ func TestFleetDeallocate_rejects_mismatched_id(t *testing.T) {
 	_ = h
 }
 
-func TestFleetBasePath_matches_template_helper(t *testing.T) {
-	assert.Equal(t, fleetBasePath(7, 9), fleetBasePathTpl(7, 9),
+func TestAllocationsBasePath_matches_template_helper(t *testing.T) {
+	assert.Equal(t, allocationsBasePath(7, 9), allocationsBasePathTpl(7, 9),
+		"go and templ helpers must produce the same URL")
+}
+
+func TestFleetsBasePath_matches_template_helper(t *testing.T) {
+	assert.Equal(t, fleetsBasePath(7, 9), fleetsBasePathTpl(7, 9),
 		"go and templ helpers must produce the same URL")
 }
 

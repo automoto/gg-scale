@@ -29,6 +29,7 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 		ID:         q.nextID,
 		TenantID:   req.TenantID,
 		ProjectID:  req.ProjectID,
+		FleetID:    req.FleetID,
 		EndUserID:  req.EndUserID,
 		Region:     req.Region,
 		GameMode:   req.GameMode,
@@ -86,7 +87,7 @@ func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket
 		if t.Status != StatusQueued {
 			continue
 		}
-		counts[Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, Region: t.Region, GameMode: t.GameMode}]++
+		counts[Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, FleetID: t.FleetID, Region: t.Region, GameMode: t.GameMode}]++
 	}
 	out := make([]Bucket, 0, len(counts))
 	for b, c := range counts {
@@ -100,6 +101,9 @@ func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket
 		}
 		if out[i].ProjectID != out[j].ProjectID {
 			return out[i].ProjectID < out[j].ProjectID
+		}
+		if out[i].FleetID != out[j].FleetID {
+			return out[i].FleetID < out[j].FleetID
 		}
 		if out[i].Region != out[j].Region {
 			return out[i].Region < out[j].Region
@@ -121,6 +125,9 @@ func (q *MemQueue) PopBucket(_ context.Context, bucket Bucket, n int) ([]*Ticket
 			continue
 		}
 		if t.TenantID != bucket.TenantID || t.ProjectID != bucket.ProjectID {
+			continue
+		}
+		if t.FleetID != bucket.FleetID {
 			continue
 		}
 		if t.Region != bucket.Region || t.GameMode != bucket.GameMode {

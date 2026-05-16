@@ -47,22 +47,12 @@ type API interface {
 // only need the dependency for its method-set.
 type ImagePullReadCloser = io.ReadCloser
 
-// Config wires the backend at startup. Port is the *container* port the
-// game server listens on; the daemon publishes it to a dynamic host port
-// which Backend.Allocate returns to the matchmaker.
+// Config wires the backend at startup. Per-template values (image, port,
+// probe) come in through AllocationRequest.Config on each Allocate; what
+// remains here are host-level knobs that are deployment-wide.
 type Config struct {
 	// Client is the Docker daemon adapter. Pass *client.Client in production.
 	Client API
-	// Image is the OCI image reference, e.g. "ghcr.io/example/gs:1.2.3".
-	Image string
-	// Port is the in-container listening port the game server binds.
-	Port int
-	// ProbeType is "tcp" or "http". An empty value disables the readiness
-	// probe entirely (the container is considered ready as soon as Docker
-	// reports it running — fine for local dev, not for production).
-	ProbeType string
-	// ProbePath is the HTTP path to GET when ProbeType is "http".
-	ProbePath string
 	// ProbeTimeout bounds how long Allocate waits for the probe to succeed.
 	// Default 30s when zero.
 	ProbeTimeout time.Duration
@@ -70,10 +60,6 @@ type Config struct {
 	// the daemon is not on localhost or when the published port isn't
 	// reachable on 127.0.0.1.
 	PublicIP string
-	// PullImage controls whether Allocate pulls the image before
-	// ContainerCreate. Default false — operators bake images into hosts
-	// for predictable cold-start latency.
-	PullImage bool
 }
 
 // Backend allocates game-server containers via Docker.
@@ -101,12 +87,6 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("docker: Client is required")
 	}
-	if cfg.Image == "" {
-		return nil, errors.New("docker: Image is required")
-	}
-	if cfg.Port <= 0 {
-		return nil, errors.New("docker: Port must be > 0")
-	}
 	timeout := cfg.ProbeTimeout
 	if timeout == 0 {
 		timeout = 30 * time.Second
@@ -117,29 +97,73 @@ func New(cfg Config) (*Backend, error) {
 // Name returns the backend identifier persisted on every allocation row.
 func (b *Backend) Name() string { return "docker" }
 
+// Template captures the per-allocation knobs the docker backend reads off
+// AllocationRequest.Config. Operators set these by creating a fleet in the
+// dashboard; the manager flattens fleet.config into req.Config before
+// dispatching.
+type Template struct {
+	Image     string
+	Port      int
+	ProbeType string
+	ProbePath string
+	PullImage bool
+}
+
+// TemplateFromConfig parses AllocationRequest.Config keys into a Template
+// and validates the required fields (image, port). Returns a meaningful
+// error if either is missing or malformed so the dashboard can surface it
+// against the fleet row.
+func TemplateFromConfig(cfg map[string]string) (Template, error) {
+	t := Template{
+		Image:     cfg["image"],
+		ProbeType: cfg["probe_type"],
+		ProbePath: cfg["probe_path"],
+	}
+	if t.Image == "" {
+		return Template{}, errors.New("docker: fleet config missing \"image\"")
+	}
+	if raw := cfg["port"]; raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil || port <= 0 {
+			return Template{}, fmt.Errorf("docker: fleet config invalid \"port\" %q", raw)
+		}
+		t.Port = port
+	} else {
+		return Template{}, errors.New("docker: fleet config missing \"port\"")
+	}
+	t.PullImage = cfg["pull_image"] == "true"
+	return t, nil
+}
+
 // Allocate creates, starts, and probes a container. On any failure past
 // ContainerCreate the container is force-removed so a failed Allocate
 // leaves no orphan resources behind.
 func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
-	if b.cfg.PullImage {
-		if err := b.pull(ctx); err != nil {
+	tmpl, err := TemplateFromConfig(req.Config)
+	if err != nil {
+		return nil, err
+	}
+
+	if tmpl.PullImage {
+		if err := b.pullImage(ctx, tmpl.Image); err != nil {
 			return nil, err
 		}
 	}
 
-	containerPort, err := nat.NewPort("tcp", strconv.Itoa(b.cfg.Port))
+	containerPort, err := nat.NewPort("tcp", strconv.Itoa(tmpl.Port))
 	if err != nil {
 		return nil, fmt.Errorf("docker: port: %w", err)
 	}
 
 	created, err := b.cfg.Client.ContainerCreate(ctx,
 		&dockercontainer.Config{
-			Image:        b.cfg.Image,
+			Image:        tmpl.Image,
 			ExposedPorts: nat.PortSet{containerPort: struct{}{}},
 			Labels: map[string]string{
 				"ggscale.managed_by": "ggscale.fleet",
 				"ggscale.tenant_id":  strconv.FormatInt(req.TenantID, 10),
 				"ggscale.project_id": strconv.FormatInt(req.ProjectID, 10),
+				"ggscale.fleet_id":   strconv.FormatInt(req.FleetID, 10),
 				"ggscale.region":     req.Region,
 				"ggscale.game_mode":  req.GameMode,
 			},
@@ -173,7 +197,7 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 		return nil, err
 	}
 
-	if err := b.probe(ctx, address); err != nil {
+	if err := b.probe(ctx, address, tmpl); err != nil {
 		b.forceRemove(context.Background(), created.ID)
 		return nil, err
 	}
@@ -275,8 +299,8 @@ func (b *Backend) HealthCheck(ctx context.Context) error {
 	return nil
 }
 
-func (b *Backend) pull(ctx context.Context) error {
-	rc, err := b.cfg.Client.ImagePull(ctx, b.cfg.Image, dockerimage.PullOptions{})
+func (b *Backend) pullImage(ctx context.Context, image string) error {
+	rc, err := b.cfg.Client.ImagePull(ctx, image, dockerimage.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("docker: pull: %w", err)
 	}
@@ -310,8 +334,8 @@ func (b *Backend) resolveAddress(ctx context.Context, containerID string, contai
 	return net.JoinHostPort(host, binding.HostPort), nil
 }
 
-func (b *Backend) probe(ctx context.Context, address string) error {
-	if b.cfg.ProbeType == "" {
+func (b *Backend) probe(ctx context.Context, address string, tmpl Template) error {
+	if tmpl.ProbeType == "" {
 		return nil
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, b.probeTimeout)
@@ -323,7 +347,7 @@ func (b *Backend) probe(ctx context.Context, address string) error {
 	defer ticker.Stop()
 
 	for {
-		if b.probeOnce(probeCtx, address) {
+		if b.probeOnce(probeCtx, address, tmpl) {
 			return nil
 		}
 		select {
@@ -334,8 +358,8 @@ func (b *Backend) probe(ctx context.Context, address string) error {
 	}
 }
 
-func (b *Backend) probeOnce(ctx context.Context, address string) bool {
-	switch strings.ToLower(b.cfg.ProbeType) {
+func (b *Backend) probeOnce(ctx context.Context, address string, tmpl Template) bool {
+	switch strings.ToLower(tmpl.ProbeType) {
 	case "tcp":
 		d := net.Dialer{Timeout: 500 * time.Millisecond}
 		conn, err := d.DialContext(ctx, "tcp", address)
@@ -345,7 +369,7 @@ func (b *Backend) probeOnce(ctx context.Context, address string) bool {
 		_ = conn.Close()
 		return true
 	case "http":
-		path := b.cfg.ProbePath
+		path := tmpl.ProbePath
 		if path == "" {
 			path = "/"
 		}

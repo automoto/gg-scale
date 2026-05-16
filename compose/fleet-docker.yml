@@ -1,0 +1,36 @@
+# Fleet feature with the Docker backend.
+#
+# ggscale-server gets the Docker socket mounted and FLEET_BACKEND=docker so
+# fleet allocations spawn a fresh game-server container per request and
+# return {host, port} to the client. Before allocations succeed, an operator
+# creates one or more fleet templates in the dashboard at
+#   /v1/dashboard/tenants/<t>/projects/<p>/fleets
+# Each template captures the image, container port, and probe — no env vars.
+#
+# Usage:
+#   make up-fleet-docker
+#   # or manually:
+#   docker compose -f compose/fleet-docker.yml up -d --wait
+#
+# Set GAME_SERVER_PUBLIC_IP in .env to the host's reachable IP so allocations
+# return an address clients can connect to.
+
+name: ggscale
+
+include:
+  - path: ../docker-compose.yml
+
+services:
+
+  ggscale-server:
+    # The published image runs as USER nonroot (distroless). To open the
+    # mounted Docker socket — owned by root on both Linux and Docker Desktop —
+    # we run as root in this local-dev compose. Production deployments should
+    # instead give the runtime user membership in the `docker` group on the
+    # host and use `group_add`, or front the daemon with a socket proxy.
+    user: "0:0"
+    environment:
+      FLEET_BACKEND: docker
+      GAME_SERVER_PUBLIC_IP: ${GAME_SERVER_PUBLIC_IP:-127.0.0.1}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

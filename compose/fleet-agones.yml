@@ -1,0 +1,77 @@
+# Fleet feature with the k3s + Agones backend.
+#
+# Spins up a single-node k3s cluster inside compose, installs Agones, and
+# points ggscale-server at the resulting kubeconfig. `POST /v1/fleet/allocate`
+# allocates a GameServer from an Agones Fleet (see k8s/fleets/doomerang.yaml).
+#
+# Usage:
+#   make up-fleet-agones && make agones-install
+#   # or manually:
+#   docker compose --project-directory . -f compose/fleet-agones.yml up -d --wait
+#   docker compose --project-directory . -f compose/fleet-agones.yml run --rm agones-install
+#
+# macOS contributors: run Colima first — Docker Desktop's host networking
+# breaks Agones UDP reachability. See README "k8s profile (contributors only)".
+
+name: ggscale
+
+include:
+  - path: ../docker-compose.yml
+
+services:
+
+  ggscale-server:
+    environment:
+      FLEET_BACKEND: agones
+      AGONES_NAMESPACE: ${AGONES_NAMESPACE:-default}
+      AGONES_FLEET_NAME: ${AGONES_FLEET_NAME:-doomerang}
+      AGONES_KUBECONFIG: /kube/kubeconfig.yaml
+    volumes:
+      - ../.k3s:/kube:ro
+
+  k3s:
+    image: rancher/k3s:v1.30.6-k3s1
+    privileged: true
+    network_mode: host
+    command:
+      - server
+      - --disable=traefik
+      - --disable=servicelb
+      - --write-kubeconfig-mode=644
+      - --write-kubeconfig=/output/kubeconfig.yaml
+    environment:
+      K3S_KUBECONFIG_OUTPUT: /output/kubeconfig.yaml
+      K3S_KUBECONFIG_MODE: "644"
+    volumes:
+      - k3s-server:/var/lib/rancher/k3s
+      - ../.k3s:/output
+    tmpfs:
+      - /run
+      - /var/run
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  agones-install:
+    image: bitnami/kubectl:1.30
+    depends_on:
+      - k3s
+    network_mode: host
+    volumes:
+      - ../.k3s:/kube:ro
+      - ../k8s:/manifests:ro
+      - ../scripts:/scripts:ro
+    environment:
+      KUBECONFIG: /kube/kubeconfig.yaml
+    entrypoint: ["/bin/sh", "/scripts/agones-install.sh"]
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  k3s-server:

@@ -256,7 +256,8 @@ templ ProjectsPage(vm ProjectsView) {
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
-									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleet") } role="button" class="secondary outline">Fleet</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") } role="button" class="secondary outline">Fleets</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") } role="button" class="secondary outline">Allocations</a>
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
 								</td>
 							</tr>
@@ -1026,10 +1027,11 @@ templ FleetPage(vm FleetView) {
 				</p>
 			</div>
 			<div class="actions-cell">
+				<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Fleets</a>
 				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/fleet/backends") } role="button" class="secondary outline btn-inline">Backends</a>
 				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/matchmaker") } role="button" class="secondary outline btn-inline">Matchmaker</a>
 				if vm.Enabled {
-					<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ Manual allocate</a>
+					<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ Manual allocate</a>
 				}
 			</div>
 		</div>
@@ -1037,7 +1039,7 @@ templ FleetPage(vm FleetView) {
 			<p class="flash-success">{ vm.Message }</p>
 		}
 		<section class="card">
-			<form method="get" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+			<form method="get" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
 				<label>
 					if vm.IncludeTerminal {
 						<input type="checkbox" name="all" value="1" checked/>
@@ -1058,7 +1060,7 @@ templ FleetPage(vm FleetView) {
 			</section>
 		} else {
 			<section class="card"
-				hx-get={ fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/table?" + fleetQuery(vm) }
+				hx-get={ allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/table?" + fleetQuery(vm) }
 				hx-trigger="every 5s"
 				hx-swap="innerHTML">
 				@FleetTableFragment(vm)
@@ -1091,7 +1093,7 @@ templ FleetTableFragment(vm FleetView) {
 						<td><code>{ a.BackendRef }</code></td>
 						<td><code>{ a.Address }</code></td>
 						<td class="actions-cell">
-							<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(a.ID)) } role="button" class="secondary outline">View</a>
+							<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(a.ID)) } role="button" class="secondary outline">View</a>
 						</td>
 					</tr>
 				}
@@ -1105,7 +1107,7 @@ templ FleetDetailPage(vm FleetDetailView) {
 	@appLayout("Allocation — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="breadcrumb">
 			<a href="/v1/dashboard">Tenants</a> /
-			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
 			#{ stringFromInt(vm.Allocation.ID) }
 		</div>
 		<div class="page-header">
@@ -1115,14 +1117,14 @@ templ FleetDetailPage(vm FleetDetailView) {
 				<p class="subtitle">Backend <code>{ vm.Allocation.Backend }</code> — status <span class="badge badge-role">{ vm.Allocation.Status }</span></p>
 			</div>
 			if !allocationTerminal(vm.Allocation.Status) {
-				<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") } role="button" class="contrast outline btn-inline">Deallocate</a>
+				<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") } role="button" class="contrast outline btn-inline">Deallocate</a>
 			}
 		</div>
 		if vm.Message != "" {
 			<p class="flash-success">{ vm.Message }</p>
 		}
 		<section class="card"
-			hx-get={ fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/events" }
+			hx-get={ allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/events" }
 			hx-trigger="every 5s"
 			hx-swap="innerHTML">
 			@FleetDetailFragment(vm)
@@ -1169,7 +1171,7 @@ templ FleetDetailFragment(vm FleetDetailView) {
 templ NewFleetAllocationPage(vm NewAllocationView) {
 	@appLayout("Manual allocate — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="breadcrumb">
-			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Manual allocate
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Manual allocate
 		</div>
 		<div class="page-header">
 			<div>
@@ -1190,11 +1192,31 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 			if !vm.Enabled {
 				<p role="alert">No fleet backend configured.</p>
 			} else {
-				if vm.Error != "" {
-					<p role="alert">{ vm.Error }</p>
+				if len(vm.Fleets) == 0 {
+					<p role="alert">
+						No fleet templates exist for this project. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create one</a> before allocating.
+					</p>
 				}
-				<form method="post" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+				if len(vm.Fleets) > 0 {
+					if vm.Error != "" {
+						<p role="alert">{ vm.Error }</p>
+					}
+				<form method="post" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>
+						Fleet
+						<select name="fleet" required>
+							<option value="">Pick a fleet…</option>
+							for _, f := range vm.Fleets {
+								if f.BackendMatches {
+									<option value={ f.Name } selected?={ f.Name == vm.Fleet }>{ f.Name } ({ f.Backend })</option>
+								} else {
+									<option value={ f.Name } disabled>{ f.Name } — backend mismatch</option>
+								}
+							}
+						</select>
+						@fieldError(vm.FieldErrors, "fleet")
+					</label>
 					<label>
 						Region
 						<input name="region" value={ vm.Region } required placeholder="us-east-1" aria-describedby="region-error"/>
@@ -1209,10 +1231,11 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 						<input name="capacity" type="number" min="1" value={ capacityString(vm.Capacity) } required/>
 					</label>
 					<div class="form-actions">
-						<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+						<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
 						<button type="submit" class="btn-inline">Allocate</button>
 					</div>
 				</form>
+				}
 			}
 		</section>
 	}
@@ -1221,8 +1244,8 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 	@appLayout("Deallocate — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="breadcrumb">
-			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
-			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> /
 			Deallocate
 		</div>
 		<div class="page-header">
@@ -1241,14 +1264,14 @@ templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 				<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
 				<dt>Address</dt><dd><code>{ vm.Allocation.Address }</code></dd>
 			</dl>
-			<form method="post" action={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") }>
+			<form method="post" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Type <code>{ stringFromInt(vm.Allocation.ID) }</code> to confirm
 					<input name="confirm_id" autocomplete="off" required/>
 				</label>
 				<div class="form-actions">
-					<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) } role="button" class="secondary outline btn-inline">Cancel</a>
 					<button type="submit" class="contrast btn-inline">Deallocate</button>
 				</div>
 			</form>
@@ -1305,7 +1328,7 @@ templ MatchmakerQueuePage(vm MatchmakerQueueView) {
 	@appLayout("Matchmaker — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="breadcrumb">
 			<a href="/v1/dashboard">Tenants</a> /
-			<a href={ templ.URL(fleetBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
 		</div>
 		<div class="page-header">
 			<div>
@@ -1459,6 +1482,250 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 				</table>
 				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { stringFromInt(vm.Total) }.</p>
 			}
+		</section>
+	}
+}
+
+templ FleetsListPage(vm FleetsListView) {
+	@appLayout("Fleets — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleets
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleets</p>
+				<h1>Fleet templates</h1>
+				<p class="subtitle">
+					Project #{ stringFromInt(vm.ProjectID) } — operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
+				</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Allocations</a>
+				if vm.Enabled {
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New fleet</a>
+				}
+			</div>
+		</div>
+		<section class="card">
+			if vm.Message != "" {
+				<p class="flash">{ vm.Message }</p>
+			}
+			if !vm.Enabled {
+				<p role="alert">No fleet backend configured. Set <code>FLEET_BACKEND</code> in the server environment.</p>
+			} else if len(vm.Fleets) == 0 {
+				<p>No fleet templates yet. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create your first fleet</a>.</p>
+			} else {
+				<table>
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Backend</th>
+							<th>Summary</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, f := range vm.Fleets {
+							<tr>
+								<td><code>{ f.Name }</code></td>
+								<td>
+									<code>{ f.Backend }</code>
+									if !f.BackendMatches {
+										<small class="muted"> (not active)</small>
+									}
+								</td>
+								<td><code>{ f.Summary }</code></td>
+								<td class="actions-cell">
+									<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(f.ID)) } role="button" class="secondary outline btn-inline">Edit</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewFleetPage(vm NewFleetView) {
+	@appLayout("New fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>New fleet template</h1>
+				<p class="subtitle">A template captures the recipe (image, port, probe, …) that future allocations use.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required placeholder="doomerang-ranked"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				<label>
+					Backend
+					<select name="backend"
+						hx-get={ fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new/form" }
+						hx-trigger="change"
+						hx-target="#fleet-backend-fields"
+						hx-include="this"
+						hx-swap="innerHTML">
+						<option value="docker" selected?={ vm.Backend == "docker" || vm.Backend == "" }>docker</option>
+						<option value="agones" selected?={ vm.Backend == "agones" }>agones</option>
+						<option value="plugin" selected?={ vm.Backend == "plugin" }>plugin</option>
+					</select>
+					@fieldError(vm.FieldErrors, "backend")
+				</label>
+				<div id="fleet-backend-fields">
+					@FleetBackendFieldsFragment(vm)
+				</div>
+				<div class="form-actions">
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create fleet</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+// FleetBackendFieldsFragment swaps the backend-specific field set on the
+// create form. Bound to the backend dropdown via hx-get.
+templ FleetBackendFieldsFragment(vm NewFleetView) {
+	switch fleetBackendKind(vm.Backend) {
+		case "agones":
+			@agonesFleetFields(vm)
+		case "plugin":
+			@pluginFleetFields(vm)
+		default:
+			@dockerFleetFields(vm)
+	}
+}
+
+templ dockerFleetFields(vm NewFleetView) {
+	<label>
+		Image
+		<input name="image" value={ vm.Config["image"] } required placeholder="ghcr.io/example/server:1.0"/>
+		@fieldError(vm.FieldErrors, "image")
+	</label>
+	<label>
+		Container port
+		<input name="port" type="number" min="1" max="65535" value={ vm.Config["port"] } required placeholder="7777"/>
+		@fieldError(vm.FieldErrors, "port")
+	</label>
+	<label>
+		Readiness probe
+		<select name="probe_type">
+			<option value="" selected?={ vm.Config["probe_type"] == "" }>none</option>
+			<option value="tcp" selected?={ vm.Config["probe_type"] == "tcp" }>tcp</option>
+			<option value="http" selected?={ vm.Config["probe_type"] == "http" }>http</option>
+		</select>
+	</label>
+	<label>
+		Probe path
+		<input name="probe_path" value={ vm.Config["probe_path"] } placeholder="/healthz"/>
+		<small class="muted">Only used when probe is http.</small>
+	</label>
+	<label>
+		<input type="checkbox" name="pull_image" value="true" checked?={ vm.Config["pull_image"] == "true" }/>
+		Pull image on first allocate
+	</label>
+}
+
+templ agonesFleetFields(vm NewFleetView) {
+	<label>
+		Agones Fleet name
+		<input name="fleet_name" value={ vm.Config["fleet_name"] } required placeholder="doomerang"/>
+		@fieldError(vm.FieldErrors, "fleet_name")
+	</label>
+	<label>
+		Namespace override
+		<input name="namespace" value={ vm.Config["namespace"] } placeholder="(uses AGONES_NAMESPACE)"/>
+	</label>
+	<label>
+		Selector labels
+		<small class="muted">Optional key=value selectors that narrow which GameServers Agones returns. Add one per row.</small>
+	</label>
+	for k, v := range fleetSelectorLabels(vm.Config) {
+		<div class="kv-row">
+			<input name="selector_key[]" value={ k } placeholder="key"/>
+			<input name="selector_value[]" value={ v } placeholder="value"/>
+		</div>
+	}
+	<div class="kv-row">
+		<input name="selector_key[]" placeholder="key"/>
+		<input name="selector_value[]" placeholder="value"/>
+	</div>
+}
+
+templ pluginFleetFields(vm NewFleetView) {
+	<label>
+		Plugin config
+		<small class="muted">Free-form key/value pairs passed through to the plugin RPC.</small>
+	</label>
+	for k, v := range vm.Config {
+		<div class="kv-row">
+			<input name="config_key[]" value={ k } placeholder="key"/>
+			<input name="config_value[]" value={ v } placeholder="value"/>
+		</div>
+	}
+	<div class="kv-row">
+		<input name="config_key[]" placeholder="key"/>
+		<input name="config_value[]" placeholder="value"/>
+	</div>
+}
+
+templ EditFleetPage(vm EditFleetView) {
+	@appLayout("Edit fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> /
+			<code>{ vm.Name }</code>
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>{ vm.Name }</h1>
+				<p class="subtitle">
+					Backend: <code>{ vm.Backend }</code>
+					if vm.Backend != vm.BackendConfigured {
+						<small class="muted"> — does not match configured backend <code>{ vm.BackendConfigured }</code>; allocations will be refused.</small>
+					}
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@FleetBackendFieldsFragment(editToNewFleetView(vm))
+				<div class="form-actions">
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Save changes</button>
+				</div>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Delete fleet</h2>
+			<p class="muted">Soft-deletes this template. Historical allocations keep their fleet reference; new allocations can no longer pick it.</p>
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID) + "/delete") } onsubmit="return confirm('Delete this fleet template?')">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<button type="submit" class="btn-inline contrast outline">Delete</button>
+			</form>
 		</section>
 	}
 }

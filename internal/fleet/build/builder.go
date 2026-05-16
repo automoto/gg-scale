@@ -2,6 +2,12 @@
 // It lives outside the fleet package itself to avoid an import cycle:
 // fleet.Backend is consumed by every backend subpackage (docker, agones,
 // plugin), so the factory that imports them all sits one level down.
+//
+// Per-template values (Docker image, Agones Fleet name, plugin opaque
+// config) come from fleet templates stored in Postgres, NOT from env vars.
+// What this builder configures is host-level: which backend to use, plus
+// the credentials/sockets/kubeconfig the backend needs to talk to its
+// daemon or API server.
 package build
 
 import (
@@ -14,23 +20,14 @@ import (
 	pluginbackend "github.com/ggscale/ggscale/internal/fleet/plugin"
 )
 
-// Config is the runtime input to New. Backend selects which subpackage is
-// wired; the Docker*/Agones* fields are only consulted when their backend
-// is selected.
+// Config is the runtime input to New.
 type Config struct {
 	Backend       string
 	Region        string
 	PluginDir     string
 	GameServerIP  string
-	DockerImage   string
-	DockerPort    int
-	DockerProbe   string
-	DockerProbeP  string
-	DockerMaxSess int
 	DockerHost    string
 	AgonesNS      string
-	AgonesFleet   string
-	AgonesLabels  string
 	AgonesKubecfg string
 }
 
@@ -40,21 +37,12 @@ type Config struct {
 func New(c Config) (fleet.Backend, error) {
 	switch c.Backend {
 	case "docker":
-		if c.DockerImage == "" {
-			return nil, fmt.Errorf("fleet: docker backend requires DOCKER_GAMESERVER_IMAGE")
-		}
 		return dockerbackend.NewFromEnv(dockerbackend.Config{
-			Image:     c.DockerImage,
-			Port:      c.DockerPort,
-			ProbeType: c.DockerProbe,
-			ProbePath: c.DockerProbeP,
-			PublicIP:  c.GameServerIP,
+			PublicIP: c.GameServerIP,
 		})
 	case "agones":
 		return agonesbackend.NewFromKubeconfig(agonesbackend.Config{
-			Namespace:      c.AgonesNS,
-			FleetName:      c.AgonesFleet,
-			SelectorLabels: agonesbackend.ParseSelectorLabels(c.AgonesLabels),
+			Namespace: c.AgonesNS,
 		}, c.AgonesKubecfg)
 	default:
 		if name, ok := strings.CutPrefix(c.Backend, "plugin:"); ok {

@@ -29,6 +29,7 @@ type Ticket struct {
 	ID           int64
 	TenantID     int64
 	ProjectID    int64
+	FleetID      int64
 	EndUserID    int64
 	Region       string
 	GameMode     string
@@ -39,10 +40,14 @@ type Ticket struct {
 	MatchedAt    *time.Time
 }
 
-// EnqueueRequest is the input HTTP handlers pass to Queue.Enqueue.
+// EnqueueRequest is the input HTTP handlers pass to Queue.Enqueue. FleetID
+// resolves to the fleet template the allocation should be drawn from; the
+// HTTP handler resolves a caller-supplied fleet name to an id before
+// constructing the request.
 type EnqueueRequest struct {
 	TenantID   int64
 	ProjectID  int64
+	FleetID    int64
 	EndUserID  int64
 	Region     string
 	GameMode   string
@@ -50,10 +55,12 @@ type EnqueueRequest struct {
 }
 
 // Bucket groups tickets that can be matched together. Workers process one
-// bucket at a time so cross-tenant or cross-project mixing is impossible.
+// bucket at a time so cross-tenant or cross-project (or cross-fleet) mixing
+// is impossible.
 type Bucket struct {
 	TenantID  int64
 	ProjectID int64
+	FleetID   int64
 	Region    string
 	GameMode  string
 }

@@ -63,27 +63,53 @@ type ManagerOptions struct {
 
 // Manager is the matchmaker-facing entry point to the fleet subsystem. One
 // Manager binds to one backend; the host swaps backends by constructing a
-// different Manager during startup.
+// different Manager during startup. The fleet store is consulted on every
+// Allocate so per-template config (image, agones fleet name, plugin opaque
+// config) can change without restarting the manager.
 type Manager struct {
 	store   Store
+	fleets  FleetStore
 	backend Backend
 	opts    ManagerOptions
 }
 
-// NewManager wires a Manager around the provided store and backend. The
-// backend's Name() is used as the persisted backend column on each
-// allocation so operators can correlate rows with the running plugin.
-func NewManager(store Store, backend Backend, opts ManagerOptions) *Manager {
+// NewManager wires a Manager around the provided allocation store, fleet
+// template store, and backend. The backend's Name() is matched against each
+// fleet's stored backend on Allocate; mismatches fail closed so an operator
+// running ggscale with FLEET_BACKEND=docker can't accidentally route
+// allocations through an Agones template.
+func NewManager(store Store, fleets FleetStore, backend Backend, opts ManagerOptions) *Manager {
 	if opts.Clock == nil {
 		opts.Clock = defaultBackoff
 	}
-	return &Manager{store: store, backend: backend, opts: opts}
+	return &Manager{store: store, fleets: fleets, backend: backend, opts: opts}
 }
+
+// ErrFleetRequired is returned by Allocate when the request omits FleetID.
+var ErrFleetRequired = errors.New("fleet: AllocationRequest.FleetID is required")
+
+// ErrFleetBackendMismatch is returned by Allocate when the fleet's backend
+// field doesn't match the configured manager backend.
+var ErrFleetBackendMismatch = errors.New("fleet: fleet backend does not match the configured backend")
 
 // Allocate persists a pending row, asks the backend to bring up a server,
 // and persists the result. On terminal failure the row is marked failed and
 // a non-nil error is returned so the matchmaker can re-queue the ticket.
 func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocation, error) {
+	if req.FleetID == 0 {
+		return nil, ErrFleetRequired
+	}
+	f, err := m.fleets.GetByID(ctx, req.FleetID)
+	if err != nil {
+		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, err)
+	}
+	if f.Backend != m.backend.Name() {
+		return nil, fmt.Errorf("%w: fleet %q wants %q, manager runs %q",
+			ErrFleetBackendMismatch, f.Name, f.Backend, m.backend.Name())
+	}
+	req.Backend = f.Backend
+	req.Config = f.Config
+
 	id, err := m.store.InsertPending(ctx, req, m.backend.Name())
 	if err != nil {
 		return nil, fmt.Errorf("fleet: insert pending: %w", err)
@@ -111,6 +137,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 			alloc.ID = id
 			alloc.TenantID = req.TenantID
 			alloc.ProjectID = req.ProjectID
+			alloc.FleetID = req.FleetID
 			alloc.Backend = m.backend.Name()
 			alloc.Region = req.Region
 			alloc.Status = StatusReady
@@ -195,6 +222,11 @@ func (m *Manager) BackendsForTenant(ctx context.Context) ([]BackendStats, error)
 func (m *Manager) Backend() Backend {
 	return m.backend
 }
+
+// Fleets exposes the fleet template store. Used by the matchmaker HTTP
+// handler to resolve a fleet name to an id, and by the dashboard fleets
+// CRUD pages. Tenant scoping happens inside the store via RLS.
+func (m *Manager) Fleets() FleetStore { return m.fleets }
 
 func defaultBackoff(attempt int) time.Duration {
 	d := 100 * time.Millisecond

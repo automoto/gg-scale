@@ -35,29 +35,33 @@ New to the model? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for tenants, proje
 
 ## Docker Compose setups
 
-There are two compose configurations:
+Four scenarios, four files. Each one is standalone — pick the file that matches what you're doing.
 
-**Simple stack** (`docker-compose.yml`) — for self-hosting and quick local runs:
-- `ggscale-server`, `postgres`, `mailhog` (SMTP)
-- `make up` / `make down`
+| Scenario | File | Make target | What's in it |
+|---|---|---|---|
+| **Basic dev** | `docker-compose.yml` | `make up` | ggscale-server + postgres + mailhog. Quick local runs, self-hosting starter. |
+| **Fleet, Docker backend** | `compose/fleet-docker.yml` | `make up-fleet-docker` | Basic dev + `FLEET_BACKEND=docker` + `/var/run/docker.sock` mount. `POST /v1/fleet/allocate` spawns game-server containers on demand. |
+| **Fleet, k3s + Agones** | `compose/fleet-agones.yml` | `make up-fleet-agones` + `make agones-install` | Basic dev + a single-node k3s cluster + Agones controller. Allocations come from an Agones Fleet. |
+| **Full dev stack** | `compose/full.yml` | `make up-full` | Fleet/Docker backend + Prometheus (`:9090`) + Stripe mock. Contributor environment. |
 
-**Game server stack** (`ops/docker-compose.gameserver.yml`) — simple self-hosting with a dedicated game server alongside ggscale, no Kubernetes required:
-- Everything in the simple stack plus a `doomerang-server` container (UDP port 7654)
-- `make up-gameserver` / `make down-gameserver`
-- Set `GAME_SERVER_PUBLIC_IP` to your host's public IP so clients know where to connect. See [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) for production setup, UDP security, and the path to k3s + Agones when you outgrow static containers.
+Scenario files `include:` the basic dev compose, so service definitions live in one place. Run compose from the repo root:
 
-**Full dev stack** (`ops/full-stack-docker-compose.yml`) — for contributors who need the complete environment:
-- Everything in the simple stack plus Prometheus, Stripe mock, dashboard stub, and optional k3s + Agones
-- `make up-dev` / `make down-dev`
+```bash
+docker compose -f compose/fleet-docker.yml up -d --wait
+```
 
-### k8s profile (contributors only)
+### Picking GAME_SERVER_PUBLIC_IP
 
-The k8s profile requires Colima on macOS — Docker Desktop's host networking breaks Agones UDP reachability.
+For the Docker fleet backend, set `GAME_SERVER_PUBLIC_IP` in `.env` to the host IP your clients can reach. Allocations return `{host, port}`; clients connect directly to that address. See [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) for production setup and UDP security.
+
+### k3s + Agones on macOS
+
+Run Colima first — Docker Desktop's host networking breaks Agones UDP reachability.
 
 ```bash
 brew install colima
 colima start --network-address --cpus 4 --memory 8
-make up-k8s && make agones-install
+make up-fleet-agones && make agones-install
 ```
 
 Linux contributors need nothing extra.
@@ -66,17 +70,13 @@ Linux contributors need nothing extra.
 
 | Target | What it does |
 |---|---|
-| `make up` | Start the simple stack (server + postgres + smtp). |
-| `make down` | Tear the simple stack down. |
-| `make clean` | Tear down + delete volumes. |
-| `make up-gameserver` | Start ggscale + a dedicated game server container (no k8s). |
-| `make down-gameserver` | Tear the game server stack down. |
-| `make up-dev` | Start the full dev stack. |
-| `make down-dev` | Tear the full dev stack down. |
-| `make up-k8s` | Start k3s + Agones (full stack, macOS: run Colima first). |
+| `make up` / `make down` / `make clean` | Basic dev stack (server + postgres + smtp). |
+| `make up-fleet-docker` / `make down-fleet-docker` | Fleet feature with the Docker backend. |
+| `make up-fleet-agones` / `make down-fleet-agones` | Fleet feature with k3s + Agones. Follow with `make agones-install`. |
+| `make up-full` / `make down-full` / `make clean-full` | Full dev stack (prometheus + docker fleet + stripe-mock). |
 | `make test` | Unit tests with `-race`. |
 | `make test-integration` | Integration tests (`-tags=integration`, Postgres via testcontainers). |
-| `make e2e` | Live compose checks (`-tags=e2e`); run after `make up`. |
+| `make e2e` | Live compose checks (`-tags=e2e`); run after the relevant `up-*`. |
 | `make lint` | `golangci-lint`. |
 
 ## License

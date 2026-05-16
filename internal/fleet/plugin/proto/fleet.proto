@@ -38,7 +38,9 @@ enum AllocationStatus {
   ALLOCATION_STATUS_FAILED = 7;
 }
 
-// AllocationRequest mirrors fleet.AllocationRequest.
+// AllocationRequest mirrors fleet.AllocationRequest. fleet_id identifies the
+// fleet template the host resolved before dispatching; config is the
+// flattened backend-specific recipe stored on that fleet.
 message AllocationRequest {
   int64 tenant_id = 1;
   int64 project_id = 2;
@@ -46,6 +48,9 @@ message AllocationRequest {
   string game_mode = 4;
   int32 capacity = 5;
   map<string, string> labels = 6;
+  int64 fleet_id = 7;
+  string backend = 8;
+  map<string, string> config = 9;
 }
 
 // Allocation mirrors fleet.Allocation. BackendRef is the plugin's opaque
@@ -60,6 +65,7 @@ message Allocation {
   string address = 7;
   AllocationStatus status = 8;
   map<string, string> metadata = 9;
+  int64 fleet_id = 10;
 }
 
 message NameRequest {}
