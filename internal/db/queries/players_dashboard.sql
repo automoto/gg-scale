@@ -6,7 +6,7 @@
 SELECT
     u.id,
     u.external_id,
-    u.email::text AS email,
+    coalesce(u.email::text, '') AS email,
     u.email_verified_at,
     u.disabled_at,
     u.created_at
@@ -15,7 +15,7 @@ JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND u.project_id = sqlc.arg(project_id)
   AND u.deleted_at IS NULL
-  AND (sqlc.narg(email_filter)::text IS NULL OR u.email::text ILIKE '%' || sqlc.narg(email_filter)::text || '%')
+  AND (sqlc.narg(email_filter)::text IS NULL OR coalesce(u.email::text, '') ILIKE '%' || sqlc.narg(email_filter)::text || '%')
 ORDER BY u.created_at DESC
 LIMIT sqlc.arg(lim) OFFSET sqlc.arg(off);
 
@@ -26,13 +26,13 @@ JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND u.project_id = sqlc.arg(project_id)
   AND u.deleted_at IS NULL
-  AND (sqlc.narg(email_filter)::text IS NULL OR u.email::text ILIKE '%' || sqlc.narg(email_filter)::text || '%');
+  AND (sqlc.narg(email_filter)::text IS NULL OR coalesce(u.email::text, '') ILIKE '%' || sqlc.narg(email_filter)::text || '%');
 
 -- name: GetPlayerForProject :one
 SELECT
     u.id,
     u.external_id,
-    u.email::text AS email,
+    coalesce(u.email::text, '') AS email,
     u.email_verified_at,
     u.disabled_at,
     u.created_at,
