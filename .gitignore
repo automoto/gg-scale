@@ -41,3 +41,5 @@ work/
 .cursor/*
 .env.example
 .claude/*
+ggscale-seed
+sdk-go

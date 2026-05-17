@@ -1,5 +1,5 @@
 .PHONY: build test test-integration test-plugins e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
-	proto build-example-plugin \
+	proto build-example-plugin seed \
         up down logs psql migrate migrate-new \
         up-fleet-docker down-fleet-docker \
         up-fleet-agones down-fleet-agones agones-install \
@@ -75,6 +75,9 @@ proto:
 build-example-plugin:
 	go build -o bin/ggscale-fleet-example ./cmd/ggscale-fleet-example
 
+seed:
+	go run ./scripts/ggscale-seed -force
+
 # Runs the plugin subprocess integration test (`internal/fleet/plugin/
 # integration_test.go`). Builds the example plugin into a temp dir, then
 # spawns + kills it under Supervisor. Already included in `make
@@ -82,6 +85,10 @@ build-example-plugin:
 # in isolation while iterating on the supervisor.
 test-plugins:
 	go test -race -tags=integration -timeout=60s ./internal/fleet/plugin/...
+
+# Runs the SDK tests inside the git submodule.
+test-sdk:
+	cd sdk-go && go test -race ./...
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
