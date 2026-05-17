@@ -26,6 +26,8 @@ linters:
       excludes:
         - G104
   exclusions:
+    paths:
+      - scripts
     rules:
       - path: _test\.go
         linters:
