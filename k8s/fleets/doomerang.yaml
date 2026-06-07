@@ -1,7 +1,13 @@
-# Phase 2 placeholder. Not applied in Phase 0; never reach Allocated state at
-# replicas: 0. Phase 2 sets replicas, real image tag, region label selector,
-# and a FleetAutoscaler buffer policy. Schema-valid so kubectl --dry-run=client
-# can be used to lint changes from Phase 0 onward.
+# Doomerang Fleet — driven by the matchmaker via the agones backend.
+# The allocator (internal/fleet/agones/backend.go) creates a
+# GameServerAllocation against this Fleet's pods on every matchmaker
+# ticket. Operators apply this manifest with kubectl or GitOps; ggscale
+# itself only reads from Fleets, it does not create them.
+#
+# Region: the allocator adds ggscale.region=<req.Region> to the
+# GameServerSelector when the matchmaker request carries a region, so
+# pods MUST carry the matching label or allocation fails. Update the
+# region label per cluster (us-east-1, us-west-1, eu-1).
 apiVersion: agones.dev/v1
 kind: Fleet
 metadata:
@@ -9,30 +15,45 @@ metadata:
   namespace: default
   labels:
     app: doomerang
-    phase: placeholder
 spec:
-  replicas: 0
+  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: "25%"
-      maxUnavailable: 0
+      maxUnavailable: "25%"
   template:
+    metadata:
+      labels:
+        app: doomerang
+        # Allocator selector key — see selectorWithRegion in
+        # internal/fleet/agones/backend.go. Set per cluster.
+        ggscale.region: us-east-1
     spec:
       ports:
         - name: default
           portPolicy: Dynamic
           containerPort: 7373
           protocol: UDP
+      # SDK sidecar heartbeat. The game server calls sdk.Health() every
+      # 2s (agonesHealthInterval in cmd/server/agones.go), comfortably
+      # under periodSeconds * failureThreshold = 15s grace.
       health:
         initialDelaySeconds: 5
         periodSeconds: 5
         failureThreshold: 3
       template:
         spec:
+          # Drain budget: Server.Drain waits up to 30s for an in-flight
+          # match to end before stopping the loop. 60s leaves headroom
+          # for the SDK to send Shutdown and the pod to exit cleanly.
+          terminationGracePeriodSeconds: 60
           containers:
             - name: doomerang-server
-              image: ghcr.io/ggscale/doomerang-server:placeholder
+              # Phase D will push a real tag to buildwrangler/doomerang-server.
+              # Pin to a SHA digest in prod before first rollout.
+              image: buildwrangler/doomerang-server:v0.1.0
+              imagePullPolicy: IfNotPresent
               resources:
                 requests:
                   cpu: 100m
