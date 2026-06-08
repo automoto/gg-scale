@@ -111,6 +111,15 @@ type Querier interface {
 	// the URL and looks up tenant + verification state in one shot.
 	GetEndUserByEmailProject(ctx context.Context, arg GetEndUserByEmailProjectParams) (GetEndUserByEmailProjectRow, error)
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
+	// Lookup an end-user by ID for the POST /v1/end-users/verify endpoint
+	// (gameserver session-token verification). Filters deleted/disabled
+	// accounts so a forged token claiming a stale id rejects with 401.
+	// The explicit tenant_id predicate matches the project's RLS-via-GUC
+	// convention (Pool.Q sets app.tenant_id) and survives a hypothetical
+	// RLS disable; the JOINs against tenants/projects enforce the
+	// soft-delete kill-switch — a wound-down project can't continue to
+	// verify sessions.
+	GetEndUserForVerify(ctx context.Context, id int64) (GetEndUserForVerifyRow, error)
 	GetEndUserInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetEndUserInvitationByCodeHashRow, error)
 	GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error)
 	GetFleetByID(ctx context.Context, id int64) (Fleet, error)

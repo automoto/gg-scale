@@ -32,7 +32,7 @@ import (
 // invite-accept flow.
 func newDashboardAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	rec := &mailer.Recorder{}
 

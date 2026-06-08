@@ -94,7 +94,7 @@ func seedFleetTemplate(t *testing.T, c *cluster, tenantID, projectID int64, back
 // fleet.Manager pointed at the cluster, and the given backend stub.
 func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *dashboard.PluginSnapshot) (*httptest.Server, *fleet.Manager) {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
 	mgr := fleet.NewManager(

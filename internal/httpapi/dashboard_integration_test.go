@@ -28,7 +28,7 @@ import (
 
 func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboard.Bootstrap) *httptest.Server {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 
 	router := httpapi.NewRouter(httpapi.Deps{

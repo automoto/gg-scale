@@ -33,7 +33,7 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 	// Surface server-side errors in test output.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	rec := &mailer.Recorder{}
 

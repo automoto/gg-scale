@@ -37,7 +37,7 @@ import (
 // players because most other tests don't need them.
 func newPlayersServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1",

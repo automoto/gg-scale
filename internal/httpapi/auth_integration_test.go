@@ -28,6 +28,22 @@ import (
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
+// testSignerKey is the HMAC key every integration test signs and
+// verifies tokens with. Kept here (alongside the cluster fixture) so
+// the value is impossible to drift between the server-under-test
+// (`newServerForCluster` + `newFullStackServer`) and the tokens tests
+// hand-roll for negative cases.
+const testSignerKey = "test-key-must-be-at-least-32-bytes-long"
+
+// newTestSigner builds a Signer over testSignerKey. Fails the test on
+// any constructor error; callers don't need to handle it.
+func newTestSigner(t *testing.T) *auth.Signer {
+	t.Helper()
+	s, err := auth.NewSigner([]byte(testSignerKey))
+	require.NoError(t, err)
+	return s
+}
+
 type cluster struct {
 	bootstrapPool *pgxpool.Pool
 	appPool       *pgxpool.Pool
@@ -101,7 +117,7 @@ func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier, token string) 
 
 func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 
 	h := httpapi.NewRouter(httpapi.Deps{
@@ -148,7 +164,7 @@ func TestAuthAnonymous_creates_end_user_signs_jwt_persists_session(t *testing.T)
 	assert.Contains(t, body.ExternalID, "anon_")
 
 	// Verify the JWT decodes to the right claims.
-	signer, _ := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, _ := auth.NewSigner([]byte(testSignerKey))
 	claims, err := signer.Verify(body.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, tenantID, claims.TenantID)

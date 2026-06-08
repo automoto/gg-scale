@@ -185,6 +185,18 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/auth/custom-token", customTokenHandler(d))
 				})
 
+				// /v1/end-users/verify — server-tier endpoint used by
+				// game-server workloads to verify a player's session
+				// token (the request body) under their own API-key auth
+				// (the Authorization header). Gated by KeyTypeSecret so
+				// publishable keys (embedded in shipped game binaries)
+				// can't be used as a session-validity oracle. See
+				// docs/temp/gameserver-auth.md.
+				r.Group(func(r chi.Router) {
+					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
+					r.Post("/end-users/verify", endUsersVerifyHandler(d))
+				})
+
 				// End-user authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
 					r.Use(enduser.New(d.Signer))

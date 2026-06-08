@@ -41,7 +41,7 @@ func TestLogin_access_token_verifies_with_hmac_signer(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &session))
 	require.NotEmpty(t, session.AccessToken)
 
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	claims, err := signer.Verify(session.AccessToken)
 	require.NoError(t, err)

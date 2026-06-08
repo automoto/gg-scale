@@ -85,7 +85,7 @@ func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_
 	t.Cleanup(func() { _ = freshCache.Close(context.Background()) })
 	c.cache = freshCache
 
-	signer, err := auth.NewSigner([]byte("test-key-must-be-at-least-32-bytes-long"))
+	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1", Commit: "test",
