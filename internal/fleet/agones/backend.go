@@ -143,9 +143,20 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 	if result.Status.Address == "" || port == 0 {
 		return nil, fmt.Errorf("agones: allocated gs %q has no address/port", result.Status.GameServerName)
 	}
+	// The allocation Status doesn't carry the port protocol. Read it
+	// off the GameServer Spec so the matchmaker response can include a
+	// protocol_hint. A GetGameServer call hits the informer cache in-
+	// cluster and adds a few milliseconds; on failure we log via the
+	// returned error and leave Protocol empty rather than fail the
+	// allocation — protocol_hint is observability, not a hard contract.
+	protocol := ""
+	if gs, getErr := b.cfg.API.GetGameServer(ctx, namespace, result.Status.GameServerName); getErr == nil && gs != nil && gs.Spec.Ports != nil && len(gs.Spec.Ports) > 0 {
+		protocol = strings.ToLower(string(gs.Spec.Ports[0].Protocol))
+	}
 	return &fleet.Allocation{
 		BackendRef: namespace + "/" + result.Status.GameServerName,
 		Address:    fmt.Sprintf("%s:%d", result.Status.Address, port),
+		Protocol:   protocol,
 		Status:     fleet.StatusReady,
 	}, nil
 }

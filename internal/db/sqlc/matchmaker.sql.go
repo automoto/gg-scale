@@ -55,7 +55,7 @@ FROM candidates c
 WHERE t.id = c.id
 RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
-          t.match_address, t.created_at, t.matched_at
+          t.match_address, t.match_protocol, t.created_at, t.matched_at
 `
 
 type ClaimMatchmakerBucketParams struct {
@@ -70,18 +70,19 @@ type ClaimMatchmakerBucketParams struct {
 }
 
 type ClaimMatchmakerBucketRow struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	FleetID      *int64
-	EndUserID    int64
-	Region       string
-	GameMode     string
-	Attributes   []byte
-	Status       string
-	MatchAddress string
-	CreatedAt    pgtype.Timestamptz
-	MatchedAt    pgtype.Timestamptz
+	ID            int64
+	TenantID      int64
+	ProjectID     int64
+	FleetID       *int64
+	EndUserID     int64
+	Region        string
+	GameMode      string
+	Attributes    []byte
+	Status        string
+	MatchAddress  string
+	MatchProtocol string
+	CreatedAt     pgtype.Timestamptz
+	MatchedAt     pgtype.Timestamptz
 }
 
 // Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
@@ -119,6 +120,7 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 			&i.Attributes,
 			&i.Status,
 			&i.MatchAddress,
+			&i.MatchProtocol,
 			&i.CreatedAt,
 			&i.MatchedAt,
 		); err != nil {
@@ -136,25 +138,27 @@ const commitMatchmakerClaim = `-- name: CommitMatchmakerClaim :execrows
 UPDATE matchmaking_tickets
 SET status           = 'matched',
     match_address    = $1,
+    match_protocol   = $2,
     matched_at       = now(),
     claim_id         = NULL,
     claimed_at       = NULL,
     claim_expires_at = NULL
-WHERE claim_id = $2::uuid
+WHERE claim_id = $3::uuid
   AND status = 'queued'
 `
 
 type CommitMatchmakerClaimParams struct {
-	MatchAddress string
-	ClaimID      pgtype.UUID
+	MatchAddress  string
+	MatchProtocol string
+	ClaimID       pgtype.UUID
 }
 
 // Flip every still-queued ticket holding this claim_id to 'matched' and
-// stamp the address. Rows that drifted (cancelled, swept) won't match the
-// WHERE and are excluded — the caller branches on rows-affected and
-// deallocates the orphan server when 0.
+// stamp the address + protocol. Rows that drifted (cancelled, swept)
+// won't match the WHERE and are excluded — the caller branches on
+// rows-affected and deallocates the orphan server when 0.
 func (q *Queries) CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, commitMatchmakerClaim, arg.MatchAddress, arg.ClaimID)
+	result, err := q.db.Exec(ctx, commitMatchmakerClaim, arg.MatchAddress, arg.MatchProtocol, arg.ClaimID)
 	if err != nil {
 		return 0, err
 	}
@@ -163,7 +167,7 @@ func (q *Queries) CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmake
 
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
 SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
-       attributes, status::text AS status, match_address,
+       attributes, status::text AS status, match_address, match_protocol,
        created_at, matched_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -171,18 +175,19 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 `
 
 type GetMatchmakingTicketRow struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	FleetID      *int64
-	EndUserID    int64
-	Region       string
-	GameMode     string
-	Attributes   []byte
-	Status       string
-	MatchAddress string
-	CreatedAt    pgtype.Timestamptz
-	MatchedAt    pgtype.Timestamptz
+	ID            int64
+	TenantID      int64
+	ProjectID     int64
+	FleetID       *int64
+	EndUserID     int64
+	Region        string
+	GameMode      string
+	Attributes    []byte
+	Status        string
+	MatchAddress  string
+	MatchProtocol string
+	CreatedAt     pgtype.Timestamptz
+	MatchedAt     pgtype.Timestamptz
 }
 
 func (q *Queries) GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error) {
@@ -199,6 +204,7 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchm
 		&i.Attributes,
 		&i.Status,
 		&i.MatchAddress,
+		&i.MatchProtocol,
 		&i.CreatedAt,
 		&i.MatchedAt,
 	)

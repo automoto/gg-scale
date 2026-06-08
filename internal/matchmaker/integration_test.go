@@ -57,6 +57,7 @@ func startMigratedDB(t *testing.T) *pgxpool.Pool {
 
 type allocatorRecorder struct {
 	address     string
+	protocol    string
 	called      atomic.Int64
 	deallocated atomic.Int64
 	nextID      atomic.Int64
@@ -65,7 +66,7 @@ type allocatorRecorder struct {
 func (a *allocatorRecorder) Allocate(_ context.Context, _ fleet.AllocationRequest) (*fleet.Allocation, error) {
 	a.called.Add(1)
 	id := fleet.AllocationID(a.nextID.Add(1))
-	return &fleet.Allocation{ID: id, Address: a.address, Status: fleet.StatusReady}, nil
+	return &fleet.Allocation{ID: id, Address: a.address, Protocol: a.protocol, Status: fleet.StatusReady}, nil
 }
 
 func (a *allocatorRecorder) Deallocate(_ context.Context, _ fleet.AllocationID) error {
@@ -169,7 +170,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 			require.NoError(t, err)
 			if claim != nil {
 				winner.Add(1)
-				_, _ = queue.CommitClaim(ctx, claim, "10.0.0.1:7777")
+				_, _ = queue.CommitClaim(ctx, claim, "10.0.0.1:7777", "tcp")
 			} else {
 				loser.Add(1)
 			}
@@ -184,6 +185,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusMatched, got.Status)
 	assert.Equal(t, "10.0.0.1:7777", got.MatchAddress)
+	assert.Equal(t, "tcp", got.MatchProtocol)
 }
 
 // TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued proves M14: a

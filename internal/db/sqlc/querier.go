@@ -28,9 +28,9 @@ type Querier interface {
 	ClearDashboardVerificationCode(ctx context.Context, id int64) error
 	ClearEndUserVerificationCode(ctx context.Context, id int64) error
 	// Flip every still-queued ticket holding this claim_id to 'matched' and
-	// stamp the address. Rows that drifted (cancelled, swept) won't match the
-	// WHERE and are excluded — the caller branches on rows-affected and
-	// deallocates the orphan server when 0.
+	// stamp the address + protocol. Rows that drifted (cancelled, swept)
+	// won't match the WHERE and are excluded — the caller branches on
+	// rows-affected and deallocates the orphan server when 0.
 	CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error)
 	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)

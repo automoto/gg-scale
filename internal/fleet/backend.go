@@ -129,8 +129,16 @@ type Allocation struct {
 	BackendRef string
 	Region     string
 	Address    string
-	Status     Status
-	Metadata   map[string]string
+	// Protocol is the wire protocol the game-server listens on,
+	// lower-cased ("tcp", "udp", "tcpudp"). Surfaced to clients via the
+	// matchmaker response's protocol_hint so cross-game launchers /
+	// dashboards can dial the right transport. Empty when the backend
+	// can't determine it (older backends, plugin backends that don't set
+	// it). The client is built for a specific game and ultimately knows
+	// its protocol; protocol_hint is defense-in-depth and observability.
+	Protocol string
+	Status   Status
+	Metadata map[string]string
 }
 
 // StatusUpdate is the unit of progress a Backend.Watch pushes back to the

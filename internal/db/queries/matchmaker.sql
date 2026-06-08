@@ -10,7 +10,7 @@ RETURNING id, status::text AS status, created_at;
 
 -- name: GetMatchmakingTicket :one
 SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
-       attributes, status::text AS status, match_address,
+       attributes, status::text AS status, match_address, match_protocol,
        created_at, matched_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -68,16 +68,17 @@ FROM candidates c
 WHERE t.id = c.id
 RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
-          t.match_address, t.created_at, t.matched_at;
+          t.match_address, t.match_protocol, t.created_at, t.matched_at;
 
 -- name: CommitMatchmakerClaim :execrows
 -- Flip every still-queued ticket holding this claim_id to 'matched' and
--- stamp the address. Rows that drifted (cancelled, swept) won't match the
--- WHERE and are excluded — the caller branches on rows-affected and
--- deallocates the orphan server when 0.
+-- stamp the address + protocol. Rows that drifted (cancelled, swept)
+-- won't match the WHERE and are excluded — the caller branches on
+-- rows-affected and deallocates the orphan server when 0.
 UPDATE matchmaking_tickets
 SET status           = 'matched',
     match_address    = sqlc.arg('match_address'),
+    match_protocol   = sqlc.arg('match_protocol'),
     matched_at       = now(),
     claim_id         = NULL,
     claimed_at       = NULL,

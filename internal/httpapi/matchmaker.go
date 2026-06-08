@@ -29,8 +29,14 @@ type matchmakerTicketResponse struct {
 	GameMode     string          `json:"game_mode"`
 	Attributes   json.RawMessage `json:"attributes,omitempty"`
 	MatchAddress string          `json:"match_address"`
-	CreatedAt    string          `json:"created_at"`
-	MatchedAt    string          `json:"matched_at,omitempty"`
+	// ProtocolHint is the wire protocol the matched game-server listens
+	// on (lower-cased: "tcp", "udp", "tcpudp"). Empty when the backend
+	// can't determine it (older allocations, plugin backends that don't
+	// surface it). Game-specific SDKs already know what to dial; this
+	// field is for cross-game launchers, dashboards, and defense-in-depth.
+	ProtocolHint string `json:"protocol_hint,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	MatchedAt    string `json:"matched_at,omitempty"`
 }
 
 func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
@@ -156,6 +162,7 @@ func writeTicket(w http.ResponseWriter, t *matchmaker.Ticket, status int) {
 		GameMode:     t.GameMode,
 		Attributes:   t.Attributes,
 		MatchAddress: t.MatchAddress,
+		ProtocolHint: t.MatchProtocol,
 		CreatedAt:    t.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 	}
 	if t.MatchedAt != nil {

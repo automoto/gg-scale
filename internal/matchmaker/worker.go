@@ -288,7 +288,7 @@ func (w *Worker) processBucket(ctx context.Context, b Bucket) error {
 		return fmt.Errorf("allocate: %w", err)
 	}
 
-	committed, err := w.queue.CommitClaim(ctx, claim, alloc.Address)
+	committed, err := w.queue.CommitClaim(ctx, claim, alloc.Address, alloc.Protocol)
 	if err != nil {
 		w.deallocateOrphan(ctx, alloc, "commit error")
 		return fmt.Errorf("commit claim: %w", err)

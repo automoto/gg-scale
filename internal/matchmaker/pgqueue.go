@@ -81,7 +81,7 @@ func (q *PGQueue) Get(ctx context.Context, id int64) (*Ticket, error) {
 			}
 			return qerr
 		}
-		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, derefFleetID(row.FleetID), row.EndUserID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress)
+		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, derefFleetID(row.FleetID), row.EndUserID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress, row.MatchProtocol)
 		t.CreatedAt = row.CreatedAt.Time
 		if row.MatchedAt.Valid {
 			v := row.MatchedAt.Time
@@ -190,7 +190,7 @@ func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, n int, ttl tim
 	}
 	tickets := make([]*Ticket, 0, len(rows))
 	for _, r := range rows {
-		t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress)
+		t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress, r.MatchProtocol)
 		t.CreatedAt = r.CreatedAt.Time
 		tickets = append(tickets, t)
 	}
@@ -203,9 +203,10 @@ func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, n int, ttl tim
 const defaultRetryHeadroom = 1 << 30
 
 // CommitClaim flips every still-queued row holding this claim to 'matched'
-// with the given address. Returns rows-affected so the caller can detect
-// 0-row commits (claim drifted) and deallocate the orphan server.
-func (q *PGQueue) CommitClaim(ctx context.Context, claim *Claim, matchAddress string) (int64, error) {
+// with the given address and protocol hint. Returns rows-affected so the
+// caller can detect 0-row commits (claim drifted) and deallocate the orphan
+// server.
+func (q *PGQueue) CommitClaim(ctx context.Context, claim *Claim, matchAddress, matchProtocol string) (int64, error) {
 	if claim == nil || claim.ID == "" {
 		return 0, nil
 	}
@@ -217,8 +218,9 @@ func (q *PGQueue) CommitClaim(ctx context.Context, claim *Claim, matchAddress st
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var qerr error
 		n, qerr = sqlcgen.New(tx).CommitMatchmakerClaim(ctx, sqlcgen.CommitMatchmakerClaimParams{
-			MatchAddress: matchAddress,
-			ClaimID:      pgUUID,
+			MatchAddress:  matchAddress,
+			MatchProtocol: matchProtocol,
+			ClaimID:       pgUUID,
 		})
 		return qerr
 	})
@@ -279,18 +281,19 @@ func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 	})
 }
 
-func rowToTicket(id, tenantID, projectID, fleetID, endUserID int64, region, gameMode string, attrs []byte, status, matchAddress string) *Ticket {
+func rowToTicket(id, tenantID, projectID, fleetID, endUserID int64, region, gameMode string, attrs []byte, status, matchAddress, matchProtocol string) *Ticket {
 	return &Ticket{
-		ID:           id,
-		TenantID:     tenantID,
-		ProjectID:    projectID,
-		FleetID:      fleetID,
-		EndUserID:    endUserID,
-		Region:       region,
-		GameMode:     gameMode,
-		Attributes:   attrs,
-		Status:       Status(status),
-		MatchAddress: matchAddress,
+		ID:            id,
+		TenantID:      tenantID,
+		ProjectID:     projectID,
+		FleetID:       fleetID,
+		EndUserID:     endUserID,
+		Region:        region,
+		GameMode:      gameMode,
+		Attributes:    attrs,
+		Status:        Status(status),
+		MatchAddress:  matchAddress,
+		MatchProtocol: matchProtocol,
 	}
 }
 

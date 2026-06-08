@@ -55,7 +55,7 @@ func TestMemQueueCancelRejectsTerminal(t *testing.T) {
 	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
-	_, err = q.CommitClaim(context.Background(), claim, "10.0.0.1:7777")
+	_, err = q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "")
 	require.NoError(t, err)
 
 	err = q.Cancel(tenantCtx(1), t1.ID)
@@ -132,13 +132,14 @@ func TestMemQueueCommitClaimSetsAddress(t *testing.T) {
 	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, err)
 
-	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777")
+	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "tcp")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 
 	got, err := q.Get(tenantCtx(1), t1.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "10.0.0.1:7777", got.MatchAddress)
+	assert.Equal(t, "tcp", got.MatchProtocol)
 	assert.Equal(t, matchmaker.StatusMatched, got.Status)
 }
 
@@ -148,7 +149,7 @@ func TestMemQueueCommitClaimZeroAfterCancel(t *testing.T) {
 	claim, _ := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, q.Cancel(tenantCtx(1), t1.ID))
 
-	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777")
+	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "tcp")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), n, "commit must return 0 when the claim's tickets were cancelled mid-flight")

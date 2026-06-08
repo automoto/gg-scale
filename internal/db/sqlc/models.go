@@ -296,6 +296,7 @@ type MatchmakingTicket struct {
 	ClaimedAt          pgtype.Timestamptz
 	ClaimExpiresAt     pgtype.Timestamptz
 	AllocationAttempts int32
+	MatchProtocol      string
 }
 
 type PlatformAuditLog struct {

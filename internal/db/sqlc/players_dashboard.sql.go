@@ -18,7 +18,7 @@ JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = $1
   AND u.project_id = $2
   AND u.deleted_at IS NULL
-  AND ($3::text IS NULL OR coalesce(u.email::text, '') ILIKE '%' || $3::text || '%')
+  AND ($3::text IS NULL OR coalesce(u.email, '')::text ILIKE '%' || $3::text || '%')
 `
 
 type CountPlayersForProjectParams struct {
@@ -38,7 +38,7 @@ const getPlayerForProject = `-- name: GetPlayerForProject :one
 SELECT
     u.id,
     u.external_id,
-    coalesce(u.email::text, '') AS email,
+    coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
     u.created_at,
@@ -90,7 +90,7 @@ const listPlayersForProject = `-- name: ListPlayersForProject :many
 SELECT
     u.id,
     u.external_id,
-    coalesce(u.email::text, '') AS email,
+    coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
     u.created_at
@@ -99,7 +99,7 @@ JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = $1
   AND u.project_id = $2
   AND u.deleted_at IS NULL
-  AND ($3::text IS NULL OR coalesce(u.email::text, '') ILIKE '%' || $3::text || '%')
+  AND ($3::text IS NULL OR coalesce(u.email, '')::text ILIKE '%' || $3::text || '%')
 ORDER BY u.created_at DESC
 LIMIT $5 OFFSET $4
 `

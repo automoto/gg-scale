@@ -173,8 +173,9 @@ func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, n int, ttl time
 }
 
 // CommitClaim flips every still-queued row with the given claim id to
-// 'matched' with the address. Returns rows-affected (0 if the claim drifted).
-func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress string) (int64, error) {
+// 'matched' with the address + protocol hint. Returns rows-affected
+// (0 if the claim drifted).
+func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress, matchProtocol string) (int64, error) {
 	if claim == nil || claim.ID == "" {
 		return 0, nil
 	}
@@ -188,6 +189,7 @@ func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress str
 		}
 		t.Status = StatusMatched
 		t.MatchAddress = matchAddress
+		t.MatchProtocol = matchProtocol
 		t.MatchedAt = &now
 		t.claimID = ""
 		t.claimExpiresAt = time.Time{}

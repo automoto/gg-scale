@@ -131,6 +131,49 @@ func TestBackend_Allocate_creates_allocation_with_fleet_and_region_selectors(t *
 	assert.Equal(t, "us-east-1", labels["ggscale.region"])
 }
 
+func TestBackend_Allocate_populates_protocol_from_gameserver_spec(t *testing.T) {
+	cases := []struct {
+		name     string
+		port     agonesv1.GameServerPort
+		expected string
+	}{
+		{"tcp lowercased", agonesv1.GameServerPort{Protocol: "TCP", ContainerPort: 7373}, "tcp"},
+		{"udp lowercased", agonesv1.GameServerPort{Protocol: "UDP", ContainerPort: 7777}, "udp"},
+		{"tcpudp lowercased", agonesv1.GameServerPort{Protocol: "TCPUDP", ContainerPort: 7777}, "tcpudp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeAPI{
+				createResult: allocatedResult("gs-1", "10.0.0.5", 7654),
+				getResult: &agonesv1.GameServer{
+					Spec: agonesv1.GameServerSpec{
+						Ports: []agonesv1.GameServerPort{tc.port},
+					},
+				},
+			}
+			be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "ggscale"})
+			require.NoError(t, err)
+
+			got, err := be.Allocate(context.Background(), sampleReq())
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, got.Protocol)
+		})
+	}
+}
+
+func TestBackend_Allocate_leaves_protocol_empty_when_gameserver_lookup_fails(t *testing.T) {
+	fake := &fakeAPI{
+		createResult: allocatedResult("gs-1", "10.0.0.5", 7654),
+		getErr:       errors.New("not found"),
+	}
+	be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "ggscale"})
+	require.NoError(t, err)
+
+	got, err := be.Allocate(context.Background(), sampleReq())
+	require.NoError(t, err, "protocol read failure must not fail the allocation; protocol_hint is observability, not contract")
+	assert.Empty(t, got.Protocol)
+}
+
 func TestBackend_Allocate_returns_error_on_unallocated(t *testing.T) {
 	fake := &fakeAPI{
 		createResult: &allocationv1.GameServerAllocation{

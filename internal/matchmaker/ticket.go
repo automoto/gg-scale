@@ -32,18 +32,19 @@ const (
 
 // Ticket is one in-flight matchmaking request.
 type Ticket struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	FleetID      int64
-	EndUserID    int64
-	Region       string
-	GameMode     string
-	Attributes   json.RawMessage
-	Status       Status
-	MatchAddress string
-	CreatedAt    time.Time
-	MatchedAt    *time.Time
+	ID            int64
+	TenantID      int64
+	ProjectID     int64
+	FleetID       int64
+	EndUserID     int64
+	Region        string
+	GameMode      string
+	Attributes    json.RawMessage
+	Status        Status
+	MatchAddress  string
+	MatchProtocol string
+	CreatedAt     time.Time
+	MatchedAt     *time.Time
 }
 
 // EnqueueRequest is the input HTTP handlers pass to Queue.Enqueue. FleetID
@@ -103,10 +104,11 @@ type Queue interface {
 	// columns are set.
 	ClaimBucket(ctx context.Context, bucket Bucket, n int, ttl time.Duration) (*Claim, error)
 	// CommitClaim flips every still-queued row holding this claim to
-	// 'matched' with the given address. Returns rows-affected so the
-	// caller can detect a race (sweeper, cancel) and deallocate the
-	// orphan server.
-	CommitClaim(ctx context.Context, claim *Claim, matchAddress string) (int64, error)
+	// 'matched' with the given address and protocol hint. Returns
+	// rows-affected so the caller can detect a race (sweeper, cancel)
+	// and deallocate the orphan server. matchProtocol may be empty when
+	// the backend can't determine it.
+	CommitClaim(ctx context.Context, claim *Claim, matchAddress, matchProtocol string) (int64, error)
 	// ReleaseClaim is the worker-driven failure path: bumps
 	// allocation_attempts, flips to 'failed' at the cap, and clears
 	// claim cols so a future claim can re-pick the ticket.
