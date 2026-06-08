@@ -30,7 +30,7 @@ import (
 //
 // On non-Linux developer machines where the GameServer's reported
 // Status.Address (cluster-internal flannel network) isn't reachable from
-// the host, export DOOMERANG_E2E_HOST=<reachable-ip> (Colima users:
+// the host, export AGONES_E2E_HOST=<reachable-ip> (Colima users:
 // `colima status` reports the address). On Linux CI with direct cluster
 // networking the default Status.Address works.
 func TestAgones_doomerang_allocate_serves_websocket_and_drains(t *testing.T) {
@@ -53,16 +53,16 @@ func TestAgones_doomerang_allocate_serves_websocket_and_drains(t *testing.T) {
 			context.Background(), alloc.gameServerName, metav1.DeleteOptions{})
 	})
 
-	host := overrideHost(alloc.address)
+	host := agonesE2EHost(alloc.address)
 	dialAddr := net.JoinHostPort(host, strconv.Itoa(int(alloc.port)))
-	t.Logf("dialing doomerang-server at %s (GameServer status reported %s; host override %q)",
-		dialAddr, alloc.address, os.Getenv("DOOMERANG_E2E_HOST"))
+	t.Logf("dialing doomerang-server at %s (GameServer status reported %s; AGONES_E2E_HOST=%q)",
+		dialAddr, alloc.address, os.Getenv("AGONES_E2E_HOST"))
 
 	wsURL := "ws://" + dialAddr + "/"
 	wsCtx, wsCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer wsCancel()
 	conn, resp, err := websocket.Dial(wsCtx, wsURL, nil)
-	require.NoErrorf(t, err, "WebSocket handshake against %s failed: %v (server reachable on this host? colima users export DOOMERANG_E2E_HOST=<colima vm ip>)", dialAddr, err)
+	require.NoErrorf(t, err, "WebSocket handshake against %s failed: %v (server reachable on this host? colima users export AGONES_E2E_HOST=<colima vm ip>)", dialAddr, err)
 	if resp != nil {
 		require.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode,
 			"expected 101 Switching Protocols, got %d", resp.StatusCode)
@@ -155,15 +155,4 @@ func assertGameServerGone(ctx context.Context, t *testing.T, gsClient agonesclie
 		case <-ticker.C:
 		}
 	}
-}
-
-// overrideHost returns DOOMERANG_E2E_HOST when set, otherwise the
-// reported Status.Address. The override exists for developer machines
-// where the cluster-internal address isn't reachable from the host
-// (Colima on macOS being the canonical case).
-func overrideHost(reported string) string {
-	if v := os.Getenv("DOOMERANG_E2E_HOST"); v != "" {
-		return v
-	}
-	return reported
 }

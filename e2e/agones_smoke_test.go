@@ -53,14 +53,14 @@ func TestAgonesAllocation_assigns_host_port_reachable_via_udp(t *testing.T) {
 		_ = gsClient.Delete(context.Background(), "ggscale-smoke", metav1.DeleteOptions{})
 	})
 
-	port := waitForReadyPort(ctx, t, gsClient, "ggscale-smoke")
+	address, port := waitForReadyAddress(ctx, t, gsClient, "ggscale-smoke")
 	require.NotZero(t, port)
 
-	echo := dialAndEcho(t, port, "PING\n")
+	echo := dialAndEcho(t, address, port, "PING\n")
 	assert.Contains(t, echo, "ACK")
 }
 
-func waitForReadyPort(ctx context.Context, t *testing.T, gsClient agonesclient.GameServerInterface, name string) int32 {
+func waitForReadyAddress(ctx context.Context, t *testing.T, gsClient agonesclient.GameServerInterface, name string) (string, int32) {
 	t.Helper()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -68,20 +68,23 @@ func waitForReadyPort(ctx context.Context, t *testing.T, gsClient agonesclient.G
 	for {
 		got, err := gsClient.Get(ctx, name, metav1.GetOptions{})
 		if err == nil && got.Status.State == agonesv1.GameServerStateReady && len(got.Status.Ports) > 0 {
-			return got.Status.Ports[0].Port
+			return got.Status.Address, got.Status.Ports[0].Port
 		}
 		select {
 		case <-ctx.Done():
 			t.Fatalf("GameServer %q never reached Ready: %v", name, ctx.Err())
-			return 0
+			return "", 0
 		case <-ticker.C:
 		}
 	}
 }
 
-func dialAndEcho(t *testing.T, port int32, msg string) string {
+func dialAndEcho(t *testing.T, reportedAddr string, port int32, msg string) string {
 	t.Helper()
-	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(port)))
+	host := agonesE2EHost(reportedAddr)
+	addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	t.Logf("dialing UDP %s (GameServer status reported %s; AGONES_E2E_HOST=%q)",
+		addr, reportedAddr, os.Getenv("AGONES_E2E_HOST"))
 
 	conn, err := net.DialTimeout("udp", addr, 5*time.Second)
 	require.NoError(t, err)
@@ -102,8 +105,11 @@ func simpleGameServerTemplate() corev1.PodTemplateSpec {
 	return corev1.PodTemplateSpec{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{
-				Name:  "simple-game-server",
-				Image: "gcr.io/agones-images/simple-game-server:0.27",
+				Name: "simple-game-server",
+				// Agones moved their public images from gcr.io/agones-images
+				// to us-docker.pkg.dev/agones-images/examples/. The old
+				// gcr.io path returns 404 as of mid-2026.
+				Image: "us-docker.pkg.dev/agones-images/examples/simple-game-server:0.42",
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("20m"),
@@ -135,4 +141,19 @@ func kubeconfigPathOrSkip(t *testing.T) string {
 		t.Skipf("Agones e2e skipped (no kubeconfig at %q: %v); run make up-k8s && make agones-install", path, err)
 	}
 	return path
+}
+
+// agonesE2EHost returns AGONES_E2E_HOST when set, otherwise the reported
+// address. The override exists for developer machines where the
+// cluster-internal GameServer.Status.Address isn't reachable from the
+// host (Colima on macOS being the canonical case — the cluster-internal
+// flannel IP can't be dialed; the colima VM's external IP can).
+//
+// On Linux CI with direct cluster networking the default Status.Address
+// works and no override is needed.
+func agonesE2EHost(reported string) string {
+	if v := os.Getenv("AGONES_E2E_HOST"); v != "" {
+		return v
+	}
+	return reported
 }
