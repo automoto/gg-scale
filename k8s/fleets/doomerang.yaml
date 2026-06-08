@@ -50,9 +50,10 @@ spec:
           terminationGracePeriodSeconds: 60
           containers:
             - name: doomerang-server
-              # Phase D will push a real tag to buildwrangler/doomerang-server.
-              # Pin to a SHA digest in prod before first rollout.
-              image: buildwrangler/doomerang-server:v0.1.0
+              # Pinned to the buildwrangler/doomerang-server v0.1.0 digest so
+              # an accidental :v0.1.0 force-push can't change what gets
+              # allocated. Bump in lockstep with the release tag.
+              image: buildwrangler/doomerang-server@sha256:47ae12bb8d4e129afc17068df434dada6d0a043cbbcd9fab95bc04a7fa249fa4
               imagePullPolicy: IfNotPresent
               resources:
                 requests:
