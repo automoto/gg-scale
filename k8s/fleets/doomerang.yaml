@@ -34,7 +34,11 @@ spec:
         - name: default
           portPolicy: Dynamic
           containerPort: 7373
-          protocol: UDP
+          # doomerang-server uses WebSocket (server/core/server.go uses
+          # transports.NewWsServerTransport), which is TCP. The original
+          # placeholder said UDP — inherited from the upstream
+          # simple-game-server smoke test and not caught in Phase B.
+          protocol: TCP
       # SDK sidecar heartbeat. The game server calls sdk.Health() every
       # 2s (agonesHealthInterval in cmd/server/agones.go), comfortably
       # under periodSeconds * failureThreshold = 15s grace.
