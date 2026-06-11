@@ -92,6 +92,10 @@ type Config struct {
 	LogLevel          string
 	Env               string
 	JWTSigningKey     string
+	// MigrationsDir is the directory ggscale-server reads SQL migrations
+	// from on startup. Default `/migrations` matches the Dockerfile COPY.
+	// In local dev (compose, go run) override with the repo-relative path.
+	MigrationsDir string
 
 	// DashboardEnabled controls whether /v1/dashboard is mounted.
 	DashboardEnabled bool
@@ -216,6 +220,10 @@ var declared = []varDecl{
 	}},
 	{name: "DASHBOARD_BOOTSTRAP_TOKEN_FILE", defval: "", set: func(c *Config, v string) error {
 		c.DashboardBootstrapTokenFile = v
+		return nil
+	}},
+	{name: "MIGRATIONS_DIR", defval: "/migrations", set: func(c *Config, v string) error {
+		c.MigrationsDir = v
 		return nil
 	}},
 	{name: "DASHBOARD_COOKIE_SECURE", defval: "false", set: func(c *Config, v string) error {

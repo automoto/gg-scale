@@ -31,6 +31,7 @@ import (
 	_ "github.com/ggscale/ggscale/internal/mailer/smtp"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
+	migraterunner "github.com/ggscale/ggscale/internal/migrate"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -78,6 +79,20 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+
+	// Apply forward-only SQL migrations before anything else touches the DB.
+	// Runner returns ErrNoChange internally as a no-op so this is safe on
+	// every restart.
+	mr, err := migraterunner.New(cfg.DatabaseURL, cfg.MigrationsDir)
+	if err != nil {
+		return fmt.Errorf("migrate init: %w", err)
+	}
+	if err := mr.Up(); err != nil {
+		_ = mr.Close()
+		return fmt.Errorf("migrate up: %w", err)
+	}
+	_ = mr.Close()
+	logger.Info("migrations applied", "dir", cfg.MigrationsDir)
 
 	store, err := cachebuild.New(ctx, cachebuild.Config{
 		Backend:             cfg.CacheBackend,

@@ -16,6 +16,9 @@ RUN CGO_ENABLED=0 go build \
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /out/ggscale-server /ggscale-server
+# Migrations are applied at startup; ggscale-server reads from
+# MIGRATIONS_DIR (default /migrations). Forward-only.
+COPY db/migrations /migrations
 
 USER nonroot:nonroot
 EXPOSE 8080
