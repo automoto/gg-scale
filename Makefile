@@ -86,10 +86,6 @@ seed:
 test-plugins:
 	go test -race -tags=integration -timeout=60s ./internal/fleet/plugin/...
 
-# Runs the SDK tests inside the git submodule.
-test-sdk:
-	cd sdk-go && go test -race ./...
-
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
 up: preflight

@@ -30,6 +30,13 @@ type Config struct {
 	AgonesNS      string
 	AgonesKubecfg string
 
+	// Out-of-cluster k3s auth (Dokku deploys). When all three are set the
+	// agones backend builds rest.Config from these instead of AgonesKubecfg.
+	// K3sCACertB64 is base64-encoded PEM.
+	K3sAPIURL    string
+	K3sSAToken   string
+	K3sCACertB64 string
+
 	// Docker host-wide knobs surfaced from internal/config.
 	DockerBindIP            string
 	DockerDefaultMemory     int64
@@ -55,9 +62,11 @@ func New(c Config) (fleet.Backend, error) {
 			RequireDigest:      c.DockerRequireDigest,
 		})
 	case "agones":
-		return agonesbackend.NewFromKubeconfig(agonesbackend.Config{
-			Namespace: c.AgonesNS,
-		}, c.AgonesKubecfg)
+		agonesCfg := agonesbackend.Config{Namespace: c.AgonesNS}
+		if c.K3sAPIURL != "" {
+			return agonesbackend.NewFromEnvVars(agonesCfg, c.K3sAPIURL, c.K3sSAToken, c.K3sCACertB64)
+		}
+		return agonesbackend.NewFromKubeconfig(agonesCfg, c.AgonesKubecfg)
 	default:
 		if name, ok := strings.CutPrefix(c.Backend, "plugin:"); ok {
 			if name == "" {

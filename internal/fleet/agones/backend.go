@@ -6,8 +6,10 @@ package agones
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
@@ -81,6 +83,51 @@ func NewFromKubeconfig(cfg Config, kubeconfigPath string) (*Backend, error) {
 	}
 	cfg.API = clientsetAdapter{cs}
 	return New(cfg)
+}
+
+// NewFromEnvVars builds a Backend from a ServiceAccount bearer token and a
+// base64-encoded PEM CA cert. Used when ggscale-server runs outside the
+// cluster (e.g. as a Dokku app) and can't reach an in-cluster config or a
+// kubeconfig file.
+func NewFromEnvVars(cfg Config, apiURL, saToken, caCertB64 string) (*Backend, error) {
+	rcfg, err := restConfigFromEnvVars(apiURL, saToken, caCertB64)
+	if err != nil {
+		return nil, err
+	}
+	cs, err := agonesclientset.NewForConfig(rcfg)
+	if err != nil {
+		return nil, fmt.Errorf("agones: clientset: %w", err)
+	}
+	cfg.API = clientsetAdapter{cs}
+	return New(cfg)
+}
+
+func restConfigFromEnvVars(apiURL, saToken, caCertB64 string) (*rest.Config, error) {
+	if apiURL == "" {
+		return nil, errors.New("agones: K3S_API_URL is required")
+	}
+	u, err := url.Parse(apiURL)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil, fmt.Errorf("agones: K3S_API_URL %q is not a valid URL", apiURL)
+	}
+	if saToken == "" {
+		return nil, errors.New("agones: K3S_SA_TOKEN is required")
+	}
+	if caCertB64 == "" {
+		return nil, errors.New("agones: K3S_CA_CERT_B64 is required")
+	}
+	caPEM, err := base64.StdEncoding.DecodeString(strings.TrimSpace(caCertB64))
+	if err != nil {
+		return nil, fmt.Errorf("agones: K3S_CA_CERT_B64 base64 decode: %w", err)
+	}
+	if len(caPEM) == 0 {
+		return nil, errors.New("agones: K3S_CA_CERT_B64 decoded to empty bytes")
+	}
+	return &rest.Config{
+		Host:            apiURL,
+		BearerToken:     saToken,
+		TLSClientConfig: rest.TLSClientConfig{CAData: caPEM},
+	}, nil
 }
 
 // Name is the identifier persisted on every allocation row.

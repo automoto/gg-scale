@@ -39,6 +39,15 @@ type Config struct {
 	AgonesNamespace  string
 	AgonesKubeconfig string
 
+	// k3s API auth via ServiceAccount + bearer token, for deployments where
+	// ggscale-server runs outside the cluster (e.g. as a Dokku app on a
+	// separate host) and can't use in-cluster config or ship a kubeconfig
+	// file. When all three are set, they take precedence over
+	// AgonesKubeconfig. K3sCACertB64 is base64-encoded PEM.
+	K3sAPIURL    string
+	K3sSAToken   string
+	K3sCACertB64 string
+
 	// RealtimeMaxPerTenant caps concurrent /v1/ws connections per tenant.
 	// 0 disables the cap (the cache.Store layer is bypassed entirely).
 	RealtimeMaxPerTenant int64
@@ -254,6 +263,18 @@ var declared = []varDecl{
 	}},
 	{name: "AGONES_KUBECONFIG", defval: "", set: func(c *Config, v string) error {
 		c.AgonesKubeconfig = v
+		return nil
+	}},
+	{name: "K3S_API_URL", defval: "", set: func(c *Config, v string) error {
+		c.K3sAPIURL = v
+		return nil
+	}},
+	{name: "K3S_SA_TOKEN", defval: "", fileFallback: true, set: func(c *Config, v string) error {
+		c.K3sSAToken = v
+		return nil
+	}},
+	{name: "K3S_CA_CERT_B64", defval: "", fileFallback: true, set: func(c *Config, v string) error {
+		c.K3sCACertB64 = v
 		return nil
 	}},
 

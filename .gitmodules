@@ -1,3 +1,0 @@
-[submodule "sdk-go"]
-	path = sdk-go
-	url = git@github.com:automoto/ggscale-go.git

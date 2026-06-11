@@ -1,5 +1,7 @@
 # Minimal Agones GameServer used by the Phase 0 e2e smoke test.
 # Uses Agones' simple-game-server image which echoes UDP messages.
+# Image registry was moved from gcr.io/agones-images to
+# us-docker.pkg.dev/agones-images/examples; this points at the new home.
 apiVersion: agones.dev/v1
 kind: GameServer
 metadata:
@@ -15,7 +17,7 @@ spec:
     spec:
       containers:
         - name: simple-game-server
-          image: gcr.io/agones-images/simple-game-server:0.27
+          image: us-docker.pkg.dev/agones-images/examples/simple-game-server:0.34
           resources:
             requests:
               cpu: 20m

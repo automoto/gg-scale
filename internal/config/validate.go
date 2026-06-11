@@ -74,5 +74,19 @@ func (c *Config) Validate() error {
 			"hint", "the LISTEN socket holds one slot, leaving DB_MAX_CONNS-1 for request traffic + cleanup")
 	}
 
+	if c.FleetBackend == "agones" {
+		anyK3s := c.K3sAPIURL != "" || c.K3sSAToken != "" || c.K3sCACertB64 != ""
+		allK3s := c.K3sAPIURL != "" && c.K3sSAToken != "" && c.K3sCACertB64 != ""
+		if anyK3s && !allK3s {
+			return fmt.Errorf("K3S_API_URL, K3S_SA_TOKEN, K3S_CA_CERT_B64 must all be set together (or all unset)")
+		}
+		if allK3s && c.AgonesKubeconfig != "" {
+			return fmt.Errorf("AGONES_KUBECONFIG and K3S_* env vars are mutually exclusive; unset one")
+		}
+		if prod && allK3s && !strings.HasPrefix(c.K3sAPIURL, "https://") {
+			return fmt.Errorf("K3S_API_URL must use HTTPS in production (got %q)", c.K3sAPIURL)
+		}
+	}
+
 	return nil
 }
