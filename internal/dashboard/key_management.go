@@ -15,18 +15,25 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 var (
 	errInvalidTenant      = errors.New("dashboard: tenant id is required")
 	errInvalidProjectName = errors.New("dashboard: project name is required")
 	errDuplicateProject   = errors.New("dashboard: project with that name already exists")
+	errInvalidKeyType     = errors.New("dashboard: key type must be 'publishable' or 'secret'")
 )
 
 type createKeyInput struct {
 	TenantID  int64
 	ProjectID *int64
 	Label     string
+	// KeyType is "publishable" (for keys embedded in shipped game clients)
+	// or "secret" (for game servers / tenant backends). Required —
+	// caller must validate against the tenant.KeyType* constants before
+	// reaching createAPIKey.
+	KeyType tenant.KeyType
 }
 
 type createKeyResult struct {
@@ -133,6 +140,9 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 	if in.TenantID <= 0 {
 		return createKeyResult{}, errInvalidTenant
 	}
+	if in.KeyType != tenant.KeyTypePublishable && in.KeyType != tenant.KeyTypeSecret {
+		return createKeyResult{}, errInvalidKeyType
+	}
 	if h.pool == nil {
 		return createKeyResult{}, errors.New("dashboard: database pool is required")
 	}
@@ -151,6 +161,7 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 			ProjectID: in.ProjectID,
 			KeyHash:   sum[:],
 			Label:     strings.TrimSpace(in.Label),
+			KeyType:   string(in.KeyType),
 		})
 		if err != nil {
 			return fmt.Errorf("create api key: %w", err)
@@ -159,6 +170,7 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 			"label":      in.Label,
 			"project_id": in.ProjectID,
 			"tenant_id":  in.TenantID,
+			"key_type":   string(in.KeyType),
 		})
 	})
 	if err != nil {

@@ -48,7 +48,8 @@ WITH args AS (
     SELECT
         $1::bigint AS project_id,
         $2::bytea AS key_hash,
-        $3::text AS label
+        $3::text AS label,
+        $4::text AS key_type
 ), tenant_ctx AS (
     SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
 ),
@@ -61,8 +62,8 @@ project_ctx AS (
     FROM projects p, tenant_ctx t, args
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
-INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
-SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), '{}'::text[]
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{}'::text[]
 FROM tenant_ctx t
 CROSS JOIN project_ctx p
 CROSS JOIN args
@@ -73,6 +74,7 @@ type CreateDashboardAPIKeyParams struct {
 	ProjectID *int64
 	KeyHash   []byte
 	Label     string
+	KeyType   string
 }
 
 type CreateDashboardAPIKeyRow struct {
@@ -81,7 +83,12 @@ type CreateDashboardAPIKeyRow struct {
 }
 
 func (q *Queries) CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error) {
-	row := q.db.QueryRow(ctx, createDashboardAPIKey, arg.ProjectID, arg.KeyHash, arg.Label)
+	row := q.db.QueryRow(ctx, createDashboardAPIKey,
+		arg.ProjectID,
+		arg.KeyHash,
+		arg.Label,
+		arg.KeyType,
+	)
 	var i CreateDashboardAPIKeyRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err

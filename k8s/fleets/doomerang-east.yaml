@@ -1,0 +1,81 @@
+# Doomerang Fleet — us-east region.
+# Allocator (internal/fleet/agones/backend.go) selects GameServers by the
+# `ggscale.region` pod label. The matchmaker passes Region in the
+# AllocationRequest; backend.go's selectorWithRegion translates that
+# into a label-match here.
+#
+# nodeSelector pins pods onto workers labeled ggscale.region=us-east so
+# the worker's public IP (which Agones advertises in
+# GameServer.Status.Address) is geographically the right one for east
+# coast players.
+apiVersion: agones.dev/v1
+kind: Fleet
+metadata:
+  name: doomerang-east
+  namespace: default
+  labels:
+    app: doomerang
+    ggscale.region: us-east
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: "25%"
+      maxUnavailable: "25%"
+  template:
+    metadata:
+      labels:
+        app: doomerang
+        # Allocator-visible region label — matches the matchmaker's
+        # AllocationRequest.Region value verbatim.
+        ggscale.region: us-east
+    spec:
+      ports:
+        - name: default
+          portPolicy: Dynamic
+          containerPort: 7373
+          # WebSocket → TCP. Workers' UFW + OVH cloud firewall opens
+          # TCP 7000-8000 to match.
+          protocol: TCP
+      health:
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        failureThreshold: 3
+      template:
+        spec:
+          # Drain budget: Server.Drain waits up to 30s for in-flight
+          # match end; 60s leaves SDK time to send Shutdown and exit.
+          terminationGracePeriodSeconds: 60
+          # Land only on workers in this region.
+          nodeSelector:
+            ggscale.region: us-east
+          volumes:
+            - name: ggscale-secret
+              secret:
+                secretName: doomerang-ggscale-secret
+                items:
+                  - key: secret-key
+                    path: ggscale-secret
+          containers:
+            - name: doomerang-server
+              image: buildwrangler/doomerang-server@sha256:48cfd2f17ab757d5c9e6cc79cce8991cef47b978a4ce1d4a1c3c0f7111456ff2
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: GGSCALE_URL
+                  value: "https://api.ggscale.com"
+                - name: GGSCALE_SECRET_KEY_FILE
+                  value: "/etc/doomerang/ggscale-secret"
+                - name: REGION
+                  value: "us-east"
+              volumeMounts:
+                - name: ggscale-secret
+                  mountPath: /etc/doomerang
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi

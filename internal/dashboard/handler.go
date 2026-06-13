@@ -18,6 +18,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -382,6 +383,10 @@ func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: session.CSRFToken,
 		TenantID:  tenantID,
 		Projects:  projects,
+		// Default to publishable: the safer choice for someone who isn't
+		// sure. A secret key embedded in a shipped client is the kind of
+		// thing that ends up on a public CDN.
+		KeyType: string(tenant.KeyTypePublishable),
 	}))
 
 }
@@ -397,11 +402,19 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	rawProjectID := r.Form.Get("project_id")
 	label := r.Form.Get("label")
+	rawKeyType := r.Form.Get("key_type")
+	keyType := tenant.KeyType(rawKeyType)
+	if keyType != tenant.KeyTypePublishable && keyType != tenant.KeyTypeSecret {
+		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
+			http.StatusUnprocessableEntity,
+			map[string]string{"key_type": "Pick a key type"}, "")
+		return
+	}
 	var projectID *int64
 	if rawProjectID != "" {
 		id, err := strconv.ParseInt(rawProjectID, 10, 64)
 		if err != nil || id <= 0 {
-			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID,
+			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 				http.StatusUnprocessableEntity,
 				map[string]string{"project_id": "Pick a valid project (or leave empty for tenant-wide)"}, "")
 			return
@@ -412,9 +425,10 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Label:     label,
+		KeyType:   keyType,
 	})
 	if err != nil {
-		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID,
+		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
@@ -428,12 +442,15 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 
 // renderNewAPIKeyError re-renders the new API key page with field errors
 // and the form values the user already typed.
-func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, tenantID int64, label, projectID string, status int, fieldErrors map[string]string, errorMsg string) {
+func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, tenantID int64, label, projectID, keyType string, status int, fieldErrors map[string]string, errorMsg string) {
 	session, _ := sessionFromContext(r.Context())
 	projects, err := h.listProjects(r.Context(), tenantID)
 	if err != nil {
 		http.Error(w, "project list failed", http.StatusInternalServerError)
 		return
+	}
+	if keyType == "" {
+		keyType = string(tenant.KeyTypePublishable)
 	}
 	w.WriteHeader(status)
 	webutil.Render(r, w, NewAPIKeyPage(NewAPIKeyView{
@@ -443,6 +460,7 @@ func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, t
 		Projects:    projects,
 		Label:       label,
 		ProjectID:   projectID,
+		KeyType:     keyType,
 		Error:       errorMsg,
 		FieldErrors: fieldErrors,
 	}))

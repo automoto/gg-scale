@@ -119,12 +119,17 @@ type NewProjectView struct {
 
 // NewAPIKeyView is the data rendered by the create-api-key page.
 type NewAPIKeyView struct {
-	UserEmail   string
-	CSRFToken   string
-	TenantID    int64
-	Projects    []ProjectOption
-	Label       string
-	ProjectID   string
+	UserEmail string
+	CSRFToken string
+	TenantID  int64
+	Projects  []ProjectOption
+	Label     string
+	ProjectID string
+	// KeyType is the currently-selected type — either "publishable"
+	// (embedded in shipped game clients) or "secret" (game-server /
+	// backend only). Empty during initial render to surface the default
+	// selection in the form.
+	KeyType     string
 	Error       string
 	FieldErrors map[string]string
 }

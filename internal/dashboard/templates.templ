@@ -387,6 +387,19 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 						@fieldError(vm.FieldErrors, "project_id")
 					</label>
 					<label>
+						Type
+						<select id="key_type" name="key_type" aria-describedby="key_type-error">
+							if vm.KeyType == "secret" {
+								<option value="publishable">Publishable — embed in shipped game clients (read + player session bootstrap)</option>
+								<option value="secret" selected>Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
+							} else {
+								<option value="publishable" selected>Publishable — embed in shipped game clients (read + player session bootstrap)</option>
+								<option value="secret">Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
+							}
+						</select>
+						@fieldError(vm.FieldErrors, "key_type")
+					</label>
+					<label>
 						Name
 						<input id="key_label" name="label" value={ vm.Label } placeholder="e.g. CI deploy key" required aria-describedby="label-error"/>
 						@fieldError(vm.FieldErrors, "label")

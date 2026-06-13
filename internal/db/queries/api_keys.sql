@@ -25,7 +25,8 @@ WITH args AS (
     SELECT
         sqlc.narg(project_id)::bigint AS project_id,
         sqlc.arg(key_hash)::bytea AS key_hash,
-        sqlc.arg(label)::text AS label
+        sqlc.arg(label)::text AS label,
+        sqlc.arg(key_type)::text AS key_type
 ), tenant_ctx AS (
     SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
 ),
@@ -38,8 +39,8 @@ project_ctx AS (
     FROM projects p, tenant_ctx t, args
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
-INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
-SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), '{}'::text[]
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{}'::text[]
 FROM tenant_ctx t
 CROSS JOIN project_ctx p
 CROSS JOIN args

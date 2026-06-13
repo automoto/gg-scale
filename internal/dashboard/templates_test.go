@@ -122,6 +122,47 @@ func TestNewAPIKeyPage_RendersProjectSelectAndPreservesSelection(t *testing.T) {
 	assert.Contains(t, html, `value="ci-key"`)
 }
 
+func TestNewAPIKeyPage_KeyTypeSelector(t *testing.T) {
+	cases := []struct {
+		name              string
+		view              NewAPIKeyView
+		publishableActive bool
+		secretActive      bool
+	}{
+		{
+			name: "publishable_default_when_keytype_unset",
+			view: NewAPIKeyView{TenantID: 1, KeyType: ""},
+			// Empty falls through to publishable-selected branch.
+			publishableActive: true,
+			secretActive:      false,
+		},
+		{
+			name:              "publishable_explicit",
+			view:              NewAPIKeyView{TenantID: 1, KeyType: "publishable"},
+			publishableActive: true,
+			secretActive:      false,
+		},
+		{
+			name:              "secret_explicit",
+			view:              NewAPIKeyView{TenantID: 1, KeyType: "secret"},
+			publishableActive: false,
+			secretActive:      true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderToString(t, NewAPIKeyPage(tc.view))
+			assert.Contains(t, html, `name="key_type"`, "form must include key_type input")
+			if tc.publishableActive {
+				assert.Contains(t, html, `<option value="publishable" selected>`)
+			}
+			if tc.secretActive {
+				assert.Contains(t, html, `<option value="secret" selected>`)
+			}
+		})
+	}
+}
+
 func TestNewTenantPage_HasCSRFHeaderForHTMX(t *testing.T) {
 	html := renderToString(t, NewTenantPage(NewTenantView{
 		UserEmail: "bob@example.com",
