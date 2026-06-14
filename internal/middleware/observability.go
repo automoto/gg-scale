@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ggscale/ggscale/internal/observability"
@@ -73,36 +74,26 @@ func NewObservability(reg prometheus.Registerer) func(http.Handler) http.Handler
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+			// chi's wrapper preserves optional interfaces (Hijacker,
+			// Flusher, Pusher, ReaderFrom); a custom wrapper would drop them.
+			rec := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()
 			next.ServeHTTP(rec, r)
 			elapsed := time.Since(start).Seconds()
 
-			// Use the matched chi route pattern instead of the raw URL —
-			// raw paths embed attacker-controlled segments (storage keys,
-			// leaderboard ids, user ids) and would explode cardinality.
+			// Use the chi route pattern, not raw URL, to bound label cardinality.
 			route := observability.RouteLabel(r)
-			status := strconv.Itoa(rec.status)
+			code := rec.Status()
+			if code == 0 {
+				code = http.StatusOK
+			}
+			status := strconv.Itoa(code)
 			dur.WithLabelValues(route, r.Method, status).Observe(elapsed)
-			if rec.status >= 400 {
-				errs.WithLabelValues(route, statusClass(rec.status)).Inc()
+			if code >= 400 {
+				errs.WithLabelValues(route, statusClass(code)).Inc()
 			}
 		})
 	}
-}
-
-type statusRecorder struct {
-	http.ResponseWriter
-	status int
-	wrote  bool
-}
-
-func (r *statusRecorder) WriteHeader(code int) {
-	if !r.wrote {
-		r.status = code
-		r.wrote = true
-	}
-	r.ResponseWriter.WriteHeader(code)
 }
 
 func statusClass(code int) string {
