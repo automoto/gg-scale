@@ -45,7 +45,7 @@ spec:
                     path: ggscale-secret
           containers:
             - name: doomerang-server
-              image: buildwrangler/doomerang-server@sha256:be4f9f533fcc0048b655deb4b746679d9003607b1d2d179fdb3a2a2c18611467
+              image: buildwrangler/doomerang-server@sha256:d5373a1d9190dbd1fa8fc645365ef17f5e2ddf3689249653d5862e3e643b941f
               imagePullPolicy: IfNotPresent
               env:
                 - name: GGSCALE_URL
