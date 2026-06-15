@@ -36,8 +36,8 @@ import (
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
-	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/relay"
+	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
