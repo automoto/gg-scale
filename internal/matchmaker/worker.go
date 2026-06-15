@@ -298,7 +298,11 @@ func (w *Worker) processBucket(ctx context.Context, b Bucket) error {
 		return nil
 	}
 
-	w.notifyMatched(ctx, claim.Tickets, alloc.Address)
+	// If no client received match_ready, the match can't proceed — release
+	// the allocation so the fleet slot is reusable instead of leaking.
+	if notified := w.notifyMatched(ctx, claim.Tickets, alloc.Address); notified == 0 {
+		w.deallocateOrphan(ctx, alloc, "no clients reachable")
+	}
 	return nil
 }
 
@@ -316,20 +320,32 @@ func (w *Worker) deallocateOrphan(ctx context.Context, alloc *fleet.Allocation, 
 	w.log.Info("matchmaker: orphan allocation released", "reason", reason, "allocation_id", alloc.ID)
 }
 
-func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, address string) {
+// notifyMatched pushes match_ready to each player and returns the number of
+// successful deliveries. A return of 0 means no client will ever connect to
+// the allocated server, so the caller should release the allocation.
+func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, address string) int {
 	if w.hub == nil {
-		return
+		return len(tickets)
 	}
+	delivered := 0
 	for _, t := range tickets {
 		p, _ := json.Marshal(map[string]any{"address": address, "ticket_id": t.ID})
 		err := w.hub.Send(ctx, t.TenantID, t.EndUserID, realtime.Message{
 			Type:    "match_ready",
 			Payload: p,
 		})
-		if err != nil && !errors.Is(err, realtime.ErrNotConnected) {
-			w.log.Warn("matchmaker: notify failed", "tenant_id", t.TenantID, "end_user_id", t.EndUserID, "err", err)
+		switch {
+		case err == nil:
+			delivered++
+		case errors.Is(err, realtime.ErrNotConnected):
+			w.log.Info("matchmaker: notify skipped (client not connected)",
+				"tenant_id", t.TenantID, "end_user_id", t.EndUserID)
+		default:
+			w.log.Warn("matchmaker: notify failed",
+				"tenant_id", t.TenantID, "end_user_id", t.EndUserID, "err", err)
 		}
 	}
+	return delivered
 }
 
 func (w *Worker) dropEvent(b Bucket, source string) {

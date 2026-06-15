@@ -64,9 +64,10 @@ func (f *fakeAllocator) Deallocated() []fleet.AllocationID {
 }
 
 type fakeNotifier struct {
-	mu      sync.Mutex
-	sent    []sentMessage
-	failErr error
+	mu            sync.Mutex
+	sent          []sentMessage
+	failErr       error
+	failForUserID int64 // when non-zero, only this end_user_id gets ErrNotConnected
 }
 
 type sentMessage struct {
@@ -79,6 +80,9 @@ func (f *fakeNotifier) Send(_ context.Context, tenantID, endUserID int64, msg re
 	defer f.mu.Unlock()
 	if f.failErr != nil {
 		return f.failErr
+	}
+	if f.failForUserID != 0 && endUserID == f.failForUserID {
+		return realtime.ErrNotConnected
 	}
 	f.sent = append(f.sent, sentMessage{tenantID, endUserID, msg})
 	return nil
@@ -274,7 +278,11 @@ func TestWorkerProcessesBucketOnListenerEvent(t *testing.T) {
 	require.Eventually(t, func() bool { return len(hub.Sent()) == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
-func TestWorkerToleratesNotifierErrors(t *testing.T) {
+// When the only matched player is no longer connected, the worker must
+// release the allocation it just made — otherwise the fleet slot leaks and
+// subsequent allocate calls fail with state=UnAllocated until the fleet is
+// scaled or the server is reaped manually.
+func TestWorkerReleasesAllocationWhenNoClientIsReachable(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	hub := &fakeNotifier{failErr: realtime.ErrNotConnected}
@@ -284,6 +292,26 @@ func TestWorkerToleratesNotifierErrors(t *testing.T) {
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())
+	assert.Equal(t, []fleet.AllocationID{1}, alloc.Deallocated(),
+		"allocation must be released when no client received match_ready")
+}
+
+// Multi-player match where one player is offline but others got the push:
+// the allocation must NOT be released — the reachable players will still
+// connect to the server and the offline one can reconnect.
+func TestWorkerKeepsAllocationWhenAnyClientReachable(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	hub := &fakeNotifier{failForUserID: 42} // one of two players is offline
+	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{BucketSize: 2})
+
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 41, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "r", GameMode: "g"})
+
+	require.NoError(t, w.Tick(context.Background()))
+	assert.Equal(t, int64(1), alloc.Called())
+	assert.Empty(t, alloc.Deallocated(),
+		"allocation must persist when at least one client received match_ready")
 }
 
 func TestWorkerRunWaitsForGoroutinesOnShutdown(t *testing.T) {
