@@ -3,20 +3,20 @@ module github.com/ggscale/ggscale
 go 1.26.4
 
 require (
-	agones.dev/agones v1.57.0
-	github.com/a-h/templ v0.2.543
+	agones.dev/agones v1.58.0
+	github.com/a-h/templ v0.3.1020
 	github.com/coder/websocket v1.8.14
 	github.com/containerd/errdefs v1.0.0
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/docker/go-connections v0.6.0
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/docker/go-connections v0.7.0
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/cors v1.2.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.8.0
-	github.com/jackc/pgx/v5 v5.9.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/olric-data/olric v0.7.3
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pion/turn/v3 v3.0.3
@@ -25,11 +25,11 @@ require (
 	github.com/stripe/stripe-go/v79 v79.12.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
 	golang.org/x/crypto v0.52.0
-	google.golang.org/grpc v1.81.0
+	google.golang.org/grpc v1.81.1
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
-	k8s.io/api v0.36.0
-	k8s.io/apimachinery v0.36.0
-	k8s.io/client-go v0.36.0
+	k8s.io/api v0.36.1
+	k8s.io/apimachinery v0.36.1
+	k8s.io/client-go v0.36.1
 )
 
 require (
