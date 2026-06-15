@@ -290,18 +290,19 @@ func (w *Worker) processBucket(ctx context.Context, b Bucket) error {
 
 	committed, err := w.queue.CommitClaim(ctx, claim, alloc.Address, alloc.Protocol)
 	if err != nil {
-		w.deallocateOrphan(ctx, alloc, "commit error")
+		w.deallocateOrphan(tenantCtx, alloc, "commit error")
 		return fmt.Errorf("commit claim: %w", err)
 	}
 	if committed == 0 {
-		w.deallocateOrphan(ctx, alloc, "claim drifted")
+		w.deallocateOrphan(tenantCtx, alloc, "claim drifted")
 		return nil
 	}
 
 	// If no client received match_ready, the match can't proceed — release
 	// the allocation so the fleet slot is reusable instead of leaking.
+	// Deallocate goes through the fleet store, which requires tenant context.
 	if notified := w.notifyMatched(ctx, claim.Tickets, alloc.Address); notified == 0 {
-		w.deallocateOrphan(ctx, alloc, "no clients reachable")
+		w.deallocateOrphan(tenantCtx, alloc, "no clients reachable")
 	}
 	return nil
 }

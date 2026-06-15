@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -42,7 +43,13 @@ func (f *fakeAllocator) Allocate(ctx context.Context, req fleet.AllocationReques
 	return &fleet.Allocation{ID: id, Address: f.address, Status: fleet.StatusReady}, nil
 }
 
-func (f *fakeAllocator) Deallocate(_ context.Context, id fleet.AllocationID) error {
+// Deallocate enforces tenant context — the real fleet.Manager.Deallocate
+// goes through the store, which filters by tenant; callers that forget to
+// pass a tenant-tagged ctx (a real bug we shipped once) must fail here too.
+func (f *fakeAllocator) Deallocate(ctx context.Context, id fleet.AllocationID) error {
+	if _, err := db.TenantFromContext(ctx); err != nil {
+		return fmt.Errorf("fakeAllocator.Deallocate: %w", err)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deallocated = append(f.deallocated, id)
