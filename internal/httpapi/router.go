@@ -29,6 +29,7 @@ import (
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
+	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -63,6 +64,10 @@ type Deps struct {
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
+
+	// ServerList is the in-memory game-server heartbeat registry that
+	// backs the server-browser endpoint. nil disables /v1/fleets/*.
+	ServerList *serverlist.Registry
 
 	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
 	RelayIssuer *relay.Issuer
@@ -195,6 +200,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
 					r.Post("/end-users/verify", endUsersVerifyHandler(d))
+					mountFleetHeartbeatRoute(r, d)
 				})
 
 				// End-user authenticated: requires X-Session-Token JWT.
@@ -207,6 +213,7 @@ func NewRouter(d Deps) http.Handler {
 					mountProfileRoutes(r, d)
 					mountRealtimeRoutes(r, d)
 					mountMatchmakerRoutes(r, d)
+					mountFleetListRoute(r, d)
 					mountRelayRoutes(r, d)
 				})
 			})

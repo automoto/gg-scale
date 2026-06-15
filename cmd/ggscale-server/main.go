@@ -36,6 +36,7 @@ import (
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
+	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
@@ -165,6 +166,12 @@ func run() error {
 		}
 	}
 
+	// Server-browser heartbeat registry. TTL=15s tolerates a missed
+	// heartbeat or two (game-servers send every 5s) without dropping
+	// live entries; GC every 10s reclaims stale rows.
+	serverListRegistry := serverlist.New(15 * time.Second)
+	go serverListRegistry.RunGC(ctx, 10*time.Second)
+
 	mmQueue := matchmaker.NewPGQueue(appPool)
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
@@ -204,6 +211,7 @@ func run() error {
 		RealtimeMaxPerTenant:  cfg.RealtimeMaxPerTenant,
 		RealtimeMaxPerEndUser: cfg.RealtimeMaxPerEndUser,
 		Matchmaker:            mmQueue,
+		ServerList:            serverListRegistry,
 		RelayIssuer:           relayIssuer,
 		Dashboard: dashboard.Config{
 			Mount:        cfg.DashboardEnabled,

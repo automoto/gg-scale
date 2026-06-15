@@ -60,6 +60,24 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 	}))
 }
 
+// mountFleetHeartbeatRoute is server-tier (secret api_key). Game-servers
+// authenticate with their secret key and POST liveness + player count.
+func mountFleetHeartbeatRoute(r chi.Router, d Deps) {
+	if d.ServerList == nil {
+		return
+	}
+	r.Post("/fleets/heartbeat", fleetHeartbeatHandler(d))
+}
+
+// mountFleetListRoute is end-user tier. Any authenticated session can
+// browse the live server list for its tenant.
+func mountFleetListRoute(r chi.Router, d Deps) {
+	if d.ServerList == nil {
+		return
+	}
+	r.Get("/fleets/{fleet}/servers", fleetServersListHandler(d))
+}
+
 func mountMatchmakerRoutes(r chi.Router, d Deps) {
 	if d.Matchmaker == nil {
 		return

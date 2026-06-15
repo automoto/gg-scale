@@ -66,6 +66,8 @@ spec:
                   value: "https://api.ggscale.com"
                 - name: GGSCALE_SECRET_KEY_FILE
                   value: "/etc/doomerang/ggscale-secret"
+                - name: GGSCALE_FLEET
+                  value: "doomerang-east"
                 - name: REGION
                   value: "us-east"
               volumeMounts:
