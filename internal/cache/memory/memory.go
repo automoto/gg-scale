@@ -5,6 +5,7 @@ package memory
 
 import (
 	"context"
+	"hash/maphash"
 	"sync"
 	"time"
 
@@ -35,8 +36,9 @@ type shard struct {
 
 // Store is a sharded in-memory implementation of cache.Store.
 type Store struct {
-	shards [shardCount]shard
-	now    func() time.Time
+	shards    [shardCount]shard
+	shardSeed maphash.Seed
+	now       func() time.Time
 
 	stop     chan struct{}
 	stopOnce sync.Once
@@ -54,8 +56,9 @@ const shardCount = 32
 // The janitor exits on Close.
 func New() *Store {
 	s := &Store{
-		now:  time.Now,
-		stop: make(chan struct{}),
+		shardSeed: maphash.MakeSeed(),
+		now:       time.Now,
+		stop:      make(chan struct{}),
 	}
 	for i := range s.shards {
 		s.shards[i].buckets = make(map[string]*bucket)
@@ -254,14 +257,5 @@ func (s *Store) Close(_ context.Context) error {
 }
 
 func (s *Store) shardFor(key string) *shard {
-	return &s.shards[fnv32(key)%shardCount]
-}
-
-func fnv32(key string) uint32 {
-	var h uint32 = 2166136261
-	for i := 0; i < len(key); i++ {
-		h ^= uint32(key[i])
-		h *= 16777619
-	}
-	return h
+	return &s.shards[maphash.String(s.shardSeed, key)%shardCount]
 }
