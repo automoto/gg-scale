@@ -92,47 +92,6 @@ func tenantView(id int64, name, role string, createdAt time.Time) TenantView {
 	return TenantView{ID: id, Name: name, Role: role, CreatedAt: createdAt}
 }
 
-func (h *Handler) userCanAccessTenant(ctx context.Context, user dashboardUser, tenantID int64, minRole string) (bool, error) {
-	if user.IsPlatformAdmin {
-		return true, nil
-	}
-	var role string
-	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		row, err := sqlcgen.New(tx).GetDashboardMembership(ctx, sqlcgen.GetDashboardMembershipParams{
-			DashboardUserID: user.ID,
-			TenantID:        tenantID,
-		})
-		if err != nil {
-			return err
-		}
-		role = row.Role
-		return nil
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return roleAllows(role, minRole), nil
-}
-
-func roleAllows(role, minRole string) bool {
-	rank := func(role string) int {
-		switch role {
-		case roleOwner:
-			return 3
-		case roleAdmin:
-			return 2
-		case roleMember:
-			return 1
-		default:
-			return 0
-		}
-	}
-	return rank(role) >= rank(minRole)
-}
-
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }

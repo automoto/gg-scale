@@ -216,7 +216,7 @@ func (h *Handler) revokeInvite(ctx context.Context, actorID, inviteID int64) err
 // own row — the SQL WHERE clause folds the self-check into a single
 // statement so we don't have to scan every member row to enforce it.
 func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, membershipID int64) error {
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		var targetUserID int64
 		err := tx.QueryRow(ctx, `
@@ -233,7 +233,7 @@ WHERE id = $1
 			return err
 		}
 		if h.rbac != nil {
-			if err := h.rbac.RemoveDashboardRoles(targetUserID, tenantID); err != nil {
+			if err := h.rbac.RemoveDashboardRolesTx(ctx, tx, targetUserID, tenantID); err != nil {
 				return fmt.Errorf("rbac remove membership: %w", err)
 			}
 		}
@@ -254,4 +254,9 @@ WHERE id = $1
 		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.membership.remove", strconv.FormatInt(membershipID, 10), map[string]any{"tenant_id": tenantID})
 	})
+	if err != nil {
+		return err
+	}
+	h.reloadRBACPolicy(ctx)
+	return nil
 }

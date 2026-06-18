@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
@@ -19,6 +20,8 @@ import (
 
 //go:embed model.conf
 var modelFS embed.FS
+
+const defaultPolicyReloadInterval = 10 * time.Second
 
 // Actions are the stable Casbin action names used by routes and policies.
 const (
@@ -119,6 +122,7 @@ func NewAuthorizer(pool *db.Pool) (*Authorizer, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.StartAutoLoadPolicy(defaultPolicyReloadInterval)
 	return &Authorizer{enforcer: e, pool: pool}, nil
 }
 
@@ -129,6 +133,25 @@ func NewMemoryAuthorizer() (*Authorizer, error) {
 		return nil, err
 	}
 	return &Authorizer{enforcer: e}, nil
+}
+
+// Close stops background policy reload.
+func (a *Authorizer) Close() {
+	if a == nil {
+		return
+	}
+	a.enforcer.StopAutoLoadPolicy()
+}
+
+// ReloadPolicy refreshes the in-memory enforcer from persistent policy.
+func (a *Authorizer) ReloadPolicy() error {
+	if a == nil {
+		return nil
+	}
+	if err := a.enforcer.LoadPolicy(); err != nil {
+		return fmt.Errorf("rbac: reload policy: %w", err)
+	}
+	return nil
 }
 
 func newEnforcer(adapter any, autoSave bool) (*casbin.SyncedEnforcer, error) {
@@ -149,28 +172,28 @@ func newEnforcer(adapter any, autoSave bool) (*casbin.SyncedEnforcer, error) {
 }
 
 // CanDashboard reports whether a dashboard user can perform act on obj.
-func (a *Authorizer) CanDashboard(ctx context.Context, user DashboardUser, tenantID int64, obj, act string) (bool, error) {
+func (a *Authorizer) CanDashboard(user DashboardUser, tenantID int64, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
 	dom := TenantDomain(tenantID)
-	allowed, err := a.enforce(ctx, DashboardSubject(user.ID), dom, obj, act)
+	allowed, err := a.enforce(DashboardSubject(user.ID), dom, obj, act)
 	if err != nil || allowed {
 		return allowed, err
 	}
 	if user.IsPlatformAdmin {
-		return a.enforce(ctx, RolePlatformAdmin, dom, obj, act)
+		return a.enforce(RolePlatformAdmin, dom, obj, act)
 	}
 	return false, nil
 }
 
 // CanAPIKey reports whether an API key can perform act on obj.
-func (a *Authorizer) CanAPIKey(ctx context.Context, key tenant.APIKey, obj, act string) (bool, error) {
+func (a *Authorizer) CanAPIKey(key tenant.APIKey, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
 	dom := TenantDomain(key.TenantID)
-	allowed, err := a.enforce(ctx, APIKeySubject(key.ID), dom, obj, act)
+	allowed, err := a.enforce(APIKeySubject(key.ID), dom, obj, act)
 	if err != nil || allowed {
 		return allowed, err
 	}
@@ -178,20 +201,20 @@ func (a *Authorizer) CanAPIKey(ctx context.Context, key tenant.APIKey, obj, act 
 	if !ok {
 		return false, nil
 	}
-	return a.enforce(ctx, role, dom, obj, act)
+	return a.enforce(role, dom, obj, act)
 }
 
 // CanEndUser reports whether an end user can perform act on obj.
-func (a *Authorizer) CanEndUser(ctx context.Context, tenantID, projectID, endUserID int64, obj, act string) (bool, error) {
+func (a *Authorizer) CanEndUser(tenantID, endUserID int64, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
 	dom := TenantDomain(tenantID)
-	allowed, err := a.enforce(ctx, EndUserSubject(endUserID), dom, obj, act)
+	allowed, err := a.enforce(EndUserSubject(endUserID), dom, obj, act)
 	if err != nil || allowed {
 		return allowed, err
 	}
-	return a.enforce(ctx, RolePlayerStandard, dom, obj, act)
+	return a.enforce(RolePlayerStandard, dom, obj, act)
 }
 
 // FeatureEnabled reports whether a high-risk feature is enabled.
@@ -232,6 +255,15 @@ func (a *Authorizer) SetDashboardMembershipRole(userID, tenantID int64, membersh
 	return a.setSubjectRole(DashboardSubject(userID), role, TenantDomain(tenantID))
 }
 
+// SetDashboardMembershipRoleTx writes a dashboard user's tenant role in tx.
+func (a *Authorizer) SetDashboardMembershipRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, membershipRole string) error {
+	role, ok := DashboardMembershipRole(membershipRole)
+	if !ok {
+		return fmt.Errorf("rbac: unknown dashboard membership role %q", membershipRole)
+	}
+	return a.setSubjectRoleTx(ctx, tx, DashboardSubject(userID), role, TenantDomain(tenantID))
+}
+
 // AddPlatformAdmin grants the global platform-admin role to a dashboard user.
 func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 	if a == nil {
@@ -239,6 +271,14 @@ func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 	}
 	_, err := a.enforcer.AddGroupingPolicy(DashboardSubject(userID), RolePlatformAdmin, "*")
 	return err
+}
+
+// AddPlatformAdminTx writes the global platform-admin role in tx.
+func (a *Authorizer) AddPlatformAdminTx(ctx context.Context, tx pgx.Tx, userID int64) error {
+	if a == nil {
+		return nil
+	}
+	return insertRule(ctx, tx, "g", []string{DashboardSubject(userID), RolePlatformAdmin, "*"})
 }
 
 // AddAPIKeyRole replaces an API key's tenant role based on its key type.
@@ -250,6 +290,15 @@ func (a *Authorizer) AddAPIKeyRole(keyID, tenantID int64, keyType tenant.KeyType
 	return a.setSubjectRole(APIKeySubject(keyID), role, TenantDomain(tenantID))
 }
 
+// AddAPIKeyRoleTx writes an API key's tenant role in tx.
+func (a *Authorizer) AddAPIKeyRoleTx(ctx context.Context, tx pgx.Tx, keyID, tenantID int64, keyType tenant.KeyType) error {
+	role, ok := APIKeyRole(keyType)
+	if !ok {
+		return fmt.Errorf("rbac: unknown api key type %q", keyType)
+	}
+	return a.setSubjectRoleTx(ctx, tx, APIKeySubject(keyID), role, TenantDomain(tenantID))
+}
+
 // AddEndUserRole grants an explicit tenant role to an end user.
 func (a *Authorizer) AddEndUserRole(endUserID, tenantID int64, role string) error {
 	if a == nil {
@@ -257,6 +306,14 @@ func (a *Authorizer) AddEndUserRole(endUserID, tenantID int64, role string) erro
 	}
 	_, err := a.enforcer.AddGroupingPolicy(EndUserSubject(endUserID), role, TenantDomain(tenantID))
 	return err
+}
+
+// AddEndUserRoleTx writes an explicit tenant role for an end user in tx.
+func (a *Authorizer) AddEndUserRoleTx(ctx context.Context, tx pgx.Tx, endUserID, tenantID int64, role string) error {
+	if a == nil {
+		return nil
+	}
+	return insertRule(ctx, tx, "g", []string{EndUserSubject(endUserID), role, TenantDomain(tenantID)})
 }
 
 // RemoveDashboardRoles removes a dashboard user's tenant-scoped roles.
@@ -268,6 +325,14 @@ func (a *Authorizer) RemoveDashboardRoles(userID, tenantID int64) error {
 	return err
 }
 
+// RemoveDashboardRolesTx removes a dashboard user's tenant-scoped roles in tx.
+func (a *Authorizer) RemoveDashboardRolesTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64) error {
+	if a == nil {
+		return nil
+	}
+	return removeFilteredRule(ctx, tx, "g", 0, DashboardSubject(userID), "", TenantDomain(tenantID))
+}
+
 // RemoveAPIKeyRoles removes all roles for an API key.
 func (a *Authorizer) RemoveAPIKeyRoles(keyID int64) error {
 	if a == nil {
@@ -275,6 +340,14 @@ func (a *Authorizer) RemoveAPIKeyRoles(keyID int64) error {
 	}
 	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, APIKeySubject(keyID))
 	return err
+}
+
+// RemoveAPIKeyRolesTx removes all roles for an API key in tx.
+func (a *Authorizer) RemoveAPIKeyRolesTx(ctx context.Context, tx pgx.Tx, keyID int64) error {
+	if a == nil {
+		return nil
+	}
+	return removeFilteredRule(ctx, tx, "g", 0, APIKeySubject(keyID))
 }
 
 func (a *Authorizer) setSubjectRole(subject, role, domain string) error {
@@ -288,8 +361,17 @@ func (a *Authorizer) setSubjectRole(subject, role, domain string) error {
 	return err
 }
 
-func (a *Authorizer) enforce(ctx context.Context, sub, dom, obj, act string) (bool, error) {
-	_ = ctx
+func (a *Authorizer) setSubjectRoleTx(ctx context.Context, tx pgx.Tx, subject, role, domain string) error {
+	if a == nil {
+		return nil
+	}
+	if err := removeFilteredRule(ctx, tx, "g", 0, subject, "", domain); err != nil {
+		return err
+	}
+	return insertRule(ctx, tx, "g", []string{subject, role, domain})
+}
+
+func (a *Authorizer) enforce(sub, dom, obj, act string) (bool, error) {
 	allowed, err := a.enforcer.Enforce(sub, dom, obj, act)
 	if err != nil {
 		return false, fmt.Errorf("rbac: enforce %s %s %s %s: %w", sub, dom, obj, act, err)
@@ -362,6 +444,11 @@ func ProjectPlayersObject(projectID int64) string {
 	return projectObject(projectID, "players")
 }
 
+// ProjectConfigObject returns the project config object name.
+func ProjectConfigObject(projectID int64) string {
+	return projectObject(projectID, "config")
+}
+
 // ProjectFleetObject returns the project fleet object name.
 func ProjectFleetObject(projectID int64) string {
 	return projectObject(projectID, "fleet")
@@ -370,6 +457,11 @@ func ProjectFleetObject(projectID int64) string {
 // ProjectAllocationObject returns the project allocation object name.
 func ProjectAllocationObject(projectID int64) string {
 	return projectObject(projectID, "allocation")
+}
+
+// ProjectMatchmakerObject returns the project matchmaker object name.
+func ProjectMatchmakerObject(projectID int64) string {
+	return projectObject(projectID, "matchmaker")
 }
 
 // ProjectRelayObject returns the project relay object name.

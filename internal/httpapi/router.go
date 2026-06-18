@@ -196,12 +196,11 @@ func NewRouter(d Deps) http.Handler {
 				// /v1/end-users/verify — server-tier endpoint used by
 				// game-server workloads to verify a player's session
 				// token (the request body) under their own API-key auth
-				// (the Authorization header). Gated by RBAC permission
-				// with the legacy secret-key check as the no-RBAC fallback
-				// so publishable keys (embedded in shipped game binaries)
-				// can't be used as a session-validity oracle.
+				// (the Authorization header). Gated by RBAC permission so
+				// publishable keys (embedded in shipped game binaries) can't
+				// be used as a session-validity oracle.
 				r.Group(func(r chi.Router) {
-					r.Use(requireAPIKeyPermission(d, rbac.ObjectEndUser, rbac.ActionVerify, tenant.KeyTypeSecret))
+					r.Use(requireAPIKeyPermission(d, rbac.ObjectEndUser, rbac.ActionVerify))
 					r.Post("/end-users/verify", endUsersVerifyHandler(d))
 				})
 

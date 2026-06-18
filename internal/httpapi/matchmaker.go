@@ -76,25 +76,27 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "fleet is required", http.StatusBadRequest)
 			return
 		}
-		if d.RBAC != nil {
-			allowed, aerr := d.RBAC.CanEndUser(ctx, tenantID, projectID, endUserID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
-			if aerr != nil {
-				http.Error(w, "authorization check failed", http.StatusInternalServerError)
-				return
-			}
-			if !allowed {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-			enabled, ferr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureDedicatedServers)
-			if ferr != nil {
-				http.Error(w, "feature check failed", http.StatusInternalServerError)
-				return
-			}
-			if !enabled {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
+		if d.RBAC == nil {
+			http.Error(w, "authorization unavailable", http.StatusInternalServerError)
+			return
+		}
+		allowed, aerr := d.RBAC.CanEndUser(tenantID, endUserID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
+		if aerr != nil {
+			http.Error(w, "authorization check failed", http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		enabled, ferr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureDedicatedServers)
+		if ferr != nil {
+			http.Error(w, "feature check failed", http.StatusInternalServerError)
+			return
+		}
+		if !enabled {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
 		}
 		if d.Fleet == nil {
 			http.Error(w, "fleet backend not configured", http.StatusServiceUnavailable)

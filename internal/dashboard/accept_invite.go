@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -109,11 +108,6 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 	codeHash := verifycode.Hash(nil, in.Code)
 
 	var out acceptInviteResult
-	var (
-		rbacTenantID       int64
-		rbacMembershipRole string
-		rbacPlatformAdmin  bool
-	)
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		row, qerr := q.GetDashboardInvitationByCodeHash(ctx, codeHash)
@@ -126,7 +120,6 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 		if verifycode.Expired(row.ExpiresAt.Time, h.now()) {
 			return errInviteExpired
 		}
-		rbacPlatformAdmin = row.Role == roleInvitePlatformAdmin
 
 		user, gerr := q.GetDashboardUserAnyStatusByEmail(ctx, row.Email)
 		switch {
@@ -171,14 +164,17 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 				}
 			}
 		}
+		if h.rbac != nil && row.Role == roleInvitePlatformAdmin {
+			if err := h.rbac.AddPlatformAdminTx(ctx, tx, out.UserID); err != nil {
+				return fmt.Errorf("rbac platform admin invite: %w", err)
+			}
+		}
 
 		if row.TenantID != nil {
 			membershipRole := roleAdmin
 			if row.Role == roleInviteTenantMember {
 				membershipRole = roleMember
 			}
-			rbacTenantID = *row.TenantID
-			rbacMembershipRole = membershipRole
 			if _, err := q.CreateDashboardMembership(ctx, sqlcgen.CreateDashboardMembershipParams{
 				DashboardUserID: out.UserID,
 				TenantID:        *row.TenantID,
@@ -186,29 +182,20 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 			}); err != nil {
 				return fmt.Errorf("invite membership: %w", err)
 			}
+			if h.rbac != nil {
+				if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, out.UserID, *row.TenantID, membershipRole); err != nil {
+					return fmt.Errorf("rbac tenant invite: %w", err)
+				}
+			}
 		}
 
 		return q.MarkDashboardInvitationAccepted(ctx, row.ID)
 	})
-	if err != nil || h.rbac == nil {
+	if err != nil {
 		return out, err
 	}
-	h.syncAcceptedInviteRoles(ctx, out.UserID, rbacTenantID, rbacMembershipRole, rbacPlatformAdmin)
+	h.reloadRBACPolicy(ctx)
 	return out, nil
-}
-
-func (h *Handler) syncAcceptedInviteRoles(ctx context.Context, userID, tenantID int64, membershipRole string, platformAdmin bool) {
-	if platformAdmin {
-		if err := h.rbac.AddPlatformAdmin(userID); err != nil {
-			slog.WarnContext(ctx, "rbac sync: platform admin invite", "err", err, "user_id", userID)
-		}
-	}
-	if tenantID == 0 {
-		return
-	}
-	if err := h.rbac.SetDashboardMembershipRole(userID, tenantID, membershipRole); err != nil {
-		slog.WarnContext(ctx, "rbac sync: tenant invite", "err", err, "tenant_id", tenantID, "user_id", userID)
-	}
 }
 
 var errWeakPassword = errors.New("dashboard: password too short")

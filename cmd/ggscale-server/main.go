@@ -132,6 +132,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("rbac: %w", err)
 	}
+	defer authorizer.Close()
 	var dashboardBootstrap *dashboard.Bootstrap
 	if cfg.DashboardEnabled {
 		dashboardBootstrap, err = dashboard.LoadBootstrap(ctx, appPool, cfg.DashboardBootstrapTokenFile, logger)

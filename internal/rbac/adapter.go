@@ -105,6 +105,12 @@ WHERE ptype = $1
 }
 
 func (a *adapter) RemoveFilteredPolicy(_ string, ptype string, fieldIndex int, fieldValues ...string) error {
+	return a.pool.BootstrapQ(context.Background(), func(tx pgx.Tx) error {
+		return removeFilteredRule(context.Background(), tx, ptype, fieldIndex, fieldValues...)
+	})
+}
+
+func removeFilteredRule(ctx context.Context, tx pgx.Tx, ptype string, fieldIndex int, fieldValues ...string) error {
 	if fieldIndex < 0 || fieldIndex+len(fieldValues) > 6 {
 		return fmt.Errorf("rbac: invalid filtered policy index %d with %d values", fieldIndex, len(fieldValues))
 	}
@@ -118,13 +124,11 @@ func (a *adapter) RemoveFilteredPolicy(_ string, ptype string, fieldIndex int, f
 		args = append(args, value)
 		fmt.Fprintf(&b, " AND v%d IS NOT DISTINCT FROM $%d", fieldIndex+i, len(args))
 	}
-	return a.pool.BootstrapQ(context.Background(), func(tx pgx.Tx) error {
-		_, err := tx.Exec(context.Background(), b.String(), args...)
-		if err != nil {
-			return fmt.Errorf("rbac: remove filtered policy: %w", err)
-		}
-		return nil
-	})
+	_, err := tx.Exec(ctx, b.String(), args...)
+	if err != nil {
+		return fmt.Errorf("rbac: remove filtered policy: %w", err)
+	}
+	return nil
 }
 
 func insertRule(ctx context.Context, tx pgx.Tx, ptype string, rule []string) error {

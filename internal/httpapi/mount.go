@@ -26,7 +26,7 @@ func mountLeaderboardRoutes(r chi.Router, d Deps) {
 		// The end-user session in X-Session-Token still identifies the
 		// subject — the secret key authorises the proxying caller.
 		r.Group(func(r chi.Router) {
-			r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit, tenant.KeyTypeSecret))
+			r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
 			r.Post("/{id}/scores", leaderboardSubmitHandler(d))
 		})
 		r.Get("/{id}/top", leaderboardTopHandler(d))
@@ -34,18 +34,19 @@ func mountLeaderboardRoutes(r chi.Router, d Deps) {
 	})
 }
 
-func requireAPIKeyPermission(d Deps, obj, act string, fallback tenant.KeyType) func(http.Handler) http.Handler {
-	if d.RBAC == nil {
-		return tenant.RequireKeyType(fallback)
-	}
+func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if d.RBAC == nil {
+				http.Error(w, "authorization unavailable", http.StatusInternalServerError)
+				return
+			}
 			key, ok := tenant.APIKeyFromContext(r.Context())
 			if !ok {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			allowed, err := d.RBAC.CanAPIKey(r.Context(), key, obj, act)
+			allowed, err := d.RBAC.CanAPIKey(key, obj, act)
 			if err != nil {
 				http.Error(w, "authorization check failed", http.StatusInternalServerError)
 				return

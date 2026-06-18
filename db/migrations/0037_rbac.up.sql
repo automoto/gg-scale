@@ -32,7 +32,7 @@ CREATE TABLE feature_grants (
         'fleet_plugin_backend'
     )),
     enabled BOOLEAN NOT NULL DEFAULT false,
-    approved_by_dashboard_user_id BIGINT REFERENCES dashboard_users(id),
+    approved_by_dashboard_user_id BIGINT REFERENCES dashboard_users(id) ON DELETE SET NULL,
     reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()

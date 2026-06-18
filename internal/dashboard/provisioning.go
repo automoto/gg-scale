@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -65,19 +64,20 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		if err != nil {
 			return fmt.Errorf("dashboard create tenant: %w", err)
 		}
+		if h.rbac != nil {
+			if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, in.ActorUserID, row.TenantID, roleOwner); err != nil {
+				return fmt.Errorf("rbac tenant owner: %w", err)
+			}
+			if err := h.rbac.AddAPIKeyRoleTx(ctx, tx, row.ApiKeyID, row.TenantID, tenant.KeyTypeSecret); err != nil {
+				return fmt.Errorf("rbac bootstrap api key: %w", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return signupResult{}, err
 	}
-	if h.rbac != nil {
-		if err := h.rbac.SetDashboardMembershipRole(in.ActorUserID, row.TenantID, roleOwner); err != nil {
-			slog.WarnContext(ctx, "rbac mirror: tenant owner", "err", err, "tenant_id", row.TenantID, "user_id", in.ActorUserID)
-		}
-		if err := h.rbac.AddAPIKeyRole(row.ApiKeyID, row.TenantID, tenant.KeyTypeSecret); err != nil {
-			slog.WarnContext(ctx, "rbac mirror: bootstrap api key", "err", err, "tenant_id", row.TenantID, "api_key_id", row.ApiKeyID)
-		}
-	}
+	h.reloadRBACPolicy(ctx)
 
 	return signupResult{
 		TenantID:  row.TenantID,

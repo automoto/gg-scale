@@ -1,7 +1,6 @@
 package rbac_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,7 +21,7 @@ func TestDefaultPolicy_allows_tenant_admin_in_own_domain(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(context.Background(), rbac.DashboardUser{
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
 		ID: 42,
 	}, 7, rbac.ObjectProject, rbac.ActionManage)
 
@@ -34,7 +33,7 @@ func TestDefaultPolicy_denies_tenant_admin_in_other_domain(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(context.Background(), rbac.DashboardUser{
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
 		ID: 42,
 	}, 8, rbac.ObjectProject, rbac.ActionManage)
 
@@ -46,7 +45,7 @@ func TestDefaultPolicy_treats_current_member_as_read_only_analyst(t *testing.T) 
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
 
-	allowed, err := a.CanDashboard(context.Background(), rbac.DashboardUser{
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
 		ID: 42,
 	}, 7, rbac.ObjectProject, rbac.ActionManage)
 
@@ -58,7 +57,7 @@ func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(context.Background(), rbac.DashboardUser{
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
 		ID: 42,
 	}, 7, rbac.ProjectPlayersObject(99), rbac.ActionManage)
 
@@ -69,13 +68,13 @@ func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T
 func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	a := newAuthorizer(t)
 
-	publishable, err := a.CanAPIKey(context.Background(), tenant.APIKey{
+	publishable, err := a.CanAPIKey(tenant.APIKey{
 		ID: 1, TenantID: 7, Type: tenant.KeyTypePublishable,
 	}, rbac.ObjectLeaderboard, rbac.ActionSubmit)
 	require.NoError(t, err)
 	assert.False(t, publishable)
 
-	secret, err := a.CanAPIKey(context.Background(), tenant.APIKey{
+	secret, err := a.CanAPIKey(tenant.APIKey{
 		ID: 2, TenantID: 7, Type: tenant.KeyTypeSecret,
 	}, rbac.ObjectLeaderboard, rbac.ActionSubmit)
 	require.NoError(t, err)
@@ -85,7 +84,7 @@ func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 func TestDefaultPolicy_denies_high_risk_player_access_by_default(t *testing.T) {
 	a := newAuthorizer(t)
 
-	allowed, err := a.CanEndUser(context.Background(), 7, 99, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
+	allowed, err := a.CanEndUser(7, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
 
 	require.NoError(t, err)
 	assert.False(t, allowed)
@@ -95,7 +94,7 @@ func TestDefaultPolicy_allows_explicit_high_access_player_role(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.AddEndUserRole(123, 7, rbac.RolePlayerHighAccess))
 
-	allowed, err := a.CanEndUser(context.Background(), 7, 99, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
+	allowed, err := a.CanEndUser(7, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
 
 	require.NoError(t, err)
 	assert.True(t, allowed)

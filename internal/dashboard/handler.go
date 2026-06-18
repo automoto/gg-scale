@@ -543,22 +543,15 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 				http.Error(w, "missing session", http.StatusUnauthorized)
 				return
 			}
-			if h.rbac != nil {
-				obj, act := tenantAccessPermission(minRole)
-				allowed, err := h.rbac.CanDashboard(r.Context(), rbac.DashboardUser{
-					ID:              session.User.ID,
-					IsPlatformAdmin: session.User.IsPlatformAdmin,
-				}, tenantID, obj, act)
-				if err != nil {
-					http.Error(w, "tenant access check failed", http.StatusInternalServerError)
-					return
-				}
-				if allowed {
-					next.ServeHTTP(w, r)
-					return
-				}
+			if h.rbac == nil {
+				http.Error(w, "authorization unavailable", http.StatusInternalServerError)
+				return
 			}
-			allowed, err := h.userCanAccessTenant(r.Context(), session.User, tenantID, minRole)
+			obj, act := tenantAccessPermission(minRole)
+			allowed, err := h.rbac.CanDashboard(rbac.DashboardUser{
+				ID:              session.User.ID,
+				IsPlatformAdmin: session.User.IsPlatformAdmin,
+			}, tenantID, obj, act)
 			if err != nil {
 				http.Error(w, "tenant access check failed", http.StatusInternalServerError)
 				return
