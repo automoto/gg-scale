@@ -201,13 +201,11 @@ and all access goes through email/password login.
 ## Reverse-proxy IP trust
 
 Dashboard sessions record the client IP for auditing. `clientIP()` reads
-`CF-Connecting-IP` first (Cloudflare), then `X-Real-IP` (nginx/HAProxy), then
-falls back to `RemoteAddr`. **This is only safe when the reverse proxy strips
-these headers from untrusted client requests on ingress.** If the proxy does
-not strip them, a client can spoof any IP address in the session audit record.
-The compose files in this repo sit behind Cloudflare (ops) or a direct bind
-(dev); both configurations strip `CF-Connecting-IP` at the edge or it is
-absent entirely.
+`RemoteAddr` by default and ignores forwarded headers. To record a proxy
+supplied address, set `TRUSTED_PROXY_HEADER` (for example
+`CF-Connecting-IP`) and `TRUSTED_PROXY_CIDRS` to the CIDR ranges of the
+reverse proxies allowed to set that header. Headers from any other peer are
+ignored, so direct clients cannot spoof dashboard session or audit IPs.
 
 ## Tenant isolation
 
