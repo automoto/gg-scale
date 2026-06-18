@@ -166,6 +166,11 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		if err != nil {
 			return fmt.Errorf("create api key: %w", err)
 		}
+		if h.rbac != nil {
+			if err := h.rbac.AddAPIKeyRoleTx(ctx, tx, row.ID, in.TenantID, in.KeyType); err != nil {
+				return fmt.Errorf("rbac api key create: %w", err)
+			}
+		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.create", strconv.FormatInt(row.ID, 10), map[string]any{
 			"label":      in.Label,
 			"project_id": in.ProjectID,
@@ -176,6 +181,7 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 	if err != nil {
 		return createKeyResult{}, err
 	}
+	h.reloadRBACPolicy(ctx)
 	return createKeyResult{APIKeyID: row.ID, APIKey: apiKey}, nil
 }
 
@@ -204,10 +210,16 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 		if err := sqlcgen.New(tx).RevokeAPIKey(ctx, apiKeyID); err != nil {
 			return err
 		}
+		if h.rbac != nil {
+			if err := h.rbac.RemoveAPIKeyRolesTx(ctx, tx, apiKeyID); err != nil {
+				return fmt.Errorf("rbac api key revoke: %w", err)
+			}
+		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.revoke", strconv.FormatInt(apiKeyID, 10), map[string]any{"tenant_id": tenantID})
 	}); err != nil {
 		return err
 	}
+	h.reloadRBACPolicy(ctx)
 	if h.cache == nil {
 		return nil
 	}

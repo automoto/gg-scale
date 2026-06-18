@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 var (
@@ -63,11 +64,20 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		if err != nil {
 			return fmt.Errorf("dashboard create tenant: %w", err)
 		}
+		if h.rbac != nil {
+			if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, in.ActorUserID, row.TenantID, roleOwner); err != nil {
+				return fmt.Errorf("rbac tenant owner: %w", err)
+			}
+			if err := h.rbac.AddAPIKeyRoleTx(ctx, tx, row.ApiKeyID, row.TenantID, tenant.KeyTypeSecret); err != nil {
+				return fmt.Errorf("rbac bootstrap api key: %w", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return signupResult{}, err
 	}
+	h.reloadRBACPolicy(ctx)
 
 	return signupResult{
 		TenantID:  row.TenantID,

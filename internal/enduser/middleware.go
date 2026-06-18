@@ -18,16 +18,33 @@ import (
 const headerName = "X-Session-Token"
 
 type ctxKey struct{}
+type projectCtxKey struct{}
 
 // WithID returns a derived context carrying endUserID.
 func WithID(ctx context.Context, endUserID int64) context.Context {
 	return context.WithValue(ctx, ctxKey{}, endUserID)
 }
 
+// WithProjectID returns a derived context carrying the project id from the
+// verified session token. A zero project id is treated as absent.
+func WithProjectID(ctx context.Context, projectID int64) context.Context {
+	return context.WithValue(ctx, projectCtxKey{}, projectID)
+}
+
 // IDFromContext extracts the end_user_id installed by the middleware.
 // Returns (0, false) when no end-user has been authenticated.
 func IDFromContext(ctx context.Context) (int64, bool) {
 	v, ok := ctx.Value(ctxKey{}).(int64)
+	if !ok || v == 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// ProjectIDFromContext extracts the project_id claim installed by the
+// middleware. Returns (0, false) for legacy tokens with no project pin.
+func ProjectIDFromContext(ctx context.Context) (int64, bool) {
+	v, ok := ctx.Value(projectCtxKey{}).(int64)
 	if !ok || v == 0 {
 		return 0, false
 	}
@@ -80,6 +97,9 @@ func New(signer *auth.Signer) func(http.Handler) http.Handler {
 			}
 
 			ctx := WithID(r.Context(), claims.EndUserID)
+			if claims.ProjectID != 0 {
+				ctx = WithProjectID(ctx, claims.ProjectID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

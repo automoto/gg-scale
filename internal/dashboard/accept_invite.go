@@ -164,6 +164,11 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 				}
 			}
 		}
+		if h.rbac != nil && row.Role == roleInvitePlatformAdmin {
+			if err := h.rbac.AddPlatformAdminTx(ctx, tx, out.UserID); err != nil {
+				return fmt.Errorf("rbac platform admin invite: %w", err)
+			}
+		}
 
 		if row.TenantID != nil {
 			membershipRole := roleAdmin
@@ -177,11 +182,20 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 			}); err != nil {
 				return fmt.Errorf("invite membership: %w", err)
 			}
+			if h.rbac != nil {
+				if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, out.UserID, *row.TenantID, membershipRole); err != nil {
+					return fmt.Errorf("rbac tenant invite: %w", err)
+				}
+			}
 		}
 
 		return q.MarkDashboardInvitationAccepted(ctx, row.ID)
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	h.reloadRBACPolicy(ctx)
+	return out, nil
 }
 
 var errWeakPassword = errors.New("dashboard: password too short")

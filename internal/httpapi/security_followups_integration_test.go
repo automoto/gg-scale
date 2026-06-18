@@ -249,8 +249,9 @@ func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 
 	createURL := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/api-keys"
 	resp := postFormWithCookie(t, createURL, url.Values{
-		"_csrf": {csrf},
-		"label": {"audit test key"},
+		"_csrf":    {csrf},
+		"key_type": {"secret"},
+		"label":    {"audit test key"},
 	}, cookie)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode, "api key create should render the success page")
@@ -276,7 +277,7 @@ func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner-m5r@example.com", "correct-horse-battery-staple")
 
 	createResp := postFormWithCookie(t, srv.URL+"/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys",
-		url.Values{"_csrf": {csrf}, "label": {"to revoke"}}, cookie)
+		url.Values{"_csrf": {csrf}, "key_type": {"secret"}, "label": {"to revoke"}}, cookie)
 	createResp.Body.Close()
 
 	var keyID int64

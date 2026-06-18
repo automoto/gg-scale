@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -35,17 +36,22 @@ func newDashboardAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *m
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	rec := &mailer.Recorder{}
+	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:  "v1",
 		Commit:   "test",
-		Pool:     db.NewPool(c.appPool),
+		Pool:     pool,
 		Lookup:   tenant.NewSQLLookup(c.appPool),
 		Limiter:  ratelimit.NewCacheLimiter(c.cache),
 		Signer:   signer,
 		Cache:    c.cache,
 		Mailer:   rec,
 		MailFrom: "no-reply@example.test",
+		RBAC:     authorizer,
 		Dashboard: dashboard.Config{
 			Mount:    true,
 			BaseURL:  "http://app.example.test",

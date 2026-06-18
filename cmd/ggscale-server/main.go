@@ -35,6 +35,7 @@ import (
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
@@ -127,6 +128,11 @@ func run() error {
 	}
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
+	authorizer, err := rbac.NewAuthorizer(appPool)
+	if err != nil {
+		return fmt.Errorf("rbac: %w", err)
+	}
+	defer authorizer.Close()
 	var dashboardBootstrap *dashboard.Bootstrap
 	if cfg.DashboardEnabled {
 		dashboardBootstrap, err = dashboard.LoadBootstrap(ctx, appPool, cfg.DashboardBootstrapTokenFile, logger)
@@ -206,6 +212,7 @@ func run() error {
 		MailFrom:              cfg.MailFrom,
 		Cache:                 store,
 		Registry:              registry,
+		RBAC:                  authorizer,
 		Fleet:                 fleetMgr,
 		Hub:                   hub,
 		RealtimeMaxPerTenant:  cfg.RealtimeMaxPerTenant,

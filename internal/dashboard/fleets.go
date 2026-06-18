@@ -136,6 +136,9 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
+	if !h.requireDashboardFleetMutation(w, r, tenantID, projectID, backend) {
+		return
+	}
 
 	tenantCtx := db.WithTenant(r.Context(), tenantID)
 	f, err := h.fleet.Fleets().Create(tenantCtx, fleet.FleetCreate{
@@ -261,6 +264,9 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
+	if !h.requireDashboardFleetMutation(w, r, tenantID, projectID, existing.Backend) {
+		return
+	}
 	if err := h.fleet.Fleets().Update(tenantCtx, fleet.FleetUpdate{
 		ID:      fleetID,
 		Name:    name,
@@ -300,6 +306,22 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tenantCtx := db.WithTenant(r.Context(), tenantID)
+	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "fleet lookup failed", http.StatusInternalServerError)
+		return
+	}
+	if existing.ProjectID != projectID {
+		http.NotFound(w, r)
+		return
+	}
+	if !h.requireDashboardFleetMutation(w, r, tenantID, projectID, existing.Backend) {
+		return
+	}
 	if err := h.fleet.Fleets().SoftDelete(tenantCtx, fleetID); err != nil {
 		slog.ErrorContext(r.Context(), "delete fleet failed", "err", err)
 		http.Error(w, "delete failed", http.StatusInternalServerError)

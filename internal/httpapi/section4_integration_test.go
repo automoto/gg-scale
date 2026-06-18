@@ -25,6 +25,7 @@ import (
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -36,15 +37,20 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	rec := &mailer.Recorder{}
+	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1", Commit: "test",
-		Pool:    db.NewPool(c.appPool),
+		Pool:    pool,
 		Lookup:  tenant.NewSQLLookup(c.appPool),
 		Limiter: ratelimit.NewCacheLimiter(c.cache),
 		Signer:  signer,
 		Mailer:  rec,
 		Cache:   c.cache,
+		RBAC:    authorizer,
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

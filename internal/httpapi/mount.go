@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"net/http"
+
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
@@ -23,12 +26,38 @@ func mountLeaderboardRoutes(r chi.Router, d Deps) {
 		// The end-user session in X-Session-Token still identifies the
 		// subject — the secret key authorises the proxying caller.
 		r.Group(func(r chi.Router) {
-			r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
+			r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
 			r.Post("/{id}/scores", leaderboardSubmitHandler(d))
 		})
 		r.Get("/{id}/top", leaderboardTopHandler(d))
 		r.Get("/{id}/around-me", leaderboardAroundMeHandler(d))
 	})
+}
+
+func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if d.RBAC == nil {
+				http.Error(w, "authorization unavailable", http.StatusInternalServerError)
+				return
+			}
+			key, ok := tenant.APIKeyFromContext(r.Context())
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			allowed, err := d.RBAC.CanAPIKey(key, obj, act)
+			if err != nil {
+				http.Error(w, "authorization check failed", http.StatusInternalServerError)
+				return
+			}
+			if !allowed {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func mountFriendRoutes(r chi.Router, d Deps) {
