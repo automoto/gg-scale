@@ -27,6 +27,7 @@ import (
 	"github.com/ggscale/ggscale/internal/middleware"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
@@ -51,6 +52,7 @@ type Deps struct {
 	MailFrom string
 	Cache    cache.Store
 	Registry *prometheus.Registry
+	RBAC     *rbac.Authorizer
 
 	// Fleet is the allocator for game-server slots. nil until a backend is
 	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
@@ -155,6 +157,7 @@ func NewRouter(d Deps) http.Handler {
 				Bootstrap:  d.DashboardBootstrap,
 				Mailer:     d.Mailer,
 				Fleet:      d.Fleet,
+				RBAC:       d.RBAC,
 				PluginInfo: d.DashboardPluginInfo,
 			}))
 		}
@@ -193,13 +196,17 @@ func NewRouter(d Deps) http.Handler {
 				// /v1/end-users/verify — server-tier endpoint used by
 				// game-server workloads to verify a player's session
 				// token (the request body) under their own API-key auth
-				// (the Authorization header). Gated by KeyTypeSecret so
-				// publishable keys (embedded in shipped game binaries)
-				// can't be used as a session-validity oracle. See
-				// docs/temp/gameserver-auth.md.
+				// (the Authorization header). Gated by RBAC permission
+				// with the legacy secret-key check as the no-RBAC fallback
+				// so publishable keys (embedded in shipped game binaries)
+				// can't be used as a session-validity oracle.
+				r.Group(func(r chi.Router) {
+					r.Use(requireAPIKeyPermission(d, rbac.ObjectEndUser, rbac.ActionVerify, tenant.KeyTypeSecret))
+					r.Post("/end-users/verify", endUsersVerifyHandler(d))
+				})
+
 				r.Group(func(r chi.Router) {
 					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
-					r.Post("/end-users/verify", endUsersVerifyHandler(d))
 					mountFleetHeartbeatRoute(r, d)
 				})
 

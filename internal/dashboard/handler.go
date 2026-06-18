@@ -18,6 +18,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -40,6 +41,9 @@ type Deps struct {
 	// invokes manual Allocate/Deallocate against. nil when no backend is
 	// configured — fleet pages render "not configured" in that case.
 	Fleet *fleet.Manager
+	// RBAC is the Casbin authorizer. nil preserves the legacy dashboard
+	// checks for tests and during partial construction.
+	RBAC *rbac.Authorizer
 	// PluginInfo returns a snapshot of the running fleet plugin (if the
 	// backend is a plugin). nil when not a plugin backend; the admin
 	// plugins page renders "no plugin backend" in that case.
@@ -68,6 +72,7 @@ type Handler struct {
 	bootstrap  *Bootstrap
 	mailer     mailer.Mailer
 	fleet      *fleet.Manager
+	rbac       *rbac.Authorizer
 	pluginInfo func() *PluginSnapshot
 	now        func() time.Time
 	// verifySigningKey signs the short-lived verify-pending cookie.
@@ -99,6 +104,7 @@ func New(d Deps) http.Handler {
 		bootstrap:        bootstrap,
 		mailer:           d.Mailer,
 		fleet:            d.Fleet,
+		rbac:             d.RBAC,
 		pluginInfo:       d.PluginInfo,
 		now:              time.Now,
 		verifySigningKey: key,
@@ -537,6 +543,21 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 				http.Error(w, "missing session", http.StatusUnauthorized)
 				return
 			}
+			if h.rbac != nil {
+				obj, act := tenantAccessPermission(minRole)
+				allowed, err := h.rbac.CanDashboard(r.Context(), rbac.DashboardUser{
+					ID:              session.User.ID,
+					IsPlatformAdmin: session.User.IsPlatformAdmin,
+				}, tenantID, obj, act)
+				if err != nil {
+					http.Error(w, "tenant access check failed", http.StatusInternalServerError)
+					return
+				}
+				if allowed {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
 			allowed, err := h.userCanAccessTenant(r.Context(), session.User, tenantID, minRole)
 			if err != nil {
 				http.Error(w, "tenant access check failed", http.StatusInternalServerError)
@@ -548,6 +569,17 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func tenantAccessPermission(minRole string) (string, string) {
+	switch minRole {
+	case roleOwner:
+		return rbac.ObjectTenant, rbac.ActionManage
+	case roleAdmin:
+		return rbac.ObjectProject, rbac.ActionManage
+	default:
+		return rbac.ObjectProject, rbac.ActionRead
 	}
 }
 

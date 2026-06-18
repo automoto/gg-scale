@@ -16,6 +16,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -204,6 +205,9 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
+	if !h.requireDashboardAllocationMutation(w, r, tenantID, projectID, rbac.ActionAllocate) {
+		return
+	}
 
 	f, ferr := h.fleet.Fleets().GetByName(tenantCtx, projectID, fleetName)
 	if errors.Is(ferr, fleet.ErrFleetNotFound) {
@@ -339,6 +343,9 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 	}
 
 	tenantCtx := db.WithTenant(r.Context(), tenantID)
+	if !h.requireDashboardAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
+		return
+	}
 	if err := h.fleet.Deallocate(tenantCtx, fleet.AllocationID(allocID)); err != nil {
 		slog.ErrorContext(r.Context(), "manual deallocate failed", "err", err, "alloc", allocID)
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)

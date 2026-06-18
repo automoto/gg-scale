@@ -218,6 +218,25 @@ func (h *Handler) revokeInvite(ctx context.Context, actorID, inviteID int64) err
 func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, membershipID int64) error {
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		var targetUserID int64
+		err := tx.QueryRow(ctx, `
+SELECT dashboard_user_id
+FROM dashboard_memberships
+WHERE id = $1
+  AND tenant_id = $2
+  AND dashboard_user_id <> $3`,
+			membershipID, tenantID, actorID).Scan(&targetUserID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errCannotRemoveSelf
+		}
+		if err != nil {
+			return err
+		}
+		if h.rbac != nil {
+			if err := h.rbac.RemoveDashboardRoles(targetUserID, tenantID); err != nil {
+				return fmt.Errorf("rbac remove membership: %w", err)
+			}
+		}
 		n, err := q.DeleteDashboardMembershipUnlessSelf(ctx, sqlcgen.DeleteDashboardMembershipUnlessSelfParams{
 			ID:          membershipID,
 			TenantID:    tenantID,

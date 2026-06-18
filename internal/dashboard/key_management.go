@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -176,6 +177,11 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 	if err != nil {
 		return createKeyResult{}, err
 	}
+	if h.rbac != nil {
+		if err := h.rbac.AddAPIKeyRole(row.ID, in.TenantID, in.KeyType); err != nil {
+			slog.WarnContext(ctx, "rbac mirror: api key create", "err", err, "tenant_id", in.TenantID, "api_key_id", row.ID)
+		}
+	}
 	return createKeyResult{APIKeyID: row.ID, APIKey: apiKey}, nil
 }
 
@@ -207,6 +213,11 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.api_key.revoke", strconv.FormatInt(apiKeyID, 10), map[string]any{"tenant_id": tenantID})
 	}); err != nil {
 		return err
+	}
+	if h.rbac != nil {
+		if err := h.rbac.RemoveAPIKeyRoles(apiKeyID); err != nil {
+			slog.WarnContext(ctx, "rbac mirror: api key revoke", "err", err, "tenant_id", tenantID, "api_key_id", apiKeyID)
+		}
 	}
 	if h.cache == nil {
 		return nil

@@ -36,6 +36,15 @@ func captureEndUser(out *int64) http.Handler {
 	})
 }
 
+func captureEndUserProject(out *int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if id, ok := enduser.ProjectIDFromContext(r.Context()); ok {
+			*out = id
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+}
+
 func TestMiddleware_returns_401_when_X_Session_Token_missing(t *testing.T) {
 	mw := enduser.New(newSigner(t))
 
@@ -98,6 +107,23 @@ func TestMiddleware_injects_end_user_id_on_success(t *testing.T) {
 	assert.Equal(t, int64(42), captured)
 }
 
+func TestMiddleware_injects_project_id_on_success(t *testing.T) {
+	signer := newSigner(t)
+	tok, err := signer.Sign(auth.Claims{
+		EndUserID: 42, TenantID: 7, ProjectID: 9, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	var captured int64
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(7)
+	req.Header.Set("X-Session-Token", tok)
+	enduser.New(signer)(captureEndUserProject(&captured)).ServeHTTP(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, int64(9), captured)
+}
+
 func TestMiddleware_returns_403_when_token_project_pin_mismatches_api_key(t *testing.T) {
 	signer := newSigner(t)
 	// Session was minted under project 7 but is being presented under an
@@ -152,6 +178,12 @@ func TestMiddleware_passes_when_token_has_no_project_pin(t *testing.T) {
 
 func TestIDFromContext_returns_false_on_bare_context(t *testing.T) {
 	_, ok := enduser.IDFromContext(context.Background())
+
+	assert.False(t, ok)
+}
+
+func TestProjectIDFromContext_returns_false_on_bare_context(t *testing.T) {
+	_, ok := enduser.ProjectIDFromContext(context.Background())
 
 	assert.False(t, ok)
 }

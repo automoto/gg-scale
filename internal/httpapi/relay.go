@@ -6,6 +6,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/rbac"
 )
 
 func relayCredentialsHandler(d Deps) http.HandlerFunc {
@@ -20,6 +21,34 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			http.Error(w, "no end user", http.StatusUnauthorized)
 			return
+		}
+		projectID, ok := enduser.ProjectIDFromContext(ctx)
+		if !ok {
+			projectID, ok = db.ProjectFromContext(ctx)
+		}
+		if !ok {
+			http.Error(w, "no project", http.StatusForbidden)
+			return
+		}
+		if d.RBAC != nil {
+			allowed, err := d.RBAC.CanEndUser(ctx, tenantID, projectID, endUserID, rbac.ProjectRelayObject(projectID), rbac.ActionIssueCredentials)
+			if err != nil {
+				http.Error(w, "authorization check failed", http.StatusInternalServerError)
+				return
+			}
+			if !allowed {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			enabled, err := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureP2PRelay)
+			if err != nil {
+				http.Error(w, "feature check failed", http.StatusInternalServerError)
+				return
+			}
+			if !enabled {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 		}
 		creds, err := d.RelayIssuer.Issue(tenantID, endUserID)
 		if err != nil {
