@@ -6,9 +6,11 @@ templ baseHead(title string) {
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<meta name="color-scheme" content="light dark"/>
 		<title>{ title }</title>
+		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true}'/>
 		<link rel="stylesheet" href="/v1/dashboard/assets/pico.min.css"/>
 		<link rel="stylesheet" href="/v1/dashboard/assets/dashboard.css"/>
-		<script src="/v1/dashboard/assets/htmx.min.js"></script>
+		<script src="/v1/dashboard/assets/htmx.min.js" defer></script>
+		<script src="/v1/dashboard/assets/dashboard.js" defer></script>
 	</head>
 }
 
@@ -627,7 +629,7 @@ templ TeamPage(vm TeamView) {
 									if m.UserID == vm.IsOwnerID {
 										<span class="badge">you</span>
 									} else {
-										<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/members/" + stringFromInt(m.MembershipID) + "/remove") } onsubmit="return confirm('Remove this member?')">
+										<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/members/" + stringFromInt(m.MembershipID) + "/remove") } data-confirm="Remove this member?">
 											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 											<button type="submit" class="secondary outline btn-inline">Remove</button>
 										</form>
@@ -660,7 +662,7 @@ templ TeamPage(vm TeamView) {
 								<td><span class="badge badge-role">{ p.Role }</span></td>
 								<td>{ timeString(p.ExpiresAt) }</td>
 								<td class="actions-cell">
-									<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invites/" + stringFromInt(p.ID) + "/revoke") } onsubmit="return confirm('Revoke this invite?')">
+									<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invites/" + stringFromInt(p.ID) + "/revoke") } data-confirm="Revoke this invite?">
 										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 										<button type="submit" class="secondary outline btn-inline">Revoke</button>
 									</form>
@@ -884,7 +886,7 @@ templ PlayersPage(vm PlayersView) {
 						}
 					</tbody>
 				</table>
-				<p>Showing { stringFromInt(int64(len(vm.Players))) } of { stringFromInt(vm.Total) }.</p>
+				<p>Showing { stringFromInt(int64(len(vm.Players))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
 			}
 		</section>
 	}
@@ -1113,7 +1115,7 @@ templ FleetTableFragment(vm FleetView) {
 				}
 			</tbody>
 		</table>
-		<p>Showing { stringFromInt(int64(len(vm.Allocations))) } of { stringFromInt(vm.Total) }.</p>
+		<p>Showing { stringFromInt(int64(len(vm.Allocations))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
 	}
 }
 
@@ -1479,12 +1481,12 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 									if u.IsSelf {
 										<span class="badge">you</span>
 									} else if !u.DisabledAt.IsZero() {
-										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/enable") } onsubmit="return confirm('Re-enable this user?')">
+										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/enable") } data-confirm="Re-enable this user?">
 											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 											<button type="submit" class="secondary outline btn-inline">Re-enable</button>
 										</form>
 									} else {
-										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/disable") } onsubmit="return confirm('Disable this user? Their active sessions and pending invitations will be revoked.')">
+										<form method="post" action={ templ.URL("/v1/dashboard/admin/users/" + stringFromInt(u.ID) + "/disable") } data-confirm="Disable this user? Their active sessions and pending invitations will be revoked.">
 											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 											<button type="submit" class="contrast outline btn-inline">Disable</button>
 										</form>
@@ -1494,7 +1496,7 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 						}
 					</tbody>
 				</table>
-				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { stringFromInt(vm.Total) }.</p>
+				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
 			}
 		</section>
 	}
@@ -1736,7 +1738,7 @@ templ EditFleetPage(vm EditFleetView) {
 		<section class="card">
 			<h2>Delete fleet</h2>
 			<p class="muted">Soft-deletes this template. Historical allocations keep their fleet reference; new allocations can no longer pick it.</p>
-			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID) + "/delete") } onsubmit="return confirm('Delete this fleet template?')">
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID) + "/delete") } data-confirm="Delete this fleet template?">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<button type="submit" class="btn-inline contrast outline">Delete</button>
 			</form>

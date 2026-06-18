@@ -17,6 +17,19 @@ func renderToString(t *testing.T, c templ.Component) string {
 	return buf.String()
 }
 
+func TestPlayersPage_LabelsNonFinalPageAsApproximate(t *testing.T) {
+	html := renderToString(t, PlayersPage(PlayersView{
+		UserEmail: "alice@example.com",
+		TenantID:  1,
+		ProjectID: 2,
+		Players:   []PlayerView{{ID: 3, Email: "player@example.com"}},
+		Total:     26,
+		HasNext:   true,
+	}))
+
+	assert.Contains(t, html, "Showing 1 of at least 26.")
+}
+
 func TestLoginPage_RendersFieldErrors(t *testing.T) {
 	html := renderToString(t, LoginPage(LoginView{
 		Email:       "bob@example.com",
@@ -26,6 +39,64 @@ func TestLoginPage_RendersFieldErrors(t *testing.T) {
 	assert.Contains(t, html, `id="email-error"`)
 	assert.Contains(t, html, "Enter a valid email address")
 	assert.NotContains(t, html, `id="password-error"`, "no error means no field-error element")
+}
+
+func TestDashboardHeadUsesExternalScriptsAndSafeHTMXConfig(t *testing.T) {
+	html := renderToString(t, LoginPage(LoginView{}))
+
+	assert.Contains(t, html, `name="htmx-config"`)
+	assert.Contains(t, html, "includeIndicatorStyles")
+	assert.Contains(t, html, "allowEval")
+	assert.Contains(t, html, "allowScriptTags")
+	assert.Contains(t, html, `src="/v1/dashboard/assets/htmx.min.js"`)
+	assert.Contains(t, html, `src="/v1/dashboard/assets/dashboard.js"`)
+	assert.NotContains(t, html, `unsafe-inline`)
+}
+
+func TestDashboardConfirmFormsUseDataAttributes(t *testing.T) {
+	tests := []struct {
+		name string
+		page templ.Component
+	}{
+		{
+			name: "team",
+			page: TeamPage(TeamView{
+				TenantID:  1,
+				CSRFToken: "tok",
+				Members: []TeamMemberView{
+					{MembershipID: 10, UserID: 20, Email: "member@example.com"},
+				},
+				Pending: []PendingInviteView{
+					{ID: 30, Email: "pending@example.com"},
+				},
+			}),
+		},
+		{
+			name: "platform users",
+			page: PlatformUsersPage(PlatformUsersView{
+				CSRFToken: "tok",
+				Users: []UserView{
+					{ID: 40, Email: "user@example.com"},
+				},
+			}),
+		},
+		{
+			name: "edit fleet",
+			page: EditFleetPage(EditFleetView{
+				TenantID: 1, ProjectID: 2, FleetID: 5, Name: "primary",
+				Backend: "docker", BackendConfigured: "docker",
+				Config: map[string]string{"image": "x:1", "port": "80"},
+			}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := renderToString(t, tt.page)
+			assert.NotContains(t, html, `onsubmit=`)
+			assert.Contains(t, html, `data-confirm=`)
+		})
+	}
 }
 
 func TestSignupSuccessPage_WrapsRevealInLimeColorBlock(t *testing.T) {

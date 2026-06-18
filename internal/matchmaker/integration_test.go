@@ -4,12 +4,16 @@ package matchmaker_test
 
 import (
 	"context"
+	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,38 +25,143 @@ import (
 	"github.com/ggscale/ggscale/internal/migrate"
 )
 
+const matchmakerTemplateDB = "ggscale_matchmaker_template"
+
+type matchmakerPostgresFixture struct {
+	ctr         *tcpostgres.PostgresContainer
+	admin       *pgxpool.Pool
+	templateDSN string
+	seq         atomic.Uint64
+	err         error
+}
+
+var (
+	matchmakerPGOnce sync.Once
+	matchmakerPG     *matchmakerPostgresFixture
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if matchmakerPG != nil {
+		matchmakerPG.close()
+	}
+	os.Exit(code)
+}
+
 func startMigratedDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
+	t.Parallel()
 	ctx := context.Background()
+	pg := sharedMatchmakerPostgres(t)
+	dbName, dsn := pg.createDatabase(t)
+
+	pool, err := pgxpool.New(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		pool.Close()
+		pg.dropDatabase(dbName)
+	})
+	return pool
+}
+
+func sharedMatchmakerPostgres(t *testing.T) *matchmakerPostgresFixture {
+	t.Helper()
+	matchmakerPGOnce.Do(func() {
+		matchmakerPG = &matchmakerPostgresFixture{}
+		matchmakerPG.err = matchmakerPG.start(context.Background())
+	})
+	require.NoError(t, matchmakerPG.err)
+	return matchmakerPG
+}
+
+func (p *matchmakerPostgresFixture) start(ctx context.Context) error {
 	ctr, err := tcpostgres.Run(ctx,
 		"postgres:17",
-		tcpostgres.WithDatabase("ggscale_test"),
+		tcpostgres.WithDatabase(matchmakerTemplateDB),
 		tcpostgres.WithUsername("ggscale"),
 		tcpostgres.WithPassword("ggscale"),
 		tcpostgres.BasicWaitStrategies(),
 	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = ctr.Terminate(shutdownCtx)
-	})
+	if err != nil {
+		return err
+	}
+	p.ctr = ctr
 
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
+	if err != nil {
+		return err
+	}
+	p.templateDSN = dsn
 
 	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
-	require.NoError(t, err)
+	if err != nil {
+		return err
+	}
 
 	r, err := migrate.New(dsn, migrationsDir)
-	require.NoError(t, err)
-	require.NoError(t, r.Up())
-	require.NoError(t, r.Close())
+	if err != nil {
+		return err
+	}
+	if err := r.Up(); err != nil {
+		_ = r.Close()
+		return err
+	}
+	if err := r.Close(); err != nil {
+		return err
+	}
 
-	pool, err := pgxpool.New(ctx, dsn)
+	adminDSN, err := matchmakerDSNForDatabase(dsn, "postgres")
+	if err != nil {
+		return err
+	}
+	admin, err := pgxpool.New(ctx, adminDSN)
+	if err != nil {
+		return err
+	}
+	p.admin = admin
+	return nil
+}
+
+func (p *matchmakerPostgresFixture) createDatabase(t *testing.T) (string, string) {
+	t.Helper()
+	dbName := fmt.Sprintf("ggscale_matchmaker_%d", p.seq.Add(1))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := p.admin.Exec(ctx,
+		"CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()+
+			" WITH TEMPLATE "+pgx.Identifier{matchmakerTemplateDB}.Sanitize()+
+			" OWNER ggscale")
 	require.NoError(t, err)
-	t.Cleanup(pool.Close)
-	return pool
+	dsn, err := matchmakerDSNForDatabase(p.templateDSN, dbName)
+	require.NoError(t, err)
+	return dbName, dsn
+}
+
+func (p *matchmakerPostgresFixture) dropDatabase(dbName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _ = p.admin.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
+	_, _ = p.admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+}
+
+func (p *matchmakerPostgresFixture) close() {
+	if p.admin != nil {
+		p.admin.Close()
+	}
+	if p.ctr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = p.ctr.Terminate(ctx)
+	}
+}
+
+func matchmakerDSNForDatabase(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/" + dbName
+	return u.String(), nil
 }
 
 type allocatorRecorder struct {
@@ -84,12 +193,16 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	appPool := db.NewPool(pool)
 
 	ctx := context.Background()
-	var tenantID, projectID, fleetID int64
+	var tenantID, projectID, fleetID, endUserID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-listen-test') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-listen') RETURNING id`,
+		tenantID, projectID).Scan(&endUserID))
 	// The matchmaking_tickets.fleet_id FK is RESTRICT — every queued ticket
 	// must reference an existing fleet template, even in tests. Seed one
 	// before enqueuing.
@@ -119,7 +232,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		FleetID:   fleetID,
-		EndUserID: 1,
+		EndUserID: endUserID,
 		Region:    "us-east-1",
 		GameMode:  "1v1",
 	})
@@ -139,12 +252,16 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	appPool := db.NewPool(pool)
 	ctx := context.Background()
 
-	var tenantID, projectID, fleetID int64
+	var tenantID, projectID, fleetID, endUserID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-claim-race') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-claim') RETURNING id`,
+		tenantID, projectID).Scan(&endUserID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
@@ -154,7 +271,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
-		EndUserID: 1, Region: "us-east-1", GameMode: "1v1",
+		EndUserID: endUserID, Region: "us-east-1", GameMode: "1v1",
 	})
 	require.NoError(t, err)
 
@@ -181,7 +298,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	assert.Equal(t, int64(1), winner.Load(), "exactly one worker should claim+commit")
 	assert.Equal(t, int64(3), loser.Load(), "the other three must observe an empty claim, not a stranded ticket")
 
-	got, err := queue.Get(tenantCtx, ticket.ID)
+	got, err := queue.Get(tenantCtx, ticket.ID, endUserID)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusMatched, got.Status)
 	assert.Equal(t, "10.0.0.1:7777", got.MatchAddress)
@@ -196,12 +313,16 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	appPool := db.NewPool(pool)
 	ctx := context.Background()
 
-	var tenantID, projectID, fleetID int64
+	var tenantID, projectID, fleetID, endUserID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-sweep') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-sweep') RETURNING id`,
+		tenantID, projectID).Scan(&endUserID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
@@ -211,7 +332,7 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
-		EndUserID: 1, Region: "us-east-1", GameMode: "1v1",
+		EndUserID: endUserID, Region: "us-east-1", GameMode: "1v1",
 	})
 	require.NoError(t, err)
 
@@ -225,7 +346,7 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 
-	got, err := queue.Get(tenantCtx, ticket.ID)
+	got, err := queue.Get(tenantCtx, ticket.ID, endUserID)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "swept ticket should be available for re-claim")
 }

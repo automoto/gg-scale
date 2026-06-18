@@ -16,6 +16,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -43,6 +44,7 @@ const (
 	verifyCookieName        = "ggscale_player_verify"
 	verifySubject           = "Your ggscale verification code"
 	minPlayerPasswordLength = 8
+	maxPlayerPasswordBytes  = 72
 )
 
 // bcryptCost is webutil.BcryptCost, re-bound locally so call sites stay
@@ -94,7 +96,7 @@ func New(d Deps) http.Handler {
 	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, verifySigningKey: key}
 
 	r := chi.NewRouter()
-	r.Use(webutil.SecurityHeaders)
+	r.Use(webutil.PlayerSecurityHeaders)
 	r.Route("/p/{projectID}", func(r chi.Router) {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
@@ -171,6 +173,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.ToLower(strings.TrimSpace(r.Form.Get("email")))
 	password := r.Form.Get("password")
+	if !validPlayerPassword(password) {
+		_ = bcrypt.CompareHashAndPassword(dummyPlayerBcryptHash, []byte(password))
+		w.WriteHeader(http.StatusUnauthorized)
+		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
+		return
+	}
 
 	var row sqlcgen.GetEndUserByEmailProjectRow
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
@@ -183,6 +191,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
+		_ = bcrypt.CompareHashAndPassword(dummyPlayerBcryptHash, []byte(password))
 		w.WriteHeader(http.StatusUnauthorized)
 		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
@@ -203,7 +212,10 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if !row.EmailVerifiedAt.Valid {
 		// Re-mint code if cooldown expired and send the user to verify.
-		_ = h.startVerification(r.Context(), row.ID, email)
+		if err := h.startVerification(r.Context(), row.ID, email); err != nil {
+			webutil.InternalError(w, "player login: verification email", err)
+			return
+		}
 		h.setVerifyCookie(w, row.ID, email, projectID)
 		http.Redirect(w, r, playerVerifyPath(projectID), http.StatusSeeOther)
 		return
@@ -232,8 +244,8 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, SignupPage(view))
 		return
 	}
-	if len(password) < minPlayerPasswordLength {
-		view.FieldErrors = map[string]string{"password": "Password must be at least 8 characters."}
+	if !validPlayerPassword(password) {
+		view.FieldErrors = map[string]string{"password": "Password must be between 8 and 72 characters."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, SignupPage(view))
 		return
@@ -288,12 +300,15 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.mailer != nil && h.mailFrom != "" {
-		_ = h.mailer.Send(r.Context(), mailer.Message{
+		if err := h.mailer.Send(r.Context(), mailer.Message{
 			From:    h.mailFrom,
 			To:      []string{email},
 			Subject: verifySubject,
 			Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
-		})
+		}); err != nil {
+			webutil.InternalError(w, "player signup: verification email", err)
+			return
+		}
 	}
 	h.setVerifyCookie(w, inserted.ID, email, projectID)
 	http.Redirect(w, r, playerVerifyPath(projectID), http.StatusSeeOther)
@@ -425,12 +440,14 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 		return err
 	}
 	if h.mailer != nil && h.mailFrom != "" {
-		_ = h.mailer.Send(ctx, mailer.Message{
+		if err := h.mailer.Send(ctx, mailer.Message{
 			From:    h.mailFrom,
 			To:      []string{email},
 			Subject: verifySubject,
 			Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
-		})
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -614,7 +631,7 @@ type verifyCookiePayload struct {
 const playerVerifyTTL = 30 * time.Minute
 
 func (h *Handler) setVerifyCookie(w http.ResponseWriter, userID int64, email string, projectID int64) {
-	expiresAt := time.Now().Add(playerVerifyTTL).Unix()
+	expiresAt := h.now().Add(playerVerifyTTL).Unix()
 	val := encodeVerifyCookie(verifyCookiePayload{EndUserID: userID, ProjectID: projectID, ExpiresAt: expiresAt, Email: email}, h.verifySigningKey)
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyCookieName,
@@ -649,22 +666,23 @@ func (h *Handler) verifyCookie(r *http.Request) (verifyCookiePayload, bool) {
 		return verifyCookiePayload{}, false
 	}
 	// MaxAge is advisory; the signed payload's ExpiresAt is authoritative.
-	if p.ExpiresAt > 0 && time.Now().Unix() > p.ExpiresAt {
+	if p.ExpiresAt > 0 && h.now().Unix() > p.ExpiresAt {
 		return verifyCookiePayload{}, false
 	}
 	return p, true
 }
 
 // encodeVerifyCookie returns base64(payload) + "." + base64(HMAC-SHA256(key, payload)).
-// Payload is "<endUserID>:<projectID>:<expiresAtUnix>:<email>". Binding the
-// projectID stops a forged cookie from authenticating against a different
-// project; the expiry stops replay past the TTL even if MaxAge is ignored.
+// The JSON payload binds the project and expiry without delimiter ambiguity.
 func encodeVerifyCookie(p verifyCookiePayload, key []byte) string {
-	payload := strconv.FormatInt(p.EndUserID, 10) + ":" + strconv.FormatInt(p.ProjectID, 10) + ":" + strconv.FormatInt(p.ExpiresAt, 10) + ":" + p.Email
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
 	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(payload))
+	mac.Write(payload)
 	sig := mac.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(sig)
+	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(sig)
 }
 
 func decodeVerifyCookie(raw string, key []byte) (verifyCookiePayload, bool) {
@@ -685,32 +703,25 @@ func decodeVerifyCookie(raw string, key []byte) (verifyCookiePayload, bool) {
 	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return verifyCookiePayload{}, false
 	}
-	// Layout: endUserID:projectID:expiresAtUnix:email
-	idRaw, rest, ok := strings.Cut(string(payload), ":")
-	if !ok {
+	var out verifyCookiePayload
+	if err := json.Unmarshal(payload, &out); err != nil {
 		return verifyCookiePayload{}, false
 	}
-	pidRaw, rest, ok := strings.Cut(rest, ":")
-	if !ok {
-		return verifyCookiePayload{}, false
-	}
-	expRaw, email, ok := strings.Cut(rest, ":")
-	if !ok {
-		return verifyCookiePayload{}, false
-	}
-	id, err := strconv.ParseInt(idRaw, 10, 64)
+	return out, true
+}
+
+var dummyPlayerBcryptHash = mustGenerateDummyPlayerHash()
+
+func mustGenerateDummyPlayerHash() []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte("dummy-password-for-player-timing-equalisation"), bcryptCost)
 	if err != nil {
-		return verifyCookiePayload{}, false
+		panic(err)
 	}
-	pid, err := strconv.ParseInt(pidRaw, 10, 64)
-	if err != nil {
-		return verifyCookiePayload{}, false
-	}
-	exp, err := strconv.ParseInt(expRaw, 10, 64)
-	if err != nil {
-		return verifyCookiePayload{}, false
-	}
-	return verifyCookiePayload{EndUserID: id, ProjectID: pid, ExpiresAt: exp, Email: email}, true
+	return h
+}
+
+func validPlayerPassword(password string) bool {
+	return len(password) >= minPlayerPasswordLength && len(password) <= maxPlayerPasswordBytes
 }
 
 // Shared errors. Their string forms aren't user-facing — the handlers

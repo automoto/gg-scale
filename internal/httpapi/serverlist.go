@@ -64,7 +64,7 @@ func fleetHeartbeatHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "current_players must be in [0, max_players]", http.StatusBadRequest)
 			return
 		}
-		d.ServerList.Submit(serverlist.Heartbeat{
+		err = d.ServerList.Submit(serverlist.Heartbeat{
 			AgonesName:     req.AgonesName,
 			Fleet:          req.Fleet,
 			Address:        req.Address,
@@ -77,6 +77,14 @@ func fleetHeartbeatHandler(d Deps) http.HandlerFunc {
 			Version:        req.Version,
 			TenantID:       tenantID,
 		})
+		if errors.Is(err, serverlist.ErrTenantLimitExceeded) {
+			http.Error(w, "server list limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

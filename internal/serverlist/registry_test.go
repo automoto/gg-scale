@@ -50,6 +50,27 @@ func TestSubmitUpsertsExistingEntry(t *testing.T) {
 	assert.Equal(t, 3, got[0].CurrentPlayers)
 }
 
+func TestSubmitRejectsNewEntriesOverTenantLimit(t *testing.T) {
+	r := serverlist.NewWithLimit(30*time.Second, 1)
+	require.NoError(t, r.Submit(mkHB(1, "f", "gs-1", 1)))
+
+	err := r.Submit(mkHB(1, "f", "gs-2", 1))
+
+	assert.ErrorIs(t, err, serverlist.ErrTenantLimitExceeded)
+}
+
+func TestSubmitAllowsUpdateAtTenantLimit(t *testing.T) {
+	r := serverlist.NewWithLimit(30*time.Second, 1)
+	require.NoError(t, r.Submit(mkHB(1, "f", "gs-1", 1)))
+
+	err := r.Submit(mkHB(1, "f", "gs-1", 2))
+
+	require.NoError(t, err)
+	got := r.List(1, "f")
+	require.Len(t, got, 1)
+	assert.Equal(t, 2, got[0].CurrentPlayers)
+}
+
 func TestListIsolatesTenants(t *testing.T) {
 	r := serverlist.New(30 * time.Second)
 	r.Submit(mkHB(1, "f", "gs-tenant-1", 1))

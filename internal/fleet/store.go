@@ -103,8 +103,10 @@ func (s *PostgresStore) Get(ctx context.Context, id AllocationID) (*Allocation, 
 	return alloc, nil
 }
 
-// List returns the most recent allocations for a project plus the total
-// count for the same filter (so callers can render pagination).
+// List returns the most recent allocations for a project. The total is the
+// highest row position known from this fetch; callers that request limit+1 can
+// trim the extra row and infer whether another page exists without a companion
+// COUNT(*).
 func (s *PostgresStore) List(ctx context.Context, projectID int64, includeTerminal bool, limit, offset int) ([]*Allocation, int64, error) {
 	var (
 		out   []*Allocation
@@ -128,14 +130,7 @@ func (s *PostgresStore) List(ctx context.Context, projectID int64, includeTermin
 			}
 			out = append(out, converted)
 		}
-		count, err := q.CountAllocationsForProject(ctx, sqlcgen.CountAllocationsForProjectParams{
-			ProjectID:       projectID,
-			IncludeTerminal: includeTerminal,
-		})
-		if err != nil {
-			return err
-		}
-		total = count
+		total = int64(offset + len(out))
 		return nil
 	})
 	if err != nil {

@@ -105,6 +105,9 @@ func Launch(cfg LaunchConfig) (*Plugin, error) {
 		return nil, errors.New("fleet plugin: invalid plugin name (lowercase alphanumerics, _ and -, max 64 chars)")
 	}
 	binPath := cfg.BinaryPath()
+	if err := verifyPluginPath(binPath); err != nil {
+		return nil, err
+	}
 	manifest, err := readManifest(binPath)
 	if err != nil {
 		return nil, err
@@ -146,6 +149,41 @@ func Launch(cfg LaunchConfig) (*Plugin, error) {
 }
 
 var _ io.Closer = (*Plugin)(nil)
+
+func verifyPluginPath(binPath string) error {
+	dir := filepath.Dir(binPath)
+	dirInfo, err := os.Lstat(dir)
+	if err != nil {
+		return fmt.Errorf("fleet plugin: stat plugin dir: %w", err)
+	}
+	if dirInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("fleet plugin: plugin dir must not be a symlink: %s", dir)
+	}
+	if !dirInfo.IsDir() {
+		return fmt.Errorf("fleet plugin: plugin dir is not a directory: %s", dir)
+	}
+	if dirInfo.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("fleet plugin: plugin dir is group/world writable: %s", dir)
+	}
+
+	binInfo, err := os.Lstat(binPath)
+	if err != nil {
+		return fmt.Errorf("fleet plugin: stat binary: %w", err)
+	}
+	if binInfo.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("fleet plugin: binary must not be a symlink: %s", binPath)
+	}
+	if !binInfo.Mode().IsRegular() {
+		return fmt.Errorf("fleet plugin: binary is not a regular file: %s", binPath)
+	}
+	if binInfo.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("fleet plugin: binary is not executable: %s", binPath)
+	}
+	if binInfo.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("fleet plugin: binary is group/world writable: %s", binPath)
+	}
+	return nil
+}
 
 // verifyManifestSHA256 enforces the manifest's optional binary hash. A
 // missing sha256 field logs a warning (warn-only mode) and proceeds; a

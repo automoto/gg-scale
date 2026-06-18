@@ -110,6 +110,30 @@ func (a *adapter) RemoveFilteredPolicy(_ string, ptype string, fieldIndex int, f
 	})
 }
 
+func (a *adapter) UpdatePolicy(_ string, ptype string, oldRule, newRule []string) error {
+	oldValues := ruleValues(oldRule)
+	newValues := ruleValues(newRule)
+	return a.pool.BootstrapQ(context.Background(), func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `
+UPDATE casbin_rule
+SET v0 = $8, v1 = $9, v2 = $10, v3 = $11, v4 = $12, v5 = $13
+WHERE ptype = $1
+  AND v0 IS NOT DISTINCT FROM $2
+  AND v1 IS NOT DISTINCT FROM $3
+  AND v2 IS NOT DISTINCT FROM $4
+  AND v3 IS NOT DISTINCT FROM $5
+  AND v4 IS NOT DISTINCT FROM $6
+  AND v5 IS NOT DISTINCT FROM $7`,
+			ptype,
+			oldValues[0], oldValues[1], oldValues[2], oldValues[3], oldValues[4], oldValues[5],
+			newValues[0], newValues[1], newValues[2], newValues[3], newValues[4], newValues[5])
+		if err != nil {
+			return fmt.Errorf("rbac: update policy: %w", err)
+		}
+		return nil
+	})
+}
+
 func removeFilteredRule(ctx context.Context, tx pgx.Tx, ptype string, fieldIndex int, fieldValues ...string) error {
 	if fieldIndex < 0 || fieldIndex+len(fieldValues) > 6 {
 		return fmt.Errorf("rbac: invalid filtered policy index %d with %d values", fieldIndex, len(fieldValues))

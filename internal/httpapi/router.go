@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -53,6 +54,7 @@ type Deps struct {
 	Cache    cache.Store
 	Registry *prometheus.Registry
 	RBAC     *rbac.Authorizer
+	Now      func() time.Time
 
 	// Fleet is the allocator for game-server slots. nil until a backend is
 	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
@@ -125,13 +127,10 @@ func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(panicRecover())
 	allowedOrigins := d.CORSAllowedOrigins
-	devWildcard := false
 	if len(allowedOrigins) == 0 {
 		// Dev fallback: wildcard. config.Validate rejects this in prod.
 		allowedOrigins = []string{"*"}
-		devWildcard = true
 	}
-	_ = devWildcard // documents intent; the slice value is what's consumed
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},

@@ -112,21 +112,22 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 
 
 -- name: CreateSession :one
-INSERT INTO sessions (tenant_id, end_user_id, refresh_hash, expires_at)
+INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3
+    $1, $2, $3, $4
 )
 RETURNING id, created_at;
 
 -- name: GetSessionByRefreshHash :one
 -- Joined to end_users so refresh fails for disabled / deleted accounts
 -- even if the refresh token is still otherwise valid.
-SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at
+SELECT s.id, s.end_user_id, s.project_id, s.expires_at, s.revoked_at
 FROM sessions s
 JOIN end_users u ON u.id = s.end_user_id
 WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND s.refresh_hash = $1
+  AND s.project_id = sqlc.arg(project_id)
+  AND s.refresh_hash = sqlc.arg(refresh_hash)
   AND u.deleted_at IS NULL
   AND u.disabled_at IS NULL;
 

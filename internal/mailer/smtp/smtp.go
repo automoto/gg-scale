@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/mail"
 	"net/smtp"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -22,6 +25,7 @@ const (
 	TLSModeOff      = "off"
 	TLSModeSTARTTLS = "starttls"
 	TLSModeImplicit = "implicit"
+	sendTimeout     = 15 * time.Second
 )
 
 func init() {
@@ -42,30 +46,40 @@ func init() {
 		default:
 			return nil, fmt.Errorf("smtp: unknown tls mode %q (want off|starttls|implicit)", tlsMode)
 		}
+		localName, err := os.Hostname()
+		if err != nil || localName == "" {
+			localName = "localhost"
+		}
 		return &smtpMailer{
-			addr:    addr,
-			host:    host,
-			auth:    auth,
-			from:    from,
-			tlsMode: tlsMode,
+			addr:      addr,
+			host:      host,
+			localName: localName,
+			auth:      auth,
+			from:      from,
+			tlsMode:   tlsMode,
 		}, nil
 	})
 }
 
 type smtpMailer struct {
-	addr    string
-	host    string
-	auth    smtp.Auth
-	from    string
-	tlsMode string
+	addr      string
+	host      string
+	localName string
+	auth      smtp.Auth
+	from      string
+	tlsMode   string
 }
 
 // Send encodes msg as RFC 5322 and hands it to the SMTP server. Header
 // fields are passed through webutil.SanitizeHeader so CRLF/control-char
 // injection is rejected at the boundary.
-func (m *smtpMailer) Send(_ context.Context, msg mailer.Message) error {
+func (m *smtpMailer) Send(ctx context.Context, msg mailer.Message) error {
 	if msg.From == "" {
 		msg.From = m.from
+	}
+	fromAddr, toAddr, err := parseEnvelope(msg)
+	if err != nil {
+		return err
 	}
 	body, err := buildRFC5322(msg)
 	if err != nil {
@@ -73,22 +87,32 @@ func (m *smtpMailer) Send(_ context.Context, msg mailer.Message) error {
 	}
 	switch m.tlsMode {
 	case TLSModeImplicit:
-		return m.sendImplicit(msg.From, msg.To, body)
+		return m.sendImplicit(ctx, fromAddr, toAddr, body)
 	default:
-		return m.sendSTARTTLSOrPlain(msg.From, msg.To, body, m.tlsMode == TLSModeSTARTTLS)
+		return m.sendSTARTTLSOrPlain(ctx, fromAddr, toAddr, body, m.tlsMode == TLSModeSTARTTLS)
 	}
 }
 
 // sendSTARTTLSOrPlain dials cleartext then upgrades via STARTTLS when
 // requireTLS is true. With requireTLS=false the connection stays in
 // cleartext (only acceptable for off-network MailHog and other dev relays).
-func (m *smtpMailer) sendSTARTTLSOrPlain(from string, to []string, body []byte, requireTLS bool) error {
-	c, err := smtp.Dial(m.addr)
+func (m *smtpMailer) sendSTARTTLSOrPlain(ctx context.Context, from string, to []string, body []byte, requireTLS bool) error {
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", m.addr)
 	if err != nil {
 		return fmt.Errorf("mailer: dial: %w", err)
 	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
+		return fmt.Errorf("mailer: deadline: %w", err)
+	}
+	c, err := smtp.NewClient(conn, m.host)
+	if err != nil {
+		return fmt.Errorf("mailer: smtp.NewClient: %w", err)
+	}
 	defer func() { _ = c.Close() }()
-	if err := c.Hello("localhost"); err != nil {
+	if err := c.Hello(m.localName); err != nil {
 		return fmt.Errorf("mailer: HELO: %w", err)
 	}
 	if requireTLS {
@@ -108,10 +132,16 @@ func (m *smtpMailer) sendSTARTTLSOrPlain(from string, to []string, body []byte, 
 }
 
 // sendImplicit dials TLS from connect (typically port 465).
-func (m *smtpMailer) sendImplicit(from string, to []string, body []byte) error {
-	conn, err := tls.Dial("tcp", m.addr, &tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12})
+func (m *smtpMailer) sendImplicit(ctx context.Context, from string, to []string, body []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
+	defer cancel()
+	conn, err := (&tls.Dialer{Config: &tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12}}).DialContext(ctx, "tcp", m.addr)
 	if err != nil {
 		return fmt.Errorf("mailer: tls dial: %w", err)
+	}
+	if err := conn.SetDeadline(time.Now().Add(sendTimeout)); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("mailer: deadline: %w", err)
 	}
 	c, err := smtp.NewClient(conn, m.host)
 	if err != nil {
@@ -125,6 +155,22 @@ func (m *smtpMailer) sendImplicit(from string, to []string, body []byte) error {
 		}
 	}
 	return writeMessage(c, from, to, body)
+}
+
+func parseEnvelope(m mailer.Message) (string, []string, error) {
+	from, err := mail.ParseAddress(m.From)
+	if err != nil {
+		return "", nil, fmt.Errorf("from address: %w", err)
+	}
+	to := make([]string, 0, len(m.To))
+	for _, rcpt := range m.To {
+		parsed, err := mail.ParseAddress(rcpt)
+		if err != nil {
+			return "", nil, fmt.Errorf("to address %q: %w", rcpt, err)
+		}
+		to = append(to, parsed.Address)
+	}
+	return from.Address, to, nil
 }
 
 func writeMessage(c *smtp.Client, from string, to []string, body []byte) error {

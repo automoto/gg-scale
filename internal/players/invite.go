@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -67,8 +66,8 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	view.Code = code
 	view.CSRFToken = h.csrf(r)
-	if len(password) < minPlayerPasswordLength {
-		view.FieldErrors = map[string]string{"password": "Password must be at least 8 characters."}
+	if !validPlayerPassword(password) {
+		view.FieldErrors = map[string]string{"password": "Password must be between 8 and 72 characters."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, InviteAcceptPage(view))
 		return
@@ -122,7 +121,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			ExpiresAt:    pgtype.Timestamptz{},
 		})
 		if cerr != nil {
-			if strings.Contains(cerr.Error(), "23505") {
+			if webutil.IsUniqueViolation(cerr) {
 				return errInvitePlayerExists
 			}
 			return cerr

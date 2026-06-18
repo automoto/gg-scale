@@ -1,6 +1,7 @@
 package rbac_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -93,6 +94,18 @@ func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	assert.True(t, secret)
 }
 
+func TestDefaultPolicy_api_key_explicit_role_is_tenant_scoped(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.AddAPIKeyRole(2, 7, tenant.KeyTypeSecret))
+
+	allowed, err := a.CanAPIKey(tenant.APIKey{
+		ID: 2, TenantID: 8, Type: tenant.KeyTypePublishable,
+	}, rbac.ObjectLeaderboard, rbac.ActionSubmit)
+
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
 func TestDefaultPolicy_denies_high_risk_player_access_by_default(t *testing.T) {
 	a := newAuthorizer(t)
 
@@ -110,6 +123,32 @@ func TestDefaultPolicy_allows_explicit_high_access_player_role(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, allowed)
+}
+
+func TestDefaultPolicy_end_user_explicit_role_is_tenant_scoped(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.AddEndUserRole(123, 7, rbac.RolePlayerHighAccess))
+
+	allowed, err := a.CanEndUser(8, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
+
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
+func TestAddEndUserRole_rejects_non_player_role(t *testing.T) {
+	a := newAuthorizer(t)
+
+	err := a.AddEndUserRole(123, 7, rbac.RolePlatformAdmin)
+
+	assert.Error(t, err)
+}
+
+func TestRoleMutations_return_error_when_authorizer_unavailable(t *testing.T) {
+	var a *rbac.Authorizer
+
+	err := a.AddEndUserRole(123, 7, rbac.RolePlayerHighAccess)
+
+	assert.True(t, errors.Is(err, rbac.ErrAuthorizerUnavailable))
 }
 
 func TestBackendFeature_maps_backend_names(t *testing.T) {

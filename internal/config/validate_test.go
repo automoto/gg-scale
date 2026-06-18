@@ -12,15 +12,17 @@ import (
 
 func baseProd() *config.Config {
 	return &config.Config{
-		Env:                   "production",
-		DBMaxConns:            10,
-		DBMinConns:            2,
-		DBMaxConnLifetime:     time.Hour,
-		CORSAllowedOrigins:    []string{"https://app.example.com"},
-		DashboardCookieSecure: true,
-		DashboardBaseURL:      "https://dashboard.example.com",
-		JWTSigningKey:         "1234567890abcdef1234567890abcdef",
-		FleetBackend:          "agones",
+		Env:                         "production",
+		DBMaxConns:                  10,
+		DBMinConns:                  2,
+		DBMaxConnLifetime:           time.Hour,
+		CORSAllowedOrigins:          []string{"https://app.example.com"},
+		DashboardEnabled:            true,
+		DashboardBootstrapTokenFile: "/run/secrets/ggscale-bootstrap",
+		DashboardCookieSecure:       true,
+		DashboardBaseURL:            "https://dashboard.example.com",
+		JWTSigningKey:               "1234567890abcdef1234567890abcdef",
+		FleetBackend:                "agones",
 	}
 }
 
@@ -70,6 +72,13 @@ func TestValidateRequiresJWTKeyInProd(t *testing.T) {
 	assert.ErrorContains(t, err, "JWT_SIGNING_KEY")
 }
 
+func TestValidateRequiresBootstrapTokenFileInProd(t *testing.T) {
+	c := baseProd()
+	c.DashboardBootstrapTokenFile = ""
+	err := c.Validate()
+	assert.ErrorContains(t, err, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
+}
+
 func TestValidateRequiresDigestPinForDockerProd(t *testing.T) {
 	c := baseProd()
 	c.FleetBackend = "docker"
@@ -90,6 +99,13 @@ func TestValidateRequiresPoolMinimum(t *testing.T) {
 	c.DBMaxConns = 2
 	err := c.Validate()
 	assert.ErrorContains(t, err, "DB_MAX_CONNS")
+}
+
+func TestValidateRejectsUnknownMailProvider(t *testing.T) {
+	c := baseProd()
+	c.MailProvider = "mystery"
+	err := c.Validate()
+	assert.ErrorContains(t, err, "MAIL_PROVIDER")
 }
 
 func TestValidateAllowsDevWithoutCORS(t *testing.T) {

@@ -1,9 +1,12 @@
 package plugin
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLaunchConfigBinaryPathDefaultsToEtcGgscalePlugins(t *testing.T) {
@@ -56,6 +59,33 @@ func TestLaunchRejectsInvalidPluginName(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid plugin name")
+}
+
+func TestVerifyPluginPathRejectsWritableDirectory(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o777))
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	bin := filepath.Join(dir, "ggscale-fleet-ovh")
+	require.NoError(t, os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755))
+
+	err := verifyPluginPath(bin)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "group/world writable")
+}
+
+func TestVerifyPluginPathRejectsSymlinkedBinary(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Chmod(dir, 0o700))
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755))
+	link := filepath.Join(dir, "ggscale-fleet-ovh")
+	require.NoError(t, os.Symlink(target, link))
+
+	err := verifyPluginPath(link)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink")
 }
 
 func TestPluginCloseIsNilSafe(t *testing.T) {

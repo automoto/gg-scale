@@ -79,10 +79,11 @@ type Manager struct {
 // running ggscale with FLEET_BACKEND=docker can't accidentally route
 // allocations through an Agones template.
 func NewManager(store Store, fleets FleetStore, backend Backend, opts ManagerOptions) *Manager {
-	if opts.Clock == nil {
-		opts.Clock = defaultBackoff
+	cfg := opts
+	if cfg.Clock == nil {
+		cfg.Clock = defaultBackoff
 	}
-	return &Manager{store: store, fleets: fleets, backend: backend, opts: opts}
+	return &Manager{store: store, fleets: fleets, backend: backend, opts: cfg}
 }
 
 // ErrFleetRequired is returned by Allocate when the request omits FleetID.

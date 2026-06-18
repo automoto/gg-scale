@@ -1,6 +1,8 @@
 package webutil_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,6 +11,46 @@ import (
 
 	"github.com/ggscale/ggscale/internal/webutil"
 )
+
+func TestSecurityHeadersDisallowInlineDashboardAssets(t *testing.T) {
+	h := webutil.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	h.ServeHTTP(w, r)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	assert.Contains(t, csp, "default-src 'self'")
+	assert.Contains(t, csp, "style-src 'self'")
+	assert.Contains(t, csp, "style-src-attr 'none'")
+	assert.Contains(t, csp, "script-src 'self'")
+	assert.Contains(t, csp, "script-src-attr 'none'")
+	assert.Contains(t, csp, "frame-ancestors 'none'")
+	assert.Contains(t, csp, "object-src 'none'")
+	assert.NotContains(t, csp, "unsafe-inline")
+}
+
+func TestPlayerSecurityHeadersDisallowScriptsAndStyles(t *testing.T) {
+	h := webutil.PlayerSecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+
+	h.ServeHTTP(w, r)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	assert.Contains(t, csp, "default-src 'none'")
+	assert.Contains(t, csp, "style-src 'none'")
+	assert.Contains(t, csp, "style-src-attr 'none'")
+	assert.Contains(t, csp, "script-src 'none'")
+	assert.Contains(t, csp, "script-src-attr 'none'")
+	assert.Contains(t, csp, "form-action 'self'")
+	assert.Contains(t, csp, "frame-ancestors 'none'")
+	assert.NotContains(t, csp, "unsafe-inline")
+}
 
 func TestSanitizeHeaderAcceptsPlainText(t *testing.T) {
 	tests := []struct {

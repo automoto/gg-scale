@@ -1,6 +1,8 @@
 package players
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,4 +61,33 @@ func TestPathHelpers(t *testing.T) {
 	assert.Equal(t, "/v1/players/p/42/login", playerLoginPath(42))
 	assert.Equal(t, "/v1/players/p/42/verify", playerVerifyPath(42))
 	assert.Equal(t, "/v1/players/p/42/account", playerAccountPath(42))
+}
+
+func TestPlayerPagesUseStrictSecurityHeaders(t *testing.T) {
+	h := New(Deps{Config: Config{Mount: true}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/p/42/login", nil)
+
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	csp := rec.Header().Get("Content-Security-Policy")
+	assert.Contains(t, csp, "default-src 'none'")
+	assert.Contains(t, csp, "script-src 'none'")
+	assert.Contains(t, csp, "style-src 'none'")
+	assert.NotContains(t, csp, "unsafe-inline")
+}
+
+func TestPlayerPagesDoNotRequestStylesheetsOrScripts(t *testing.T) {
+	h := New(Deps{Config: Config{Mount: true}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/p/42/login", nil)
+
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	html := rec.Body.String()
+	assert.NotContains(t, html, "<style")
+	assert.NotContains(t, html, "<script")
+	assert.NotContains(t, html, `rel="stylesheet"`)
 }

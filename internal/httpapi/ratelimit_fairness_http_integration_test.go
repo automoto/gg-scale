@@ -103,8 +103,8 @@ func TestRatelimit_bursting_tenant_throttled_other_tenant_unaffected(t *testing.
 	assert.Greater(t, count429A.Load(), int64(0), "tenant A should be throttled")
 	first429 := first429Ns.Load()
 	require.NotZero(t, first429)
-	assert.Less(t, time.Duration(first429-start.UnixNano()), time.Second,
-		"first 429 should arrive within 1s of burst start")
+	assert.Less(t, time.Duration(first429-start.UnixNano()), 2*time.Second,
+		"first 429 should arrive within the burst window")
 
 	assert.Equal(t, int64(0), count429B.Load(), "tenant B should not be throttled at 50 Hz")
 

@@ -20,6 +20,7 @@ const platformUsersPerPage = 25
 // errCannotDisableSelf is returned when a platform admin tries to
 // disable their own account.
 var errCannotDisableSelf = errors.New("dashboard: cannot disable yourself")
+var errCannotDisableLastPlatformAdmin = errors.New("dashboard: cannot disable the last platform admin")
 
 // validateUserDisableTarget rejects the actor disabling themselves. Pure
 // helper so it can be unit-tested without HTTP plumbing.
@@ -32,15 +33,13 @@ func validateUserDisableTarget(actorID, targetID int64) error {
 
 func (h *Handler) platformUsersPage(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("q")
-	page := 1
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
-		page = p
-	}
-	offset := int32((page - 1) * platformUsersPerPage)
+	page := pageParam(r)
+	offset := dashboardPageOffset(page, platformUsersPerPage)
 
 	var (
-		rows  []sqlcgen.ListDashboardUsersForPlatformAdminRow
-		total int64
+		rows    []sqlcgen.ListDashboardUsersForPlatformAdminRow
+		total   int64
+		hasNext bool
 	)
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
@@ -51,14 +50,21 @@ func (h *Handler) platformUsersPage(w http.ResponseWriter, r *http.Request) {
 		var err error
 		rows, err = q.ListDashboardUsersForPlatformAdmin(r.Context(), sqlcgen.ListDashboardUsersForPlatformAdminParams{
 			EmailFilter: filter,
-			Lim:         int32(platformUsersPerPage),
+			Lim:         dashboardPageLimit(platformUsersPerPage),
 			Off:         offset,
 		})
 		if err != nil {
 			return err
 		}
-		total, err = q.CountDashboardUsersForPlatformAdmin(r.Context(), filter)
-		return err
+		if len(rows) > platformUsersPerPage {
+			hasNext = true
+			rows = rows[:platformUsersPerPage]
+		}
+		total = int64(offset) + int64(len(rows))
+		if hasNext {
+			total++
+		}
+		return nil
 	})
 	if err != nil {
 		webutil.InternalError(w, "platform users: list", err)
@@ -87,7 +93,7 @@ func (h *Handler) platformUsersPage(w http.ResponseWriter, r *http.Request) {
 		Total:     total,
 		Page:      page,
 		HasPrev:   page > 1,
-		HasNext:   int64(page*platformUsersPerPage) < total,
+		HasNext:   hasNext,
 		Message:   r.URL.Query().Get("flash"),
 	}))
 }
@@ -133,6 +139,18 @@ func (h *Handler) toggleDashboardUserDisabled(w http.ResponseWriter, r *http.Req
 		if err != nil {
 			return err
 		}
+		if disable && target.IsPlatformAdmin {
+			if _, err := q.LockEnabledPlatformAdmins(r.Context()); err != nil {
+				return err
+			}
+			admins, err := q.CountEnabledPlatformAdmins(r.Context())
+			if err != nil {
+				return err
+			}
+			if admins <= 1 {
+				return errCannotDisableLastPlatformAdmin
+			}
+		}
 		if err := q.SetDashboardUserDisabled(r.Context(), sqlcgen.SetDashboardUserDisabledParams{
 			ID:         userID,
 			DisabledAt: disabledAt,
@@ -159,6 +177,12 @@ func (h *Handler) toggleDashboardUserDisabled(w http.ResponseWriter, r *http.Req
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, errCannotDisableLastPlatformAdmin) {
+		http.Redirect(w, r,
+			"/v1/dashboard/admin/users?flash="+url.QueryEscape("You can't disable the last enabled platform admin."),
+			http.StatusSeeOther)
 		return
 	}
 	if err != nil {

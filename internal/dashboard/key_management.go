@@ -164,6 +164,9 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 			KeyType:   string(in.KeyType),
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errProjectNotInTenant
+			}
 			return fmt.Errorf("create api key: %w", err)
 		}
 		if h.rbac != nil {

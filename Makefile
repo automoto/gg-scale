@@ -15,6 +15,7 @@ FULL_STACK         := docker compose -f compose/full.yml
 DOCKER_IMAGE ?= buildwrangler/ggscale
 TAG          ?= latest
 GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+INTEGRATION_PARALLEL ?= 8
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ test:
 	go test -race ./...
 
 test-integration:
-	go test -race -tags=integration ./...
+	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) ./...
 
 # Runs the e2e suite against an already-running compose stack.
 # Use `make up-fleet-agones && make agones-install && make e2e`.

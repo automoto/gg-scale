@@ -24,6 +24,7 @@ const (
 	fleetPageSize     = 25
 	fleetEventLimit   = 50
 	matchmakerMaxRows = 100
+	maxDashboardPage  = 100
 )
 
 // fleetEnabled is true when a backend was wired at startup. The pages render
@@ -450,9 +451,13 @@ func (h *Handler) loadAllocations(ctx context.Context, tenantID, projectID int64
 	}
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	offset := (page - 1) * fleetPageSize
-	allocs, total, err := h.fleet.List(tenantCtx, projectID, includeTerminal, fleetPageSize, offset)
+	allocs, total, err := h.fleet.List(tenantCtx, projectID, includeTerminal, fleetPageSize+1, offset)
 	if err != nil {
 		return nil, 0, err
+	}
+	if len(allocs) > fleetPageSize {
+		allocs = allocs[:fleetPageSize]
+		total = int64(offset + fleetPageSize + 1)
 	}
 	out := make([]AllocationView, 0, len(allocs))
 	for _, a := range allocs {
@@ -550,6 +555,16 @@ func (h *Handler) parseTenantAndProject(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return 0, 0, false
 	}
+	ok, err := h.projectBelongsToTenant(r.Context(), tenantID, projectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "project ownership check failed", "err", err, "tenant", tenantID, "project", projectID)
+		http.Error(w, "project lookup failed", http.StatusInternalServerError)
+		return 0, 0, false
+	}
+	if !ok {
+		http.NotFound(w, r)
+		return 0, 0, false
+	}
 	return tenantID, projectID, true
 }
 
@@ -558,7 +573,43 @@ func pageParam(r *http.Request) int {
 	if err != nil || p <= 0 {
 		return 1
 	}
+	if p > maxDashboardPage {
+		return maxDashboardPage
+	}
 	return p
+}
+
+func dashboardPageOffset(page, pageSize int) int32 {
+	offset := (page - 1) * pageSize
+	if offset <= 0 {
+		return 0
+	}
+	// #nosec G115 -- pageParam clamps page to maxDashboardPage and dashboard page sizes are small constants.
+	return int32(offset)
+}
+
+func dashboardPageLimit(pageSize int) int32 {
+	// #nosec G115 -- dashboard page sizes are small constants and +1 is the LIMIT+1 sentinel.
+	return int32(pageSize + 1)
+}
+
+func (h *Handler) projectBelongsToTenant(ctx context.Context, tenantID, projectID int64) (bool, error) {
+	var belongs bool
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", stringFromInt(tenantID)); err != nil {
+			return err
+		}
+		row, err := sqlcgen.New(tx).GetProjectTenant(ctx, projectID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		belongs = row.TenantID == tenantID
+		return nil
+	})
+	return belongs, err
 }
 
 func allocationsBasePath(tenantID, projectID int64) string {

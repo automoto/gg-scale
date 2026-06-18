@@ -40,6 +40,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.DBMinConns, c.DBMaxConns)
 	}
 
+	switch c.MailProvider {
+	case "", "smtp", "noop":
+	default:
+		return fmt.Errorf("MAIL_PROVIDER must be one of smtp|noop (got %q)", c.MailProvider)
+	}
+
 	if prod {
 		if len(c.CORSAllowedOrigins) == 0 {
 			return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production (no wildcard fallback)")
@@ -57,6 +63,9 @@ func (c *Config) Validate() error {
 		}
 		if !strings.HasPrefix(c.DashboardBaseURL, "https://") {
 			return fmt.Errorf("DASHBOARD_BASE_URL must use HTTPS in production (got %q)", c.DashboardBaseURL)
+		}
+		if c.DashboardEnabled && c.DashboardBootstrapTokenFile == "" {
+			return fmt.Errorf("DASHBOARD_BOOTSTRAP_TOKEN_FILE must be set in production when dashboard is enabled")
 		}
 		if c.JWTSigningKey == "" {
 			return fmt.Errorf("JWT_SIGNING_KEY must be set in production")

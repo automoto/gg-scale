@@ -12,19 +12,6 @@ templ playerLayout(title string) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<meta name="color-scheme" content="light dark"/>
 			<title>{ title }</title>
-			<style>
-				body{font-family:system-ui,-apple-system,sans-serif;max-width:24rem;margin:3rem auto;padding:0 1rem;color:#222}
-				h1{font-size:1.5rem;margin-bottom:.25rem}
-				form{display:flex;flex-direction:column;gap:.75rem;margin-top:1.5rem}
-				input{padding:.5rem;font-size:1rem;border:1px solid #ccc;border-radius:.25rem}
-				button{padding:.5rem 1rem;font-size:1rem;background:#0a7;color:#fff;border:0;border-radius:.25rem;cursor:pointer}
-				button.secondary{background:transparent;color:#0a7;border:1px solid #0a7}
-				.error{color:#a00;background:#fee;padding:.5rem;border-radius:.25rem}
-				.flash{color:#070;background:#efe;padding:.5rem;border-radius:.25rem}
-				.subtitle{color:#666;margin-bottom:1rem}
-				code{background:#eee;padding:.1rem .3rem;border-radius:.2rem}
-				a{color:#0a7}
-			</style>
 		</head>
 		<body>
 			{ children... }

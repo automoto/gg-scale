@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -68,20 +69,6 @@ func run() error {
 	registry.MustRegister(collectors.NewGoCollector())
 	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-	if err != nil {
-		return err
-	}
-	poolCfg.ConnConfig.Tracer = observability.NewPgxTracer(registry)
-	poolCfg.MaxConns = int32(cfg.DBMaxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
-	poolCfg.MinConns = int32(cfg.DBMinConns) //nolint:gosec // operator config, validated >= 0
-	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
-	if err != nil {
-		return err
-	}
-	defer pool.Close()
-
 	// Apply forward-only SQL migrations before anything else touches the DB.
 	// Runner returns ErrNoChange internally as a no-op so this is safe on
 	// every restart.
@@ -95,6 +82,29 @@ func run() error {
 	}
 	_ = mr.Close()
 	logger.Info("migrations applied", "dir", cfg.MigrationsDir)
+
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	poolCfg.ConnConfig.Tracer = observability.NewPgxTracer(registry)
+	poolCfg.MaxConns = int32(cfg.DBMaxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
+	poolCfg.MinConns = int32(cfg.DBMinConns) //nolint:gosec // operator config, validated >= 0
+	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
+	poolCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if _, err := conn.Exec(ctx, "SET ROLE ggscale_app"); err != nil {
+			return fmt.Errorf("set app db role: %w", err)
+		}
+		return nil
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if err := assertAppDBRole(ctx, pool); err != nil {
+		return err
+	}
 
 	store, err := cachebuild.New(ctx, cachebuild.Config{
 		Backend:             cfg.CacheBackend,
@@ -221,10 +231,12 @@ func run() error {
 		ServerList:            serverListRegistry,
 		RelayIssuer:           relayIssuer,
 		Dashboard: dashboard.Config{
-			Mount:        cfg.DashboardEnabled,
-			CookieSecure: cfg.DashboardCookieSecure,
-			BaseURL:      cfg.DashboardBaseURL,
-			MailFrom:     cfg.MailFrom,
+			Mount:              cfg.DashboardEnabled,
+			CookieSecure:       cfg.DashboardCookieSecure,
+			BaseURL:            cfg.DashboardBaseURL,
+			MailFrom:           cfg.MailFrom,
+			TrustedProxyHeader: cfg.TrustedProxyHeader,
+			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
 		},
 		Players: players.Config{
 			Mount:        cfg.PlayersEnabled,
@@ -240,6 +252,7 @@ func run() error {
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -269,6 +282,32 @@ func run() error {
 		slog.Warn("matchmaker worker did not drain in 30s; forcing shutdown")
 	}
 	return shutdownErr
+}
+
+func assertAppDBRole(ctx context.Context, pool *pgxpool.Pool) error {
+	var currentUser string
+	var ownsTenantTables bool
+	if err := pool.QueryRow(ctx, `
+SELECT current_user,
+       EXISTS (
+           SELECT 1
+           FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           JOIN pg_roles r ON r.oid = c.relowner
+           WHERE n.nspname = 'public'
+             AND c.relkind IN ('r', 'p')
+             AND c.relname IN ('tenants', 'projects', 'api_keys', 'end_users', 'sessions')
+             AND r.rolname = current_user
+       )`).Scan(&currentUser, &ownsTenantTables); err != nil {
+		return fmt.Errorf("db role assertion: %w", err)
+	}
+	if currentUser != "ggscale_app" {
+		return fmt.Errorf("db role assertion: current_user is %q, want ggscale_app", currentUser)
+	}
+	if ownsTenantTables {
+		return fmt.Errorf("db role assertion: ggscale_app must not own tenant tables")
+	}
+	return nil
 }
 
 // buildFleet wires the configured fleet backend. Returns (nil, nil, nil) when

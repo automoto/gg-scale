@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -29,9 +30,17 @@ const (
 	accessTokenTTL       = 15 * time.Minute
 	refreshTokenTTL      = 30 * 24 * time.Hour
 	maxJSONBodyBytes     = 1 << 20
+	maxPasswordBytes     = 72
 	mailerVerifySubject  = "Verify your ggscale email"
 	mailerVerifyBodyTmpl = "Your ggscale verification code is %s (valid 15 minutes)."
 )
+
+func apiNow(d Deps) time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
 
 // bcryptCost is webutil.BcryptCost re-bound locally so existing call
 // sites stay untouched after the helper extraction.
@@ -101,7 +110,8 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		accessExpiresAt := time.Now().Add(accessTokenTTL)
+		now := apiNow(d)
+		accessExpiresAt := now.Add(accessTokenTTL)
 		var endUserID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
@@ -113,7 +123,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 				return fmt.Errorf("insert end_user: %w", err)
 			}
 			endUserID = user.ID
-			if err := insertSession(ctx, tx, user.ID, refreshToken); err != nil {
+			if err := insertSession(ctx, tx, projectID, user.ID, refreshToken, now); err != nil {
 				return err
 			}
 			return auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID})
@@ -147,7 +157,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		if !validateEmail(req.Email) || len(req.Password) < 8 {
+		if !validateEmail(req.Email) || !validPassword(req.Password) {
 			http.Error(w, "email or password invalid", http.StatusBadRequest)
 			return
 		}
@@ -180,11 +190,12 @@ func signupHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "signup: ext_id rand", err)
 			return
 		}
+		now := apiNow(d)
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
-			expires := pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true}
+			expires := pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true}
 			id, err := q.CreateEmailEndUser(ctx, sqlcgen.CreateEmailEndUserParams{
 				ProjectID:                  projectID,
 				ExternalID:                 externalID,
@@ -257,8 +268,12 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "api key has no project pin", http.StatusBadRequest)
 			return
 		}
+		now := apiNow(d)
 
-		var endUserID int64
+		var (
+			endUserID          int64
+			lockedAfterAttempt bool
+		)
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
@@ -273,10 +288,10 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				endUserID = row.ID
 				return nil
 			}
-			if row.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(row.EmailVerificationLockedUntil.Time, time.Now()) {
+			if row.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(row.EmailVerificationLockedUntil.Time, now) {
 				return errVerifyAccountLocked
 			}
-			if verifycode.Expired(row.EmailVerificationExpiresAt.Time, time.Now()) {
+			if verifycode.Expired(row.EmailVerificationExpiresAt.Time, now) {
 				return errVerifyExpired
 			}
 			if len(row.EmailVerificationSalt) == 0 || len(row.EmailVerificationCodeHash) == 0 {
@@ -300,13 +315,13 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			// together; we return nil here and surface the lock via the
 			// dedicated guard at the head of the closure on the next call.
 			if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
-				lockedUntil := pgtype.Timestamptz{Time: time.Now().Add(verifycode.LockoutDuration), Valid: true}
+				lockedUntil := pgtype.Timestamptz{Time: now.Add(verifycode.LockoutDuration), Valid: true}
 				if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
 					ID: row.ID, LockedUntil: lockedUntil,
 				}); lerr != nil {
 					return lerr
 				}
-				endUserID = -1 // sentinel: closure succeeded but caller must surface locked status
+				lockedAfterAttempt = true
 				return nil
 			}
 			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
@@ -327,7 +342,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid email or code", http.StatusBadRequest)
 			return
 		case errors.Is(err, errVerifyExpired):
-			http.Error(w, "code expired", http.StatusBadRequest)
+			http.Error(w, "invalid email or code", http.StatusBadRequest)
 			return
 		case errors.Is(err, errVerifyExhausted):
 			http.Error(w, "too many attempts", http.StatusTooManyRequests)
@@ -339,10 +354,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "verify: tx", err)
 			return
 		}
-		// Sentinel: lifetime cap was tripped inside the tx (lock + bump
-		// both committed); the response is the same as the pre-existing
-		// locked guard above.
-		if endUserID < 0 {
+		if lockedAfterAttempt {
 			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
 			return
 		}
@@ -356,6 +368,10 @@ func loginHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
 		if !decodeJSON(w, r, &req) {
+			return
+		}
+		if !validPassword(req.Password) {
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 
@@ -372,6 +388,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "login: refresh rand", err)
 			return
 		}
+		now := apiNow(d)
 		var endUserID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
@@ -387,7 +404,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 				return errBadCredentials
 			}
 			endUserID = row.ID
-			if err := insertSession(ctx, tx, row.ID, refreshToken); err != nil {
+			if err := insertSession(ctx, tx, projectID, row.ID, refreshToken, now); err != nil {
 				return err
 			}
 			return auditlog.Write(ctx, tx, row.ID, "auth.login", req.Email, nil)
@@ -406,7 +423,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		expiresAt := time.Now().Add(accessTokenTTL)
+		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
 			ExpiresAt: expiresAt,
@@ -447,22 +464,26 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "refresh: rand", err)
 			return
 		}
+		now := apiNow(d)
 
 		var endUserID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			row, err := q.GetSessionByRefreshHash(ctx, oldHash[:])
+			row, err := q.GetSessionByRefreshHash(ctx, sqlcgen.GetSessionByRefreshHashParams{
+				ProjectID:   projectID,
+				RefreshHash: oldHash[:],
+			})
 			if err != nil {
 				return err
 			}
-			if row.RevokedAt.Valid || row.ExpiresAt.Time.Before(time.Now()) {
+			if row.RevokedAt.Valid || row.ExpiresAt.Time.Before(now) {
 				return errSessionRevoked
 			}
 			endUserID = row.EndUserID
 			if err := q.RevokeSession(ctx, row.ID); err != nil {
 				return err
 			}
-			if err := insertSession(ctx, tx, row.EndUserID, newRefresh); err != nil {
+			if err := insertSession(ctx, tx, row.ProjectID, row.EndUserID, newRefresh, now); err != nil {
 				return err
 			}
 			return auditlog.Write(ctx, tx, row.EndUserID, "auth.refresh", "", nil)
@@ -476,7 +497,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		expiresAt := time.Now().Add(accessTokenTTL)
+		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
 			ExpiresAt: expiresAt,
@@ -561,6 +582,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "custom-token: rand", err)
 			return
 		}
+		now := apiNow(d)
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
@@ -591,7 +613,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			// Reject tokens minted with a future iat — a small skew is
 			// permitted by jwt.WithLeeway above; anything beyond that is
 			// either a clock fault or a forged token.
-			if parsed.IssuedAt != nil && parsed.IssuedAt.After(time.Now().Add(5*time.Minute)) {
+			if parsed.IssuedAt != nil && parsed.IssuedAt.After(now.Add(5*time.Minute)) {
 				return errCustomTokenInvalid
 			}
 			externalID = parsed.External
@@ -604,7 +626,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 				return fmt.Errorf("upsert end_user: %w", err)
 			}
 			endUserID = id
-			if err := insertSession(ctx, tx, id, refreshTok); err != nil {
+			if err := insertSession(ctx, tx, projectID, id, refreshTok, now); err != nil {
 				return err
 			}
 			return auditlog.Write(ctx, tx, id, "auth.custom_token", externalID, nil)
@@ -621,7 +643,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		expiresAt := time.Now().Add(accessTokenTTL)
+		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
 			ExpiresAt: expiresAt,
@@ -671,13 +693,14 @@ func mustGenerateDummyHash() []byte {
 	return h
 }
 
-func insertSession(ctx context.Context, tx pgx.Tx, endUserID int64, refreshToken string) error {
+func insertSession(ctx context.Context, tx pgx.Tx, projectID, endUserID int64, refreshToken string, now time.Time) error {
 	q := sqlcgen.New(tx)
 	sum := sha256.Sum256([]byte(refreshToken))
 	_, err := q.CreateSession(ctx, sqlcgen.CreateSessionParams{
+		ProjectID:   projectID,
 		EndUserID:   endUserID,
 		RefreshHash: sum[:],
-		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(refreshTokenTTL), Valid: true},
+		ExpiresAt:   pgtype.Timestamptz{Time: now.Add(refreshTokenTTL), Valid: true},
 	})
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)
@@ -698,6 +721,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, into any) bool {
 		http.Error(w, "bad request body", http.StatusBadRequest)
 		return false
 	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		http.Error(w, "bad request body", http.StatusBadRequest)
+		return false
+	}
 	return true
 }
 
@@ -710,4 +738,8 @@ func writeJSON(w http.ResponseWriter, body any) {
 func validateEmail(s string) bool {
 	_, err := webutil.ValidateEmail(s)
 	return err == nil
+}
+
+func validPassword(s string) bool {
+	return len(s) >= 8 && len(s) <= maxPasswordBytes
 }

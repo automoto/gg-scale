@@ -43,3 +43,4 @@ work/
 .claude/*
 ggscale-seed
 sdk-go
+ggscale-server

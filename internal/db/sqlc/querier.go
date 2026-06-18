@@ -17,7 +17,7 @@ type Querier interface {
 	BumpDashboardLoginFailure(ctx context.Context, arg BumpDashboardLoginFailureParams) (BumpDashboardLoginFailureRow, error)
 	// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 	// CommitClaim will find zero rows and deallocate the orphan server.
-	CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error)
+	CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error)
 	// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
 	// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 	// subsequent ClaimBucket (different worker) skips them. The caller commits
@@ -35,6 +35,7 @@ type Querier interface {
 	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
+	CountEnabledPlatformAdmins(ctx context.Context) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
@@ -129,7 +130,7 @@ type Querier interface {
 	GetFleetByName(ctx context.Context, arg GetFleetByNameParams) (Fleet, error)
 	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
-	GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error)
+	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerForProject(ctx context.Context, arg GetPlayerForProjectParams) (GetPlayerForProjectRow, error)
 	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
 	GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error)
@@ -139,7 +140,7 @@ type Querier interface {
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
 	// Joined to end_users so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid.
-	GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error)
+	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	IncrementDashboardVerificationAttempts(ctx context.Context, id int64) (int32, error)
@@ -191,6 +192,9 @@ type Querier interface {
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	// Serializes last-admin checks by locking the currently enabled platform
+	// admin rows before counting them in the surrounding transaction.
+	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
 	// Set the lockout window on an account that just tipped over
 	// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
 	// duration stays a single source of truth.

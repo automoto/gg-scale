@@ -266,6 +266,22 @@ SELECT COUNT(*)::bigint
 FROM dashboard_users u
 WHERE (sqlc.narg(email_filter)::text IS NULL OR u.email::text ILIKE '%' || sqlc.narg(email_filter)::text || '%');
 
+-- name: CountEnabledPlatformAdmins :one
+SELECT COUNT(*)::bigint
+FROM dashboard_users
+WHERE is_platform_admin = true
+  AND disabled_at IS NULL;
+
+-- name: LockEnabledPlatformAdmins :many
+-- Serializes last-admin checks by locking the currently enabled platform
+-- admin rows before counting them in the surrounding transaction.
+SELECT id
+FROM dashboard_users
+WHERE is_platform_admin = true
+  AND disabled_at IS NULL
+ORDER BY id
+FOR UPDATE;
+
 -- name: SetDashboardUserDisabled :exec
 -- Nullable timestamptz so the same query handles disable (now()) and
 -- enable (NULL).

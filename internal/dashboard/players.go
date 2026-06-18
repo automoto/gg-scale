@@ -160,15 +160,13 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	search := r.URL.Query().Get("q")
-	page := 1
-	if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
-		page = p
-	}
-	offset := int32((page - 1) * playersPerPage)
+	page := pageParam(r)
+	offset := dashboardPageOffset(page, playersPerPage)
 
 	var (
 		players []PlayerView
 		total   int64
+		hasNext bool
 	)
 	// Use Q + WithTenant so RLS enforces tenant isolation as defense-in-depth.
 	// The query still passes TenantID — both layers must agree on which
@@ -185,11 +183,15 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			TenantID:    tenantID,
 			ProjectID:   projectID,
 			EmailFilter: filter,
-			Lim:         int32(playersPerPage),
+			Lim:         dashboardPageLimit(playersPerPage),
 			Off:         offset,
 		})
 		if err != nil {
 			return err
+		}
+		if len(rows) > playersPerPage {
+			hasNext = true
+			rows = rows[:playersPerPage]
 		}
 		for _, row := range rows {
 			pv := PlayerView{
@@ -202,15 +204,10 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			pv.DisabledAt = row.DisabledAt.Time
 			players = append(players, pv)
 		}
-		count, err := q.CountPlayersForProject(ctx, sqlcgen.CountPlayersForProjectParams{
-			TenantID:    tenantID,
-			ProjectID:   projectID,
-			EmailFilter: filter,
-		})
-		if err != nil {
-			return err
+		total = int64(offset) + int64(len(players))
+		if hasNext {
+			total++
 		}
-		total = count
 		return nil
 	})
 	if err != nil {
@@ -228,7 +225,7 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 		Total:     total,
 		Page:      page,
 		HasPrev:   page > 1,
-		HasNext:   int64(page*playersPerPage) < total,
+		HasNext:   hasNext,
 		Message:   r.URL.Query().Get("flash"),
 	}))
 

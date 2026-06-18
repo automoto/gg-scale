@@ -319,6 +319,7 @@ type Project struct {
 type Session struct {
 	ID          int64
 	TenantID    int64
+	ProjectID   int64
 	EndUserID   int64
 	RefreshHash []byte
 	ExpiresAt   pgtype.Timestamptz
