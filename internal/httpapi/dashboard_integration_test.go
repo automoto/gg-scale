@@ -23,6 +23,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -30,14 +31,19 @@ func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboar
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
+	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1",
 		Commit:  "test",
-		Pool:    db.NewPool(c.appPool),
+		Pool:    pool,
 		Lookup:  tenant.NewSQLLookup(c.appPool),
 		Signer:  signer,
 		Cache:   c.cache,
+		RBAC:    authorizer,
 		Dashboard: dashboard.Config{
 			Mount: true,
 		},
@@ -188,6 +194,25 @@ func TestDashboardTenantIsolation_second_user_cannot_see_first_users_tenant(t *t
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
+func TestDashboardRBAC_member_cannot_manage_tenant_admin_routes(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "member-key")
+	memberID := seedDashboardUser(t, c, "member@example.com", "correct-horse-battery-staple", false)
+	seedDashboardMembership(t, c, memberID, tenantID, "member")
+	srv := newDashboardIntegrationServer(t, c, dashboard.DisabledBootstrap())
+
+	cookie, _ := dashboardLoginCookieAndCSRF(t, srv.URL, "member@example.com", "correct-horse-battery-staple")
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys", nil)
+	require.NoError(t, err)
+	req.AddCookie(cookie)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
 func TestDashboardPlatformAdmin_sees_all_tenants(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
@@ -263,6 +288,7 @@ func TestDashboardAPIKeys_create_label_and_revoke(t *testing.T) {
 	createForm := url.Values{
 		"_csrf":      {csrf},
 		"project_id": {strconv.FormatInt(projectID, 10)},
+		"key_type":   {"secret"},
 		"label":      {"new key"},
 	}
 	createReq, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys", strings.NewReader(createForm.Encode()))
@@ -343,6 +369,14 @@ func seedDashboardUser(t *testing.T, c *cluster, email, password string, platfor
 		`INSERT INTO dashboard_users (email, password_hash, is_platform_admin, email_verified_at)
 		 VALUES ($1, $2, $3, now()) RETURNING id`,
 		email, hash, platformAdmin).Scan(&id))
+	if platformAdmin {
+		_, err = c.bootstrapPool.Exec(context.Background(),
+			`INSERT INTO casbin_rule (ptype, v0, v1, v2)
+			 VALUES ('g', $1, $2, '*')
+			 ON CONFLICT DO NOTHING`,
+			rbac.DashboardSubject(id), rbac.RolePlatformAdmin)
+		require.NoError(t, err)
+	}
 	return id
 }
 
@@ -351,6 +385,14 @@ func seedDashboardMembership(t *testing.T, c *cluster, userID, tenantID int64, r
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`INSERT INTO dashboard_memberships (dashboard_user_id, tenant_id, role) VALUES ($1, $2, $3)`,
 		userID, tenantID, role)
+	require.NoError(t, err)
+	membershipRole, ok := rbac.DashboardMembershipRole(role)
+	require.True(t, ok)
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO casbin_rule (ptype, v0, v1, v2)
+		 VALUES ('g', $1, $2, $3)
+		 ON CONFLICT DO NOTHING`,
+		rbac.DashboardSubject(userID), membershipRole, rbac.TenantDomain(tenantID))
 	require.NoError(t, err)
 }
 

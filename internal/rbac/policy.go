@@ -11,6 +11,13 @@ p, role:platform_support, *, dashboard_user, read
 
 p, role:tenant_owner, *, tenant, manage
 p, role:tenant_owner, *, project, manage
+p, role:tenant_owner, *, project:*:players, *
+p, role:tenant_owner, *, project:*:config, *
+p, role:tenant_owner, *, project:*:fleet, *
+p, role:tenant_owner, *, project:*:allocation, *
+p, role:tenant_owner, *, project:*:matchmaker, *
+p, role:tenant_owner, *, project:*:relay, *
+p, role:tenant_owner, *, project:*:matchmaking:dedicated, *
 p, role:tenant_owner, *, api_key, manage
 p, role:tenant_owner, *, team, manage
 p, role:tenant_owner, *, audit, read

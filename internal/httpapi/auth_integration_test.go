@@ -25,6 +25,7 @@ import (
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/migrate"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -119,15 +120,20 @@ func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
+	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 
 	h := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1",
 		Commit:  "test",
-		Pool:    db.NewPool(c.appPool),
+		Pool:    pool,
 		Lookup:  tenant.NewSQLLookup(c.appPool),
 		Limiter: ratelimit.NewCacheLimiter(c.cache),
 		Signer:  signer,
 		Cache:   c.cache,
+		RBAC:    authorizer,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

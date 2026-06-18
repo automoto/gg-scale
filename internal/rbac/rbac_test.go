@@ -65,6 +65,18 @@ func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T
 	assert.True(t, allowed)
 }
 
+func TestDefaultPolicy_allows_tenant_owner_to_allocate_project_fleet(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "owner"))
+
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
+		ID: 42,
+	}, 7, rbac.ProjectAllocationObject(99), rbac.ActionAllocate)
+
+	require.NoError(t, err)
+	assert.True(t, allowed)
+}
+
 func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	a := newAuthorizer(t)
 

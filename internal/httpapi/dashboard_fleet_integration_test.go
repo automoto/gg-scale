@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -90,6 +91,16 @@ func seedFleetTemplate(t *testing.T, c *cluster, tenantID, projectID int64, back
 	return name
 }
 
+func seedFeatureGrant(t *testing.T, c *cluster, tenantID, projectID int64, feature rbac.Feature) {
+	t.Helper()
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO feature_grants (tenant_id, project_id, feature, enabled, reason)
+		 VALUES ($1, $2, $3, true, 'integration test fixture')
+		 ON CONFLICT DO NOTHING`,
+		tenantID, projectID, string(feature))
+	require.NoError(t, err)
+}
+
 // newDashboardFleetServer wires the dashboard with a real PostgresStore-backed
 // fleet.Manager pointed at the cluster, and the given backend stub.
 func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *dashboard.PluginSnapshot) (*httptest.Server, *fleet.Manager) {
@@ -97,6 +108,9 @@ func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pl
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 	mgr := fleet.NewManager(
 		fleet.NewPostgresStore(pool),
 		fleet.NewPostgresFleetStore(pool),
@@ -112,6 +126,7 @@ func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pl
 		Signer:  signer,
 		Cache:   c.cache,
 		Fleet:   mgr,
+		RBAC:    authorizer,
 		Dashboard: dashboard.Config{
 			Mount: true,
 		},
@@ -127,6 +142,7 @@ func TestDashboardFleet_list_then_allocate_then_appears_in_table(t *testing.T) {
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-a")
 	ownerID := seedDashboardUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
 
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
@@ -176,6 +192,7 @@ func TestDashboardFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-events")
 	ownerID := seedDashboardUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
 
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
@@ -213,6 +230,7 @@ func TestDashboardFleet_deallocate_rejects_wrong_typed_id_then_succeeds(t *testi
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-d")
 	ownerID := seedDashboardUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
 
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
@@ -280,6 +298,7 @@ func TestDashboardFleet_RLS_isolates_allocations_across_tenants(t *testing.T) {
 	bobID := seedDashboardUser(t, c, "bob@example.com", "correct-horse-battery-staple", false)
 	seedDashboardMembership(t, c, aliceID, tenantA, "owner")
 	seedDashboardMembership(t, c, bobID, tenantB, "owner")
+	seedFeatureGrant(t, c, tenantA, projectA, rbac.FeatureDedicatedServers)
 
 	backend := newStubBackend("stub")
 	srv, _ := newDashboardFleetServer(t, c, backend, nil)
