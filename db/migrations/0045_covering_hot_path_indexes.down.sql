@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS game_server_allocations_tenant_backend_idx;
+DROP INDEX IF EXISTS leaderboard_entries_best_score_idx;

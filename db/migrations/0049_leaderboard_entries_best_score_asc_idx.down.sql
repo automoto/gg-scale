@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS leaderboard_entries_best_score_asc_idx;
