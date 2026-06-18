@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -171,6 +172,9 @@ type Config struct {
 	// to honor when RemoteAddr is in a trusted-proxy network. Empty
 	// disables forwarded-IP trust.
 	TrustedProxyHeader string
+	// TrustedProxyCIDRs is the allowlist of TCP peer networks permitted to
+	// supply TrustedProxyHeader.
+	TrustedProxyCIDRs []string
 
 	// Mail provider and connection settings.
 	// MailProvider selects the registered provider: "smtp" (default) or "noop".
@@ -534,6 +538,16 @@ var declared = []varDecl{
 	}},
 	{name: "TRUSTED_PROXY_HEADER", defval: "", set: func(c *Config, v string) error {
 		c.TrustedProxyHeader = v
+		return nil
+	}},
+	{name: "TRUSTED_PROXY_CIDRS", defval: "", set: func(c *Config, v string) error {
+		values := splitCSV(v)
+		for _, value := range values {
+			if _, _, err := net.ParseCIDR(value); err != nil {
+				return fmt.Errorf("TRUSTED_PROXY_CIDRS %q: %w", value, err)
+			}
+		}
+		c.TrustedProxyCIDRs = values
 		return nil
 	}},
 }

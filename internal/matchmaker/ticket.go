@@ -93,8 +93,8 @@ type Claim struct {
 // run cross-tenant from the worker goroutine.
 type Queue interface {
 	Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, error)
-	Get(ctx context.Context, id int64) (*Ticket, error)
-	Cancel(ctx context.Context, id int64) error
+	Get(ctx context.Context, id, endUserID int64) (*Ticket, error)
+	Cancel(ctx context.Context, id, endUserID int64) error
 
 	ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucket, error)
 	// ClaimBucket stakes a claim on up to n unclaimed queued tickets in the

@@ -103,6 +103,22 @@ func TestVerify_rejects_token_signed_with_hs512_alg_downgrade(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestVerify_rejects_token_without_exp(t *testing.T) {
+	s := newSigner(t)
+	key := []byte("test-key-must-be-at-least-32-bytes-long")
+
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"euid": float64(1),
+		"tid":  float64(1),
+	})
+	signed, err := tok.SignedString(key)
+	require.NoError(t, err)
+
+	_, err = s.Verify(signed)
+
+	assert.Error(t, err)
+}
+
 func TestSign_returns_distinct_jti_per_call(t *testing.T) {
 	s := newSigner(t)
 	c := auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)}

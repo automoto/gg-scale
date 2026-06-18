@@ -409,8 +409,6 @@ func (b *Backend) probe(ctx context.Context, address string, tmpl Template) erro
 	probeCtx, cancel := context.WithTimeout(ctx, b.probeTimeout)
 	defer cancel()
 
-	deadline := time.NewTimer(b.probeTimeout)
-	defer deadline.Stop()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -467,6 +465,8 @@ func (b *Backend) probeOnce(ctx context.Context, address string, tmpl Template) 
 }
 
 func (b *Backend) forceRemove(ctx context.Context, containerID string) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	timeout := 5
 	_ = b.cfg.Client.ContainerStop(ctx, containerID, dockercontainer.StopOptions{Timeout: &timeout})
 	_ = b.cfg.Client.ContainerRemove(ctx, containerID, dockercontainer.RemoveOptions{Force: true})

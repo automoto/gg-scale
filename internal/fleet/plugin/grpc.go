@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -254,6 +255,7 @@ func (s *grpcServer) Ping(ctx context.Context, _ *fleetpb.PingRequest) (*fleetpb
 type grpcClient struct {
 	client     fleetpb.FleetBackendClient
 	ctx        context.Context // plugin lifetime; per-call deadlines come from the method ctx
+	nameMu     sync.Mutex
 	cachedName string
 }
 
@@ -262,6 +264,8 @@ func newGRPCClient(ctx context.Context, c fleetpb.FleetBackendClient) *grpcClien
 }
 
 func (c *grpcClient) Name() string {
+	c.nameMu.Lock()
+	defer c.nameMu.Unlock()
 	if c.cachedName != "" {
 		return c.cachedName
 	}

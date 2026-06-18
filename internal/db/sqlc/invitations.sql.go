@@ -177,8 +177,8 @@ func (q *Queries) CreatePlayerEndUser(ctx context.Context, arg CreatePlayerEndUs
 }
 
 const createPlayerSession = `-- name: CreatePlayerSession :one
-INSERT INTO sessions (tenant_id, end_user_id, refresh_hash, expires_at)
-SELECT u.tenant_id, $1, $2, $3
+INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
+SELECT u.tenant_id, u.project_id, $1, $2, $3
 FROM end_users u
 WHERE u.id = $1
 RETURNING id

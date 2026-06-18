@@ -293,8 +293,8 @@ FROM end_users
 WHERE id = sqlc.arg(id);
 
 -- name: CreatePlayerSession :one
-INSERT INTO sessions (tenant_id, end_user_id, refresh_hash, expires_at)
-SELECT u.tenant_id, sqlc.arg(end_user_id), sqlc.arg(refresh_hash), sqlc.arg(expires_at)
+INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
+SELECT u.tenant_id, u.project_id, sqlc.arg(end_user_id), sqlc.arg(refresh_hash), sqlc.arg(expires_at)
 FROM end_users u
 WHERE u.id = sqlc.arg(end_user_id)
 RETURNING id;

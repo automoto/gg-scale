@@ -3,6 +3,7 @@ package dashboard
 import (
 	"crypto/rand"
 	"embed"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -64,17 +65,18 @@ type PluginSnapshot struct {
 
 // Handler owns dashboard HTTP routes.
 type Handler struct {
-	pool       *db.Pool
-	cache      cache.Store
-	limiter    ratelimit.Limiter
-	reg        prometheus.Registerer
-	cfg        Config
-	bootstrap  *Bootstrap
-	mailer     mailer.Mailer
-	fleet      *fleet.Manager
-	rbac       *rbac.Authorizer
-	pluginInfo func() *PluginSnapshot
-	now        func() time.Time
+	pool             *db.Pool
+	cache            cache.Store
+	limiter          ratelimit.Limiter
+	reg              prometheus.Registerer
+	cfg              Config
+	bootstrap        *Bootstrap
+	mailer           mailer.Mailer
+	fleet            *fleet.Manager
+	rbac             *rbac.Authorizer
+	pluginInfo       func() *PluginSnapshot
+	now              func() time.Time
+	trustedProxyNets []*net.IPNet
 	// verifySigningKey signs the short-lived verify-pending cookie.
 	// Generated once at handler construction so each process has a fresh
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
@@ -107,6 +109,7 @@ func New(d Deps) http.Handler {
 		rbac:             d.RBAC,
 		pluginInfo:       d.PluginInfo,
 		now:              time.Now,
+		trustedProxyNets: parseProxyCIDRs(d.Config.TrustedProxyCIDRs),
 		verifySigningKey: key,
 	}
 
@@ -434,6 +437,12 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		KeyType:   keyType,
 	})
 	if err != nil {
+		if errors.Is(err, errProjectNotInTenant) {
+			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
+				http.StatusUnprocessableEntity,
+				map[string]string{"project_id": "Pick a valid project (or leave empty for tenant-wide)"}, "")
+			return
+		}
 		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
@@ -609,18 +618,44 @@ func parsePathID(w http.ResponseWriter, r *http.Request, name string) (int64, bo
 	return id, true
 }
 
-// clientIP extracts the real client IP for audit purposes.
-//
-// The previous version trusted CF-Connecting-IP / X-Real-IP unconditionally:
-// any direct client could set the header and write a forged IP into
-// dashboard_sessions.ip and audit-log payloads. Now those headers are honored
-// only when the configured trusted-proxy header is set (TRUSTED_PROXY_HEADER
-// — see Handler.trustedProxyHeader). When unset, every caller is treated as
-// untrusted and clientIP returns RemoteAddr alone.
-func clientIP(r *http.Request) string {
+// clientIP extracts the audit IP. Forwarded headers are honored only when the
+// TCP peer matches a configured trusted proxy network.
+func (h *Handler) clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	return host
+	if h == nil || h.cfg.TrustedProxyHeader == "" || len(h.trustedProxyNets) == 0 {
+		return host
+	}
+	peer := net.ParseIP(host)
+	if peer == nil || !ipInAnyNet(peer, h.trustedProxyNets) {
+		return host
+	}
+	forwarded := strings.TrimSpace(r.Header.Get(h.cfg.TrustedProxyHeader))
+	ip := net.ParseIP(forwarded)
+	if ip == nil {
+		return host
+	}
+	return ip.String()
+}
+
+func parseProxyCIDRs(values []string) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err == nil {
+			out = append(out, network)
+		}
+	}
+	return out
+}
+
+func ipInAnyNet(ip net.IP, networks []*net.IPNet) bool {
+	for _, network := range networks {
+		if network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }

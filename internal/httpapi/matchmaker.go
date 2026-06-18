@@ -3,6 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -14,6 +16,13 @@ import (
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/webutil"
+)
+
+const (
+	matchmakerCreateRate  = 2.0
+	matchmakerCreateBurst = 5.0
+	matchmakerCancelRate  = 5.0
+	matchmakerCancelBurst = 10.0
 )
 
 type matchmakerTicketRequest struct {
@@ -98,6 +107,9 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		if !allowMatchmakerAction(w, r, d, tenantID, projectID, endUserID, "create", matchmakerCreateRate, matchmakerCreateBurst) {
+			return
+		}
 		if d.Fleet == nil {
 			http.Error(w, "fleet backend not configured", http.StatusServiceUnavailable)
 			return
@@ -135,7 +147,12 @@ func matchmakerGetTicketHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		ticket, err := d.Matchmaker.Get(r.Context(), id)
+		endUserID, ok := enduser.IDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "no end user", http.StatusUnauthorized)
+			return
+		}
+		ticket, err := d.Matchmaker.Get(r.Context(), id, endUserID)
 		if errors.Is(err, matchmaker.ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -154,7 +171,25 @@ func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		err := d.Matchmaker.Cancel(r.Context(), id)
+		endUserID, ok := enduser.IDFromContext(r.Context())
+		if !ok {
+			http.Error(w, "no end user", http.StatusUnauthorized)
+			return
+		}
+		projectID, ok := db.ProjectFromContext(r.Context())
+		if !ok {
+			http.Error(w, "no project", http.StatusBadRequest)
+			return
+		}
+		tenantID, err := db.TenantFromContext(r.Context())
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if !allowMatchmakerAction(w, r, d, tenantID, projectID, endUserID, "cancel", matchmakerCancelRate, matchmakerCancelBurst) {
+			return
+		}
+		err = d.Matchmaker.Cancel(r.Context(), id, endUserID)
 		switch {
 		case errors.Is(err, matchmaker.ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -166,6 +201,34 @@ func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 		}
 	}
+}
+
+func allowMatchmakerAction(w http.ResponseWriter, r *http.Request, d Deps, tenantID, projectID, endUserID int64, action string, rate, burst float64) bool {
+	if d.Limiter == nil {
+		http.Error(w, "rate limiter unavailable", http.StatusInternalServerError)
+		return false
+	}
+	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, endUserID)
+	decision, err := d.Limiter.Allow(r.Context(), key, rate, burst)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return false
+	}
+	if decision.Allowed {
+		return true
+	}
+	retrySec := int(math.Ceil(decision.RetryAfter.Seconds()))
+	if retrySec < 1 {
+		retrySec = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(retrySec))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusTooManyRequests)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":               "rate_limit_exceeded",
+		"retry_after_seconds": retrySec,
+	})
+	return false
 }
 
 func parseTicketID(w http.ResponseWriter, r *http.Request) (int64, bool) {

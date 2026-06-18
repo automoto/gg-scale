@@ -20,6 +20,10 @@ type Config struct {
 	// emails. Empty disables emails (a recorder/log-only fallback can
 	// still surface the codes through audit logs).
 	MailFrom string
+	// TrustedProxyHeader is honored for audit IPs only when RemoteAddr is in
+	// TrustedProxyCIDRs. Empty disables forwarded-IP trust.
+	TrustedProxyHeader string
+	TrustedProxyCIDRs  []string
 }
 
 // Enabled reports whether the dashboard should be mounted.
@@ -453,6 +457,13 @@ type PlatformPluginsView struct {
 
 func stringFromInt(n int64) string {
 	return strconv.FormatInt(n, 10)
+}
+
+func approximateTotalLabel(total int64, hasNext bool) string {
+	if hasNext {
+		return "at least " + stringFromInt(total)
+	}
+	return stringFromInt(total)
 }
 
 // fleetBackendKind buckets a fleet.backend value ("docker"|"agones"|"plugin:<n>")

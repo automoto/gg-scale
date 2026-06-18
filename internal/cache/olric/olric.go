@@ -217,6 +217,9 @@ func (s *Store) AcquireSlot(ctx context.Context, key string, limit int64, ttl ti
 		if _, derr := s.slots.Decr(ctx, key, 1); derr != nil {
 			return false, 0, fmt.Errorf("olric: acquire rollback: %w", derr)
 		}
+		if err := s.slots.Expire(ctx, key, ttl); err != nil && !errors.Is(err, olricpkg.ErrKeyNotFound) {
+			return false, 0, fmt.Errorf("olric: acquire reject expire: %w", err)
+		}
 		return false, limit, nil
 	}
 
@@ -271,7 +274,7 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("olric: get decode: %w", err)
 	}
-	return v, nil
+	return append([]byte(nil), v...), nil
 }
 
 // Set implements cache.Store.

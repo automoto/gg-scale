@@ -19,14 +19,20 @@ SET status           = 'cancelled',
     claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
+  AND end_user_id = $2
   AND status = 'queued'
 RETURNING id
 `
 
+type CancelMatchmakingTicketParams struct {
+	ID        int64
+	EndUserID int64
+}
+
 // Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 // CommitClaim will find zero rows and deallocate the orphan server.
-func (q *Queries) CancelMatchmakingTicket(ctx context.Context, id int64) (int64, error) {
-	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, id)
+func (q *Queries) CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error) {
+	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, arg.ID, arg.EndUserID)
 	var id_2 int64
 	err := row.Scan(&id_2)
 	return id_2, err
@@ -172,6 +178,7 @@ SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
+  AND end_user_id = $2
 `
 
 type GetMatchmakingTicketRow struct {
@@ -190,8 +197,13 @@ type GetMatchmakingTicketRow struct {
 	MatchedAt     pgtype.Timestamptz
 }
 
-func (q *Queries) GetMatchmakingTicket(ctx context.Context, id int64) (GetMatchmakingTicketRow, error) {
-	row := q.db.QueryRow(ctx, getMatchmakingTicket, id)
+type GetMatchmakingTicketParams struct {
+	ID        int64
+	EndUserID int64
+}
+
+func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error) {
+	row := q.db.QueryRow(ctx, getMatchmakingTicket, arg.ID, arg.EndUserID)
 	var i GetMatchmakingTicketRow
 	err := row.Scan(
 		&i.ID,

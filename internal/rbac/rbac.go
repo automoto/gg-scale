@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/casbin/casbin/v3"
@@ -22,6 +23,11 @@ import (
 var modelFS embed.FS
 
 const defaultPolicyReloadInterval = 10 * time.Second
+const featureGrantCacheTTL = 5 * time.Second
+
+// ErrAuthorizerUnavailable is returned when a mutating RBAC operation is called
+// without a configured authorizer.
+var ErrAuthorizerUnavailable = errors.New("rbac: authorizer unavailable")
 
 // Actions are the stable Casbin action names used by routes and policies.
 const (
@@ -109,8 +115,21 @@ type DashboardUser struct {
 
 // Authorizer wraps the Casbin enforcer and feature-grant checks.
 type Authorizer struct {
-	enforcer *casbin.SyncedEnforcer
-	pool     *db.Pool
+	enforcer     *casbin.SyncedEnforcer
+	pool         *db.Pool
+	featureCache map[featureCacheKey]featureCacheEntry
+	featureMu    sync.Mutex
+}
+
+type featureCacheKey struct {
+	tenantID  int64
+	projectID int64
+	feature   Feature
+}
+
+type featureCacheEntry struct {
+	enabled   bool
+	expiresAt time.Time
 }
 
 // NewAuthorizer loads persisted Casbin policy from Postgres.
@@ -123,7 +142,7 @@ func NewAuthorizer(pool *db.Pool) (*Authorizer, error) {
 		return nil, err
 	}
 	e.StartAutoLoadPolicy(defaultPolicyReloadInterval)
-	return &Authorizer{enforcer: e, pool: pool}, nil
+	return &Authorizer{enforcer: e, pool: pool, featureCache: make(map[featureCacheKey]featureCacheEntry)}, nil
 }
 
 // NewMemoryAuthorizer builds an authorizer with the default policy in memory.
@@ -132,7 +151,7 @@ func NewMemoryAuthorizer() (*Authorizer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Authorizer{enforcer: e}, nil
+	return &Authorizer{enforcer: e, featureCache: make(map[featureCacheKey]featureCacheEntry)}, nil
 }
 
 // Close stops background policy reload.
@@ -222,8 +241,20 @@ func (a *Authorizer) FeatureEnabled(ctx context.Context, tenantID, projectID int
 	if a == nil || a.pool == nil {
 		return false, nil
 	}
+	key := featureCacheKey{tenantID: tenantID, projectID: projectID, feature: feature}
+	now := time.Now()
+	a.featureMu.Lock()
+	if entry, ok := a.featureCache[key]; ok && now.Before(entry.expiresAt) {
+		a.featureMu.Unlock()
+		return entry.enabled, nil
+	}
+	a.featureMu.Unlock()
+
 	var enabled bool
 	err := a.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(tenantID, 10)); err != nil {
+			return err
+		}
 		const query = `
 SELECT enabled
 FROM feature_grants
@@ -238,12 +269,23 @@ LIMIT 1`
 		return tx.QueryRow(ctx, query, tenantID, string(feature), projectID).Scan(&enabled)
 	})
 	if err == nil {
+		a.storeFeatureCache(key, enabled, now)
 		return enabled, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
+		a.storeFeatureCache(key, false, now)
 		return false, nil
 	}
 	return false, err
+}
+
+func (a *Authorizer) storeFeatureCache(key featureCacheKey, enabled bool, now time.Time) {
+	a.featureMu.Lock()
+	defer a.featureMu.Unlock()
+	a.featureCache[key] = featureCacheEntry{
+		enabled:   enabled,
+		expiresAt: now.Add(featureGrantCacheTTL),
+	}
 }
 
 // SetDashboardMembershipRole replaces a dashboard user's tenant role.
@@ -267,7 +309,7 @@ func (a *Authorizer) SetDashboardMembershipRoleTx(ctx context.Context, tx pgx.Tx
 // AddPlatformAdmin grants the global platform-admin role to a dashboard user.
 func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	_, err := a.enforcer.AddGroupingPolicy(DashboardSubject(userID), RolePlatformAdmin, "*")
 	return err
@@ -276,7 +318,7 @@ func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 // AddPlatformAdminTx writes the global platform-admin role in tx.
 func (a *Authorizer) AddPlatformAdminTx(ctx context.Context, tx pgx.Tx, userID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	return insertRule(ctx, tx, "g", []string{DashboardSubject(userID), RolePlatformAdmin, "*"})
 }
@@ -302,7 +344,10 @@ func (a *Authorizer) AddAPIKeyRoleTx(ctx context.Context, tx pgx.Tx, keyID, tena
 // AddEndUserRole grants an explicit tenant role to an end user.
 func (a *Authorizer) AddEndUserRole(endUserID, tenantID int64, role string) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
+	}
+	if !EndUserRole(role) {
+		return fmt.Errorf("rbac: unknown end-user role %q", role)
 	}
 	_, err := a.enforcer.AddGroupingPolicy(EndUserSubject(endUserID), role, TenantDomain(tenantID))
 	return err
@@ -311,7 +356,10 @@ func (a *Authorizer) AddEndUserRole(endUserID, tenantID int64, role string) erro
 // AddEndUserRoleTx writes an explicit tenant role for an end user in tx.
 func (a *Authorizer) AddEndUserRoleTx(ctx context.Context, tx pgx.Tx, endUserID, tenantID int64, role string) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
+	}
+	if !EndUserRole(role) {
+		return fmt.Errorf("rbac: unknown end-user role %q", role)
 	}
 	return insertRule(ctx, tx, "g", []string{EndUserSubject(endUserID), role, TenantDomain(tenantID)})
 }
@@ -319,7 +367,7 @@ func (a *Authorizer) AddEndUserRoleTx(ctx context.Context, tx pgx.Tx, endUserID,
 // RemoveDashboardRoles removes a dashboard user's tenant-scoped roles.
 func (a *Authorizer) RemoveDashboardRoles(userID, tenantID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), "", TenantDomain(tenantID))
 	return err
@@ -328,7 +376,7 @@ func (a *Authorizer) RemoveDashboardRoles(userID, tenantID int64) error {
 // RemoveDashboardRolesTx removes a dashboard user's tenant-scoped roles in tx.
 func (a *Authorizer) RemoveDashboardRolesTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	return removeFilteredRule(ctx, tx, "g", 0, DashboardSubject(userID), "", TenantDomain(tenantID))
 }
@@ -336,7 +384,7 @@ func (a *Authorizer) RemoveDashboardRolesTx(ctx context.Context, tx pgx.Tx, user
 // RemoveAPIKeyRoles removes all roles for an API key.
 func (a *Authorizer) RemoveAPIKeyRoles(keyID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, APIKeySubject(keyID))
 	return err
@@ -345,25 +393,46 @@ func (a *Authorizer) RemoveAPIKeyRoles(keyID int64) error {
 // RemoveAPIKeyRolesTx removes all roles for an API key in tx.
 func (a *Authorizer) RemoveAPIKeyRolesTx(ctx context.Context, tx pgx.Tx, keyID int64) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	return removeFilteredRule(ctx, tx, "g", 0, APIKeySubject(keyID))
 }
 
 func (a *Authorizer) setSubjectRole(subject, role, domain string) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
-	if _, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, subject, "", domain); err != nil {
+	existing, err := a.enforcer.GetFilteredNamedGroupingPolicy("g", 0, subject, "", domain)
+	if err != nil {
 		return err
 	}
-	_, err := a.enforcer.AddGroupingPolicy(subject, role, domain)
-	return err
+	if len(existing) == 0 {
+		_, err := a.enforcer.AddGroupingPolicy(subject, role, domain)
+		return err
+	}
+	_, err = a.enforcer.UpdateGroupingPolicy(existing[0], []string{subject, role, domain})
+	if err != nil {
+		return err
+	}
+	for _, duplicate := range existing[1:] {
+		if _, err := a.enforcer.RemoveGroupingPolicy(ruleArgs(duplicate)...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ruleArgs(rule []string) []any {
+	args := make([]any, len(rule))
+	for i, v := range rule {
+		args[i] = v
+	}
+	return args
 }
 
 func (a *Authorizer) setSubjectRoleTx(ctx context.Context, tx pgx.Tx, subject, role, domain string) error {
 	if a == nil {
-		return nil
+		return ErrAuthorizerUnavailable
 	}
 	if err := removeFilteredRule(ctx, tx, "g", 0, subject, "", domain); err != nil {
 		return err
@@ -402,6 +471,16 @@ func APIKeyRole(keyType tenant.KeyType) (string, bool) {
 		return RoleAPIServer, true
 	default:
 		return "", false
+	}
+}
+
+// EndUserRole reports whether role is safe to grant to an end-user subject.
+func EndUserRole(role string) bool {
+	switch role {
+	case RolePlayerStandard, RolePlayerVerified, RolePlayerHighAccess, RolePlayerBanned:
+		return true
+	default:
+		return false
 	}
 }
 

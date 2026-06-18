@@ -175,30 +175,32 @@ func (s *Supervisor) pingLoop() {
 }
 
 func (s *Supervisor) handleExit() {
-	if int(s.restartCount.Load()) >= s.cfg.MaxRestarts {
-		s.swap(nil)
-		s.shutdown() // permanent give-up; stop both goroutines
-		return
-	}
-	// Exponential backoff between restart attempts caps fork-bomb risk on
-	// a plugin that crashes immediately. Wait for the configured delay or
-	// for the supervisor to be told to shut down.
-	if backoff := s.restartBackoff(); backoff > 0 {
-		select {
-		case <-time.After(backoff):
-		case <-s.done:
+	s.swap(nil)
+	for {
+		if int(s.restartCount.Load()) >= s.cfg.MaxRestarts {
+			s.shutdown() // permanent give-up; stop both goroutines
 			return
 		}
-	}
-	s.restartCount.Add(1)
-	s.totalRestarts.Add(1)
-	p, err := Launch(s.cfg.Launch)
-	if err != nil {
-		slog.Warn("fleet plugin: restart launch failed", "err", err, "restarts", s.restartCount.Load())
-		s.swap(nil)
+		// Exponential backoff between restart attempts caps fork-bomb risk on
+		// a plugin that crashes immediately. Wait for the configured delay or
+		// for the supervisor to be told to shut down.
+		if backoff := s.restartBackoff(); backoff > 0 {
+			select {
+			case <-time.After(backoff):
+			case <-s.done:
+				return
+			}
+		}
+		s.restartCount.Add(1)
+		s.totalRestarts.Add(1)
+		p, err := Launch(s.cfg.Launch)
+		if err != nil {
+			slog.Warn("fleet plugin: restart launch failed", "err", err, "restarts", s.restartCount.Load())
+			continue
+		}
+		s.swap(p)
 		return
 	}
-	s.swap(p)
 }
 
 // restartBackoff returns the exponential backoff between restart attempts:

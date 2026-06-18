@@ -26,34 +26,43 @@ type kvEntry struct {
 	expires time.Time
 }
 
-// Store is a sync.Mutex-guarded in-memory implementation of cache.Store.
-type Store struct {
+type shard struct {
 	mu      sync.Mutex
 	buckets map[string]*bucket
 	slots   map[string]*slot
 	kv      map[string]*kvEntry
-	now     func() time.Time
+}
+
+// Store is a sharded in-memory implementation of cache.Store.
+type Store struct {
+	shards [shardCount]shard
+	now    func() time.Time
 
 	stop     chan struct{}
 	stopOnce sync.Once
+	wg       sync.WaitGroup
 }
 
 // sweepInterval is how often the janitor wakes to evict idle/expired keys.
 // Short enough that a churning rate-limiter doesn't accumulate memory;
 // long enough that the sweep overhead is invisible.
 const sweepInterval = time.Minute
+const shardCount = 32
 
 // New returns a fresh in-memory Store with a background janitor that
 // reclaims expired kv entries, stale slots, and idle rate-limit buckets.
 // The janitor exits on Close.
 func New() *Store {
 	s := &Store{
-		buckets: make(map[string]*bucket),
-		slots:   make(map[string]*slot),
-		kv:      make(map[string]*kvEntry),
-		now:     time.Now,
-		stop:    make(chan struct{}),
+		now:  time.Now,
+		stop: make(chan struct{}),
 	}
+	for i := range s.shards {
+		s.shards[i].buckets = make(map[string]*bucket)
+		s.shards[i].slots = make(map[string]*slot)
+		s.shards[i].kv = make(map[string]*kvEntry)
+	}
+	s.wg.Add(1)
 	go s.janitor(sweepInterval)
 	return s
 }
@@ -62,6 +71,7 @@ func New() *Store {
 // under the lock, delete in a follow-up critical section) keeps the
 // critical section short even for large maps.
 func (s *Store) janitor(interval time.Duration) {
+	defer s.wg.Done()
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -83,36 +93,42 @@ func (s *Store) sweep() {
 	now := s.now()
 	idleCutoff := now.Add(-10 * sweepInterval)
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for k, e := range s.kv {
-		if !e.expires.IsZero() && e.expires.Before(now) {
-			delete(s.kv, k)
+	for i := range s.shards {
+		sh := &s.shards[i]
+		sh.mu.Lock()
+		for k, e := range sh.kv {
+			if !e.expires.IsZero() && e.expires.Before(now) {
+				delete(sh.kv, k)
+			}
 		}
-	}
-	for k, sl := range s.slots {
-		if sl.count == 0 && sl.expires.Before(now) {
-			delete(s.slots, k)
+		for k, sl := range sh.slots {
+			if sl.count == 0 && sl.expires.Before(now) {
+				delete(sh.slots, k)
+			}
 		}
-	}
-	for k, b := range s.buckets {
-		if b.last.Before(idleCutoff) {
-			delete(s.buckets, k)
+		for k, b := range sh.buckets {
+			if b.last.Before(idleCutoff) {
+				delete(sh.buckets, k)
+			}
 		}
+		sh.mu.Unlock()
 	}
 }
 
 // TokenBucket implements cache.Store.
 func (s *Store) TokenBucket(_ context.Context, key string, capacity, refillPerSec, cost float64) (bool, time.Duration, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if refillPerSec <= 0 {
+		return false, time.Second, nil
+	}
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
 	now := s.now()
-	b, ok := s.buckets[key]
+	b, ok := sh.buckets[key]
 	if !ok {
 		b = &bucket{tokens: capacity, last: now}
-		s.buckets[key] = b
+		sh.buckets[key] = b
 	}
 
 	elapsed := now.Sub(b.last).Seconds()
@@ -132,14 +148,15 @@ func (s *Store) TokenBucket(_ context.Context, key string, capacity, refillPerSe
 
 // AcquireSlot implements cache.Store.
 func (s *Store) AcquireSlot(_ context.Context, key string, limit int64, ttl time.Duration) (bool, int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
 	now := s.now()
-	sl, ok := s.slots[key]
+	sl, ok := sh.slots[key]
 	if !ok || sl.expires.Before(now) {
 		sl = &slot{}
-		s.slots[key] = sl
+		sh.slots[key] = sl
 	}
 
 	if sl.count+1 > limit {
@@ -152,10 +169,11 @@ func (s *Store) AcquireSlot(_ context.Context, key string, limit int64, ttl time
 
 // ReleaseSlot implements cache.Store.
 func (s *Store) ReleaseSlot(_ context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	sl, ok := s.slots[key]
+	sl, ok := sh.slots[key]
 	if !ok {
 		return nil
 	}
@@ -167,10 +185,11 @@ func (s *Store) ReleaseSlot(_ context.Context, key string) error {
 
 // RefreshSlot implements cache.Store.
 func (s *Store) RefreshSlot(_ context.Context, key string, ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	sl, ok := s.slots[key]
+	sl, ok := sh.slots[key]
 	if !ok {
 		return nil
 	}
@@ -180,15 +199,16 @@ func (s *Store) RefreshSlot(_ context.Context, key string, ttl time.Duration) er
 
 // Get implements cache.Store.
 func (s *Store) Get(_ context.Context, key string) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	e, ok := s.kv[key]
+	e, ok := sh.kv[key]
 	if !ok {
 		return nil, cache.ErrNotFound
 	}
 	if !e.expires.IsZero() && e.expires.Before(s.now()) {
-		delete(s.kv, key)
+		delete(sh.kv, key)
 		return nil, cache.ErrNotFound
 	}
 	out := make([]byte, len(e.value))
@@ -198,8 +218,9 @@ func (s *Store) Get(_ context.Context, key string) ([]byte, error) {
 
 // Set implements cache.Store.
 func (s *Store) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
 	stored := make([]byte, len(value))
 	copy(stored, value)
@@ -208,18 +229,19 @@ func (s *Store) Set(_ context.Context, key string, value []byte, ttl time.Durati
 	if ttl > 0 {
 		e.expires = s.now().Add(ttl)
 	}
-	s.kv[key] = e
+	sh.kv[key] = e
 	return nil
 }
 
 // Delete implements cache.Store.
 func (s *Store) Delete(_ context.Context, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
 
-	delete(s.buckets, key)
-	delete(s.slots, key)
-	delete(s.kv, key)
+	delete(sh.buckets, key)
+	delete(sh.slots, key)
+	delete(sh.kv, key)
 	return nil
 }
 
@@ -227,5 +249,19 @@ func (s *Store) Delete(_ context.Context, key string) error {
 // Close twice is safe (the underlying channel close is once-guarded).
 func (s *Store) Close(_ context.Context) error {
 	s.stopOnce.Do(func() { close(s.stop) })
+	s.wg.Wait()
 	return nil
+}
+
+func (s *Store) shardFor(key string) *shard {
+	return &s.shards[fnv32(key)%shardCount]
+}
+
+func fnv32(key string) uint32 {
+	var h uint32 = 2166136261
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= 16777619
+	}
+	return h
 }

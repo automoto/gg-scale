@@ -84,6 +84,20 @@ func (q *Queries) CountDashboardUsersForPlatformAdmin(ctx context.Context, email
 	return column_1, err
 }
 
+const countEnabledPlatformAdmins = `-- name: CountEnabledPlatformAdmins :one
+SELECT COUNT(*)::bigint
+FROM dashboard_users
+WHERE is_platform_admin = true
+  AND disabled_at IS NULL
+`
+
+func (q *Queries) CountEnabledPlatformAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countEnabledPlatformAdmins)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createDashboardSession = `-- name: CreateDashboardSession :one
 INSERT INTO dashboard_sessions (
     dashboard_user_id, refresh_hash, csrf_secret, expires_at, ip, user_agent
@@ -617,6 +631,37 @@ func (q *Queries) ListDashboardUsersForPlatformAdmin(ctx context.Context, arg Li
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockEnabledPlatformAdmins = `-- name: LockEnabledPlatformAdmins :many
+SELECT id
+FROM dashboard_users
+WHERE is_platform_admin = true
+  AND disabled_at IS NULL
+ORDER BY id
+FOR UPDATE
+`
+
+// Serializes last-admin checks by locking the currently enabled platform
+// admin rows before counting them in the surrounding transaction.
+func (q *Queries) LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, lockEnabledPlatformAdmins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

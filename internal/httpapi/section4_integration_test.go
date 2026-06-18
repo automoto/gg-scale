@@ -359,6 +359,44 @@ func TestLeaderboard_submit_then_top_returns_best_score_per_user(t *testing.T) {
 	assert.Equal(t, int64(75), top.Entries[1].Score)
 }
 
+func TestLeaderboard_ascendingSortUsesLowestScorePerUser(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv, _ := newFullStackServer(t, c)
+
+	var leaderboardID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO leaderboards (tenant_id, project_id, name, sort_order) VALUES ($1, $2, 'time-trial', 'asc') RETURNING id`,
+		tenantID, projectID).Scan(&leaderboardID))
+
+	a := anonymousLogin(t, srv.URL, "k")
+	b := anonymousLogin(t, srv.URL, "k")
+
+	for _, sc := range []struct {
+		token string
+		score int64
+	}{{a, 100}, {a, 50}, {b, 75}} {
+		resp, _ := authedReq(t, http.MethodPost,
+			fmt.Sprintf("%s/v1/leaderboards/%d/scores", srv.URL, leaderboardID),
+			"k", sc.token, map[string]int64{"score": sc.score})
+		require.Equal(t, http.StatusCreated, resp.StatusCode)
+	}
+
+	resp, body := authedReq(t, http.MethodGet,
+		fmt.Sprintf("%s/v1/leaderboards/%d/top?limit=10", srv.URL, leaderboardID),
+		"k", a, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var top struct {
+		Entries []struct {
+			Score int64 `json:"score"`
+		} `json:"entries"`
+	}
+	require.NoError(t, json.Unmarshal(body, &top))
+	require.Len(t, top.Entries, 2)
+	assert.Equal(t, int64(50), top.Entries[0].Score)
+	assert.Equal(t, int64(75), top.Entries[1].Score)
+}
+
 // -------- Friends --------
 
 func TestFriends_request_accept_list(t *testing.T) {

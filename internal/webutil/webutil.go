@@ -26,14 +26,28 @@ const (
 
 	// MaxFormBodyBytes caps the body size for HTML form POSTs.
 	MaxFormBodyBytes = 1 << 20
+
+	dashboardCSP = "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+	playerCSP    = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'none'; style-src-attr 'none'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
 
-// SecurityHeaders sets the conservative browser-protection headers all
-// server-rendered ggscale UIs share.
+// SecurityHeaders sets browser-protection headers for the authenticated
+// dashboard. Dashboard JS/CSS must be served as first-party static assets.
 func SecurityHeaders(next http.Handler) http.Handler {
+	return securityHeadersWithCSP(dashboardCSP, next)
+}
+
+// PlayerSecurityHeaders sets a stricter policy for player-facing forms. Those
+// pages intentionally run without script or stylesheet execution.
+func PlayerSecurityHeaders(next http.Handler) http.Handler {
+	return securityHeadersWithCSP(playerCSP, next)
+}
+
+func securityHeadersWithCSP(csp string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", csp)
 		w.Header().Set("Referrer-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})

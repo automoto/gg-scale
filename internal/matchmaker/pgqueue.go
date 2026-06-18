@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,10 +72,13 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 
 // Get returns the ticket if it belongs to the tenant on ctx; otherwise
 // ErrNotFound.
-func (q *PGQueue) Get(ctx context.Context, id int64) (*Ticket, error) {
+func (q *PGQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error) {
 	var t *Ticket
 	err := q.pool.Q(ctx, func(tx pgx.Tx) error {
-		row, qerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, id)
+		row, qerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, sqlcgen.GetMatchmakingTicketParams{
+			ID:        id,
+			EndUserID: endUserID,
+		})
 		if qerr != nil {
 			if errors.Is(qerr, pgx.ErrNoRows) {
 				return ErrNotFound
@@ -101,11 +105,15 @@ func derefFleetID(p *int64) int64 {
 
 // Cancel sets a queued ticket to cancelled and clears any active claim.
 // Returns ErrAlreadyTerminal when the ticket is past 'queued'.
-func (q *PGQueue) Cancel(ctx context.Context, id int64) error {
+func (q *PGQueue) Cancel(ctx context.Context, id, endUserID int64) error {
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
-		_, qerr := sqlcgen.New(tx).CancelMatchmakingTicket(ctx, id)
+		arg := sqlcgen.CancelMatchmakingTicketParams{
+			ID:        id,
+			EndUserID: endUserID,
+		}
+		_, qerr := sqlcgen.New(tx).CancelMatchmakingTicket(ctx, arg)
 		if errors.Is(qerr, pgx.ErrNoRows) {
-			row, gerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, id)
+			row, gerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, sqlcgen.GetMatchmakingTicketParams(arg))
 			if errors.Is(gerr, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -275,6 +283,7 @@ func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 			GameMode  string `json:"game_mode"`
 		}
 		if err := json.Unmarshal([]byte(payload), &p); err != nil {
+			slog.WarnContext(ctx, "matchmaker: malformed notify payload", "err", err, "payload", payload)
 			return
 		}
 		fn(Bucket{TenantID: p.TenantID, ProjectID: p.ProjectID, FleetID: p.FleetID, Region: p.Region, GameMode: p.GameMode})

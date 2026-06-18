@@ -326,7 +326,7 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Verified — issue a session and clear the verify-pending cookie.
 	h.clearVerifyPendingCookie(w)
-	if _, err := h.issueSession(r.Context(), w, p.UserID, clientIP(r), r.UserAgent()); err != nil {
+	if _, err := h.issueSession(r.Context(), w, p.UserID, h.clientIP(r), r.UserAgent()); err != nil {
 		slog.ErrorContext(r.Context(), "dashboard verify session", "err", err)
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return

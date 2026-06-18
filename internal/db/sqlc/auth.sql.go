@@ -93,15 +93,16 @@ func (q *Queries) CreateEmailEndUser(ctx context.Context, arg CreateEmailEndUser
 }
 
 const createSession = `-- name: CreateSession :one
-INSERT INTO sessions (tenant_id, end_user_id, refresh_hash, expires_at)
+INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3
+    $1, $2, $3, $4
 )
 RETURNING id, created_at
 `
 
 type CreateSessionParams struct {
+	ProjectID   int64
 	EndUserID   int64
 	RefreshHash []byte
 	ExpiresAt   pgtype.Timestamptz
@@ -113,7 +114,12 @@ type CreateSessionRow struct {
 }
 
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error) {
-	row := q.db.QueryRow(ctx, createSession, arg.EndUserID, arg.RefreshHash, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createSession,
+		arg.ProjectID,
+		arg.EndUserID,
+		arg.RefreshHash,
+		arg.ExpiresAt,
+	)
 	var i CreateSessionRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
@@ -236,30 +242,38 @@ func (q *Queries) GetEndUserVerificationState(ctx context.Context, arg GetEndUse
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at
+SELECT s.id, s.end_user_id, s.project_id, s.expires_at, s.revoked_at
 FROM sessions s
 JOIN end_users u ON u.id = s.end_user_id
 WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND s.refresh_hash = $1
+  AND s.project_id = $1
+  AND s.refresh_hash = $2
   AND u.deleted_at IS NULL
   AND u.disabled_at IS NULL
 `
 
+type GetSessionByRefreshHashParams struct {
+	ProjectID   int64
+	RefreshHash []byte
+}
+
 type GetSessionByRefreshHashRow struct {
 	ID        int64
 	EndUserID int64
+	ProjectID int64
 	ExpiresAt pgtype.Timestamptz
 	RevokedAt pgtype.Timestamptz
 }
 
 // Joined to end_users so refresh fails for disabled / deleted accounts
 // even if the refresh token is still otherwise valid.
-func (q *Queries) GetSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetSessionByRefreshHashRow, error) {
-	row := q.db.QueryRow(ctx, getSessionByRefreshHash, refreshHash)
+func (q *Queries) GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error) {
+	row := q.db.QueryRow(ctx, getSessionByRefreshHash, arg.ProjectID, arg.RefreshHash)
 	var i GetSessionByRefreshHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.EndUserID,
+		&i.ProjectID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 	)

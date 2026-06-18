@@ -76,6 +76,8 @@ func ServeWS(opts Options) http.HandlerFunc {
 			return
 		}
 
+		var refreshSlots func(context.Context)
+
 		// Per-end-user cap first: a single misbehaving player can't drain
 		// the per-tenant budget for everyone else. The order matters —
 		// failing the user-level cap before the tenant one means a
@@ -98,6 +100,11 @@ func ServeWS(opts Options) http.HandlerFunc {
 					logger.Warn("realtime: ReleaseSlot (end_user) failed", "err", rerr, "tenant_id", tenantID, "end_user_id", endUserID)
 				}
 			}()
+			refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
+				if rerr := opts.Cache.RefreshSlot(ctx, userKey, slotTTL); rerr != nil {
+					logger.Warn("realtime: RefreshSlot (end_user) failed", "err", rerr, "tenant_id", tenantID, "end_user_id", endUserID)
+				}
+			})
 		}
 
 		slotKey := slotKeyForTenant(tenantID)
@@ -117,9 +124,14 @@ func ServeWS(opts Options) http.HandlerFunc {
 					logger.Warn("realtime: ReleaseSlot failed", "err", rerr, "tenant_id", tenantID)
 				}
 			}()
+			refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
+				if rerr := opts.Cache.RefreshSlot(ctx, slotKey, slotTTL); rerr != nil {
+					logger.Warn("realtime: RefreshSlot failed", "err", rerr, "tenant_id", tenantID)
+				}
+			})
 		}
 
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			logger.Warn("realtime: ws upgrade failed", "err", err)
 			return
@@ -131,19 +143,29 @@ func ServeWS(opts Options) http.HandlerFunc {
 		unregister := opts.Hub.Register(tenantID, endUserID, writer)
 		defer unregister()
 
-		runConnection(r.Context(), conn, heartbeat, logger)
+		runConnection(r.Context(), conn, heartbeat, refreshSlots, logger)
+	}
+}
+
+func appendRefresh(current func(context.Context), next func(context.Context)) func(context.Context) {
+	if current == nil {
+		return next
+	}
+	return func(ctx context.Context) {
+		current(ctx)
+		next(ctx)
 	}
 }
 
 // runConnection drives the per-client read loop alongside a heartbeat
 // ticker. It returns when the client disconnects, the heartbeat ping
 // fails, or ctx is cancelled.
-func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Duration, logger *slog.Logger) {
+func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	heartbeatErr := make(chan error, 1)
-	go func() { heartbeatErr <- runHeartbeat(ctx, conn, heartbeat) }()
+	go func() { heartbeatErr <- runHeartbeat(ctx, conn, heartbeat, refreshSlots) }()
 
 	for {
 		_, _, err := conn.Read(ctx)
@@ -155,12 +177,15 @@ func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Dur
 			<-heartbeatErr
 			return
 		}
+		if refreshSlots != nil {
+			refreshSlots(context.Background())
+		}
 		// Inbound messages are currently ignored; lobby + chat handlers
 		// land in M6.1 follow-ups.
 	}
 }
 
-func runHeartbeat(ctx context.Context, conn *websocket.Conn, interval time.Duration) error {
+func runHeartbeat(ctx context.Context, conn *websocket.Conn, interval time.Duration, refreshSlots func(context.Context)) error {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -173,6 +198,9 @@ func runHeartbeat(ctx context.Context, conn *websocket.Conn, interval time.Durat
 			cancel()
 			if err != nil {
 				return err
+			}
+			if refreshSlots != nil {
+				refreshSlots(context.Background())
 			}
 		}
 	}

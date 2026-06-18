@@ -168,7 +168,7 @@ func TestWorkerFailsTicketAfterMaxAttempts(t *testing.T) {
 
 	require.NoError(t, w.Tick(context.Background()))
 
-	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID)
+	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID, 42)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusFailed, got.Status)
 }
@@ -181,7 +181,7 @@ func TestWorkerRetriesUnderAttemptCap(t *testing.T) {
 
 	require.NoError(t, w.Tick(context.Background()))
 
-	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID)
+	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID, 42)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "first allocator failure under cap should leave the ticket queued")
 }
@@ -197,7 +197,7 @@ func TestWorkerDeallocatesOrphanWhenCommitFindsNoRows(t *testing.T) {
 	// affects 0 rows and the worker should release the orphan allocation.
 	go func() {
 		time.Sleep(5 * time.Millisecond)
-		_ = q.Cancel(db.WithTenant(context.Background(), 1), t1.ID)
+		_ = q.Cancel(db.WithTenant(context.Background(), 1), t1.ID, 42)
 	}()
 	delayed := &delayingAllocator{inner: alloc, delay: 20 * time.Millisecond}
 	w := matchmaker.NewWorker(q, delayed, hub, matchmaker.WorkerConfig{BucketSize: 1})

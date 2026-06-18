@@ -137,7 +137,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "audit log failed", http.StatusInternalServerError)
 		return
 	}
-	session, err := h.issueSession(r.Context(), w, user.ID, clientIP(r), r.UserAgent())
+	session, err := h.issueSession(r.Context(), w, user.ID, h.clientIP(r), r.UserAgent())
 	if err != nil {
 		http.Error(w, "session create failed", http.StatusInternalServerError)
 		return

@@ -14,7 +14,8 @@ SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
        created_at, matched_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1;
+  AND id = sqlc.arg(id)
+  AND end_user_id = sqlc.arg(end_user_id);
 
 -- name: CancelMatchmakingTicket :one
 -- Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
@@ -25,7 +26,8 @@ SET status           = 'cancelled',
     claimed_at       = NULL,
     claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
+  AND id = sqlc.arg(id)
+  AND end_user_id = sqlc.arg(end_user_id)
   AND status = 'queued'
 RETURNING id;
 

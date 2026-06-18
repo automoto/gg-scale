@@ -19,13 +19,9 @@ import (
 // Write inserts a tenant-scoped row. actorUserID may be 0 — the column is
 // nullable. payload is JSON-marshalled; pass nil to record an empty object.
 func Write(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target string, payload any) error {
-	body := []byte("{}")
-	if payload != nil {
-		var err error
-		body, err = json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("auditlog: marshal payload: %w", err)
-		}
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return err
 	}
 
 	q := sqlcgen.New(tx)
@@ -52,13 +48,9 @@ func Write(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target str
 // WritePlatform inserts a platform-scoped row into platform_audit_log (no
 // tenant FK). Use for dashboard login/logout and other platform events.
 func WritePlatform(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target string, payload any) error {
-	body := []byte("{}")
-	if payload != nil {
-		var err error
-		body, err = json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("auditlog: marshal payload: %w", err)
-		}
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return err
 	}
 
 	q := sqlcgen.New(tx)
@@ -80,4 +72,15 @@ func WritePlatform(ctx context.Context, tx pgx.Tx, actorUserID int64, action, ta
 		return fmt.Errorf("auditlog: write platform: %w", err)
 	}
 	return nil
+}
+
+func marshalPayload(payload any) ([]byte, error) {
+	if payload == nil {
+		return []byte("{}"), nil
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("auditlog: marshal payload: %w", err)
+	}
+	return body, nil
 }

@@ -110,6 +110,40 @@ func TestAttemptsExhausted(t *testing.T) {
 	}
 }
 
+func TestLifetimeExhausted(t *testing.T) {
+	tests := []struct {
+		n    int
+		want bool
+	}{
+		{0, false},
+		{MaxLifetimeAttempts - 1, false},
+		{MaxLifetimeAttempts, true},
+		{MaxLifetimeAttempts + 1, true},
+	}
+	for _, tc := range tests {
+		assert.Equal(t, tc.want, LifetimeExhausted(tc.n), "n=%d", tc.n)
+	}
+}
+
+func TestAccountLocked(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		lockedUntil time.Time
+		want        bool
+	}{
+		{"zero", time.Time{}, false},
+		{"past", now.Add(-time.Second), false},
+		{"now", now, false},
+		{"future", now.Add(time.Second), true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, AccountLocked(tc.lockedUntil, now))
+		})
+	}
+}
+
 func TestConstants_match_plan(t *testing.T) {
 	assert.Equal(t, 15*time.Minute, CodeTTL)
 	assert.Equal(t, 3*24*time.Hour, InviteTTL)

@@ -9,6 +9,7 @@ package serverlist
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strconv"
 	"sync"
@@ -51,22 +52,36 @@ type entry struct {
 	lastSeen time.Time
 }
 
+const defaultMaxEntriesPerTenant = 1000
+
+// ErrTenantLimitExceeded is returned when a new heartbeat would exceed a tenant's live entry cap.
+var ErrTenantLimitExceeded = errors.New("serverlist: tenant entry limit exceeded")
+
 // Registry tracks live game-servers keyed by (tenant, fleet, agones_name).
 type Registry struct {
-	ttl   time.Duration
-	now   func() time.Time
-	mu    sync.RWMutex
-	items map[string]entry
+	ttl                 time.Duration
+	maxEntriesPerTenant int
+	now                 func() time.Time
+	mu                  sync.RWMutex
+	items               map[string]entry
 }
 
 // New returns a Registry with the given TTL. Heartbeats that haven't
 // been refreshed within ttl are considered stale and dropped on List/Sweep.
 func New(ttl time.Duration) *Registry {
 	return &Registry{
-		ttl:   ttl,
-		now:   time.Now,
-		items: make(map[string]entry),
+		ttl:                 ttl,
+		maxEntriesPerTenant: defaultMaxEntriesPerTenant,
+		now:                 time.Now,
+		items:               make(map[string]entry),
 	}
+}
+
+// NewWithLimit is like New but caps each tenant's live server-list entries.
+func NewWithLimit(ttl time.Duration, maxEntriesPerTenant int) *Registry {
+	r := New(ttl)
+	r.maxEntriesPerTenant = maxEntriesPerTenant
+	return r
 }
 
 // NewWithClock is like New but uses the given clock — for deterministic tests.
@@ -82,13 +97,18 @@ func key(tenantID int64, fleet, agonesName string) string {
 
 // Submit upserts a heartbeat. The TenantID on hb is the authority; pass
 // it from the request's authenticated tenant context, not from the body.
-func (r *Registry) Submit(hb Heartbeat) {
+func (r *Registry) Submit(hb Heartbeat) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.items[key(hb.TenantID, hb.Fleet, hb.AgonesName)] = entry{
+	k := key(hb.TenantID, hb.Fleet, hb.AgonesName)
+	if _, ok := r.items[k]; !ok && r.tenantEntryCountLocked(hb.TenantID) >= r.maxEntriesPerTenant {
+		return ErrTenantLimitExceeded
+	}
+	r.items[k] = entry{
 		hb:       hb,
 		lastSeen: r.now(),
 	}
+	return nil
 }
 
 // List returns the live servers for (tenantID, fleet), sorted by Name +
@@ -137,6 +157,21 @@ func (r *Registry) Sweep() {
 			delete(r.items, k)
 		}
 	}
+}
+
+func (r *Registry) tenantEntryCountLocked(tenantID int64) int {
+	cutoff := r.now().Add(-r.ttl)
+	count := 0
+	for k, e := range r.items {
+		if e.lastSeen.Before(cutoff) {
+			delete(r.items, k)
+			continue
+		}
+		if e.hb.TenantID == tenantID {
+			count++
+		}
+	}
+	return count
 }
 
 // RunGC sweeps expired entries every interval until ctx is cancelled.

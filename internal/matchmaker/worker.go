@@ -107,6 +107,7 @@ func NewWorker(q Queue, alloc Allocator, hub Notifier, cfg WorkerConfig) *Worker
 // 64 so a momentary backlog doesn't force a drop; the consumer pool drains
 // it fast enough under normal load. Drops are logged + metered.
 const eventsBuffer = 1024
+const listenerReconnectMaxBackoff = 30 * time.Second
 
 // Run drives the worker until ctx is cancelled. Returns only after every
 // internal goroutine (listener, sweeper, consumer pool) has exited so the
@@ -196,6 +197,7 @@ func (w *Worker) drain(ctx context.Context, events chan<- Bucket) {
 // runListener forwards NOTIFY events to the consumer pool until ctx is
 // cancelled. Drops on a full channel; the fallback ticker covers the gap.
 func (w *Worker) runListener(ctx context.Context, l Listener, out chan<- Bucket) {
+	backoff := time.Second
 	for {
 		err := l.Listen(ctx, func(b Bucket) {
 			select {
@@ -209,12 +211,16 @@ func (w *Worker) runListener(ctx context.Context, l Listener, out chan<- Bucket)
 			return
 		}
 		if err != nil {
-			w.log.Warn("matchmaker: listener disconnected", "err", err)
+			w.log.Warn("matchmaker: listener disconnected", "err", err, "retry_in", backoff)
 		}
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(backoff):
 		case <-ctx.Done():
 			return
+		}
+		backoff *= 2
+		if backoff > listenerReconnectMaxBackoff {
+			backoff = listenerReconnectMaxBackoff
 		}
 	}
 }

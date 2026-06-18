@@ -114,11 +114,8 @@ func (s *Signer) Sign(c Claims) (string, error) {
 func (s *Signer) Verify(token string) (Claims, error) {
 	rc := &registeredClaims{}
 	tok, err := jwt.ParseWithClaims(token, rc, func(t *jwt.Token) (any, error) {
-		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing method %v", t.Method.Alg())
-		}
 		return s.key, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
 	if errors.Is(err, jwt.ErrTokenExpired) {
 		return Claims{}, ErrTokenExpired
 	}

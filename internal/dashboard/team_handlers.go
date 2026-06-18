@@ -312,7 +312,7 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Auto-login: issue a session and redirect to the dashboard home.
-	if _, err := h.issueSession(r.Context(), w, res.UserID, clientIP(r), r.Header.Get("User-Agent")); err != nil {
+	if _, err := h.issueSession(r.Context(), w, res.UserID, h.clientIP(r), r.Header.Get("User-Agent")); err != nil {
 		slog.ErrorContext(r.Context(), "accept invite: issue session", "err", err)
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return

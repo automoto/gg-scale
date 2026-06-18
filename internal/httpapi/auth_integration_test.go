@@ -6,9 +6,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -51,37 +56,38 @@ type cluster struct {
 	cache         cache.Store
 }
 
+const httpapiTemplateDB = "ggscale_httpapi_template"
+
+type httpapiPostgresFixture struct {
+	ctr         *tcpostgres.PostgresContainer
+	admin       *pgxpool.Pool
+	templateDSN string
+	seq         atomic.Uint64
+	err         error
+}
+
+var (
+	httpapiPGOnce sync.Once
+	httpapiPG     *httpapiPostgresFixture
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if httpapiPG != nil {
+		httpapiPG.close()
+	}
+	os.Exit(code)
+}
+
 func startCluster(t *testing.T) *cluster {
 	t.Helper()
+	t.Parallel()
 	ctx := context.Background()
-
-	pgCtr, err := tcpostgres.Run(ctx,
-		"postgres:17",
-		tcpostgres.WithDatabase("ggscale_test"),
-		tcpostgres.WithUsername("ggscale"),
-		tcpostgres.WithPassword("ggscale"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		shutdown, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = pgCtr.Terminate(shutdown)
-	})
-
-	dsn, err := pgCtr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
-	require.NoError(t, err)
-	r, err := migrate.New(dsn, migrationsDir)
-	require.NoError(t, err)
-	require.NoError(t, r.Up())
-	require.NoError(t, r.Close())
+	pg := sharedHTTPAPIPostgres(t)
+	dbName, dsn := pg.createDatabase(t)
 
 	bootstrap, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
-	t.Cleanup(bootstrap.Close)
 
 	cfg, err := pgxpool.ParseConfig(dsn)
 	require.NoError(t, err)
@@ -91,12 +97,115 @@ func startCluster(t *testing.T) *cluster {
 	}
 	app, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
-	t.Cleanup(app.Close)
 
 	store := memory.New()
-	t.Cleanup(func() { _ = store.Close(context.Background()) })
+	t.Cleanup(func() {
+		_ = store.Close(context.Background())
+		app.Close()
+		bootstrap.Close()
+		pg.dropDatabase(dbName)
+	})
 
 	return &cluster{bootstrapPool: bootstrap, appPool: app, cache: store}
+}
+
+func sharedHTTPAPIPostgres(t *testing.T) *httpapiPostgresFixture {
+	t.Helper()
+	httpapiPGOnce.Do(func() {
+		httpapiPG = &httpapiPostgresFixture{}
+		httpapiPG.err = httpapiPG.start(context.Background())
+	})
+	require.NoError(t, httpapiPG.err)
+	return httpapiPG
+}
+
+func (p *httpapiPostgresFixture) start(ctx context.Context) error {
+	ctr, err := tcpostgres.Run(ctx,
+		"postgres:17",
+		tcpostgres.WithDatabase(httpapiTemplateDB),
+		tcpostgres.WithUsername("ggscale"),
+		tcpostgres.WithPassword("ggscale"),
+		tcpostgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		return err
+	}
+	p.ctr = ctr
+
+	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		return err
+	}
+	p.templateDSN = dsn
+
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	if err != nil {
+		return err
+	}
+	r, err := migrate.New(dsn, migrationsDir)
+	if err != nil {
+		return err
+	}
+	if err := r.Up(); err != nil {
+		_ = r.Close()
+		return err
+	}
+	if err := r.Close(); err != nil {
+		return err
+	}
+
+	adminDSN, err := postgresDSNForDatabase(dsn, "postgres")
+	if err != nil {
+		return err
+	}
+	admin, err := pgxpool.New(ctx, adminDSN)
+	if err != nil {
+		return err
+	}
+	p.admin = admin
+	return nil
+}
+
+func (p *httpapiPostgresFixture) createDatabase(t *testing.T) (string, string) {
+	t.Helper()
+	dbName := fmt.Sprintf("ggscale_httpapi_%d", p.seq.Add(1))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := p.admin.Exec(ctx,
+		"CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()+
+			" WITH TEMPLATE "+pgx.Identifier{httpapiTemplateDB}.Sanitize()+
+			" OWNER ggscale")
+	require.NoError(t, err)
+	dsn, err := postgresDSNForDatabase(p.templateDSN, dbName)
+	require.NoError(t, err)
+	return dbName, dsn
+}
+
+func (p *httpapiPostgresFixture) dropDatabase(dbName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _ = p.admin.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, dbName)
+	_, _ = p.admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+}
+
+func (p *httpapiPostgresFixture) close() {
+	if p.admin != nil {
+		p.admin.Close()
+	}
+	if p.ctr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = p.ctr.Terminate(ctx)
+	}
+}
+
+func postgresDSNForDatabase(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/" + dbName
+	return u.String(), nil
 }
 
 func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier, token string) (tenantID, projectID int64) {

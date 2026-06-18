@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 
 	pionturn "github.com/pion/turn/v3"
 )
@@ -74,10 +75,19 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 // Close stops the TURN server and releases the listener.
 func (s *Server) Close() error {
-	if err := s.turn.Close(); err != nil {
-		return err
+	turnErr := s.turn.Close()
+	connErr := s.conn.Close()
+	if isClosedPacketConnError(connErr) {
+		connErr = nil
 	}
-	return nil
+	if turnErr != nil {
+		return turnErr
+	}
+	return connErr
+}
+
+func isClosedPacketConnError(err error) bool {
+	return errors.Is(err, net.ErrClosed) || (err != nil && strings.Contains(err.Error(), "use of closed network connection"))
 }
 
 // authHandlerFor returns a pion AuthHandler that recomputes the HMAC

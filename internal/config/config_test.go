@@ -40,6 +40,7 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", cfg.CacheOlricMemberlistAddr)
 	assert.Equal(t, 3322, cfg.CacheOlricMemberlistPort)
 	assert.Empty(t, cfg.CacheOlricPeers)
+	assert.Empty(t, cfg.TrustedProxyCIDRs)
 }
 
 func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
@@ -62,6 +63,7 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		}},
 		{"CACHE_BACKEND", "olric", func(c *config.Config) string { return c.CacheBackend }},
 		{"CACHE_OLRIC_BIND_ADDR", "0.0.0.0", func(c *config.Config) string { return c.CacheOlricBindAddr }},
+		{"TRUSTED_PROXY_HEADER", "CF-Connecting-IP", func(c *config.Config) string { return c.TrustedProxyHeader }},
 	}
 	for _, c := range cases {
 		t.Run(c.envVar, func(t *testing.T) {
@@ -75,6 +77,28 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 			assert.Equal(t, c.value, c.got(cfg))
 		})
 	}
+}
+
+func TestLoad_parses_trusted_proxy_cidrs(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "10.0.0.0/8, 192.0.2.0/24")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"10.0.0.0/8", "192.0.2.0/24"}, cfg.TrustedProxyCIDRs)
+}
+
+func TestLoad_rejects_invalid_trusted_proxy_cidr(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "not-a-cidr")
+
+	_, err := config.Load()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "TRUSTED_PROXY_CIDRS")
 }
 
 func TestLoad_rejects_unknown_cache_backend(t *testing.T) {

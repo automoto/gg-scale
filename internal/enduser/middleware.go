@@ -90,7 +90,7 @@ func New(signer *auth.Signer) func(http.Handler) http.Handler {
 			// project A must not work when presented under an api_key
 			// pinned to project B.
 			if projectID, ok := db.ProjectFromContext(r.Context()); ok {
-				if claims.ProjectID != 0 && claims.ProjectID != projectID {
+				if claims.ProjectID != projectID {
 					http.Error(w, "forbidden", http.StatusForbidden)
 					return
 				}

@@ -158,10 +158,8 @@ func TestMiddleware_passes_when_token_project_pin_matches_api_key(t *testing.T) 
 	assert.Equal(t, http.StatusNotFound, rr.Code) // passes through to NotFoundHandler
 }
 
-func TestMiddleware_passes_when_token_has_no_project_pin(t *testing.T) {
+func TestMiddleware_rejects_project_pinned_key_when_token_has_no_project_pin(t *testing.T) {
 	signer := newSigner(t)
-	// No ProjectID claim on the session — accept against any api_key
-	// project pin (legacy / non-pinned sessions).
 	tok, err := signer.Sign(auth.Claims{
 		EndUserID: 5, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour),
 	})
@@ -173,7 +171,7 @@ func TestMiddleware_passes_when_token_has_no_project_pin(t *testing.T) {
 	req.Header.Set("X-Session-Token", tok)
 	enduser.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
-	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
 
 func TestIDFromContext_returns_false_on_bare_context(t *testing.T) {
