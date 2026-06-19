@@ -511,13 +511,13 @@ func fleetSelectorLabels(cfg map[string]string) map[string]string {
 // allocationsBasePathTpl is the templ-side equivalent of allocationsBasePath
 // in allocations.go; both must agree on the path shape.
 func allocationsBasePathTpl(tenantID, projectID int64) string {
-	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 }
 
 // fleetsBasePathTpl is the templ-side equivalent of fleetsBasePath.
 func fleetsBasePathTpl(tenantID, projectID int64) string {
-	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
 }
 

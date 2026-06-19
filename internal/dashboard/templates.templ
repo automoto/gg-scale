@@ -59,8 +59,24 @@ templ authLayout(title string) {
 	</html>
 }
 
+// errorAlert renders a form/page error banner. It renders nothing when the
+// message is empty so callers can drop the surrounding `if vm.Error != ""`.
+templ errorAlert(message string) {
+	if message != "" {
+		<p role="alert">{ message }</p>
+	}
+}
+
+// flashSuccess renders a success banner, or nothing when the message is empty.
+templ flashSuccess(message string) {
+	if message != "" {
+		<p class="flash-success">{ message }</p>
+	}
+}
+
+// FormErrorFragment is the htmx-swapped error response for inline form posts.
 templ FormErrorFragment(message string) {
-	<p role="alert">{ message }</p>
+	@errorAlert(message)
 }
 
 templ fieldError(errs map[string]string, name string) {
@@ -73,9 +89,7 @@ templ LoginPage(vm LoginView) {
 	@authLayout("Sign in — ggscale") {
 		<h1>ggscale Dashboard</h1>
 		<p class="subtitle">Sign in to your admin account.</p>
-		if vm.Error != "" {
-			<p role="alert">{ vm.Error }</p>
-		}
+		@errorAlert(vm.Error)
 		<form method="post" action="/v1/dashboard/login">
 			<label for="email">Email</label>
 			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
@@ -97,9 +111,7 @@ templ SetupTokenPage(vm SetupTokenView) {
 		} else {
 			<p>The token was printed to the server&apos;s stderr (no <code>DASHBOARD_BOOTSTRAP_TOKEN_FILE</code> configured). Check your server logs.</p>
 		}
-		if vm.Error != "" {
-			<p role="alert">{ vm.Error }</p>
-		}
+		@errorAlert(vm.Error)
 		<form method="post" action="/v1/dashboard/setup/token">
 			<label for="bootstrap_token">Bootstrap token</label>
 			<input id="bootstrap_token" name="bootstrap_token" type="text" autocomplete="off" required aria-describedby="bootstrap_token-error"/>
@@ -113,9 +125,7 @@ templ SetupAdminPage(vm SetupAdminView) {
 	@authLayout("Set up — ggscale") {
 		<h1>Create admin account</h1>
 		<p class="subtitle">Step 2 of 2 — set the email and password for the first administrator.</p>
-		if vm.Error != "" {
-			<p role="alert">{ vm.Error }</p>
-		}
+		@errorAlert(vm.Error)
 		<form method="post" action="/v1/dashboard/setup">
 			<input type="hidden" name="bootstrap_token" value={ vm.Token }/>
 			<label for="email">Email</label>
@@ -190,9 +200,7 @@ templ NewTenantPage(vm NewTenantView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action="/v1/dashboard/tenants" hx-post="/v1/dashboard/tenants" hx-target="#signup-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<div class="grid">
@@ -233,9 +241,7 @@ templ ProjectsPage(vm ProjectsView) {
 			</div>
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			if len(vm.Projects) == 0 {
 				<div class="empty-state">
@@ -284,9 +290,7 @@ templ NewProjectPage(vm NewProjectView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -364,26 +368,16 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<div class="grid">
 					<label>
 						Project
 						<select id="project_id" name="project_id" aria-describedby="project_id-error">
-							if vm.ProjectID == "" {
-								<option value="" selected>Tenant-wide (all projects)</option>
-							} else {
-								<option value="">Tenant-wide (all projects)</option>
-							}
+							<option value="" selected?={ vm.ProjectID == "" }>Tenant-wide (all projects)</option>
 							for _, p := range vm.Projects {
-								if vm.ProjectID == stringFromInt(p.ID) {
-									<option value={ stringFromInt(p.ID) } selected>{ p.Name }</option>
-								} else {
-									<option value={ stringFromInt(p.ID) }>{ p.Name }</option>
-								}
+								<option value={ stringFromInt(p.ID) } selected?={ vm.ProjectID == stringFromInt(p.ID) }>{ p.Name }</option>
 							}
 						</select>
 						@fieldError(vm.FieldErrors, "project_id")
@@ -391,13 +385,8 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 					<label>
 						Type
 						<select id="key_type" name="key_type" aria-describedby="key_type-error">
-							if vm.KeyType == "secret" {
-								<option value="publishable">Publishable — embed in shipped game clients (read + player session bootstrap)</option>
-								<option value="secret" selected>Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
-							} else {
-								<option value="publishable" selected>Publishable — embed in shipped game clients (read + player session bootstrap)</option>
-								<option value="secret">Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
-							}
+							<option value="publishable" selected?={ vm.KeyType != "secret" }>Publishable — embed in shipped game clients (read + player session bootstrap)</option>
+							<option value="secret" selected?={ vm.KeyType == "secret" }>Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
 						</select>
 						@fieldError(vm.FieldErrors, "key_type")
 					</label>
@@ -427,9 +416,7 @@ templ APIKeysPage(vm APIKeysView) {
 			</div>
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/new") } role="button" class="btn-inline">+ New API key</a>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			if len(vm.Keys) == 0 {
 				<div class="empty-state">
@@ -566,12 +553,8 @@ templ AccountPage(vm AccountView) {
 		<section class="card">
 			<h2>Change password</h2>
 			<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
-			if vm.Message != "" {
-				<p class="flash-success">{ vm.Message }</p>
-			}
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@flashSuccess(vm.Message)
+			@errorAlert(vm.Error)
 			<form method="post" action="/v1/dashboard/account/password">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label for="current_password">Current password</label>
@@ -599,12 +582,8 @@ templ TeamPage(vm TeamView) {
 			</div>
 			<a href={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") } role="button" class="btn-inline">+ Invite teammate</a>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
-		if vm.Error != "" {
-			<p role="alert">{ vm.Error }</p>
-		}
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
 		<section class="card">
 			<h2>Members</h2>
 			if len(vm.Members) == 0 {
@@ -690,9 +669,7 @@ templ InviteTeamPage(vm InviteTeamView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -703,13 +680,8 @@ templ InviteTeamPage(vm InviteTeamView) {
 				<label>
 					Role
 					<select name="role" aria-describedby="role-error">
-						if vm.Role == "tenant_member" {
-							<option value="tenant_admin">Tenant admin</option>
-							<option value="tenant_member" selected>Tenant member</option>
-						} else {
-							<option value="tenant_admin" selected>Tenant admin</option>
-							<option value="tenant_member">Tenant member</option>
-						}
+						<option value="tenant_admin" selected?={ vm.Role != "tenant_member" }>Tenant admin</option>
+						<option value="tenant_member" selected?={ vm.Role == "tenant_member" }>Tenant member</option>
 					</select>
 					@fieldError(vm.FieldErrors, "role")
 				</label>
@@ -736,9 +708,7 @@ templ PlatformTeamPage(vm PlatformTeamView) {
 				<a href="/v1/dashboard/admin/team/invite" role="button" class="btn-inline">+ Invite platform admin</a>
 			</div>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			<h2>Admins</h2>
 			if len(vm.Admins) == 0 {
@@ -801,9 +771,7 @@ templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action="/v1/dashboard/admin/team/invite">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -834,9 +802,7 @@ templ PlayersPage(vm PlayersView) {
 			</div>
 			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") } role="button" class="btn-inline">+ Invite player</a>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			<form method="get" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>
 				<label>
@@ -905,9 +871,7 @@ templ InvitePlayerPage(vm InvitePlayerView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -937,9 +901,7 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 				<p class="subtitle">External ID <code>{ vm.Player.ExternalID }</code></p>
 			</div>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			<dl class="kv">
 				<dt>Email verified</dt>
@@ -967,12 +929,8 @@ templ VerifyPage(vm VerifyView) {
 	@authLayout("Verify email — ggscale") {
 		<h1>Verify your email</h1>
 		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>. Enter it below.</p>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
-		if vm.Error != "" {
-			<p role="alert">{ vm.Error }</p>
-		}
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
 		<form method="post" action="/v1/dashboard/verify">
 			<label for="code">Verification code</label>
 			<input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus aria-describedby="code-error"/>
@@ -1051,9 +1009,7 @@ templ FleetPage(vm FleetView) {
 				}
 			</div>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			<form method="get" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
 				<label>
@@ -1136,9 +1092,7 @@ templ FleetDetailPage(vm FleetDetailView) {
 				<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") } role="button" class="contrast outline btn-inline">Deallocate</a>
 			}
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card"
 			hx-get={ allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/events" }
 			hx-trigger="every 5s"
@@ -1214,9 +1168,7 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 					</p>
 				}
 				if len(vm.Fleets) > 0 {
-					if vm.Error != "" {
-						<p role="alert">{ vm.Error }</p>
-					}
+					@errorAlert(vm.Error)
 				<form method="post" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<label>
@@ -1272,9 +1224,7 @@ templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<dl class="kv">
 				<dt>Backend</dt><dd><code>{ vm.Allocation.Backend }</code></dd>
 				<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
@@ -1428,9 +1378,7 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 			</div>
 			<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
 		</div>
-		if vm.Message != "" {
-			<p class="flash-success">{ vm.Message }</p>
-		}
+		@flashSuccess(vm.Message)
 		<section class="card">
 			<form method="get" action="/v1/dashboard/admin/users">
 				<label>
@@ -1577,9 +1525,7 @@ templ NewFleetPage(vm NewFleetView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -1718,9 +1664,7 @@ templ EditFleetPage(vm EditFleetView) {
 			</div>
 		</div>
 		<section class="card">
-			if vm.Error != "" {
-				<p role="alert">{ vm.Error }</p>
-			}
+			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>

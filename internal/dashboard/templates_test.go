@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/a-h/templ"
@@ -249,6 +250,43 @@ func TestFormErrorFragment_RendersAlertRole(t *testing.T) {
 	html := renderToString(t, FormErrorFragment("nope"))
 	assert.Contains(t, html, `role="alert"`)
 	assert.Contains(t, html, ">nope<")
+}
+
+func TestErrorAlert_RendersWhenMessagePresent(t *testing.T) {
+	html := renderToString(t, errorAlert("boom"))
+	assert.Contains(t, html, `<p role="alert">boom</p>`)
+}
+
+func TestErrorAlert_RendersNothingWhenEmpty(t *testing.T) {
+	html := renderToString(t, errorAlert(""))
+	assert.Empty(t, html)
+}
+
+func TestFlashSuccess_RendersWhenMessagePresent(t *testing.T) {
+	html := renderToString(t, flashSuccess("saved"))
+	assert.Contains(t, html, `<p class="flash-success">saved</p>`)
+}
+
+func TestFlashSuccess_RendersNothingWhenEmpty(t *testing.T) {
+	html := renderToString(t, flashSuccess(""))
+	assert.Empty(t, html)
+}
+
+func TestNewAPIKeyPage_MarksSelectedKeyType(t *testing.T) {
+	html := renderToString(t, NewAPIKeyPage(NewAPIKeyView{
+		KeyType: "secret",
+	}))
+	assert.Contains(t, html, `<option value="secret" selected>`)
+	assert.NotContains(t, html, `<option value="publishable" selected>`)
+}
+
+func TestInviteTeamPage_MarksSelectedRoleOnce(t *testing.T) {
+	html := renderToString(t, InviteTeamPage(InviteTeamView{
+		Role: "tenant_member",
+	}))
+	// The invite form has a single <select>, so exactly one option is selected.
+	assert.Equal(t, 1, strings.Count(html, " selected"))
+	assert.Contains(t, html, `<option value="tenant_member" selected>`)
 }
 
 func TestSetupTokenPage_RendersTokenFilePath(t *testing.T) {

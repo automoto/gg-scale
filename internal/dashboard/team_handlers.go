@@ -84,7 +84,7 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectDashboard, "")
-	target := tenantTeamPath(tenantID) + "?flash=" + url.QueryEscape("Invite sent to "+res.Email)
+	target := tenantTeamPath(tenantID) + queryFlash + url.QueryEscape("Invite sent to "+res.Email)
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -137,7 +137,7 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+"?flash="+url.QueryEscape("Invite revoked."))
+	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Invite revoked."))
 }
 
 func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
@@ -155,14 +155,14 @@ func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	err := h.removeMember(r.Context(), session.User.ID, tenantID, membershipID)
 	if errors.Is(err, errCannotRemoveSelf) {
-		http.Redirect(w, r, tenantTeamPath(tenantID)+"?flash="+url.QueryEscape("You can't remove yourself; ask another admin."), http.StatusSeeOther)
+		http.Redirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("You can't remove yourself; ask another admin."), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
 		http.Error(w, "remove failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+"?flash="+url.QueryEscape("Member removed."))
+	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Member removed."))
 }
 
 func (h *Handler) platformTeamPage(w http.ResponseWriter, r *http.Request) {
@@ -386,5 +386,5 @@ func (h *Handler) inviteAcceptURL(code string) string {
 }
 
 func tenantTeamPath(tenantID int64) string {
-	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/team"
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/team"
 }

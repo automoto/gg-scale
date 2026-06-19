@@ -59,7 +59,7 @@ func (h *Handler) issueSession(ctx context.Context, w http.ResponseWriter, userI
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    refreshToken,
-		Path:     "/v1/dashboard",
+		Path:     pathDashboard,
 		Expires:  expires,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -76,7 +76,7 @@ func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
-		Path:     "/v1/dashboard",
+		Path:     pathDashboard,
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,

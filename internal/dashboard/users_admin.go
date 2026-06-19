@@ -118,7 +118,7 @@ func (h *Handler) toggleDashboardUserDisabled(w http.ResponseWriter, r *http.Req
 	if disable {
 		if err := validateUserDisableTarget(session.User.ID, userID); err != nil {
 			http.Redirect(w, r,
-				"/v1/dashboard/admin/users?flash="+url.QueryEscape("You can't disable yourself; ask another platform admin."),
+				pathAdminUsersFlash+url.QueryEscape("You can't disable yourself; ask another platform admin."),
 				http.StatusSeeOther)
 			return
 		}
@@ -181,7 +181,7 @@ func (h *Handler) toggleDashboardUserDisabled(w http.ResponseWriter, r *http.Req
 	}
 	if errors.Is(err, errCannotDisableLastPlatformAdmin) {
 		http.Redirect(w, r,
-			"/v1/dashboard/admin/users?flash="+url.QueryEscape("You can't disable the last enabled platform admin."),
+			pathAdminUsersFlash+url.QueryEscape("You can't disable the last enabled platform admin."),
 			http.StatusSeeOther)
 		return
 	}
@@ -191,5 +191,5 @@ func (h *Handler) toggleDashboardUserDisabled(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	htmxRedirect(w, r, "/v1/dashboard/admin/users?flash="+url.QueryEscape(flashMsg))
+	htmxRedirect(w, r, pathAdminUsersFlash+url.QueryEscape(flashMsg))
 }

@@ -32,7 +32,7 @@ type setupInput struct {
 
 func (h *Handler) setupTokenPage(w http.ResponseWriter, r *http.Request) {
 	if h.bootstrap == nil || !h.bootstrap.Pending() {
-		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
+		http.Error(w, msgSetupUnavailable, http.StatusGone)
 		return
 	}
 	webutil.Render(r, w, SetupTokenPage(SetupTokenView{TokenFilePath: h.bootstrap.TokenFilePath()}))
@@ -40,7 +40,7 @@ func (h *Handler) setupTokenPage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) verifySetupToken(w http.ResponseWriter, r *http.Request) {
 	if h.bootstrap == nil || !h.bootstrap.Pending() {
-		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
+		http.Error(w, msgSetupUnavailable, http.StatusGone)
 		return
 	}
 	if !webutil.ParseForm(w, r) {
@@ -70,7 +70,7 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	err := h.createFirstAdmin(r, in)
 	if err == nil {
-		htmxRedirect(w, r, "/v1/dashboard/login")
+		htmxRedirect(w, r, pathDashboardLogin)
 		return
 	}
 	switch {
@@ -82,7 +82,7 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		}))
 
 	case errors.Is(err, errBootstrapUnavailable):
-		http.Error(w, "dashboard setup is no longer available", http.StatusGone)
+		http.Error(w, msgSetupUnavailable, http.StatusGone)
 	case errors.Is(err, errInvalidSignup):
 		view := SetupAdminView{Token: in.Token, Email: in.Email, FieldErrors: map[string]string{}}
 		if !validDashboardEmail(in.Email) {
@@ -143,7 +143,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.User = user
-	htmxRedirect(w, r, "/v1/dashboard")
+	htmxRedirect(w, r, pathDashboard)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +155,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	h.clearSessionCookie(w)
-	htmxRedirect(w, r, "/v1/dashboard/login")
+	htmxRedirect(w, r, pathDashboardLogin)
 }
 
 func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) error {

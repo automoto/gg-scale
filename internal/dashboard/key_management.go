@@ -46,7 +46,7 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 		return nil, errInvalidTenant
 	}
 	if h.pool == nil {
-		return nil, errors.New("dashboard: database pool is required")
+		return nil, errors.New(msgDashboardPoolNeeded)
 	}
 
 	var out []APIKeyView
@@ -83,7 +83,7 @@ func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOp
 		return nil, errInvalidTenant
 	}
 	if h.pool == nil {
-		return nil, errors.New("dashboard: database pool is required")
+		return nil, errors.New(msgDashboardPoolNeeded)
 	}
 	var out []ProjectOption
 	ctx = db.WithTenant(ctx, tenantID)
@@ -114,7 +114,7 @@ func (h *Handler) createProject(ctx context.Context, tenantID int64, name string
 		return ProjectOption{}, errInvalidProjectName
 	}
 	if h.pool == nil {
-		return ProjectOption{}, errors.New("dashboard: database pool is required")
+		return ProjectOption{}, errors.New(msgDashboardPoolNeeded)
 	}
 	var out ProjectOption
 	ctx = db.WithTenant(ctx, tenantID)
@@ -144,7 +144,7 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		return createKeyResult{}, errInvalidKeyType
 	}
 	if h.pool == nil {
-		return createKeyResult{}, errors.New("dashboard: database pool is required")
+		return createKeyResult{}, errors.New(msgDashboardPoolNeeded)
 	}
 
 	apiKey, err := randomAPIKey()

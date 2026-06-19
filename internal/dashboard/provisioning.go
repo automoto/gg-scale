@@ -42,7 +42,7 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		return signupResult{}, errInvalidSignup
 	}
 	if h.pool == nil {
-		return signupResult{}, errors.New("dashboard: database pool is required")
+		return signupResult{}, errors.New(msgDashboardPoolNeeded)
 	}
 
 	apiKey, err := randomAPIKey()
