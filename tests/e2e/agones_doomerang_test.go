@@ -25,7 +25,7 @@ import (
 // full Phase A-D stack end-to-end against a live k3s+Agones cluster.
 // Preconditions:
 //   - k3s+Agones running (make up-fleet-agones && agones-install).
-//   - Doomerang Fleet applied: kubectl apply -f k8s/fleets/doomerang.yaml.
+//   - Doomerang Fleet applied: kubectl apply -f infra/k8s/fleets/doomerang.yaml.
 //   - Image buildwrangler/doomerang-server reachable from the cluster.
 //
 // On non-Linux developer machines where the GameServer's reported
@@ -121,7 +121,7 @@ func requireDoomerangFleetReady(t *testing.T, cs *versioned.Clientset) {
 	})
 	require.NoError(t, err)
 	if len(fleets.Items) == 0 {
-		t.Skipf("no doomerang Fleet found; run `kubectl apply -f k8s/fleets/doomerang.yaml`")
+		t.Skipf("no doomerang Fleet found; run `kubectl apply -f infra/k8s/fleets/doomerang.yaml`")
 	}
 	// Wait briefly for at least one Ready replica.
 	deadline := time.Now().Add(60 * time.Second)

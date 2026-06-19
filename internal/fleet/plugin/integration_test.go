@@ -18,14 +18,14 @@ import (
 	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
 )
 
-// buildExamplePlugin compiles cmd/ggscale-fleet-example into a fresh temp
+// buildExamplePlugin compiles examples/ggscale-fleet-example into a fresh temp
 // directory and returns the directory path. The temp dir is reaped by the
 // test's t.TempDir().
 func buildExamplePlugin(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "ggscale-fleet-example")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/ggscale/ggscale/cmd/ggscale-fleet-example")
+	cmd := exec.Command("go", "build", "-o", bin, "github.com/ggscale/ggscale/examples/ggscale-fleet-example")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build example plugin: %s", out)
