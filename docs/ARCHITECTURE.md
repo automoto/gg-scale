@@ -80,9 +80,9 @@ back to stderr only.
 | Service | Image | Role |
 |---|---|---|
 | `k3s` | `rancher/k3s:v1.30.6-k3s1` | Single-node control plane + agent. Runs `--network=host`, `--privileged`, with Traefik and ServiceLB disabled. Writes the kubeconfig to `./.k3s/kubeconfig.yaml`. |
-| `agones-install` | `bitnami/kubectl:1.30` | One-shot job that applies `k8s/agones-install.yaml` (pinned Agones v1.42.0) and waits for the controller + allocator to roll out. |
+| `agones-install` | `bitnami/kubectl:1.30` | One-shot job that applies `infra/k8s/agones-install.yaml` (pinned Agones v1.42.0) and waits for the controller + allocator to roll out. |
 
-The Agones install manifest is committed verbatim under `k8s/agones-install.yaml`
+The Agones install manifest is committed verbatim under `infra/k8s/agones-install.yaml`
 (top-of-file comment records the source URL and version). Bumping Agones is a
 re-fetch and a PR.
 
@@ -453,7 +453,7 @@ pinned to commit SHAs.
    `e2e` job can consume it. Runs with `contents: read` only — no GHCR
    credentials.
 3. **e2e** — depends on `docker-build`; loads the artifact image, starts compose
-   (lite stack + k8s profile), installs Agones, runs `go test -tags=e2e ./e2e/...`
+   (lite stack + k8s profile), installs Agones, runs `go test -tags=e2e ./tests/e2e/...`
    (healthz against ggscale/MailHog/dashboard; Agones smoke skips when no kubeconfig).
    On failure, compose logs are captured as an artifact.
 

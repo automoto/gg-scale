@@ -27,6 +27,20 @@ fi
 
 # ─── k8s profile (macOS Colima) ─────────────────────────────────────────
 
+if [ "$mode" = "k8s" ]; then
+  infra_dir="${GGSCALE_INFRA_DIR:-infra}"
+  if [ ! -f "$infra_dir/k8s/agones-install.yaml" ]; then
+    cat >&2 <<EOF
+preflight: Agones manifests not found at $infra_dir/k8s/agones-install.yaml.
+
+  git submodule update --init --recursive
+
+Or set GGSCALE_INFRA_DIR=/path/to/gg-scale-infra.
+EOF
+    err=1
+  fi
+fi
+
 if [ "$mode" = "k8s" ] && [ "$(uname -s)" = "Darwin" ] && [ -z "${GGSCALE_SKIP_COLIMA_CHECK:-}" ]; then
   if ! command -v colima >/dev/null 2>&1; then
     cat >&2 <<EOF

@@ -8,8 +8,10 @@
         preflight preflight-k8s clean clean-full
 
 FLEET_DOCKER_STACK := docker compose -f compose/fleet-docker.yml
-FLEET_AGONES_STACK := docker compose -f compose/fleet-agones.yml
 FULL_STACK         := docker compose -f compose/full.yml
+GGSCALE_INFRA_DIR ?= infra
+GGSCALE_INFRA_ABS := $(abspath $(GGSCALE_INFRA_DIR))
+FLEET_AGONES_STACK := GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) docker compose -f compose/fleet-agones.yml
 
 # Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
 DOCKER_IMAGE ?= buildwrangler/ggscale
@@ -31,7 +33,7 @@ test-integration:
 # Runs the e2e suite against an already-running compose stack.
 # Use `make up-fleet-agones && make agones-install && make e2e`.
 e2e:
-	go test -race -tags=e2e -timeout=180s ./e2e/...
+	go test -race -tags=e2e -timeout=180s ./tests/e2e/...
 
 # Runs the docker fleet-backend integration test against the local Docker
 # daemon. Requires a reachable daemon and network access to pull
@@ -74,7 +76,7 @@ proto:
 # $$GGSCALE_PLUGIN_DIR/ggscale-fleet-example and run core with
 # FLEET_BACKEND=plugin:example to exercise the plugin path end-to-end.
 build-example-plugin:
-	go build -o bin/ggscale-fleet-example ./cmd/ggscale-fleet-example
+	go build -o bin/ggscale-fleet-example ./examples/ggscale-fleet-example
 
 seed:
 	go run ./scripts/ggscale-seed -force
@@ -163,4 +165,4 @@ preflight:
 	@bash scripts/preflight.sh
 
 preflight-k8s:
-	@bash scripts/preflight.sh k8s
+	@GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) bash scripts/preflight.sh k8s

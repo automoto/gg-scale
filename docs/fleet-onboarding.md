@@ -46,12 +46,12 @@ Agones backend: `Ready` on startup, periodic `Health`, watch for the
 
 ### 2. A Fleet manifest
 
-A Kubernetes Fleet CR under `k8s/fleets/<your-game>.yaml`. Picks your
+A Kubernetes Fleet CR under `infra/k8s/fleets/<your-game>.yaml`. Picks your
 transport, port policy, replicas, region label, drain budget, and
 image. Operators apply it with kubectl or GitOps; ggscale never
 creates Fleets — it only allocates from them.
 
-Minimum viable manifest, drawn from `k8s/fleets/doomerang.yaml`:
+Minimum viable manifest, drawn from `infra/k8s/fleets/doomerang.yaml`:
 
 ```yaml
 apiVersion: agones.dev/v1

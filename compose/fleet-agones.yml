@@ -2,7 +2,9 @@
 #
 # Spins up a single-node k3s cluster inside compose, installs Agones, and
 # points ggscale-server at the resulting kubeconfig. `POST /v1/fleet/allocate`
-# allocates a GameServer from an Agones Fleet (see k8s/fleets/doomerang.yaml).
+# allocates a GameServer from an Agones Fleet (see infra/k8s/fleets/doomerang.yaml).
+# Set GGSCALE_INFRA_DIR to a checked-out gg-scale-infra repo if not using the
+# infra submodule.
 #
 # Usage:
 #   make up-fleet-agones && make agones-install
@@ -61,7 +63,7 @@ services:
     network_mode: host
     volumes:
       - ../.k3s:/kube:ro
-      - ../k8s:/manifests:ro
+      - ${GGSCALE_INFRA_DIR:-../infra}/k8s:/manifests:ro
       - ../scripts:/scripts:ro
     environment:
       KUBECONFIG: /kube/kubeconfig.yaml

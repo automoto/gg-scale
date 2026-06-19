@@ -11,7 +11,7 @@ ggscale is a single Go binary. Drop it on any Linux box, point it at a Postgres 
 ## Quickstart
 
 ```bash
-git clone https://github.com/automoto/gg-scale.git
+git clone --recurse-submodules https://github.com/automoto/gg-scale.git
 cd gg-scale
 make up
 curl -s localhost:8080/v1/healthz
@@ -32,6 +32,9 @@ This starts the **simple stack**: ggscale-server, Postgres, and MailHog (SMTP + 
 The client module is published as **`github.com/automoto/ggscale-go`** (sibling repo `ggscale-go`). It covers auth, storage, leaderboards, and profile with a pluggable `Transport`.
 
 New to the model? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for tenants, projects, and API keys.
+
+If you cloned without submodules, run `git submodule update --init --recursive`
+before using the k3s + Agones profile.
 
 ## Docker Compose setups
 
@@ -65,6 +68,10 @@ make up-fleet-agones && make agones-install
 ```
 
 Linux contributors need nothing extra.
+
+The Agones profile mounts manifests from the `infra/k8s/` checkout by default.
+To use a separate checkout of `gg-scale-infra`, run make with
+`GGSCALE_INFRA_DIR=/path/to/gg-scale-infra`.
 
 ## Common commands
 
