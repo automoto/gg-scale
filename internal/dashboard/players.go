@@ -350,7 +350,7 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.sendPlayerInviteEmail(r.Context(), res, projectID)
-	target := "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
 		"/players?flash=" + url.QueryEscape("Invite sent to "+res.Email)
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -394,8 +394,8 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	if enable {
 		flash = "Player re-enabled."
 	}
-	target := "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players/" + strconv.FormatInt(playerID, 10) + "?flash=" + url.QueryEscape(flash)
+		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash + url.QueryEscape(flash)
 	htmxRedirect(w, r, target)
 }

@@ -121,74 +121,15 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 			return errInviteExpired
 		}
 
-		user, gerr := q.GetDashboardUserAnyStatusByEmail(ctx, row.Email)
-		switch {
-		case errors.Is(gerr, pgx.ErrNoRows):
-			if len(in.Password) < 12 {
-				return errWeakPassword
-			}
-			pwHash, hashErr := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
-			if hashErr != nil {
-				return fmt.Errorf("invite bcrypt: %w", hashErr)
-			}
-			created, cerr := q.CreateVerifiedDashboardUser(ctx, sqlcgen.CreateVerifiedDashboardUserParams{
-				Email:           row.Email,
-				PasswordHash:    pwHash,
-				IsPlatformAdmin: row.Role == roleInvitePlatformAdmin,
-			})
-			if cerr != nil {
-				return fmt.Errorf("invite create user: %w", cerr)
-			}
-			out.UserID = created.ID
-			out.Email = created.Email
-			out.IsNewUser = true
-		case gerr != nil:
-			return gerr
-		case user.DisabledAt.Valid:
-			// User exists but a platform admin disabled them; refuse
-			// the invite acceptance with a friendly sentinel.
-			return errInviteForDisabledAccount
-		default:
-			// Existing user: require the CURRENT password before granting
-			// a session or escalating roles. Mere possession of the magic
-			// link is otherwise a full account takeover for anyone with
-			// inbox / mail-server access.
-			if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(in.Password)) != nil {
-				return errInvalidCredentials
-			}
-			out.UserID = user.ID
-			out.Email = user.Email
-			if row.Role == roleInvitePlatformAdmin && !user.IsPlatformAdmin {
-				if err := q.PromoteDashboardUserToPlatformAdmin(ctx, user.ID); err != nil {
-					return fmt.Errorf("invite promote: %w", err)
-				}
-			}
+		resolved, rerr := h.resolveInviteUser(ctx, q, row, in)
+		if rerr != nil {
+			return rerr
 		}
-		if h.rbac != nil && row.Role == roleInvitePlatformAdmin {
-			if err := h.rbac.AddPlatformAdminTx(ctx, tx, out.UserID); err != nil {
-				return fmt.Errorf("rbac platform admin invite: %w", err)
-			}
-		}
+		out = resolved
 
-		if row.TenantID != nil {
-			membershipRole := roleAdmin
-			if row.Role == roleInviteTenantMember {
-				membershipRole = roleMember
-			}
-			if _, err := q.CreateDashboardMembership(ctx, sqlcgen.CreateDashboardMembershipParams{
-				DashboardUserID: out.UserID,
-				TenantID:        *row.TenantID,
-				Role:            membershipRole,
-			}); err != nil {
-				return fmt.Errorf("invite membership: %w", err)
-			}
-			if h.rbac != nil {
-				if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, out.UserID, *row.TenantID, membershipRole); err != nil {
-					return fmt.Errorf("rbac tenant invite: %w", err)
-				}
-			}
+		if err := h.applyInviteRoles(ctx, tx, q, row, out.UserID); err != nil {
+			return err
 		}
-
 		return q.MarkDashboardInvitationAccepted(ctx, row.ID)
 	})
 	if err != nil {
@@ -196,6 +137,88 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 	}
 	h.reloadRBACPolicy(ctx)
 	return out, nil
+}
+
+// resolveInviteUser returns the dashboard user the invite resolves to,
+// creating a verified account for first-time invitees and verifying the
+// current password (and promoting platform admins) for existing ones.
+func (h *Handler) resolveInviteUser(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.GetDashboardInvitationByCodeHashRow, in acceptInviteInput) (acceptInviteResult, error) {
+	user, gerr := q.GetDashboardUserAnyStatusByEmail(ctx, row.Email)
+	switch {
+	case errors.Is(gerr, pgx.ErrNoRows):
+		return h.createInviteUser(ctx, q, row, in)
+	case gerr != nil:
+		return acceptInviteResult{}, gerr
+	case user.DisabledAt.Valid:
+		// User exists but a platform admin disabled them; refuse
+		// the invite acceptance with a friendly sentinel.
+		return acceptInviteResult{}, errInviteForDisabledAccount
+	}
+
+	// Existing user: require the CURRENT password before granting a session
+	// or escalating roles. Mere possession of the magic link is otherwise a
+	// full account takeover for anyone with inbox / mail-server access.
+	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(in.Password)) != nil {
+		return acceptInviteResult{}, errInvalidCredentials
+	}
+	if row.Role == roleInvitePlatformAdmin && !user.IsPlatformAdmin {
+		if err := q.PromoteDashboardUserToPlatformAdmin(ctx, user.ID); err != nil {
+			return acceptInviteResult{}, fmt.Errorf("invite promote: %w", err)
+		}
+	}
+	return acceptInviteResult{UserID: user.ID, Email: user.Email}, nil
+}
+
+// createInviteUser provisions a verified dashboard_user for a first-time
+// invitee, enforcing the password floor.
+func (h *Handler) createInviteUser(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.GetDashboardInvitationByCodeHashRow, in acceptInviteInput) (acceptInviteResult, error) {
+	if len(in.Password) < 12 {
+		return acceptInviteResult{}, errWeakPassword
+	}
+	pwHash, hashErr := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
+	if hashErr != nil {
+		return acceptInviteResult{}, fmt.Errorf("invite bcrypt: %w", hashErr)
+	}
+	created, cerr := q.CreateVerifiedDashboardUser(ctx, sqlcgen.CreateVerifiedDashboardUserParams{
+		Email:           row.Email,
+		PasswordHash:    pwHash,
+		IsPlatformAdmin: row.Role == roleInvitePlatformAdmin,
+	})
+	if cerr != nil {
+		return acceptInviteResult{}, fmt.Errorf("invite create user: %w", cerr)
+	}
+	return acceptInviteResult{UserID: created.ID, Email: created.Email, IsNewUser: true}, nil
+}
+
+// applyInviteRoles writes the platform-admin and tenant-membership grants the
+// invite confers, mirroring each into the RBAC store.
+func (h *Handler) applyInviteRoles(ctx context.Context, tx pgx.Tx, q *sqlcgen.Queries, row sqlcgen.GetDashboardInvitationByCodeHashRow, userID int64) error {
+	if h.rbac != nil && row.Role == roleInvitePlatformAdmin {
+		if err := h.rbac.AddPlatformAdminTx(ctx, tx, userID); err != nil {
+			return fmt.Errorf("rbac platform admin invite: %w", err)
+		}
+	}
+	if row.TenantID == nil {
+		return nil
+	}
+
+	membershipRole := roleAdmin
+	if row.Role == roleInviteTenantMember {
+		membershipRole = roleMember
+	}
+	if _, err := q.CreateDashboardMembership(ctx, sqlcgen.CreateDashboardMembershipParams{
+		DashboardUserID: userID,
+		TenantID:        *row.TenantID,
+		Role:            membershipRole,
+	}); err != nil {
+		return fmt.Errorf("invite membership: %w", err)
+	}
+	if h.rbac != nil {
+		if err := h.rbac.SetDashboardMembershipRoleTx(ctx, tx, userID, *row.TenantID, membershipRole); err != nil {
+			return fmt.Errorf("rbac tenant invite: %w", err)
+		}
+	}
+	return nil
 }
 
 var errWeakPassword = errors.New("dashboard: password too short")

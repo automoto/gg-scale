@@ -65,7 +65,7 @@ func (h *Handler) setVerifyPendingCookie(w http.ResponseWriter, p verifyPendingP
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyPendingCookieName,
 		Value:    value,
-		Path:     "/v1/dashboard",
+		Path:     pathDashboard,
 		MaxAge:   int(verifyPendingTTL.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -77,7 +77,7 @@ func (h *Handler) clearVerifyPendingCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyPendingCookieName,
 		Value:    "",
-		Path:     "/v1/dashboard",
+		Path:     pathDashboard,
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -272,7 +272,7 @@ func (h *Handler) confirmVerification(ctx context.Context, userID int64, code st
 func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.verifyPendingFromCookie(r)
 	if !ok {
-		http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+		http.Redirect(w, r, pathDashboardLogin, http.StatusSeeOther)
 		return
 	}
 	webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Message: r.URL.Query().Get("flash")}))
@@ -284,7 +284,7 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	p, ok := h.verifyPendingFromCookie(r)
 	if !ok {
-		http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+		http.Redirect(w, r, pathDashboardLogin, http.StatusSeeOther)
 		return
 	}
 	code := strings.TrimSpace(r.Form.Get("code"))
@@ -331,7 +331,7 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard", http.StatusSeeOther)
+	http.Redirect(w, r, pathDashboard, http.StatusSeeOther)
 }
 
 func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +340,7 @@ func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	p, ok := h.verifyPendingFromCookie(r)
 	if !ok {
-		http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+		http.Redirect(w, r, pathDashboardLogin, http.StatusSeeOther)
 		return
 	}
 	err := h.startVerification(r.Context(), p.UserID, p.Email)

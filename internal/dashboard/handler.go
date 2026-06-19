@@ -145,14 +145,14 @@ func New(d Deps) http.Handler {
 			r.Get("/projects", h.projectsPage)
 			r.Get("/projects/new", h.newProjectPage)
 			r.Post("/projects", h.createProjectHandler)
-			r.Get("/api-keys", h.apiKeys)
+			r.Get(segAPIKeys, h.apiKeys)
 			r.Get("/api-keys/new", h.newAPIKeyPage)
-			r.Post("/api-keys", h.createAPIKeyHandler)
+			r.Post(segAPIKeys, h.createAPIKeyHandler)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
 			r.Get("/team", h.teamPage)
-			r.Get("/team/invite", h.inviteTeamPage)
-			r.Post("/team/invite", h.inviteTeammateHandler)
+			r.Get(segTeamInvite, h.inviteTeamPage)
+			r.Post(segTeamInvite, h.inviteTeammateHandler)
 			r.Post("/team/invites/{inviteID}/revoke", h.revokeInviteHandler)
 			r.Post("/team/members/{membershipID}/remove", h.removeMemberHandler)
 			r.Get("/projects/{projectID}/players", h.playersListPage)
@@ -182,8 +182,8 @@ func New(d Deps) http.Handler {
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(h.requirePlatformAdmin)
 			r.Get("/team", h.platformTeamPage)
-			r.Get("/team/invite", h.invitePlatformAdminPage)
-			r.Post("/team/invite", h.invitePlatformAdminHandler)
+			r.Get(segTeamInvite, h.invitePlatformAdminPage)
+			r.Post(segTeamInvite, h.invitePlatformAdminHandler)
 			r.Get("/users", h.platformUsersPage)
 			r.Post("/users/{userID}/disable", h.disableDashboardUserHandler)
 			r.Post("/users/{userID}/enable", h.enableDashboardUserHandler)
@@ -198,7 +198,7 @@ func New(d Deps) http.Handler {
 	// cookie helper so the POST handler can still verify intent.
 	r.Group(func(r chi.Router) {
 		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
-			Path:     "/v1/dashboard",
+			Path:     pathDashboard,
 			Secure:   h.cfg.CookieSecure,
 			SameSite: http.SameSiteLaxMode,
 		}))
@@ -253,7 +253,7 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	projects, err := h.listProjects(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, "project list failed", http.StatusInternalServerError)
+		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -315,7 +315,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewProjectPage(view))
 		return
 	}
-	target := "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Project \""+strings.TrimSpace(name)+"\" created.")
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Project \""+strings.TrimSpace(name)+"\" created.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -349,10 +349,10 @@ func (h *Handler) openTenant(w http.ResponseWriter, r *http.Request) {
 	raw := r.URL.Query().Get("tenant_id")
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if raw == "" || err != nil || id <= 0 {
-		http.Redirect(w, r, "/v1/dashboard", http.StatusSeeOther)
+		http.Redirect(w, r, pathDashboard, http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(id, 10)+"/api-keys", http.StatusSeeOther)
+	http.Redirect(w, r, pathTenantsPrefix+strconv.FormatInt(id, 10)+segAPIKeys, http.StatusSeeOther)
 }
 
 func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
@@ -383,7 +383,7 @@ func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
 	}
 	projects, err := h.listProjects(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, "project list failed", http.StatusInternalServerError)
+		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -461,7 +461,7 @@ func (h *Handler) renderNewAPIKeyError(w http.ResponseWriter, r *http.Request, t
 	session, _ := sessionFromContext(r.Context())
 	projects, err := h.listProjects(r.Context(), tenantID)
 	if err != nil {
-		http.Error(w, "project list failed", http.StatusInternalServerError)
+		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
 		return
 	}
 	if keyType == "" {
@@ -495,7 +495,7 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys")
+	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 }
 
 func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
@@ -511,14 +511,14 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, "/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys")
+	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 }
 
 func (h *Handler) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, ok := h.sessionFromRequest(r)
 		if !ok {
-			http.Redirect(w, r, "/v1/dashboard/login", http.StatusSeeOther)
+			http.Redirect(w, r, pathDashboardLogin, http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(contextWithSession(r.Context(), session)))

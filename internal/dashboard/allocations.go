@@ -105,7 +105,7 @@ func (h *Handler) allocationsDetailPage(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err != nil {
-		http.Error(w, "fleet detail failed", http.StatusInternalServerError)
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -135,7 +135,7 @@ func (h *Handler) allocationsDetailFragment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
-		http.Error(w, "fleet detail failed", http.StatusInternalServerError)
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
 		return
 	}
 	webutil.Render(r, w, FleetDetailFragment(FleetDetailView{
@@ -172,7 +172,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !h.fleetEnabled() {
-		http.Error(w, "no fleet backend configured", http.StatusServiceUnavailable)
+		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
 		return
 	}
 	if !webutil.ParseForm(w, r) {
@@ -218,7 +218,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if ferr != nil {
-		slog.ErrorContext(r.Context(), "fleet lookup failed", "err", ferr, "fleet", fleetName)
+		slog.ErrorContext(r.Context(), msgFleetLookupFailed, "err", ferr, "fleet", fleetName)
 		view.Error = "Fleet lookup failed: " + ferr.Error()
 		w.WriteHeader(http.StatusInternalServerError)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
@@ -251,7 +251,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		slog.WarnContext(r.Context(), "audit log: fleet.allocate.manual", "err", auditErr)
 	}
 	target := allocationsBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
-		"?flash=" + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
+		queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -297,7 +297,7 @@ func (h *Handler) allocationsDeallocatePage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err != nil {
-		http.Error(w, "fleet detail failed", http.StatusInternalServerError)
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -320,7 +320,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if !h.fleetEnabled() {
-		http.Error(w, "no fleet backend configured", http.StatusServiceUnavailable)
+		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
 		return
 	}
 	if !webutil.ParseForm(w, r) {
@@ -331,7 +331,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		session, _ := sessionFromContext(r.Context())
 		alloc, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID)
 		if err != nil {
-			http.Error(w, "fleet detail failed", http.StatusInternalServerError)
+			http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -357,7 +357,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		strconv.FormatInt(allocID, 10), map[string]any{"project_id": projectID}); auditErr != nil {
 		slog.WarnContext(r.Context(), "audit log: fleet.deallocate.manual", "err", auditErr)
 	}
-	target := allocationsBasePath(tenantID, projectID) + "?flash=" + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
+	target := allocationsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -613,12 +613,12 @@ func (h *Handler) projectBelongsToTenant(ctx context.Context, tenantID, projectI
 }
 
 func allocationsBasePath(tenantID, projectID int64) string {
-	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 }
 
 func fleetsBasePath(tenantID, projectID int64) string {
-	return "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
 }
 

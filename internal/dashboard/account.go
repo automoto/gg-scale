@@ -75,5 +75,5 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clearSessionCookie(w)
-	htmxRedirect(w, r, "/v1/dashboard/login")
+	htmxRedirect(w, r, pathDashboardLogin)
 }
