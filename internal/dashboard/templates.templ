@@ -4,7 +4,7 @@ templ baseHead(title string) {
 	<head>
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
-		<meta name="color-scheme" content="light dark"/>
+		<meta name="color-scheme" content="dark"/>
 		<title>{ title }</title>
 		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true}'/>
 		<link rel="stylesheet" href="/v1/dashboard/assets/pico.min.css"/>
@@ -16,7 +16,7 @@ templ baseHead(title string) {
 
 templ appLayout(title, userEmail, csrfToken string) {
 	<!doctype html>
-	<html lang="en">
+	<html lang="en" data-theme="dark">
 		@baseHead(title)
 		<body>
 			<header class="app-header">
@@ -47,7 +47,7 @@ templ appLayout(title, userEmail, csrfToken string) {
 
 templ authLayout(title string) {
 	<!doctype html>
-	<html lang="en">
+	<html lang="en" data-theme="dark">
 		@baseHead(title)
 		<body>
 			<main class="auth-shell">

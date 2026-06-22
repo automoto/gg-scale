@@ -28,3 +28,4 @@
 - Go version preference: Use Go 1.26.3 or newer in the 1.26 line. The current module declares Go 1.26.4.
 - CI runner cost constraint: Linux only in CI; macOS/Windows runners cost money
 - After each task is completed, update our planning document to reflect any tasks we have completed for a milestone(phase).
+- Frontend work (dashboard/player UI): follow `docs/FRONTEND_GUIDELINES.md` (templ/HTMX behavior checklist) and `docs/FRONTEND_STYLING.md` (Pico CSS conventions, pinned asset versions, CSP constraints). Self-hosted assets only — no CDN, no Tailwind/Alpine, no inline `<script>`/`<style>`.

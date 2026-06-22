@@ -3,6 +3,10 @@
 A code-review checklist for the dashboard (Go + Templ + HTMX, Pico CSS).
 Each rule is a thing a reviewer should actually block on. Nits go elsewhere.
 
+> For styling/CSS conventions, Pico constraints, pinned asset versions
+> (Pico/htmx), the CSP rules, and doc links, see the companion
+> [`FRONTEND_STYLING.md`](./FRONTEND_STYLING.md).
+
 ---
 
 ## 1. Templ components

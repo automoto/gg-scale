@@ -1,8 +1,8 @@
-/* ggscale dashboard — editorial palette layered on Pico v2.
-   Design tokens live in :root. Pico variable rebinds let Pico's
-   classless components (button, input, table, card) inherit the brand
-   without parallel class systems. */
+/* ggscale dashboard — minimal dark theme on Pico CSS v2.
+   Leans on Pico's dark defaults; overrides only fonts, accent colour,
+   pill buttons, and the structural layout classes below. */
 
+/* === Fonts ================================================= */
 @font-face {
   font-family: "Inter Variable";
   font-style: normal;
@@ -10,7 +10,6 @@
   font-display: swap;
   src: url("/v1/dashboard/assets/fonts/inter-variable.woff2") format("woff2-variations");
 }
-
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
@@ -19,650 +18,338 @@
   src: url("/v1/dashboard/assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
 }
 
+/* === Tokens =============================================== */
 :root {
-  /* Color — ink/canvas */
-  --color-ink: #000000;
-  --color-canvas: #ffffff;
-  --color-on-primary: #ffffff;
-  --color-inverse-canvas: #000000;
-  --color-inverse-ink: #ffffff;
-  --color-on-inverse-soft: rgba(255, 255, 255, 0.16);
-
-  /* Color — surface */
-  --color-surface-soft: #f7f7f5;
-  --color-hairline: #e6e6e6;
-  --color-hairline-soft: #f1f1f1;
-
-  /* Color — pastel blocks */
-  --color-block-lime: #dceeb1;
-  --color-block-lilac: #c5b0f4;
-  --color-block-cream: #f4ecd6;
-  --color-block-pink: #efd4d4;
-  --color-block-mint: #c8e6cd;
-  --color-block-coral: #f3c9b6;
-  --color-block-navy: #1f1d3d;
-
-  /* Color — semantic + accent */
-  --color-accent-magenta: #ff3d8b;
-  --color-success: #1ea64a;
-
-  /* Type families */
-  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  /* Spacing scale — 8px base */
-  --space-hair: 1px;
-  --space-xxs: 4px;
-  --space-xs: 8px;
-  --space-sm: 12px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-xxl: 48px;
-  --space-section: 96px;
-
-  /* Radii */
-  --radius-xs: 2px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 24px;
-  --radius-xl: 32px;
-  --radius-pill: 50px;
-  --radius-full: 9999px;
-
-  /* Layout */
+  --font-sans: "Inter Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --content-max: 1280px;
 }
 
-/* === Pico variable rebinds ====================================
-   Pico components (button, input, form, card, table, nav) read these
-   variables. Rebind them to our tokens and Pico inherits the brand
-   automatically — no parallel class system needed.
-
-   Selector matches Pico v2's own theme block specificity
-   (:root:not([data-theme=dark])); without the :not(), Pico's defaults
-   win the cascade and primary CTAs revert to its blue. */
-:root:not([data-theme="dark"]),
-[data-theme="light"] {
+/* === Pico dark overrides ==================================
+   Only override what differs from Pico's built-in dark defaults. */
+[data-theme="dark"] {
   --pico-font-family: var(--font-sans);
   --pico-font-family-sans-serif: var(--font-sans);
   --pico-font-family-monospace: var(--font-mono);
 
-  --pico-color: var(--color-ink);
-  --pico-background-color: var(--color-canvas);
-  --pico-card-background-color: var(--color-canvas);
-  --pico-card-border-color: var(--color-hairline);
-  --pico-card-sectioning-background-color: var(--color-canvas);
-
-  --pico-muted-color: #5a5a5a;
-  --pico-muted-border-color: var(--color-hairline);
-
-  --pico-secondary: var(--color-ink);
-  --pico-secondary-hover: var(--color-ink);
-  --pico-secondary-focus: rgba(0, 0, 0, 0.18);
-  --pico-secondary-inverse: var(--color-on-primary);
-  --pico-secondary-background: var(--color-ink);
-  --pico-secondary-border: var(--color-ink);
-  --pico-secondary-hover-background: #1a1a1a;
-  --pico-secondary-hover-border: #1a1a1a;
-  --pico-secondary-underline: var(--color-ink);
-
-  --pico-primary: var(--color-ink);
-  --pico-primary-hover: var(--color-ink);
-  --pico-primary-focus: rgba(0, 0, 0, 0.18);
-  --pico-primary-inverse: var(--color-on-primary);
-  --pico-primary-background: var(--color-ink);
-  --pico-primary-border: var(--color-ink);
-  --pico-primary-hover-background: #1a1a1a;
-  --pico-primary-hover-border: #1a1a1a;
-  --pico-primary-underline: var(--color-ink);
-  --pico-primary-hover-underline: var(--color-ink);
-
-  --pico-contrast: var(--color-ink);
-  --pico-contrast-hover: #1a1a1a;
-  --pico-contrast-focus: rgba(0, 0, 0, 0.18);
-  --pico-contrast-inverse: var(--color-on-primary);
-  --pico-contrast-background: var(--color-ink);
-  --pico-contrast-border: var(--color-ink);
-  --pico-contrast-hover-background: #1a1a1a;
-  --pico-contrast-hover-border: #1a1a1a;
-  --pico-contrast-underline: var(--color-ink);
-
-  --pico-form-element-background-color: var(--color-canvas);
-  --pico-form-element-border-color: var(--color-hairline);
-  --pico-form-element-color: var(--color-ink);
-  --pico-form-element-placeholder-color: #8a8a8a;
-  --pico-form-element-focus-color: var(--color-ink);
-  --pico-form-element-active-background-color: var(--color-canvas);
-  --pico-form-element-active-border-color: var(--color-ink);
-  --pico-form-element-spacing-vertical: var(--space-sm);
-  --pico-form-element-spacing-horizontal: 14px;
-
-  --pico-border-radius: var(--radius-md);
-  --pico-spacing: var(--space-lg);
-
-  --pico-h1-color: var(--color-ink);
-  --pico-h2-color: var(--color-ink);
-  --pico-h3-color: var(--color-ink);
-  --pico-h4-color: var(--color-ink);
-  --pico-h5-color: var(--color-ink);
-  --pico-h6-color: var(--color-ink);
-
-  --pico-code-background-color: var(--color-surface-soft);
-  --pico-code-color: var(--color-ink);
-
-  --pico-ins-color: var(--color-success);
-  --pico-del-color: #c4364f;
+  /* Indigo accent */
+  --pico-primary:                  #818cf8;
+  --pico-primary-hover:            #a5b4fc;
+  --pico-primary-background:       #6366f1;
+  --pico-primary-hover-background: #4f46e5;
+  --pico-primary-border:           #6366f1;
+  --pico-primary-hover-border:     #4f46e5;
+  --pico-primary-focus:            rgba(99, 102, 241, 0.25);
+  --pico-primary-underline:        rgba(129, 140, 248, 0.5);
+  --pico-primary-inverse:          #fff;
 }
 
-html { scroll-behavior: smooth; }
+/* === Pill buttons ========================================= */
+button,
+[role="button"],
+input[type="submit"],
+input[type="button"],
+input[type="reset"] {
+  border-radius: 50px;
+}
 
+/* === Body ================================================= */
+html {
+  background-color: var(--pico-background-color);
+  color: var(--pico-color);
+}
 body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  background: var(--color-canvas);
   font-feature-settings: "kern";
+  background-color: var(--pico-background-color);
 }
 
-/* === Top app bar ============================================== */
+/* === Header =============================================== */
 .app-header {
-  background: var(--color-canvas);
-  border-bottom: 1px solid var(--color-hairline);
-  padding: 0;
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-border-color);
   position: sticky;
   top: 0;
   z-index: 10;
+  padding: 0;
 }
 .app-header > nav {
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-xs) var(--space-lg);
+  padding: 0.5rem 1.5rem;
   align-items: center;
 }
 .app-header ul { margin: 0; padding: 0; }
-.app-header li { padding: var(--space-xs) var(--space-sm); }
+.app-header li { padding: 0.5rem 0.75rem; }
 .app-header .brand {
-  font-weight: 540;
-  font-size: 18px;
+  font-weight: 600;
+  font-size: 1.1rem;
   letter-spacing: -0.01em;
   text-decoration: none;
-  color: var(--color-ink);
+  color: var(--pico-color);
 }
-.app-header .brand:hover { color: var(--color-ink); text-decoration: none; }
-.app-header .user-email {
-  color: #5a5a5a;
-  font-size: 14px;
-}
+.app-header .brand:hover { text-decoration: none; }
+.app-header .user-email { font-size: 0.875rem; opacity: 0.5; }
 .app-header form { margin: 0; display: inline; }
-.app-header .btn-inline {
-  margin: 0;
-  width: auto;
-  padding: 6px 14px;
-  font-size: 14px;
-}
-.app-header a { text-decoration: none; }
+.app-header a { text-decoration: none; color: var(--pico-color); }
 .app-header a:hover { text-decoration: underline; }
+.app-header .btn-inline { width: auto; padding: 4px 14px; font-size: 0.875rem; margin: 0; }
 
-/* === Main content ============================================= */
+/* === Main ================================================= */
 main.app-main {
   flex: 1;
-  width: 100%;
   max-width: var(--content-max);
   margin: 0 auto;
-  padding: var(--space-xl) var(--space-lg) var(--space-xxl);
+  width: 100%;
+  padding: 2rem 1.5rem 3rem;
 }
 
+/* === Page structure ======================================= */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: var(--space-md);
-  margin-bottom: var(--space-lg);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
 }
 .page-header h1 {
   margin: 0;
-  font-size: 32px;
-  font-weight: 540;
-  letter-spacing: -0.4px;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   line-height: 1.15;
 }
-.page-header .subtitle {
-  color: #5a5a5a;
-  font-size: 16px;
-  font-weight: 330;
-  margin: var(--space-xxs) 0 0;
+.page-header .subtitle { font-size: 0.9rem; opacity: 0.55; margin: 0.25rem 0 0; }
+.breadcrumb { font-size: 0.875rem; opacity: 0.45; margin-bottom: 0.5rem; }
+.breadcrumb a { color: inherit; }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.45;
+  margin: 0 0 0.25rem;
 }
-.breadcrumb {
-  font-size: 14px;
-  color: #5a5a5a;
-  margin-bottom: var(--space-xs);
+.caption {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.45;
 }
-.breadcrumb a { color: #5a5a5a; }
 
-/* === Auth pages =============================================== */
+/* === Auth shell =========================================== */
 .auth-shell {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-xxl) var(--space-lg);
+  padding: 3rem 1.5rem;
   width: 100%;
   max-width: none;
 }
 .auth-shell article {
   width: 100%;
   max-width: 420px;
-  padding: var(--space-xl);
   margin: 0;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-hairline);
 }
 .auth-shell h1 {
   text-align: center;
-  font-size: 26px;
-  font-weight: 540;
-  letter-spacing: -0.26px;
-  margin-bottom: var(--space-xxs);
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.25rem;
 }
 .auth-shell .subtitle {
   text-align: center;
-  color: #5a5a5a;
-  font-size: 16px;
-  margin-bottom: var(--space-lg);
+  opacity: 0.55;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
 }
 
-/* === Cards / sections ========================================= */
+/* === Cards ================================================ */
 section.card {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg);
-  margin-bottom: var(--space-md);
+  border: 1px solid var(--pico-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  background: var(--pico-card-background-color);
+  overflow-x: auto;
 }
-section.card > h2 {
-  margin-top: 0;
-  margin-bottom: var(--space-xxs);
-  font-size: 20px;
-  font-weight: 540;
-  letter-spacing: -0.01em;
-}
-section.card > .card-subtitle {
-  color: #5a5a5a;
-  font-size: 14px;
-  margin: 0 0 var(--space-md);
-}
+section.card > h2 { margin-top: 0; font-size: 1.1rem; font-weight: 600; }
+section.card > .card-subtitle { opacity: 0.55; font-size: 0.875rem; margin: 0 0 1rem; }
 
-/* === Forms ==================================================== */
+/* === Forms ================================================ */
 .btn-inline { width: auto; }
 .form-actions {
   display: flex;
   justify-content: flex-end;
-  gap: var(--space-sm);
-  margin-top: var(--space-sm);
+  gap: 0.75rem;
+  margin-top: 0.75rem;
 }
 .form-actions button,
-.form-actions [role="button"] {
-  width: auto;
-  margin: 0;
-}
+.form-actions [role="button"] { width: auto; margin: 0; }
 
-/* === Tables =================================================== */
-.data-table {
-  font-size: 16px;
-  margin-bottom: 0;
+/* === Tables =============================================== */
+/* Break out of card's horizontal padding so the table uses the full card width. */
+.data-table { font-size: 0.9rem; margin-bottom: 0; width: 100%; }
+section.card .data-table {
+  margin-left: -1.5rem;
+  margin-right: -1.5rem;
+  width: calc(100% + 3rem);
 }
 .data-table th {
   font-family: var(--font-mono);
+  font-size: 0.65rem;
   font-weight: 400;
-  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: #5a5a5a;
-  border-bottom: 1px solid var(--color-hairline);
+  letter-spacing: 0.08em;
+  opacity: 0.45;
+  border-bottom: 1px solid var(--pico-border-color);
 }
-.data-table td {
-  vertical-align: middle;
-  border-bottom: 1px solid var(--color-hairline-soft);
-}
-.data-table .actions-cell {
-  white-space: nowrap;
-  text-align: right;
-}
+.data-table td { vertical-align: middle; border-bottom: 1px solid var(--pico-border-color); }
+.data-table tr:last-child td { border-bottom: none; }
+.data-table .actions-cell { white-space: nowrap; text-align: right; }
 .data-table .actions-cell form { margin: 0; display: inline-block; }
-.data-table .actions-cell button {
-  width: auto;
-  margin: 0 0 0 var(--space-xs);
-  padding: 6px 14px;
-  font-size: 13px;
-}
+.data-table .actions-cell button { width: auto; margin: 0 0 0 0.5rem; padding: 4px 14px; font-size: 0.8rem; }
 .data-table .label-cell details { display: inline-block; }
 .data-table .label-cell .label-edit-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  cursor: pointer;
-  list-style: none;
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  cursor: pointer; list-style: none;
 }
 .data-table .label-cell .label-edit-toggle::-webkit-details-marker { display: none; }
-.data-table .label-cell .label-edit-icon {
-  font-size: 13px;
-  opacity: 0.55;
-  line-height: 1;
-}
+.data-table .label-cell .label-edit-icon { font-size: 0.8rem; opacity: 0.45; line-height: 1; }
 .data-table .label-cell .label-edit-toggle:hover .label-edit-icon,
 .data-table .label-cell details[open] .label-edit-icon { opacity: 1; }
-.data-table .label-cell details[open] form { margin-top: var(--space-xs); }
-.data-table .label-cell form {
-  margin: 0;
-  display: flex;
-  gap: var(--space-xs);
-  align-items: center;
-}
-.data-table .label-cell input {
-  margin: 0;
-  padding: 6px 10px;
-  font-size: 14px;
-  flex: 1;
-  min-width: 8rem;
-}
-.data-table .label-cell button {
-  width: auto;
-  margin: 0;
-  padding: 6px 12px;
-  font-size: 13px;
-}
-.data-table code {
-  font-size: 14px;
-  padding: 2px 6px;
-}
+.data-table .label-cell details[open] form { margin-top: 0.5rem; }
+.data-table .label-cell form { margin: 0; display: flex; gap: 0.5rem; align-items: center; }
+.data-table .label-cell input { margin: 0; padding: 4px 8px; font-size: 0.85rem; flex: 1; min-width: 8rem; }
+.data-table .label-cell button { width: auto; margin: 0; padding: 4px 10px; font-size: 0.8rem; }
+.data-table code { font-size: 0.8rem; padding: 1px 5px; }
 
-/* === Inline muted text ======================================== */
-.muted {
-  color: #5a5a5a;
-  font-style: italic;
-  font-size: 0.9em;
-}
-.muted-id {
-  color: #5a5a5a;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  margin-left: var(--space-xs);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.4px;
-}
-
-/* === Status badges ============================================ */
+/* === Badges =============================================== */
 .badge {
   display: inline-block;
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
+  padding: 2px 10px;
+  border-radius: 50px;
   font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.6px;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  line-height: 1.2;
-  border: 1px solid var(--color-hairline);
+  white-space: nowrap;
+  border: 1px solid var(--pico-border-color);
 }
-.badge-active {
-  border-color: var(--color-success);
-  color: var(--color-success);
-}
-.badge-revoked {
-  color: #5a5a5a;
-}
-.badge-role {
-  border-color: var(--color-ink);
-  color: var(--color-ink);
-}
+.badge-active  { border-color: #4ade80; color: #4ade80; }
+.badge-revoked { opacity: 0.35; }
+.badge-role    { border-color: var(--pico-primary); color: var(--pico-primary); }
 
-/* === Empty state ============================================== */
-.empty-state {
-  text-align: center;
-  padding: var(--space-xl) var(--space-md);
-  color: #5a5a5a;
-  font-size: 16px;
-  border: 1px dashed var(--color-hairline);
-  border-radius: var(--radius-lg);
-}
-
-/* === Alerts =================================================== */
+/* === Alerts =============================================== */
 [role="alert"] {
-  background: var(--color-block-pink);
-  color: var(--color-ink);
-  border: 1px solid var(--color-hairline);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  font-size: 16px;
+  border-left: 3px solid #f87171;
+  background: rgba(248, 113, 113, 0.08);
+  padding: 0.75rem 1rem;
+  border-radius: 0 var(--pico-border-radius) var(--pico-border-radius) 0;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
 }
 .flash-success {
-  background: var(--color-block-mint);
-  color: var(--color-ink);
-  border: 1px solid var(--color-hairline);
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-md);
-  margin-bottom: var(--space-md);
-  font-size: 16px;
+  border-left: 3px solid #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+  padding: 0.75rem 1rem;
+  border-radius: 0 var(--pico-border-radius) var(--pico-border-radius) 0;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
 }
 
-/* === Definition list (API key reveal) ========================= */
+/* === Misc ================================================= */
+.muted { opacity: 0.45; font-style: italic; font-size: 0.9em; }
+.muted-id {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  opacity: 0.45;
+  margin-left: 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.field-error {
+  display: block;
+  margin-top: -0.5rem;
+  margin-bottom: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: #f87171;
+}
+.empty-state {
+  text-align: center;
+  padding: 2rem 1rem;
+  opacity: 0.4;
+  font-size: 0.9rem;
+  border: 1px dashed var(--pico-border-color);
+  border-radius: var(--pico-border-radius);
+}
+
+/* === API key reveal ======================================= */
 dl.kv {
   display: grid;
   grid-template-columns: max-content 1fr;
-  column-gap: var(--space-lg);
-  row-gap: var(--space-xs);
-  margin: var(--space-md) 0 var(--space-lg);
+  column-gap: 1.5rem;
+  row-gap: 0.5rem;
+  margin: 1rem 0 1.5rem;
 }
 dl.kv dt {
   font-family: var(--font-mono);
-  font-weight: 400;
-  color: #5a5a5a;
-  font-size: 12px;
+  font-size: 0.65rem;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.08em;
+  opacity: 0.45;
   align-self: center;
 }
-dl.kv dd {
-  margin: 0;
+dl.kv dd { margin: 0; font-family: var(--font-mono); font-size: 0.875rem; word-break: break-all; }
+dl.kv code { display: block; padding: 0.75rem 1rem; font-size: 0.875rem; }
+
+.color-block {
+  border-radius: var(--pico-border-radius);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.07);
+  padding: 1.5rem 2rem;
+  margin: 1rem 0;
+}
+.color-block .reveal-warning { font-size: 0.875rem; opacity: 0.7; margin: 0 0 0.5rem; }
+.color-block > h2 { margin: 0 0 0.5rem; font-size: 1.2rem; font-weight: 600; }
+.color-block code { font-size: 0.875rem; }
+
+/* === Help page ============================================ */
+.flow-diagram {
+  background: var(--pico-code-background-color);
+  border: 1px solid var(--pico-border-color);
+  border-radius: var(--pico-border-radius);
+  padding: 1rem 1.5rem;
   font-family: var(--font-mono);
-  font-size: 14px;
-  word-break: break-all;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin: 0 0 0.75rem;
 }
-dl.kv code {
-  display: block;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-canvas);
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-md);
-  font-size: 14px;
-}
-
-/* === Tenant list ============================================== */
-.tenant-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.tenant-list li {
-  padding: var(--space-md) var(--space-xxs);
-  border-bottom: 1px solid var(--color-hairline-soft);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-md);
-}
-.tenant-list li:last-child { border-bottom: none; }
-.tenant-list li a { font-weight: 480; text-decoration: none; }
-.tenant-list li a:hover { text-decoration: underline; }
-
-.color-block .reveal-warning {
-  font-size: 14px;
-  color: var(--color-ink);
-  margin: 0 0 var(--space-xs);
-}
-
-/* === Help / concepts page ===================================== */
-.quick-steps {
-  margin: 0;
-  padding-left: var(--space-lg);
-}
-.quick-steps li {
-  margin-bottom: var(--space-xs);
-  line-height: 1.55;
-}
-.quick-steps li:last-child { margin-bottom: 0; }
-
 dl.concept-list {
   display: grid;
   grid-template-columns: 9rem 1fr;
-  column-gap: var(--space-lg);
-  row-gap: var(--space-md);
+  column-gap: 1.5rem;
+  row-gap: 1rem;
   margin: 0;
 }
-dl.concept-list dt {
-  font-weight: 540;
-  font-size: 16px;
-  color: var(--color-ink);
-  padding-top: 2px;
-}
-dl.concept-list dd {
-  margin: 0;
-  line-height: 1.55;
-  color: var(--color-ink);
-}
-dl.concept-list code {
-  font-size: 0.88em;
-  padding: 1px 5px;
-}
+dl.concept-list dt { font-weight: 600; font-size: 0.9rem; padding-top: 2px; }
+dl.concept-list dd { margin: 0; line-height: 1.55; }
+dl.concept-list code { font-size: 0.85em; padding: 1px 5px; }
+.quick-steps, .next-steps { margin: 0; padding-left: 1.5rem; }
+.quick-steps li, .next-steps li { margin-bottom: 0.5rem; line-height: 1.55; }
 
-.flow-diagram {
-  background: var(--color-surface-soft);
-  border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-md);
-  padding: var(--space-md) var(--space-lg);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-x: auto;
-  margin: 0 0 var(--space-sm);
-  color: var(--color-ink);
-}
-
-.next-steps {
-  margin: 0;
-  padding-left: var(--space-lg);
-}
-.next-steps li {
-  margin-bottom: var(--space-xs);
-  line-height: 1.55;
-}
-
-@media (max-width: 640px) {
-  dl.concept-list {
-    grid-template-columns: 1fr;
-    row-gap: var(--space-xs);
-  }
-  dl.concept-list dt { padding-top: var(--space-xs); }
-}
-
-/* === Responsive tweaks ======================================== */
+/* === Responsive =========================================== */
 @media (max-width: 640px) {
   .app-header .user-email { display: none; }
-  main.app-main { padding: var(--space-md) var(--space-sm) var(--space-xl); }
-  .page-header h1 { font-size: 26px; }
-  section.card { padding: var(--space-md); }
-}
-
-/* === Color-block sections =====================================
-   Pastel panels reserved for high-impact moments (API-key reveal,
-   signup success). Default padding is 24px so they read inside a
-   white card; --full modifier matches DESIGN.md's 48px full-bleed. */
-.color-block {
-  border-radius: var(--radius-lg);
-  padding: var(--space-lg) var(--space-xl);
-  margin: var(--space-md) 0;
-  color: var(--color-ink);
-}
-.color-block--full {
-  padding: var(--space-xxl);
-}
-.color-block > h2 {
-  margin: 0 0 var(--space-xs);
-  font-size: 22px;
-  font-weight: 540;
-  letter-spacing: -0.26px;
-  color: inherit;
-}
-.color-block > p { color: inherit; }
-.color-block code {
-  background: var(--color-canvas);
-  border: 1px solid var(--color-hairline);
-  color: var(--color-ink);
-}
-
-.color-block--lime  { background: var(--color-block-lime); }
-.color-block--lilac { background: var(--color-block-lilac); }
-.color-block--cream { background: var(--color-block-cream); }
-.color-block--mint  { background: var(--color-block-mint); }
-.color-block--pink  { background: var(--color-block-pink); }
-.color-block--coral { background: var(--color-block-coral); }
-.color-block--navy {
-  background: var(--color-block-navy);
-  color: var(--color-inverse-ink);
-}
-.color-block--navy code {
-  background: var(--color-on-inverse-soft);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: var(--color-inverse-ink);
-}
-
-@media (max-width: 768px) {
-  .color-block {
-    border-radius: 0;
-    padding: var(--space-lg);
-    margin-left: calc(-1 * var(--space-sm));
-    margin-right: calc(-1 * var(--space-sm));
-  }
-}
-
-/* === Eyebrow + caption (mono taxonomy) ========================
-   Used as section markers above page titles and as small caption
-   text. Always uppercase, never used for body copy. */
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: #5a5a5a;
-  margin: 0 0 var(--space-xs);
-}
-.caption {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.0;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
-  color: #5a5a5a;
-}
-
-/* === Inline field validation error ============================
-   Sits directly under the input it describes. Keep terse —
-   page-level [role="alert"] handles non-field-specific failures. */
-.field-error {
-  display: block;
-  margin-top: calc(-1 * var(--space-xs));
-  margin-bottom: var(--space-sm);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.4px;
-  color: #c4364f;
+  main.app-main { padding: 1rem 1rem 2rem; }
+  .page-header h1 { font-size: 1.5rem; }
+  section.card { padding: 1rem; }
+  dl.concept-list { grid-template-columns: 1fr; row-gap: 0.5rem; }
 }
