@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ggscale/ggscale/internal/auth"
 	cachebuild "github.com/ggscale/ggscale/internal/cache/build"
@@ -27,6 +29,7 @@ import (
 	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
 	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
 	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/ggscale/ggscale/internal/jobs"
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
 	_ "github.com/ggscale/ggscale/internal/mailer/smtp"
@@ -188,6 +191,14 @@ func run() error {
 	serverListRegistry := serverlist.New(15 * time.Second)
 	go serverListRegistry.RunGC(ctx, 10*time.Second)
 
+	// Background jobs (River). Expired game-session/invite cleanup runs as a
+	// leader-elected periodic job, so it fires once across the fleet rather
+	// than once per instance. River failures are non-fatal — GC is best-effort
+	// and the server must boot without it.
+	if stopRiver := startRiverJobs(ctx, pool, appPool, logger); stopRiver != nil {
+		defer stopRiver()
+	}
+
 	mmQueue := matchmaker.NewPGQueue(appPool)
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
@@ -282,6 +293,46 @@ func run() error {
 		slog.Warn("matchmaker worker did not drain in 30s; forcing shutdown")
 	}
 	return shutdownErr
+}
+
+// startRiverJobs boots the River client (periodic game-session/invite GC) and
+// returns a stop function, or nil if River couldn't start. River runs under
+// the app DB role via the pool's SET ROLE; its tables are granted in migration
+// 0055. Failures are logged and swallowed so a River problem never blocks boot.
+func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, logger *slog.Logger) func() {
+	workers := river.NewWorkers()
+	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
+
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+		Logger:  logger,
+		Workers: workers,
+		Queues: map[string]river.QueueConfig{
+			river.QueueDefault: {MaxWorkers: 2},
+		},
+		PeriodicJobs: []*river.PeriodicJob{
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) { return jobs.GameSessionGCArgs{}, nil },
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+		},
+	})
+	if err != nil {
+		logger.Error("river: client init failed; background jobs disabled", "error", err)
+		return nil
+	}
+	if err := client.Start(ctx); err != nil {
+		logger.Error("river: start failed; background jobs disabled", "error", err)
+		return nil
+	}
+	logger.Info("river started", "periodic_job", jobs.GameSessionGCKind)
+	return func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.Stop(stopCtx); err != nil {
+			logger.Warn("river: graceful stop failed", "error", err)
+		}
+	}
 }
 
 func assertAppDBRole(ctx context.Context, pool *pgxpool.Pool) error {

@@ -12,13 +12,21 @@ import (
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
+type friendPresence struct {
+	Status    string  `json:"status"`
+	SessionID *string `json:"session_id"`
+}
+
 type friendEntry struct {
-	ID         int64  `json:"id"`
-	FromUserID int64  `json:"from_user_id"`
-	ToUserID   int64  `json:"to_user_id"`
-	Status     string `json:"status"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID         int64           `json:"id"`
+	FromUserID int64           `json:"from_user_id"`
+	ToUserID   int64           `json:"to_user_id"`
+	Status     string          `json:"status"`
+	Email      *string         `json:"email,omitempty"`
+	XUID       *string         `json:"xuid,omitempty"`
+	Presence   *friendPresence `json:"presence,omitempty"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
 }
 
 // POST /v1/friends/{user_id}/request
@@ -208,19 +216,70 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 		var items []friendEntry
 		var lastID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			rows, qerr := sqlcgen.New(tx).ListFriendsByStatusForCaller(ctx, sqlcgen.ListFriendsByStatusForCallerParams{
+			q := sqlcgen.New(tx)
+			rows, qerr := q.ListFriendsByStatusForCaller(ctx, sqlcgen.ListFriendsByStatusForCallerParams{
 				Me: me, Status: status, Cursor: cursor, RowLimit: limit,
 			})
 			if qerr != nil {
 				return qerr
 			}
+
+			// Collect all friend user IDs for bulk identity + presence lookups.
+			friendIDs := make([]int64, 0, len(rows))
 			for _, row := range rows {
-				items = append(items, friendEntry{
+				other := row.ToUserID
+				if other == me {
+					other = row.FromUserID
+				}
+				friendIDs = append(friendIDs, other)
+			}
+
+			// Bulk-fetch email/xuid and presence. Both are tenant-scoped, so
+			// enrichment works regardless of whether a project is pinned.
+			idMap := map[int64]sqlcgen.ListEndUserIdentitiesForUsersRow{}
+			presMap := map[int64]sqlcgen.ListPresenceForUsersRow{}
+			if len(friendIDs) > 0 {
+				idRows, qerr := q.ListEndUserIdentitiesForUsers(ctx, friendIDs)
+				if qerr != nil {
+					return qerr
+				}
+				for _, ir := range idRows {
+					idMap[ir.EndUserID] = ir
+				}
+				presRows, qerr := q.ListPresenceForUsers(ctx, friendIDs)
+				if qerr != nil {
+					return qerr
+				}
+				for _, pr := range presRows {
+					presMap[pr.EndUserID] = pr
+				}
+			}
+
+			for _, row := range rows {
+				other := row.ToUserID
+				if other == me {
+					other = row.FromUserID
+				}
+				entry := friendEntry{
 					ID: row.ID, FromUserID: row.FromUserID, ToUserID: row.ToUserID,
 					Status:    row.Status,
 					CreatedAt: row.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 					UpdatedAt: row.UpdatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
-				})
+				}
+				if ir, ok := idMap[other]; ok {
+					if ir.Email != "" {
+						email := ir.Email
+						entry.Email = &email
+					}
+					entry.XUID = ir.Xuid
+				}
+				if pr, ok := presMap[other]; ok {
+					entry.Presence = &friendPresence{
+						Status:    pr.Status,
+						SessionID: pr.SessionID,
+					}
+				}
+				items = append(items, entry)
 				lastID = row.ID
 			}
 			return nil
@@ -228,6 +287,9 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 		if err != nil {
 			webutil.InternalError(w, "friends list: tx", err)
 			return
+		}
+		if items == nil {
+			items = []friendEntry{}
 		}
 		var next string
 		if len(items) == int(limit) {

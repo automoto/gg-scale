@@ -33,9 +33,9 @@ type CancelMatchmakingTicketParams struct {
 // CommitClaim will find zero rows and deallocate the orphan server.
 func (q *Queries) CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error) {
 	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, arg.ID, arg.EndUserID)
-	var id_2 int64
-	err := row.Scan(&id_2)
-	return id_2, err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const claimMatchmakerBucket = `-- name: ClaimMatchmakerBucket :many
@@ -181,6 +181,11 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND end_user_id = $2
 `
 
+type GetMatchmakingTicketParams struct {
+	ID        int64
+	EndUserID int64
+}
+
 type GetMatchmakingTicketRow struct {
 	ID            int64
 	TenantID      int64
@@ -195,11 +200,6 @@ type GetMatchmakingTicketRow struct {
 	MatchProtocol string
 	CreatedAt     pgtype.Timestamptz
 	MatchedAt     pgtype.Timestamptz
-}
-
-type GetMatchmakingTicketParams struct {
-	ID        int64
-	EndUserID int64
 }
 
 func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error) {

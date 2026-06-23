@@ -124,6 +124,17 @@ type AuditLog struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type CasbinRule struct {
+	ID    int64
+	Ptype string
+	V0    *string
+	V1    *string
+	V2    *string
+	V3    *string
+	V4    *string
+	V5    *string
+}
+
 type DashboardInvitation struct {
 	ID              int64
 	Email           string
@@ -196,6 +207,7 @@ type EndUser struct {
 	DisabledAt                        pgtype.Timestamptz
 	EmailVerificationLifetimeAttempts int32
 	EmailVerificationLockedUntil      pgtype.Timestamptz
+	Xuid                              *string
 }
 
 type EndUserInvitation struct {
@@ -209,6 +221,18 @@ type EndUserInvitation struct {
 	RevokedAt       pgtype.Timestamptz
 	InvitedByUserID int64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type FeatureGrant struct {
+	ID                        int64
+	TenantID                  int64
+	ProjectID                 *int64
+	Feature                   string
+	Enabled                   bool
+	ApprovedByDashboardUserID *int64
+	Reason                    *string
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
 }
 
 type Fleet struct {
@@ -244,6 +268,18 @@ type FriendEdge struct {
 	UpdatedAt  pgtype.Timestamptz
 }
 
+type GameInvite struct {
+	ID         int64
+	TenantID   int64
+	ProjectID  int64
+	FromUserID int64
+	ToUserID   int64
+	SessionID  string
+	JoinCode   string
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+}
+
 type GameServerAllocation struct {
 	ID          int64
 	TenantID    int64
@@ -258,6 +294,31 @@ type GameServerAllocation struct {
 	ReadyAt     pgtype.Timestamptz
 	ReleasedAt  pgtype.Timestamptz
 	FleetID     *int64
+}
+
+type GameSession struct {
+	ID         string
+	JoinCode   string
+	TenantID   int64
+	ProjectID  int64
+	TitleID    string
+	HostUserID int64
+	State      string
+	Props      []byte
+	MaxPlayers int32
+	Private    bool
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+}
+
+type GameSessionPeer struct {
+	TenantID  int64
+	SessionID string
+	EndUserID int64
+	Ip        *string
+	Port      *int32
+	Qos       []byte
+	LastSeen  pgtype.Timestamptz
 }
 
 type Leaderboard struct {
@@ -308,6 +369,14 @@ type PlatformAuditLog struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type Presence struct {
+	TenantID  int64
+	EndUserID int64
+	Status    string
+	SessionID *string
+	UpdatedAt pgtype.Timestamptz
+}
+
 type Project struct {
 	ID        int64
 	TenantID  int64
@@ -319,12 +388,12 @@ type Project struct {
 type Session struct {
 	ID          int64
 	TenantID    int64
-	ProjectID   int64
 	EndUserID   int64
 	RefreshHash []byte
 	ExpiresAt   pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
+	ProjectID   int64
 }
 
 type StorageObject struct {
@@ -350,6 +419,16 @@ type Tenant struct {
 }
 
 type UsageSample struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamplesDefault struct {
 	ID          int64
 	TenantID    int64
 	ProjectID   int64

@@ -220,6 +220,9 @@ func NewRouter(d Deps) http.Handler {
 					mountMatchmakerRoutes(r, d)
 					mountFleetListRoute(r, d)
 					mountRelayRoutes(r, d)
+					mountGameSessionRoutes(r, d)
+					mountPresenceRoutes(r, d)
+					mountGameInviteRoutes(r, d)
 				})
 			})
 		}

@@ -1,7 +1,16 @@
 -- name: GetProfile :one
-SELECT id, project_id, external_id, email, email_verified_at, created_at
+SELECT id, project_id, external_id, email, xuid, email_verified_at, created_at
 FROM end_users
 WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: UpdateProfileXuid :exec
+-- Self-set secondary identifier. NULL clears it. The unique partial index
+-- on (project_id, xuid) rejects collisions with a constraint violation.
+UPDATE end_users
+SET xuid = sqlc.narg('xuid')
+WHERE id = sqlc.arg('id')
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL;
 

@@ -124,3 +124,28 @@ func mountRelayRoutes(r chi.Router, d Deps) {
 	}
 	r.Post("/relay/credentials", relayCredentialsHandler(d))
 }
+
+func mountGameSessionRoutes(r chi.Router, d Deps) {
+	r.Route("/game-session", func(r chi.Router) {
+		r.Post("/", gameSessionCreateHandler(d))
+		r.Get("/", gameSessionResolveHandler(d))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", gameSessionGetHandler(d))
+			r.Post("/join", gameSessionJoinHandler(d))
+			r.Post("/heartbeat", gameSessionHeartbeatHandler(d))
+			r.Delete("/", gameSessionLeaveHandler(d))
+		})
+	})
+}
+
+func mountPresenceRoutes(r chi.Router, d Deps) {
+	r.Put("/presence", presenceUpdateHandler(d))
+}
+
+func mountGameInviteRoutes(r chi.Router, d Deps) {
+	r.Route("/invite", func(r chi.Router) {
+		r.Post("/", gameInviteCreateHandler(d))
+		r.Get("/", gameInviteListHandler(d))
+		r.Delete("/{id}", gameInviteDeleteHandler(d))
+	})
+}

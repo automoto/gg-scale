@@ -638,6 +638,25 @@ func (q *Queries) ListDashboardUsersForPlatformAdmin(ctx context.Context, arg Li
 	return items, nil
 }
 
+const lockDashboardUserVerification = `-- name: LockDashboardUserVerification :exec
+UPDATE dashboard_users
+SET email_verification_locked_until = $1::timestamptz
+WHERE id = $2
+`
+
+type LockDashboardUserVerificationParams struct {
+	LockedUntil pgtype.Timestamptz
+	ID          int64
+}
+
+// Set the lockout window on an account that just tipped over
+// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
+// duration stays a single source of truth.
+func (q *Queries) LockDashboardUserVerification(ctx context.Context, arg LockDashboardUserVerificationParams) error {
+	_, err := q.db.Exec(ctx, lockDashboardUserVerification, arg.LockedUntil, arg.ID)
+	return err
+}
+
 const lockEnabledPlatformAdmins = `-- name: LockEnabledPlatformAdmins :many
 SELECT id
 FROM dashboard_users
@@ -667,25 +686,6 @@ func (q *Queries) LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error
 		return nil, err
 	}
 	return items, nil
-}
-
-const lockDashboardUserVerification = `-- name: LockDashboardUserVerification :exec
-UPDATE dashboard_users
-SET email_verification_locked_until = $1::timestamptz
-WHERE id = $2
-`
-
-type LockDashboardUserVerificationParams struct {
-	LockedUntil pgtype.Timestamptz
-	ID          int64
-}
-
-// Set the lockout window on an account that just tipped over
-// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
-// duration stays a single source of truth.
-func (q *Queries) LockDashboardUserVerification(ctx context.Context, arg LockDashboardUserVerificationParams) error {
-	_, err := q.db.Exec(ctx, lockDashboardUserVerification, arg.LockedUntil, arg.ID)
-	return err
 }
 
 const markDashboardUserVerified = `-- name: MarkDashboardUserVerified :exec

@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const areFriendsAccepted = `-- name: AreFriendsAccepted :one
+SELECT id FROM friend_edges
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND ((from_user_id = $1 AND to_user_id = $2)
+       OR (from_user_id = $2 AND to_user_id = $1))
+  AND status = 'accepted'
+LIMIT 1
+`
+
+type AreFriendsAcceptedParams struct {
+	FromUserID int64
+	ToUserID   int64
+}
+
+// Returns the edge ID if an accepted friendship exists between the two
+// users in either direction; pgx.ErrNoRows if they are not friends.
+func (q *Queries) AreFriendsAccepted(ctx context.Context, arg AreFriendsAcceptedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, areFriendsAccepted, arg.FromUserID, arg.ToUserID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const deleteFriendEdge = `-- name: DeleteFriendEdge :execrows
 DELETE FROM friend_edges
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -57,6 +80,77 @@ func (q *Queries) GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (G
 	var i GetFriendEdgeRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
+}
+
+const listAcceptedFriendIDs = `-- name: ListAcceptedFriendIDs :many
+SELECT from_user_id, to_user_id
+FROM friend_edges
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND (from_user_id = $1 OR to_user_id = $1)
+  AND status = 'accepted'
+`
+
+type ListAcceptedFriendIDsRow struct {
+	FromUserID int64
+	ToUserID   int64
+}
+
+// Returns (from_user_id, to_user_id) pairs for all accepted friendships
+// involving the given user. Callers resolve the "other" user by comparing
+// each column against their own ID.
+func (q *Queries) ListAcceptedFriendIDs(ctx context.Context, fromUserID int64) ([]ListAcceptedFriendIDsRow, error) {
+	rows, err := q.db.Query(ctx, listAcceptedFriendIDs, fromUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAcceptedFriendIDsRow
+	for rows.Next() {
+		var i ListAcceptedFriendIDsRow
+		if err := rows.Scan(&i.FromUserID, &i.ToUserID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEndUserIdentitiesForUsers = `-- name: ListEndUserIdentitiesForUsers :many
+SELECT id AS end_user_id, COALESCE(email::text, '')::text AS email, xuid
+FROM end_users
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = ANY($1::bigint[])
+`
+
+type ListEndUserIdentitiesForUsersRow struct {
+	EndUserID int64
+	Email     string
+	Xuid      *string
+}
+
+// Bulk-fetch email + xuid for a set of users, used to enrich friend lists.
+// email is COALESCEd because anonymous users have none.
+func (q *Queries) ListEndUserIdentitiesForUsers(ctx context.Context, endUserIds []int64) ([]ListEndUserIdentitiesForUsersRow, error) {
+	rows, err := q.db.Query(ctx, listEndUserIdentitiesForUsers, endUserIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEndUserIdentitiesForUsersRow
+	for rows.Next() {
+		var i ListEndUserIdentitiesForUsersRow
+		if err := rows.Scan(&i.EndUserID, &i.Email, &i.Xuid); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFriendsByStatus = `-- name: ListFriendsByStatus :many

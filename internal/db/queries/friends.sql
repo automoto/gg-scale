@@ -63,3 +63,31 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id > $3
 ORDER BY id ASC
 LIMIT $4;
+
+-- name: ListAcceptedFriendIDs :many
+-- Returns (from_user_id, to_user_id) pairs for all accepted friendships
+-- involving the given user. Callers resolve the "other" user by comparing
+-- each column against their own ID.
+SELECT from_user_id, to_user_id
+FROM friend_edges
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND (from_user_id = $1 OR to_user_id = $1)
+  AND status = 'accepted';
+
+-- name: AreFriendsAccepted :one
+-- Returns the edge ID if an accepted friendship exists between the two
+-- users in either direction; pgx.ErrNoRows if they are not friends.
+SELECT id FROM friend_edges
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND ((from_user_id = $1 AND to_user_id = $2)
+       OR (from_user_id = $2 AND to_user_id = $1))
+  AND status = 'accepted'
+LIMIT 1;
+
+-- name: ListEndUserIdentitiesForUsers :many
+-- Bulk-fetch email + xuid for a set of users, used to enrich friend lists.
+-- email is COALESCEd because anonymous users have none.
+SELECT id AS end_user_id, COALESCE(email::text, '')::text AS email, xuid
+FROM end_users
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = ANY(sqlc.arg('end_user_ids')::bigint[]);

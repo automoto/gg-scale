@@ -12,7 +12,7 @@ import (
 )
 
 const getProfile = `-- name: GetProfile :one
-SELECT id, project_id, external_id, email, email_verified_at, created_at
+SELECT id, project_id, external_id, email, xuid, email_verified_at, created_at
 FROM end_users
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -24,6 +24,7 @@ type GetProfileRow struct {
 	ProjectID       int64
 	ExternalID      string
 	Email           *string
+	Xuid            *string
 	EmailVerifiedAt pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 }
@@ -36,6 +37,7 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 		&i.ProjectID,
 		&i.ExternalID,
 		&i.Email,
+		&i.Xuid,
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
 	)
@@ -75,5 +77,25 @@ func (q *Queries) UpdateProfileEmail(ctx context.Context, arg UpdateProfileEmail
 		arg.EmailVerificationSalt,
 		arg.EmailVerificationExpiresAt,
 	)
+	return err
+}
+
+const updateProfileXuid = `-- name: UpdateProfileXuid :exec
+UPDATE end_users
+SET xuid = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type UpdateProfileXuidParams struct {
+	Xuid *string
+	ID   int64
+}
+
+// Self-set secondary identifier. NULL clears it. The unique partial index
+// on (project_id, xuid) rejects collisions with a constraint violation.
+func (q *Queries) UpdateProfileXuid(ctx context.Context, arg UpdateProfileXuidParams) error {
+	_, err := q.db.Exec(ctx, updateProfileXuid, arg.Xuid, arg.ID)
 	return err
 }
