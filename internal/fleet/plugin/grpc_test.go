@@ -131,7 +131,7 @@ func TestErrToStatusGenericPreservesMessage(t *testing.T) {
 // These tests stand up the FleetBackend service on an in-memory listener and
 // drive it with the host-side grpcClient. This exercises the full translation
 // layer (server + client + streaming) without involving hashicorp/go-plugin's
-// subprocess machinery — that gets covered by M4.4's integration test against
+// subprocess machinery — that gets covered by the integration test against
 // the reference plugin binary.
 
 type fakeBackend struct {

@@ -26,7 +26,7 @@ type storageObjectResponse struct {
 	UpdatedAt string          `json:"updated_at"`
 }
 
-// PUT /v1/storage/objects/{key} — m1.md 4.2.1.
+// PUT /v1/storage/objects/{key}
 func storagePutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := chi.URLParam(r, "key")
@@ -115,7 +115,7 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// GET /v1/storage/objects/{key} — m1.md 4.2.2.
+// GET /v1/storage/objects/{key}
 func storageGetHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := chi.URLParam(r, "key")
@@ -157,7 +157,7 @@ func storageGetHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// DELETE /v1/storage/objects/{key} — m1.md 4.2.3.
+// DELETE /v1/storage/objects/{key}
 func storageDeleteHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := chi.URLParam(r, "key")
@@ -186,7 +186,7 @@ func storageDeleteHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// GET /v1/storage/objects — m1.md 4.2.4 (cursor pagination).
+// GET /v1/storage/objects (cursor pagination).
 func storageListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()

@@ -50,7 +50,7 @@ type profilePatchRequest struct {
 	XUID  *string `json:"xuid,omitempty"`
 }
 
-// GET /v1/profile — m1.md 4.5.1.
+// GET /v1/profile
 func profileGetHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -93,7 +93,7 @@ func profileGetHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// PATCH /v1/profile — m1.md 4.5.2. Editable fields: email and xuid. A new
+// PATCH /v1/profile. Editable fields: email and xuid. A new
 // email triggers a verification round-trip (clears email_verified_at, mints a
 // new verification token, sends mail) and returns 202; an xuid-only change
 // returns 204.

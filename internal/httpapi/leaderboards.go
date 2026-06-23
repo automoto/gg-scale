@@ -43,7 +43,7 @@ func leaderboardTopCacheKey(tenantID, leaderboardID int64, limit int32) string {
 	return fmt.Sprintf("leaderboard:top:%d:%d:%d", tenantID, leaderboardID, limit)
 }
 
-// POST /v1/leaderboards/{id}/scores — m1.md 4.3.1.
+// POST /v1/leaderboards/{id}/scores
 func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		leaderboardID, ok := pathInt64(r, "id")
@@ -94,7 +94,7 @@ func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// GET /v1/leaderboards/{id}/top?limit=N — m1.md 4.3.2.
+// GET /v1/leaderboards/{id}/top?limit=N
 func leaderboardTopHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		leaderboardID, ok := pathInt64(r, "id")
@@ -138,7 +138,7 @@ func leaderboardTopHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// GET /v1/leaderboards/{id}/around-me?radius=N — m1.md 4.3.3.
+// GET /v1/leaderboards/{id}/around-me?radius=N
 func leaderboardAroundMeHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		leaderboardID, ok := pathInt64(r, "id")

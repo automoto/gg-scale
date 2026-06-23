@@ -1,7 +1,6 @@
 // Command ggscale-fleet-example is the reference fleet plugin: a noop backend
 // that succeeds instantly with a hard-coded address. It doubles as the
-// third-party plugin author template and as the M4.4 integration-test
-// fixture.
+// third-party plugin author template and as the integration-test fixture.
 //
 // Invoke: drop the built binary at $GGSCALE_PLUGIN_DIR/ggscale-fleet-example
 // and run core with FLEET_BACKEND=plugin:example.

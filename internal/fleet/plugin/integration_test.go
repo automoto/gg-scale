@@ -34,8 +34,7 @@ func buildExamplePlugin(t *testing.T) string {
 
 // TestSupervisor_RestartsAfterCrash spawns the example plugin under
 // Supervisor, kills the subprocess mid-flight, and asserts the supervisor
-// auto-restarts exactly once and the new instance is functional. Matches the
-// M4.4 deliverable from docs/temp/m2.md.
+// auto-restarts exactly once and the new instance is functional.
 func TestSupervisor_RestartsAfterCrash(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; -short set")

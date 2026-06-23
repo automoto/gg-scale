@@ -24,8 +24,8 @@ type Mailer interface {
 	Send(ctx context.Context, msg Message) error
 }
 
-// Message is the minimum set of fields we need for Phase 1 transactional
-// mail. Add CC/BCC/HTML when product needs them.
+// Message is the minimum set of fields we need for transactional mail.
+// Add CC/BCC/HTML when product needs them.
 type Message struct {
 	From    string
 	To      []string

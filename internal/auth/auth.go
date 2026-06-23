@@ -4,8 +4,8 @@
 // tenant_id matches the api_key's tenant context to prevent cross-tenant
 // replay.
 //
-// Signing is HMAC-SHA256 with a single global key for Phase 1; per-tenant
-// signing keys with rotation land in v1.1 (see docs/m1.md §4.1.3).
+// Signing is HMAC-SHA256 with a single global key; per-tenant signing keys
+// with rotation land in v1.1.
 package auth
 
 import (

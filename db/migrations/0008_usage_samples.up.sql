@@ -1,6 +1,6 @@
 -- Usage samples drive billing. Range-partitioned monthly so old months can
 -- be archived/dropped cheaply. The DO block creates 12 forward partitions;
--- a maintenance job (Phase 4) extends the window every month.
+-- a maintenance job extends the window every month.
 
 CREATE TABLE usage_samples (
     id              BIGSERIAL,

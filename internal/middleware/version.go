@@ -1,6 +1,5 @@
 // Package middleware holds HTTP middleware shared across the ggscale-server
-// router. Version is the only middleware in Phase 0; rate-limit, tenant, and
-// observability middleware land in Phase 1.
+// router, such as version, rate-limit, tenant, and observability middleware.
 package middleware
 
 import (

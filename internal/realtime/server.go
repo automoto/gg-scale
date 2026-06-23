@@ -181,7 +181,7 @@ func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Dur
 			refreshSlots(context.Background())
 		}
 		// Inbound messages are currently ignored; lobby + chat handlers
-		// land in M6.1 follow-ups.
+		// are deferred.
 	}
 }
 

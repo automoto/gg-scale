@@ -88,7 +88,7 @@ type customTokenRequest struct {
 	Token string `json:"token"`
 }
 
-// anonymousHandler — m1.md 4.1.6
+// anonymousHandler
 func anonymousHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -150,7 +150,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// signupHandler — m1.md 4.1.1
+// signupHandler
 func signupHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req signupRequest
@@ -249,7 +249,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// verifyHandler — m1.md 4.1.2. Accepts {email, code}; matches by salt+hash
+// verifyHandler accepts {email, code}; matches by salt+hash
 // after looking up the row; enforces a 5-attempt cap before clearing.
 func verifyHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -363,7 +363,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// loginHandler — m1.md 4.1.3
+// loginHandler
 func loginHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req loginRequest
@@ -439,7 +439,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// refreshHandler — m1.md 4.1.4: rotate refresh, issue new access token.
+// refreshHandler rotates the refresh token and issues a new access token.
 func refreshHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req refreshRequest
@@ -513,7 +513,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// logoutHandler — m1.md 4.1.5
+// logoutHandler
 func logoutHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req logoutRequest
@@ -549,7 +549,7 @@ func logoutHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// customTokenHandler — m1.md 4.1.7: tenant-signed JWT carrying an
+// customTokenHandler accepts a tenant-signed JWT carrying an
 // external_id; ggscale verifies and mints a session for that user.
 func customTokenHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

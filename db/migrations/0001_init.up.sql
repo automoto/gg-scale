@@ -1,3 +1,3 @@
--- Phase 0 initial migration: extensions only. Tables land in Phase 1.
+-- Initial migration: extensions only. Tables land in later migrations.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;

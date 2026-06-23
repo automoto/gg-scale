@@ -4,7 +4,7 @@
 --      email_verified_at;
 --   2. a per-tenant HMAC secret on tenants for POST /v1/auth/custom-token
 --      (the integrator signs a JWT for their player; ggscale verifies and
---      mints a session). HS256 keeps Phase 1 simple — RS256 follows when
+--      mints a session). HS256 keeps this simple — RS256 follows when
 --      we add a key-rotation API.
 
 ALTER TABLE end_users

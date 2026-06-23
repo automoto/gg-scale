@@ -62,9 +62,9 @@ func TestCacheLimiter_isolates_buckets_by_key(t *testing.T) {
 	assert.True(t, dec.Allowed, "B is independent of A")
 }
 
-// TestRatelimit_fairness_under_load is m1.md task 3.4: tenant A hammers above
-// its tier limit and gets 429s; tenant B's modest traffic under load is
-// unaffected. With a per-process Store this runs without any container.
+// Fairness under load: tenant A hammers above its tier limit and gets 429s;
+// tenant B's modest traffic under load is unaffected. With a per-process Store
+// this runs without any container.
 func TestRatelimit_fairness_under_load_does_not_starve_other_tenants(t *testing.T) {
 	lim := ratelimit.NewCacheLimiter(memory.New())
 	reg := prometheus.NewRegistry()

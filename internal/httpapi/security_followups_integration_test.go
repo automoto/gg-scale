@@ -266,7 +266,7 @@ func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 	assert.Equal(t, 1, count, "expected exactly one audit row for the api-key create action")
 }
 
-// TestM5_APIKeyRevoke_EmitsPlatformAuditRow covers the revoke side of M5.
+// TestM5_APIKeyRevoke_EmitsPlatformAuditRow covers the api-key revoke audit row.
 func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "m5-audit-revoke")

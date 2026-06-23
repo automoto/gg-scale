@@ -12,7 +12,7 @@ import (
 
 // noopBackend is the reference fleet.Backend implementation. It allocates
 // nothing — every call resolves instantly to a hard-coded address — so it
-// doubles as the third-party plugin author template and as the M4.4
+// doubles as the third-party plugin author template and as the
 // integration-test fixture.
 type noopBackend struct {
 	counter atomic.Uint64
