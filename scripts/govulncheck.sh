@@ -30,6 +30,20 @@ ACCEPTED=(
     # Again a daemon-side issue. Same re-evaluation trigger as 4887.
     "GO-2026-4883"
 
+    # github.com/docker/docker — `docker cp` / `containers/{id}/archive`
+    # family of host-escape bugs:
+    #   GO-2026-5617  race in `docker cp` redirects a bind mount to a host path
+    #   GO-2026-5668  race in `docker cp` creates arbitrary empty host files via symlink swap
+    #   GO-2026-5746  PUT /containers/{id}/archive executes a container binary on the host
+    # All three execute daemon-side, and our client (internal/fleet/docker)
+    # never calls CopyToContainer/CopyFromContainer or the archive endpoint —
+    # only Container{Create,Start,Stop,Remove,Inspect}, ImagePull, Events, Ping.
+    # The only fix is moby 2.0.0-beta.14 (pre-release; no stable tag yet).
+    # Re-evaluate when Moby ships a tagged stable fix and the SDK requires it.
+    "GO-2026-5617"
+    "GO-2026-5668"
+    "GO-2026-5746"
+
     # github.com/pion/dtls/v2 — Random nonce generation for AES-GCM. Pulled
     # in transitively via github.com/pion/turn/v3 for the TURN relay. The
     # vuln applies to DTLS server-side crypto; our relay use is exposed,
