@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -205,9 +206,9 @@ func TestBackend_Allocate_cleans_up_when_probe_never_succeeds(t *testing.T) {
 func TestBackend_HTTPProbe_does_not_follow_redirects(t *testing.T) {
 	// A compromised image could 302 the probe at the cloud metadata
 	// service. The probe must refuse to follow and fail closed.
-	var got int
+	var got atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got++
+		got.Add(1)
 		w.Header().Set("Location", "http://169.254.169.254/latest/meta-data/")
 		w.WriteHeader(http.StatusFound)
 	}))
@@ -226,7 +227,7 @@ func TestBackend_HTTPProbe_does_not_follow_redirects(t *testing.T) {
 
 	_, err = be.Allocate(context.Background(), reqWithDocker("ggscale/echo:latest", 7777, "http", "/"))
 	require.Error(t, err, "probe must fail when the server only redirects")
-	assert.Greater(t, got, 0, "probe must have hit the container's port")
+	assert.Greater(t, got.Load(), int64(0), "probe must have hit the container's port")
 }
 
 func TestBackend_Allocate_uses_http_probe_when_configured(t *testing.T) {
