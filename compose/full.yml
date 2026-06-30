@@ -1,7 +1,7 @@
 # Full development stack.
 #
 # Builds on the Docker fleet backend (`compose/fleet-docker.yml`) and adds
-# Prometheus for metrics scraping and stripe-mock for billing tests.
+# Prometheus for metrics scraping.
 #
 # Usage:
 #   make up-full
@@ -10,10 +10,9 @@
 #
 # Endpoints:
 #   ggscale-server:  http://localhost:8080
-#   dashboard:       http://localhost:3001
+#   dashboard:       http://localhost:8080/v1/dashboard
 #   prometheus:      http://localhost:9090
 #   mailhog UI:      http://localhost:8025
-#   stripe-mock:     http://localhost:12111 (http), 12112 (https)
 
 name: ggscale
 
@@ -32,17 +31,6 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  stripe-mock:
-    image: stripe/stripe-mock:v0.197.0
-    ports:
-      - "12111:12111"
-      - "12112:12112"
     logging:
       driver: json-file
       options:

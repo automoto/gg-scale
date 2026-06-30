@@ -137,7 +137,7 @@ down-fleet-agones:
 agones-install:
 	$(FLEET_AGONES_STACK) run --rm agones-install
 
-# ─── Full dev stack (prometheus + docker fleet + stripe-mock) ───────────
+# ─── Full dev stack (prometheus + docker fleet) ─────────────────────────
 
 up-full: preflight
 	$(FULL_STACK) up -d --wait
