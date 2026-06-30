@@ -31,22 +31,24 @@ If you cloned without submodules, run `git submodule update --init --recursive` 
 
 ## Player and session features
 
-Everything durable is backed by Postgres with row-level security per tenant. These endpoints require an end-user session (`X-Session-Token`), which a player obtains through one of the auth flows; the Go SDK wraps them, and the raw routes live under `/v1/`.
+These are the calls a game client makes for a signed-in player: accounts, profiles, friends, presence, saves, leaderboards, game sessions, and invites. Each one needs an end-user session token and is stored in Postgres under a single tenant and project, so a player keeps their data across sessions and devices.
+
+Endpoints require an end-user session (`X-Session-Token`), which a player obtains through one of the auth flows; the Go SDK wraps them, and the raw routes live under `/v1/`.
 
 | Feature | Endpoints | What it does |
 |---|---|---|
-| **Accounts & auth** | `/v1/auth/*` | Email/password (bcrypt), anonymous, and `custom-token` sign-in, the last federating an existing identity provider through a tenant-signed JWT. Sessions are 15-minute HS256 access tokens paired with rotating 30-day refresh tokens, stored only as SHA-256 hashes. Email verification uses attempt-capped codes, and signup is anti-enumeration (uniform `202`). |
-| **Profiles** | `/v1/profile` | Per-player display name, avatar, and arbitrary JSON metadata; read and partial-update (`PATCH`). |
-| **Friends** | `/v1/friends/*` | Directed friend edges with a request → accept/reject/block state machine. Requests are idempotent and illegal transitions return `409`; the friends list is enriched with each friend's identity and live presence. |
-| **Presence** | `/v1/presence` | Online state plus a free-form status (≤32 chars), upserted per player. Every update fans out over WebSocket to the player's accepted friends. |
-| **Game sessions** | `/v1/game-session/*` | The room players share before and during a match: create or join by 6-character code, heartbeat to stay a member, and leave. Joins are row-locked to respect capacity (up to 64), stale peers are pruned on a 30-second window, and the session ends when the host leaves (4-hour TTL). Each peer row carries the player's public UDP endpoint for P2P connect. |
-| **Invites** | `/v1/invite/*` | Short-lived (5-minute) invites from a session host or member to an accepted friend; create, list pending, and cancel or decline. Pushed over WebSocket when the recipient is online. |
-| **Storage** | `/v1/storage/objects/*` | Per-player JSON object store for saves and settings, up to 1 MiB per value. Optimistic concurrency via a monotonic `version` and `If-Match` (`412` on conflict); cursor-paginated listing with key-prefix filters. |
-| **Leaderboards** | `/v1/leaderboards/*` | Append-only score entries ranked with SQL window functions on ascending or descending boards. `top` and `around-me` (0-based ranks) are open reads; submission is server-authoritative, requiring a secret key and the `leaderboard:submit` permission. |
-| **Realtime** | `/v1/ws` | A per-player WebSocket (one connection per end-user, newer-wins) the server uses to push presence changes, invites, and match-ready events. Concurrency is capped per tenant and per end-user by billing tier, with 30-second server heartbeats. |
-| **Relay** | `/v1/relay/credentials` | An embedded TURN server (pion/turn) for NAT traversal in P2P games. Issues short-lived (5-minute) TURN-REST credentials (HMAC-SHA1 over an expiry-scoped username); UDP listener on `:3478`. |
+| **Accounts & auth** | `/v1/auth/*` | Email/password, anonymous, and `custom-token` sign-in, the last bridging your own identity provider with a tenant-signed JWT. |
+| **Profiles** | `/v1/profile` | Read and update a player's display name, avatar, and JSON metadata. |
+| **Friends** | `/v1/friends/*` | Friend requests with an accept/reject/block flow, returning each friend's identity and live presence. |
+| **Presence** | `/v1/presence` | Online state and a short status string, pushed to the player's friends over WebSocket on every update. |
+| **Game sessions** | `/v1/game-session/*` | The room players share before and during a match: create or join by 6-character code, heartbeat to stay in, then leave. |
+| **Invites** | `/v1/invite/*` | Short-lived invites from a session host or member to a friend, delivered over WebSocket when the recipient is online. |
+| **Storage** | `/v1/storage/objects/*` | Per-player JSON store for saves and settings, up to 1 MiB per value with `If-Match` optimistic concurrency. |
+| **Leaderboards** | `/v1/leaderboards/*` | Ranked scoreboards with `top` and `around-me` reads and server-authoritative score submission. |
+| **Realtime** | `/v1/ws` | One WebSocket per player that the server uses to push presence, invites, and match-ready events. |
+| **Relay** | `/v1/relay/credentials` | Embedded TURN server (pion/turn) that hands out short-lived credentials for P2P NAT traversal. |
 
-Friends, presence, game sessions, and invites are the social layer most multiplayer games rebuild from scratch; ggscale ships them so you don't have to.
+Friends, presence, game sessions, and invites are the social layer many multiplayer games need.
 
 ## Matchmaking and the server browser
 
