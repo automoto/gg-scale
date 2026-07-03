@@ -185,7 +185,9 @@ func (s *Store) TokenBucket(ctx context.Context, key string, capacity, refillPer
 		}
 		return false, retry, nil
 	}
-	tokens -= cost
+	// min(capacity, ...) caps a refund (negative cost) so a credited token can
+	// never lift the bucket above its burst; a no-op for the normal cost>=0 path.
+	tokens = math.Min(capacity, tokens-cost)
 	if err := s.buckets.Put(ctx, key, encodeBucket(tokens, now), olricpkg.EX(bucketTTL(capacity, refillPerSec))); err != nil {
 		return false, 0, fmt.Errorf("olric: tokenbucket put: %w", err)
 	}

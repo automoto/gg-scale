@@ -123,6 +123,7 @@ type Querier interface {
 	DeleteGameInvite(ctx context.Context, arg DeleteGameInviteParams) (int64, error)
 	DeleteGameSession(ctx context.Context, id string) error
 	DeleteGameSessionPeer(ctx context.Context, arg DeleteGameSessionPeerParams) error
+	DeleteRateLimitOverride(ctx context.Context, arg DeleteRateLimitOverrideParams) error
 	DeleteTenantPlayerBan(ctx context.Context, arg DeleteTenantPlayerBanParams) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
@@ -136,6 +137,9 @@ type Querier interface {
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error)
+	// Tenant-level HTTP API override (project_id NULL, kind 'api'). Read by the
+	// rate-limit middleware; falls back to compiled tier defaults when absent.
+	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
 	GetDashboardInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetDashboardInvitationByCodeHashRow, error)
 	GetDashboardInvitationByID(ctx context.Context, id int64) (GetDashboardInvitationByIDRow, error)
@@ -170,6 +174,9 @@ type Querier interface {
 	// same session serialize on the session row and max_players is enforced
 	// without a TOCTOU race.
 	GetGameSessionForUpdate(ctx context.Context, id string) (GetGameSessionForUpdateRow, error)
+	// Most-specific-wins: a project-scoped row overrides a tenant-wide row for the
+	// same kind. Used by the invite throttle.
+	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
@@ -231,6 +238,9 @@ type Querier interface {
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	GetTenantPublicJoining(ctx context.Context) (bool, error)
+	// The tenant's billing tier, used to show the correct compiled default on the
+	// rate-limits page (enforcement keys off the same tier via the API key).
+	GetTenantTier(ctx context.Context, id int64) (string, error)
 	IncrementDashboardVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttemptsByID(ctx context.Context, id int64) (int32, error)
@@ -260,6 +270,10 @@ type Querier interface {
 	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
 	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
+	// Every override for a tenant — tenant-wide (project_id NULL) and per-project —
+	// in one query. The rate-limits page groups these in Go rather than issuing one
+	// ListRateLimitOverridesForProject per project (an N+1 over the project list).
+	ListAllRateLimitOverridesForTenant(ctx context.Context, tenantID int64) ([]ListAllRateLimitOverridesForTenantRow, error)
 	// Distinct backends seen across this tenant's recent allocations. Drives
 	// the backends-health page so operators see which backends actually serve
 	// traffic, not just the one currently configured.
@@ -439,6 +453,7 @@ type Querier interface {
 	// (tenant, project) or create one. Idempotent across repeated calls.
 	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error)
 	UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error
+	UpsertRateLimitOverride(ctx context.Context, arg UpsertRateLimitOverrideParams) error
 	WriteAudit(ctx context.Context, arg WriteAuditParams) error
 	WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error
 }

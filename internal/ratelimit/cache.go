@@ -27,3 +27,13 @@ func (l *CacheLimiter) Allow(ctx context.Context, key string, ratePerSecond, bur
 	}
 	return Decision{Allowed: allowed, RetryAfter: retry}, nil
 }
+
+// Refund credits one token back to the bucket (a negative-cost token-bucket
+// call). The backend caps the result at capacity, so a refund can never lift a
+// bucket above its burst. Used to undo a debit when the guarded action fails.
+func (l *CacheLimiter) Refund(ctx context.Context, key string, ratePerSecond, burst float64) error {
+	if _, _, err := l.store.TokenBucket(ctx, key, burst, ratePerSecond, -1); err != nil {
+		return fmt.Errorf("ratelimit: token bucket refund: %w", err)
+	}
+	return nil
+}

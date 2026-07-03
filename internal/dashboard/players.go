@@ -329,8 +329,21 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
+	if retry, throttled := h.inviteThrottled(r.Context(), session.User.ID, tenantID, projectID, email); throttled {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		w.WriteHeader(http.StatusTooManyRequests)
+		webutil.Render(r, w, InvitePlayerPage(InvitePlayerView{
+			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
+			TenantID: tenantID, ProjectID: projectID, Email: email,
+			Error: "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s.",
+		}))
+		return
+	}
 	res, err := h.createPlayerInvite(r.Context(), tenantID, projectID, email, session.User.ID)
 	if err != nil {
+		// The throttle already debited this send; the invite didn't happen, so
+		// return the tokens rather than charging a failed attempt against quota.
+		h.inviteRefund(r.Context(), session.User.ID, tenantID, projectID, email)
 		view := InvitePlayerView{
 			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
 			TenantID: tenantID, ProjectID: projectID, Email: email,

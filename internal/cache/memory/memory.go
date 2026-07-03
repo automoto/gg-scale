@@ -145,7 +145,9 @@ func (s *Store) TokenBucket(_ context.Context, key string, capacity, refillPerSe
 		retry := time.Duration(missing / refillPerSec * float64(time.Second))
 		return false, retry, nil
 	}
-	b.tokens -= cost
+	// min(capacity, ...) caps a refund (negative cost) so a credited token can
+	// never lift the bucket above its burst; a no-op for the normal cost>=0 path.
+	b.tokens = min(capacity, b.tokens-cost)
 	return true, 0, nil
 }
 

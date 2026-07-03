@@ -181,6 +181,34 @@ type APIKeysView struct {
 	Message   string
 }
 
+// RateLimitsView renders the per-tenant rate-limit override page.
+type RateLimitsView struct {
+	UserEmail       string
+	CSRFToken       string
+	TenantID        int64
+	IsPlatformAdmin bool
+	// API HTTP limit (tenant-wide, platform-admin editable).
+	APIOverridden   bool
+	APIRate         float64
+	APIBurst        float64
+	APIDefaultRate  float64
+	APIDefaultBurst float64
+	// Per-project invite quotas (tenant-admin editable).
+	Projects           []ProjectInviteLimitView
+	DefaultInviterHour float64
+	DefaultDomainDay   float64
+	Message            string
+	Error              string
+}
+
+// ProjectInviteLimitView is one project's invite-quota override (0 = default).
+type ProjectInviteLimitView struct {
+	ProjectID      int64
+	ProjectName    string
+	InviterPerHour float64
+	DomainPerDay   float64
+}
+
 // HelpView is the data rendered by the in-app concepts page.
 type HelpView struct {
 	UserEmail string

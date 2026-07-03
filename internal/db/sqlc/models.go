@@ -465,6 +465,17 @@ type ProjectPlayer struct {
 	SessionEpoch                      int32
 }
 
+type RateLimitOverride struct {
+	ID        int64
+	TenantID  int64
+	ProjectID *int64
+	Kind      string
+	Rate      float64
+	Burst     float64
+	UpdatedBy *int64
+	UpdatedAt pgtype.Timestamptz
+}
+
 type RiverClient struct {
 	ID        string
 	CreatedAt pgtype.Timestamptz

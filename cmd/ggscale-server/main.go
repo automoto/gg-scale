@@ -231,6 +231,8 @@ func run() error {
 		Pool:                 appPool,
 		Lookup:               tenant.NewSQLLookup(pool),
 		Limiter:              ratelimit.NewCacheLimiter(store),
+		RateLimitOverrides:   ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
+		ProxyTrust:           ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
 		Signer:               signer,
 		Mailer:               m,
 		MailFrom:             cfg.MailFrom,

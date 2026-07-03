@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -40,6 +41,14 @@ type Limiter interface {
 	Allow(ctx context.Context, key string, ratePerSecond, burst float64) (Decision, error)
 }
 
+// Refunder credits a previously-debited token back to a bucket, capped at the
+// bucket's burst. It is optional: callers type-assert a Limiter to Refunder and
+// skip the refund when unsupported. Used to undo a debit when the guarded
+// action fails after the token was taken.
+type Refunder interface {
+	Refund(ctx context.Context, key string, ratePerSecond, burst float64) error
+}
+
 const routeClassDefault = "v1"
 
 // APIKeyBucketKey returns the default route-class bucket key for apiKeyID.
@@ -50,10 +59,16 @@ func APIKeyBucketKey(apiKeyID int64) string {
 
 // New builds the rate-limit middleware.
 //
+// overrides (may be nil) is consulted per request for a tenant-level API
+// limit; when none is set, the compiled tier default from LimitsForTier
+// applies. Wrap a DBOverrideStore in a CachedOverrideStore so this stays
+// off the hot path — an override-lookup error is non-fatal and falls back
+// to the tier default rather than failing the request.
+//
 // The throttled counter (ggscale_ratelimit_throttled_total{tier,route_class})
 // is registered on reg so callers control the registry — useful for tests
 // and for keeping the production registry isolated from package globals.
-func New(lim Limiter, reg prometheus.Registerer) func(http.Handler) http.Handler {
+func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(http.Handler) http.Handler {
 	throttled := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "ggscale_ratelimit_throttled_total",
@@ -68,6 +83,7 @@ func New(lim Limiter, reg prometheus.Registerer) func(http.Handler) http.Handler
 		}
 		throttled = are.ExistingCollector.(*prometheus.CounterVec)
 	}
+	overrideErrs := newOverrideErrorCounter(reg)
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +94,17 @@ func New(lim Limiter, reg prometheus.Registerer) func(http.Handler) http.Handler
 			}
 
 			limits := LimitsForTier(key.Tier)
+			if overrides != nil {
+				o, ok, oerr := overrides.APILimit(r.Context(), key.TenantID)
+				switch {
+				case oerr != nil:
+					overrideErrs.WithLabelValues("api").Inc()
+					slog.WarnContext(r.Context(), "rate-limit override lookup failed; using tier default",
+						"err", oerr, "tenant_id", key.TenantID)
+				case ok:
+					limits = o
+				}
+			}
 			bucket := bucketKey(key.ID, routeClassDefault)
 			decision, err := lim.Allow(r.Context(), bucket, limits.RatePerSecond, limits.Burst)
 			if err != nil {

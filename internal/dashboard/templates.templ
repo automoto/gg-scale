@@ -240,7 +240,10 @@ templ ProjectsPage(vm ProjectsView) {
 				<h1>Projects</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
-			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
+			<div class="header-actions">
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") } role="button" class="secondary outline btn-inline">Rate limits</a>
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
+			</div>
 		</div>
 		@flashSuccess(vm.Message)
 		<section class="card">
@@ -577,6 +580,71 @@ templ fleetOperatorToggle(tenantID int64, csrf string, m TeamMemberView) {
 			<input type="hidden" name="action" value="grant"/>
 			<button type="submit" class="btn-inline">Grant fleet operator</button>
 		</form>
+	}
+}
+
+templ RateLimitsPage(vm RateLimitsView) {
+	@appLayout("Rate limits — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Rate limits</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Rate limits</p>
+				<h1>Rate limits</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
+		<section class="card">
+			<h2>HTTP API limit</h2>
+			<p class="card-subtitle">
+				Per-second rate and burst applied to this tenant's API keys. Blank
+				restores the tier default ({ rlNum(vm.APIDefaultRate) }/s, burst { rlNum(vm.APIDefaultBurst) }).
+			</p>
+			if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>Rate (requests/second)
+						<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.APIRate) } placeholder={ rlNum(vm.APIDefaultRate) }/>
+					</label>
+					<label>Burst
+						<input name="burst" type="number" step="any" min="0" value={ rlValue(vm.APIBurst) } placeholder={ rlNum(vm.APIDefaultBurst) }/>
+					</label>
+					<button type="submit">Save API limit</button>
+				</form>
+			} else {
+				if vm.APIOverridden {
+					<p>Override active: <strong>{ rlNum(vm.APIRate) }</strong>/s, burst <strong>{ rlNum(vm.APIBurst) }</strong>.</p>
+				} else {
+					<p>Using the tier default. </p>
+				}
+				<p class="muted">Only platform admins can change the API ceiling.</p>
+			}
+		</section>
+		<section class="card">
+			<h2>Invite quotas</h2>
+			<p class="card-subtitle">
+				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour,
+				{ rlNum(vm.DefaultDomainDay) }/project/day).
+			</p>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state"><p>No projects yet.</p></div>
+			} else {
+				for _, p := range vm.Projects {
+					<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(p.ProjectID) + "/invites") } class="rate-limit-row">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<strong>{ p.ProjectName }</strong>
+						<label>Invites / inviter / hour
+							<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(p.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
+						</label>
+						<label>Invites / project / day
+							<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(p.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
+						</label>
+						<button type="submit" class="btn-inline">Save</button>
+					</form>
+				}
+			}
+		</section>
 	}
 }
 

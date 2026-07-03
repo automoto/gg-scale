@@ -45,16 +45,22 @@ type Deps struct {
 	Version string
 	Commit  string
 
-	Pool     *db.Pool
-	Lookup   tenant.Lookup
-	Limiter  ratelimit.Limiter
-	Signer   *auth.Signer
-	Mailer   mailer.Mailer
-	MailFrom string
-	Cache    cache.Store
-	Registry *prometheus.Registry
-	RBAC     *rbac.Authorizer
-	Now      func() time.Time
+	Pool    *db.Pool
+	Lookup  tenant.Lookup
+	Limiter ratelimit.Limiter
+	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
+	// overrides. Wrap the DB store in a CachedOverrideStore.
+	RateLimitOverrides ratelimit.OverrideStore
+	// ProxyTrust resolves the real client IP for per-IP limits when the server
+	// is behind a trusted reverse proxy / load balancer. nil = RemoteAddr only.
+	ProxyTrust *ratelimit.ProxyTrust
+	Signer     *auth.Signer
+	Mailer     mailer.Mailer
+	MailFrom   string
+	Cache      cache.Store
+	Registry   *prometheus.Registry
+	RBAC       *rbac.Authorizer
+	Now        func() time.Time
 
 	// Fleet is the allocator for game-server slots. nil until a backend is
 	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
@@ -148,33 +154,36 @@ func NewRouter(d Deps) http.Handler {
 		r.Get("/healthz", healthzHandler(d))
 		if d.Dashboard.Enabled() {
 			r.Mount("/dashboard", dashboard.New(dashboard.Deps{
-				Pool:       d.Pool,
-				Cache:      d.Cache,
-				Limiter:    d.Limiter,
-				Registry:   reg,
-				Config:     d.Dashboard,
-				Bootstrap:  d.DashboardBootstrap,
-				Mailer:     d.Mailer,
-				Fleet:      d.Fleet,
-				RBAC:       d.RBAC,
-				PluginInfo: d.DashboardPluginInfo,
+				Pool:               d.Pool,
+				Cache:              d.Cache,
+				Limiter:            d.Limiter,
+				RateLimitOverrides: d.RateLimitOverrides,
+				ProxyTrust:         d.ProxyTrust,
+				Registry:           reg,
+				Config:             d.Dashboard,
+				Bootstrap:          d.DashboardBootstrap,
+				Mailer:             d.Mailer,
+				Fleet:              d.Fleet,
+				RBAC:               d.RBAC,
+				PluginInfo:         d.DashboardPluginInfo,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {
 			r.Mount("/players", players.New(players.Deps{
-				Pool:     d.Pool,
-				Mailer:   d.Mailer,
-				MailFrom: d.MailFrom,
-				Config:   d.Players,
-				Limiter:  d.Limiter,
-				Registry: reg,
+				Pool:       d.Pool,
+				Mailer:     d.Mailer,
+				MailFrom:   d.MailFrom,
+				Config:     d.Players,
+				Limiter:    d.Limiter,
+				ProxyTrust: d.ProxyTrust,
+				Registry:   reg,
 			}))
 		}
 
 		if d.hasAuthDeps() {
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.New(d.Lookup))
-				r.Use(ratelimit.New(d.Limiter, reg))
+				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
 
 				// /v1/auth/* — tenant-scoped, player-anonymous (api_key
 				// suffices). Auth endpoints get an additional per-IP
@@ -182,7 +191,7 @@ func NewRouter(d Deps) http.Handler {
 				// login/signup runs bcrypt (~250ms CPU) and a single
 				// api_key holder must not be able to burn shared CPU.
 				r.Group(func(r chi.Router) {
-					r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, reg))
+					r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, reg))
 					r.Post("/auth/signup", signupHandler(d))
 					r.Post("/auth/verify", verifyHandler(d))
 					r.Post("/auth/login", loginHandler(d))

@@ -73,6 +73,12 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 	email := r.Form.Get("email")
 	role := r.Form.Get("role")
 
+	if retry, throttled := h.inviteThrottled(r.Context(), session.User.ID, tenantID, 0, normalizeEmail(email)); throttled {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
+		h.renderInviteTeamThrottled(w, r, tenantID, email, role, retry)
+		return
+	}
+
 	res, err := h.createInvite(r.Context(), inviteTeammateInput{
 		Email:     email,
 		Role:      role,
@@ -80,6 +86,9 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 		InvitedBy: session.User.ID,
 	})
 	if err != nil {
+		// The throttle already debited this send; refund so a failed create
+		// (duplicate/invalid/transient) doesn't consume the admin's quota.
+		h.inviteRefund(r.Context(), session.User.ID, tenantID, 0, normalizeEmail(email))
 		h.renderInviteTeamError(w, r, tenantID, email, role, err)
 		return
 	}
@@ -115,6 +124,19 @@ func (h *Handler) renderInviteTeamError(w http.ResponseWriter, r *http.Request, 
 	}
 	w.WriteHeader(status)
 	webutil.Render(r, w, InviteTeamPage(view))
+}
+
+func (h *Handler) renderInviteTeamThrottled(w http.ResponseWriter, r *http.Request, tenantID int64, email, role string, retry int) {
+	session, _ := sessionFromContext(r.Context())
+	w.WriteHeader(http.StatusTooManyRequests)
+	webutil.Render(r, w, InviteTeamPage(InviteTeamView{
+		UserEmail: session.User.Email,
+		CSRFToken: session.CSRFToken,
+		TenantID:  tenantID,
+		Email:     email,
+		Role:      role,
+		Error:     "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s.",
+	}))
 }
 
 func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {

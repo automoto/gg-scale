@@ -69,8 +69,11 @@ type Deps struct {
 	// Limiter and Registry may be nil — typically only in unit tests.
 	// When nil the per-IP auth rate limiter is skipped; production
 	// callers always supply both.
-	Limiter  ratelimit.Limiter
-	Registry prometheus.Registerer
+	Limiter ratelimit.Limiter
+	// ProxyTrust resolves the real client IP for the per-IP auth limiter when
+	// behind a trusted reverse proxy. nil = RemoteAddr only.
+	ProxyTrust *ratelimit.ProxyTrust
+	Registry   prometheus.Registerer
 }
 
 // Handler owns player UI HTTP routes.
@@ -104,7 +107,7 @@ func New(d Deps) http.Handler {
 	// docs/temp/player-accounts.md.
 	r.Route("/account", func(r chi.Router) {
 		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
 		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
 			Path:     "/v1/players",
@@ -134,7 +137,7 @@ func New(d Deps) http.Handler {
 
 	r.Route("/p/{projectID}", func(r chi.Router) {
 		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
 		// Anonymous-form CSRF (double-submit cookie). The player site has
 		// no session before login/verify, so the dashboard's session-bound

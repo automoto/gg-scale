@@ -46,7 +46,7 @@ func reqWithKey(key tenant.APIKey) *http.Request {
 func TestMiddleware_passes_through_when_decision_allowed(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
@@ -59,7 +59,7 @@ func TestMiddleware_passes_through_when_decision_allowed(t *testing.T) {
 func TestMiddleware_returns_429_with_retry_after_and_json_body_when_denied(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: false, RetryAfter: 250 * time.Millisecond}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
@@ -80,7 +80,7 @@ func TestMiddleware_returns_429_with_retry_after_and_json_body_when_denied(t *te
 func TestMiddleware_increments_throttled_counter_on_denial(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: false, RetryAfter: 100 * time.Millisecond}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	for i := 0; i < 3; i++ {
 		rr := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestMiddleware_increments_throttled_counter_on_denial(t *testing.T) {
 func TestMiddleware_returns_500_on_limiter_error(t *testing.T) {
 	lim := &fakeLimiter{err: errors.New("redis down")}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
@@ -116,7 +116,7 @@ func TestMiddleware_returns_500_on_limiter_error(t *testing.T) {
 func TestMiddleware_returns_500_when_no_api_key_in_context(t *testing.T) {
 	lim := &fakeLimiter{}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
@@ -129,7 +129,7 @@ func TestMiddleware_returns_500_when_no_api_key_in_context(t *testing.T) {
 func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, reg)
+	mw := ratelimit.New(lim, nil, reg)
 
 	for _, id := range []int64{42, 43, 42} {
 		rr := httptest.NewRecorder()

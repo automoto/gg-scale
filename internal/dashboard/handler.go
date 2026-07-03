@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"embed"
 	"errors"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,13 +30,19 @@ var staticFS embed.FS
 // of seven positional params) keeps the call site readable as
 // dependencies grow.
 type Deps struct {
-	Pool      *db.Pool
-	Cache     cache.Store
-	Limiter   ratelimit.Limiter
-	Registry  prometheus.Registerer
-	Config    Config
-	Bootstrap *Bootstrap
-	Mailer    mailer.Mailer
+	Pool    *db.Pool
+	Cache   cache.Store
+	Limiter ratelimit.Limiter
+	// RateLimitOverrides (may be nil) supplies per-tenant/project invite-limit
+	// overrides to the invite throttle.
+	RateLimitOverrides ratelimit.OverrideStore
+	// ProxyTrust resolves the real client IP for the per-IP auth limiter when
+	// behind a trusted reverse proxy. nil = RemoteAddr only.
+	ProxyTrust *ratelimit.ProxyTrust
+	Registry   prometheus.Registerer
+	Config     Config
+	Bootstrap  *Bootstrap
+	Mailer     mailer.Mailer
 	// Fleet is the manager the dashboard reads allocations from and
 	// invokes manual Allocate/Deallocate against. nil when no backend is
 	// configured — fleet pages render "not configured" in that case.
@@ -65,18 +70,20 @@ type PluginSnapshot struct {
 
 // Handler owns dashboard HTTP routes.
 type Handler struct {
-	pool             *db.Pool
-	cache            cache.Store
-	limiter          ratelimit.Limiter
-	reg              prometheus.Registerer
-	cfg              Config
-	bootstrap        *Bootstrap
-	mailer           mailer.Mailer
-	fleet            *fleet.Manager
-	rbac             *rbac.Authorizer
-	pluginInfo       func() *PluginSnapshot
-	now              func() time.Time
-	trustedProxyNets []*net.IPNet
+	pool           *db.Pool
+	cache          cache.Store
+	limiter        ratelimit.Limiter
+	overrides      ratelimit.OverrideStore
+	inviteThrottle *ratelimit.InviteThrottle
+	reg            prometheus.Registerer
+	cfg            Config
+	bootstrap      *Bootstrap
+	mailer         mailer.Mailer
+	fleet          *fleet.Manager
+	rbac           *rbac.Authorizer
+	pluginInfo     func() *PluginSnapshot
+	now            func() time.Time
+	proxyTrust     *ratelimit.ProxyTrust
 	// verifySigningKey signs the short-lived verify-pending cookie.
 	// Generated once at handler construction so each process has a fresh
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
@@ -101,6 +108,7 @@ func New(d Deps) http.Handler {
 		pool:             d.Pool,
 		cache:            d.Cache,
 		limiter:          d.Limiter,
+		overrides:        d.RateLimitOverrides,
 		reg:              d.Registry,
 		cfg:              d.Config,
 		bootstrap:        bootstrap,
@@ -109,8 +117,12 @@ func New(d Deps) http.Handler {
 		rbac:             d.RBAC,
 		pluginInfo:       d.PluginInfo,
 		now:              time.Now,
-		trustedProxyNets: parseProxyCIDRs(d.Config.TrustedProxyCIDRs),
+		proxyTrust:       d.ProxyTrust,
 		verifySigningKey: key,
+	}
+	if d.Limiter != nil && d.Registry != nil {
+		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
+			WithOverrides(d.RateLimitOverrides)
 	}
 
 	r := chi.NewRouter()
@@ -118,7 +130,7 @@ func New(d Deps) http.Handler {
 	r.Get("/assets/*", h.assetHandler)
 	r.Group(func(r chi.Router) {
 		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
 		r.Get("/setup", h.setupTokenPage)
 		r.Post("/setup/token", h.verifySetupToken)
@@ -153,6 +165,9 @@ func New(d Deps) http.Handler {
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
 			r.Post("/api-keys/{apiKeyID}/scopes", h.updateAPIKeyScopesHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
+			r.Get("/rate-limits", h.rateLimitsPage)
+			r.Post("/rate-limits/api", h.updateTenantAPILimitHandler)
+			r.Post("/rate-limits/projects/{projectID}/invites", h.updateProjectInviteLimitHandler)
 			r.Get("/team", h.teamPage)
 			r.Get(segTeamInvite, h.inviteTeamPage)
 			r.Post(segTeamInvite, h.inviteTeammateHandler)
@@ -668,44 +683,9 @@ func parsePathID(w http.ResponseWriter, r *http.Request, name string) (int64, bo
 	return id, true
 }
 
-// clientIP extracts the audit IP. Forwarded headers are honored only when the
-// TCP peer matches a configured trusted proxy network.
+// clientIP extracts the audit IP, delegating to the shared ProxyTrust resolver
+// so audit rows and the per-IP limiter agree on the real client. Forwarded
+// headers are honored only when the TCP peer is a configured trusted proxy.
 func (h *Handler) clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	if h == nil || h.cfg.TrustedProxyHeader == "" || len(h.trustedProxyNets) == 0 {
-		return host
-	}
-	peer := net.ParseIP(host)
-	if peer == nil || !ipInAnyNet(peer, h.trustedProxyNets) {
-		return host
-	}
-	forwarded := strings.TrimSpace(r.Header.Get(h.cfg.TrustedProxyHeader))
-	ip := net.ParseIP(forwarded)
-	if ip == nil {
-		return host
-	}
-	return ip.String()
-}
-
-func parseProxyCIDRs(values []string) []*net.IPNet {
-	out := make([]*net.IPNet, 0, len(values))
-	for _, value := range values {
-		_, network, err := net.ParseCIDR(value)
-		if err == nil {
-			out = append(out, network)
-		}
-	}
-	return out
-}
-
-func ipInAnyNet(ip net.IP, networks []*net.IPNet) bool {
-	for _, network := range networks {
-		if network.Contains(ip) {
-			return true
-		}
-	}
-	return false
+	return h.proxyTrust.ClientIP(r)
 }
