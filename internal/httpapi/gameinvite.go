@@ -82,10 +82,31 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			}
 			toUserID = id
 
+			// Friends are account-scoped. Resolve both end_users to their
+			// linked accounts; an anonymous / unlinked player can't be a
+			// friend, so the invite is refused.
+			fromAcc, aerr := q.GetEndUserAccountID(ctx, fromUserID)
+			if aerr != nil {
+				return aerr
+			}
+			toAcc, aerr := q.GetEndUserAccountID(ctx, toUserID)
+			if aerr != nil {
+				return aerr
+			}
+			if !fromAcc.Valid || !toAcc.Valid {
+				return errNotFriends
+			}
+			// Explicit block gate (either direction) — defense in depth on
+			// top of the accepted-friendship requirement below.
+			if _, berr := q.IsBlockedBetweenAccounts(ctx, sqlcgen.IsBlockedBetweenAccountsParams{A: fromAcc, B: toAcc}); berr == nil {
+				return errNotFriends
+			} else if !errors.Is(berr, pgx.ErrNoRows) {
+				return berr
+			}
 			// Require an accepted friendship before allowing the invite.
-			if _, qerr = q.AreFriendsAccepted(ctx, sqlcgen.AreFriendsAcceptedParams{
-				FromUserID: fromUserID,
-				ToUserID:   toUserID,
+			if _, qerr = q.AreAccountsFriendsAccepted(ctx, sqlcgen.AreAccountsFriendsAcceptedParams{
+				A: fromAcc,
+				B: toAcc,
 			}); qerr != nil {
 				if errors.Is(qerr, pgx.ErrNoRows) {
 					return errNotFriends

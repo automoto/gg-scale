@@ -406,6 +406,8 @@ func TestFriends_request_accept_list(t *testing.T) {
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
+	linkEndUserAccount(t, c, idA)
+	linkEndUserAccount(t, c, idB)
 
 	resp, _ := authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "k", tokA, nil)
@@ -435,6 +437,8 @@ func TestFriends_re_request_after_rejection_transitions_to_pending(t *testing.T)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
+	linkEndUserAccount(t, c, idA)
+	linkEndUserAccount(t, c, idB)
 
 	_, _ = authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "k", tokA, nil)

@@ -23,14 +23,33 @@ func setEndUserEmail(t *testing.T, c *cluster, id int64, email string) {
 	require.NoError(t, err)
 }
 
-func makeFriends(t *testing.T, baseURL, apiKey string, idA int64, tokA string, idB int64, tokB string) {
+func makeFriends(t *testing.T, c *cluster, baseURL, apiKey string, idA int64, tokA string, idB int64, tokB string) {
 	t.Helper()
+	// Friends are account-scoped, so both end_users must be linked to a
+	// global player_account before they can friend each other.
+	linkEndUserAccount(t, c, idA)
+	linkEndUserAccount(t, c, idB)
 	resp, body := authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", baseURL, idB), apiKey, tokA, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	resp, body = authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/accept", baseURL, idA), apiKey, tokB, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+}
+
+// linkEndUserAccount creates a fresh verified player_account and links the
+// given end_user to it (bootstrapPool bypasses RLS). Used by friend/game-invite
+// tests since friends are account-scoped.
+func linkEndUserAccount(t *testing.T, c *cluster, endUserID int64) {
+	t.Helper()
+	var accID string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO player_accounts (email, password_hash, email_verified_at)
+		 VALUES ($1, '\x00'::bytea, now()) RETURNING id`,
+		fmt.Sprintf("linked-%d@example.com", endUserID)).Scan(&accID))
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE end_users SET player_account_id = $1 WHERE id = $2`, accID, endUserID)
+	require.NoError(t, err)
 }
 
 func addr(ip string, port int) map[string]any {
@@ -263,7 +282,7 @@ func TestGameInvite_requires_sender_membership(t *testing.T) {
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
 	tokC, _ := anonymousLoginWithID(t, srv.URL, "k")
 	setEndUserEmail(t, c, idB, "b2@example.com")
-	makeFriends(t, srv.URL, "k", idA, tokA, idB, tokB)
+	makeFriends(t, c, srv.URL, "k", idA, tokA, idB, tokB)
 
 	// C owns the session; A is friends with B but is NOT in C's session.
 	sess := createSession(t, srv.URL, "k", tokC, 4)
@@ -282,7 +301,7 @@ func TestGameInvite_happy_path_by_email(t *testing.T) {
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
 	setEndUserEmail(t, c, idA, "alice@example.com")
 	setEndUserEmail(t, c, idB, "bob@example.com")
-	makeFriends(t, srv.URL, "k", idA, tokA, idB, tokB)
+	makeFriends(t, c, srv.URL, "k", idA, tokA, idB, tokB)
 	sess := createSession(t, srv.URL, "k", tokA, 4)
 
 	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/invite", "k", tokA,
@@ -342,35 +361,34 @@ func TestFriends_enriched_with_email_xuid_presence(t *testing.T) {
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
-	setEndUserEmail(t, c, idB, "friendb@example.com")
-	makeFriends(t, srv.URL, "k", idA, tokA, idB, tokB)
+	makeFriends(t, c, srv.URL, "k", idA, tokA, idB, tokB)
 
-	// B sets an xuid and presence.
-	resp, body := authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "k", tokB,
-		map[string]string{"xuid": "gamerB"})
-	require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
-	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/presence", "k", tokB,
+	// B sets presence in this project.
+	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/presence", "k", tokB,
 		map[string]string{"status": "in_match"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	// A lists friends — B's email, xuid, and presence appear.
+	// A lists friends — the friend entry carries the account email/display name
+	// and the friend's presence resolved via their end_user in this project.
 	resp, body = authedReq(t, http.MethodGet, srv.URL+"/v1/friends/", "k", tokA, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var list struct {
 		Items []struct {
-			Email    *string `json:"email"`
-			XUID     *string `json:"xuid"`
-			Presence *struct {
+			AccountID string  `json:"account_id"`
+			UserID    *int64  `json:"user_id"`
+			Email     *string `json:"email"`
+			Presence  *struct {
 				Status string `json:"status"`
 			} `json:"presence"`
 		} `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(body, &list))
 	require.Len(t, list.Items, 1)
+	assert.NotEmpty(t, list.Items[0].AccountID)
 	require.NotNil(t, list.Items[0].Email)
-	assert.Equal(t, "friendb@example.com", *list.Items[0].Email)
-	require.NotNil(t, list.Items[0].XUID)
-	assert.Equal(t, "gamerB", *list.Items[0].XUID)
+	assert.Equal(t, fmt.Sprintf("linked-%d@example.com", idB), *list.Items[0].Email)
+	require.NotNil(t, list.Items[0].UserID)
+	assert.Equal(t, idB, *list.Items[0].UserID)
 	require.NotNil(t, list.Items[0].Presence)
 	assert.Equal(t, "in_match", list.Items[0].Presence.Status)
 }
@@ -380,10 +398,24 @@ func TestFriends_empty_returns_array_not_null(t *testing.T) {
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
 	srv := newServerForCluster(t, c)
 
-	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	tok, id := anonymousLoginWithID(t, srv.URL, "k")
+	linkEndUserAccount(t, c, id)
 	resp, body := authedReq(t, http.MethodGet, srv.URL+"/v1/friends/", "k", tok, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	assert.Contains(t, string(body), `"items":[]`)
+}
+
+// TestFriends_unlinked_end_user_gets_403 proves an anonymous / unlinked player
+// is told to link a gg-scale account before using friends.
+func TestFriends_unlinked_end_user_gets_403(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv := newServerForCluster(t, c)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodGet, srv.URL+"/v1/friends/", "k", tok, nil)
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Contains(t, string(body), "link a gg-scale account")
 }
 
 func TestProfile_xuid_uniqueness_conflict(t *testing.T) {

@@ -306,15 +306,13 @@ type FleetAllocationEvent struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
-// One directed edge per (tenant, from, to). Status transitions are managed via UPSERT in the handler: a re-request after rejection updates status pending; pending/accepted are idempotent; blocked is terminal. See migration 0012 for the contract.
 type FriendEdge struct {
-	ID         int64
-	TenantID   int64
-	FromUserID int64
-	ToUserID   int64
-	Status     string
-	CreatedAt  pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
+	ID            int64
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type GameInvite struct {

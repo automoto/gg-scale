@@ -136,6 +136,7 @@ templ AccountHomePage(vm AccountHomeView) {
 				}
 			</ul>
 		}
+		<p><a href={ templ.URL("/v1/players/account/friends") }>Manage friends</a></p>
 		<h2>Join a game</h2>
 		<p class="subtitle">Enter a project ID to link your account. Invite-only games need an invite instead.</p>
 		<form method="post" action={ templ.URL("/v1/players/account/join") }>

@@ -1,93 +1,113 @@
--- name: RequestFriend :one
--- The unique index keeps one current row per directed pair, so re-requests
--- after rejection update in place. Pending/accepted are idempotent (the
--- WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
--- terminal (the WHERE clause omits it). See migration 0012.
-INSERT INTO friend_edges (tenant_id, from_user_id, to_user_id, status)
-VALUES (
-    current_setting('app.tenant_id', true)::bigint,
-    $1, $2, 'pending'
-)
-ON CONFLICT (tenant_id, from_user_id, to_user_id)
-DO UPDATE SET status     = 'pending',
-              updated_at = now()
+-- Friend edges between GLOBAL player_accounts (Milestone 4). friend_edges has
+-- no tenant_id and no RLS, so these run in either a tenant Pool.Q or a
+-- BootstrapQ transaction. Account ids are UUIDs.
+
+-- name: RequestFriendByAccount :one
+-- One current row per directed pair. Re-requests after rejection update in
+-- place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
+-- no-ops); blocked is terminal (WHERE omits it).
+INSERT INTO friend_edges (from_account_id, to_account_id, status)
+VALUES (sqlc.arg(from_account_id), sqlc.arg(to_account_id), 'pending')
+ON CONFLICT (from_account_id, to_account_id)
+DO UPDATE SET status = 'pending', updated_at = now()
 WHERE friend_edges.status = 'rejected'
 RETURNING id, status;
 
--- name: GetFriendEdge :one
+-- name: GetFriendEdgeByAccount :one
 SELECT id, status
 FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND from_user_id = $1
-  AND to_user_id   = $2;
+WHERE from_account_id = sqlc.arg(from_account_id)
+  AND to_account_id   = sqlc.arg(to_account_id);
 
--- name: SetFriendEdgeStatus :exec
+-- name: SetFriendEdgeStatusByAccount :exec
 UPDATE friend_edges
-SET status     = $3,
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND from_user_id = $1
-  AND to_user_id   = $2;
+SET status = sqlc.arg(status), updated_at = now()
+WHERE from_account_id = sqlc.arg(from_account_id)
+  AND to_account_id   = sqlc.arg(to_account_id);
 
--- name: DeleteFriendEdge :execrows
--- Symmetric unfriend: the caller can be on either side of the edge. The
--- previous one-directional query silently no-op'd when the friendship was
--- inbound, so a "delete" returned 204 without actually removing anything.
+-- name: UpsertFriendEdgeStatusByAccount :exec
+-- Used for block: create-or-overwrite the directed edge to a terminal status
+-- regardless of the prior state (blocking a stranger, a pending, or a friend).
+INSERT INTO friend_edges (from_account_id, to_account_id, status)
+VALUES (sqlc.arg(from_account_id), sqlc.arg(to_account_id), sqlc.arg(status))
+ON CONFLICT (from_account_id, to_account_id)
+DO UPDATE SET status = sqlc.arg(status), updated_at = now();
+
+-- name: DeleteFriendEdgeByAccount :execrows
+-- Symmetric unfriend: caller can be on either side.
 DELETE FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND ((from_user_id = sqlc.arg('me') AND to_user_id = sqlc.arg('other'))
-       OR (from_user_id = sqlc.arg('other') AND to_user_id = sqlc.arg('me')));
+WHERE (from_account_id = sqlc.arg('me') AND to_account_id = sqlc.arg('other'))
+   OR (from_account_id = sqlc.arg('other') AND to_account_id = sqlc.arg('me'));
 
--- name: ListFriendsByStatusForCaller :many
--- Caller-aware list. For 'blocked', only rows where the caller initiated
--- the block are returned — never rows where the caller is the blockee
--- (which would let a blocked user enumerate who blocked them).
-SELECT id, from_user_id, to_user_id, status, created_at, updated_at
+-- name: DeleteFriendEdgeDirected :execrows
+-- Directed delete (unblock: only remove the edge the caller initiated).
+DELETE FROM friend_edges
+WHERE from_account_id = sqlc.arg(from_account_id)
+  AND to_account_id   = sqlc.arg(to_account_id)
+  AND status = sqlc.arg(status);
+
+-- name: ListFriendsByStatusForAccount :many
+-- Caller-aware. For 'blocked', only rows the caller initiated are returned —
+-- never rows where the caller is the blockee (which would let a blocked user
+-- learn who blocked them).
+SELECT id, from_account_id, to_account_id, status, created_at, updated_at
 FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND ((sqlc.arg('status')::text != 'blocked'
-            AND (from_user_id = sqlc.arg('me') OR to_user_id = sqlc.arg('me')))
+WHERE ((sqlc.arg('status')::text != 'blocked'
+            AND (from_account_id = sqlc.arg('me') OR to_account_id = sqlc.arg('me')))
        OR (sqlc.arg('status')::text = 'blocked'
-            AND from_user_id = sqlc.arg('me')))
+            AND from_account_id = sqlc.arg('me')))
   AND status = sqlc.arg('status')
   AND id > sqlc.arg('cursor')
 ORDER BY id ASC
 LIMIT sqlc.arg('row_limit');
 
--- name: ListFriendsByStatus :many
-SELECT id, from_user_id, to_user_id, status, created_at, updated_at
-FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND (from_user_id = $1 OR to_user_id = $1)
-  AND status = $2
-  AND id > $3
-ORDER BY id ASC
-LIMIT $4;
-
--- name: ListAcceptedFriendIDs :many
--- Returns (from_user_id, to_user_id) pairs for all accepted friendships
--- involving the given user. Callers resolve the "other" user by comparing
--- each column against their own ID.
-SELECT from_user_id, to_user_id
-FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND (from_user_id = $1 OR to_user_id = $1)
-  AND status = 'accepted';
-
--- name: AreFriendsAccepted :one
--- Returns the edge ID if an accepted friendship exists between the two
--- users in either direction; pgx.ErrNoRows if they are not friends.
+-- name: AreAccountsFriendsAccepted :one
+-- Edge id if an accepted friendship exists in either direction.
 SELECT id FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND ((from_user_id = $1 AND to_user_id = $2)
-       OR (from_user_id = $2 AND to_user_id = $1))
+WHERE ((from_account_id = sqlc.arg('a') AND to_account_id = sqlc.arg('b'))
+       OR (from_account_id = sqlc.arg('b') AND to_account_id = sqlc.arg('a')))
   AND status = 'accepted'
 LIMIT 1;
 
--- name: ListEndUserIdentitiesForUsers :many
--- Bulk-fetch email + xuid for a set of users, used to enrich friend lists.
--- email is COALESCEd because anonymous users have none.
-SELECT id AS end_user_id, COALESCE(email::text, '')::text AS email, xuid
+-- name: IsBlockedBetweenAccounts :one
+-- Edge id if EITHER account has blocked the other. Defense-in-depth gate on
+-- every interaction path (friend request, game invite, presence).
+SELECT id FROM friend_edges
+WHERE ((from_account_id = sqlc.arg('a') AND to_account_id = sqlc.arg('b'))
+       OR (from_account_id = sqlc.arg('b') AND to_account_id = sqlc.arg('a')))
+  AND status = 'blocked'
+LIMIT 1;
+
+-- name: ListAccountIdentities :many
+-- Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
+SELECT id, email::text AS email, display_name
+FROM player_accounts
+WHERE id = ANY(sqlc.arg('account_ids')::uuid[]);
+
+-- name: FindAccountIDByEmail :one
+SELECT id FROM player_accounts WHERE email = sqlc.arg(email);
+
+-- name: FindAccountIDsByDisplayName :many
+-- Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
+-- names are not unique) and refuse rather than friend the wrong person.
+SELECT id, email::text AS email
+FROM player_accounts
+WHERE display_name = sqlc.arg(display_name)
+LIMIT 2;
+
+-- name: GetEndUserAccountID :one
+-- Tenant-scoped: the global account an end_user is linked to (NULL if the
+-- player is anonymous / unlinked).
+SELECT player_account_id
 FROM end_users
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = ANY(sqlc.arg('end_user_ids')::bigint[]);
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL;
+
+-- name: ResolveEndUsersForAccountsInProject :many
+-- Tenant-scoped: maps a set of accounts back to their end_user in a specific
+-- project, for presence sharing and JSON-API user_id mapping.
+SELECT id AS end_user_id, player_account_id
+FROM end_users
+WHERE project_id = sqlc.arg(project_id)
+  AND player_account_id = ANY(sqlc.arg('account_ids')::uuid[])
+  AND deleted_at IS NULL;

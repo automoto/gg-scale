@@ -66,6 +66,8 @@ func mountFriendRoutes(r chi.Router, d Deps) {
 		r.Post("/{user_id}/request", friendRequestHandler(d))
 		r.Post("/{user_id}/accept", friendAcceptHandler(d))
 		r.Post("/{user_id}/reject", friendRejectHandler(d))
+		r.Post("/{user_id}/block", friendBlockHandler(d))
+		r.Post("/{user_id}/unblock", friendUnblockHandler(d))
 		r.Delete("/{user_id}", friendDeleteHandler(d))
 	})
 }

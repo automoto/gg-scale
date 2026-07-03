@@ -11,9 +11,8 @@ import (
 )
 
 type Querier interface {
-	// Returns the edge ID if an accepted friendship exists between the two
-	// users in either direction; pgx.ErrNoRows if they are not friends.
-	AreFriendsAccepted(ctx context.Context, arg AreFriendsAcceptedParams) (int64, error)
+	// Edge id if an accepted friendship exists in either direction.
+	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
 	// Atomic increment + conditional lockout. The previous read-then-write
 	// pattern was TOCTOU-racy: N parallel failed logins all read the same value
 	// and wrote N+1, so 10 simultaneous wrong passwords landed at login_failures=1
@@ -104,14 +103,18 @@ type Querier interface {
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
-	// Symmetric unfriend: the caller can be on either side of the edge. The
-	// previous one-directional query silently no-op'd when the friendship was
-	// inbound, so a "delete" returned 204 without actually removing anything.
-	DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) (int64, error)
+	// Symmetric unfriend: caller can be on either side.
+	DeleteFriendEdgeByAccount(ctx context.Context, arg DeleteFriendEdgeByAccountParams) (int64, error)
+	// Directed delete (unblock: only remove the edge the caller initiated).
+	DeleteFriendEdgeDirected(ctx context.Context, arg DeleteFriendEdgeDirectedParams) (int64, error)
 	// Either sender (cancel) or recipient (decline/dismiss) may delete an invite.
 	DeleteGameInvite(ctx context.Context, arg DeleteGameInviteParams) (int64, error)
 	DeleteGameSession(ctx context.Context, id string) error
 	DeleteGameSessionPeer(ctx context.Context, arg DeleteGameSessionPeerParams) error
+	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
+	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
+	// names are not unique) and refuse rather than friend the wrong person.
+	FindAccountIDsByDisplayName(ctx context.Context, displayName *string) ([]FindAccountIDsByDisplayNameRow, error)
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier + key_type. Runs without an
 	// app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
@@ -139,6 +142,9 @@ type Querier interface {
 	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
 	GetDashboardUserByID(ctx context.Context, id int64) (GetDashboardUserByIDRow, error)
 	GetDashboardUserVerificationState(ctx context.Context, id int64) (GetDashboardUserVerificationStateRow, error)
+	// Tenant-scoped: the global account an end_user is linked to (NULL if the
+	// player is anonymous / unlinked).
+	GetEndUserAccountID(ctx context.Context, id int64) (pgtype.UUID, error)
 	// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
 	// /v1/auth/login behaves identically to an unknown email — same dummy
 	// bcrypt + invalid_credentials response.
@@ -169,7 +175,7 @@ type Querier interface {
 	// excluded so a retired fleet doesn't collide with a freshly created one
 	// under the same name.
 	GetFleetByName(ctx context.Context, arg GetFleetByNameParams) (Fleet, error)
-	GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error)
+	GetFriendEdgeByAccount(ctx context.Context, arg GetFriendEdgeByAccountParams) (GetFriendEdgeByAccountRow, error)
 	GetGameSession(ctx context.Context, id string) (GetGameSessionRow, error)
 	// Open, unexpired sessions only — an expired session lingering before GC
 	// must not be resolvable by join code.
@@ -207,6 +213,9 @@ type Querier interface {
 	// bounded per allocation_id; callers can fire-and-forget.
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
+	// Edge id if EITHER account has blocked the other. Defense-in-depth gate on
+	// every interaction path (friend request, game invite, presence).
+	IsBlockedBetweenAccounts(ctx context.Context, arg IsBlockedBetweenAccountsParams) (int64, error)
 	IsGameSessionMember(ctx context.Context, arg IsGameSessionMemberParams) (bool, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
@@ -218,10 +227,8 @@ type Querier interface {
 	// per-project end_user to a global account. Guarded by RLS on end_users.
 	LinkEndUserToAccount(ctx context.Context, arg LinkEndUserToAccountParams) error
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
-	// Returns (from_user_id, to_user_id) pairs for all accepted friendships
-	// involving the given user. Callers resolve the "other" user by comparing
-	// each column against their own ID.
-	ListAcceptedFriendIDs(ctx context.Context, fromUserID int64) ([]ListAcceptedFriendIDsRow, error)
+	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
+	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
 	// Distinct backends seen across this tenant's recent allocations. Drives
 	// the backends-health page so operators see which backends actually serve
@@ -239,18 +246,14 @@ type Querier interface {
 	// Powers the /v1/dashboard/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListDashboardUsersForPlatformAdmin(ctx context.Context, arg ListDashboardUsersForPlatformAdminParams) ([]ListDashboardUsersForPlatformAdminRow, error)
-	// Bulk-fetch email + xuid for a set of users, used to enrich friend lists.
-	// email is COALESCEd because anonymous users have none.
-	ListEndUserIdentitiesForUsers(ctx context.Context, endUserIds []int64) ([]ListEndUserIdentitiesForUsersRow, error)
 	ListEndUserInvitationsForProject(ctx context.Context, projectID int64) ([]ListEndUserInvitationsForProjectRow, error)
 	// Dashboard list. Soft-deleted rows are excluded; include_deleted is reserved
 	// for a future "archive" view but not wired through the UI yet.
 	ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
-	ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error)
-	// Caller-aware list. For 'blocked', only rows where the caller initiated
-	// the block are returned — never rows where the caller is the blockee
-	// (which would let a blocked user enumerate who blocked them).
-	ListFriendsByStatusForCaller(ctx context.Context, arg ListFriendsByStatusForCallerParams) ([]ListFriendsByStatusForCallerRow, error)
+	// Caller-aware. For 'blocked', only rows the caller initiated are returned —
+	// never rows where the caller is the blockee (which would let a blocked user
+	// learn who blocked them).
+	ListFriendsByStatusForAccount(ctx context.Context, arg ListFriendsByStatusForAccountParams) ([]FriendEdge, error)
 	// Returns active peers (last_seen within 30 s) with each peer's optional
 	// xuid. RLS on game_session_peer scopes rows to the current tenant.
 	ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error)
@@ -311,11 +314,13 @@ type Querier interface {
 	// Worker-driven release: allocator failed (or the worker is giving up).
 	// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
 	ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error)
-	// The unique index keeps one current row per directed pair, so re-requests
-	// after rejection update in place. Pending/accepted are idempotent (the
-	// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
-	// terminal (the WHERE clause omits it). See migration 0012.
-	RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error)
+	// Friend edges between GLOBAL player_accounts (Milestone 4). friend_edges has
+	// no tenant_id and no RLS, so these run in either a tenant Pool.Q or a
+	// BootstrapQ transaction. Account ids are UUIDs.
+	// One current row per directed pair. Re-requests after rejection update in
+	// place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
+	// no-ops); blocked is terminal (WHERE omits it).
+	RequestFriendByAccount(ctx context.Context, arg RequestFriendByAccountParams) (RequestFriendByAccountRow, error)
 	// Atomic check-and-bump used in place of the previous fetch-then-increment
 	// pattern: two parallel wrong codes used to both pass the cap check before
 	// either incremented, so the lockout could be overshot. The WHERE clause
@@ -327,6 +332,9 @@ type Querier interface {
 	ReserveEndUserVerifyAttempt(ctx context.Context, arg ReserveEndUserVerifyAttemptParams) (ReserveEndUserVerifyAttemptRow, error)
 	// Atomic check-and-bump; returns 0 rows when already at the per-code cap.
 	ReservePlayerAccountVerifyAttempt(ctx context.Context, arg ReservePlayerAccountVerifyAttemptParams) (ReservePlayerAccountVerifyAttemptRow, error)
+	// Tenant-scoped: maps a set of accounts back to their end_user in a specific
+	// project, for presence sharing and JSON-API user_id mapping.
+	ResolveEndUsersForAccountsInProject(ctx context.Context, arg ResolveEndUsersForAccountsInProjectParams) ([]ResolveEndUsersForAccountsInProjectRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
 	RevokeAllPlayerAccountSessions(ctx context.Context, playerAccountID pgtype.UUID) error
@@ -348,7 +356,7 @@ type Querier interface {
 	SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error
 	SetDashboardUserVerificationCode(ctx context.Context, arg SetDashboardUserVerificationCodeParams) error
 	SetEndUserVerificationCode(ctx context.Context, arg SetEndUserVerificationCodeParams) error
-	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
+	SetFriendEdgeStatusByAccount(ctx context.Context, arg SetFriendEdgeStatusByAccountParams) error
 	// Platform-level disable. Bumps session_epoch to kill live sessions.
 	SetPlayerAccountDisabled(ctx context.Context, id pgtype.UUID) error
 	SetPlayerAccountEnabled(ctx context.Context, id pgtype.UUID) error
@@ -389,6 +397,9 @@ type Querier interface {
 	// Custom-token flow: find existing end_user with this external_id under
 	// (tenant, project) or create one. Idempotent across repeated calls.
 	UpsertEndUserByExternalID(ctx context.Context, arg UpsertEndUserByExternalIDParams) (int64, error)
+	// Used for block: create-or-overwrite the directed edge to a terminal status
+	// regardless of the prior state (blocking a stranger, a pending, or a friend).
+	UpsertFriendEdgeStatusByAccount(ctx context.Context, arg UpsertFriendEdgeStatusByAccountParams) error
 	UpsertGameSessionPeer(ctx context.Context, arg UpsertGameSessionPeerParams) error
 	UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error
 	WriteAudit(ctx context.Context, arg WriteAuditParams) error

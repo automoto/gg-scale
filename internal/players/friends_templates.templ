@@ -1,0 +1,111 @@
+package players
+
+// Player-site friends UI (global account). Plain forms + redirects, matching
+// the rest of the player site.
+
+// FriendRow is one account shown in a friends group.
+type FriendRow struct {
+	AccountID   string
+	Email       string
+	DisplayName string
+}
+
+type FriendsView struct {
+	CSRFToken       string
+	Flash           string
+	FlashError      string
+	Accepted        []FriendRow
+	IncomingPending []FriendRow
+	OutgoingPending []FriendRow
+	Blocked         []FriendRow
+}
+
+func friendLabel(f FriendRow) string {
+	if f.DisplayName != "" {
+		return f.DisplayName
+	}
+	return f.Email
+}
+
+templ FriendsPage(vm FriendsView) {
+	@playerLayout("Friends") {
+		<h1>Friends</h1>
+		<p><a href={ templ.URL("/v1/players/account/") }>← Back to account</a></p>
+		if vm.Flash != "" {
+			<p class="flash">{ vm.Flash }</p>
+		}
+		if vm.FlashError != "" {
+			<p class="error">{ vm.FlashError }</p>
+		}
+		<h2>Add a friend</h2>
+		<form method="post" action={ templ.URL("/v1/players/account/friends/request") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Email or display name
+				<input name="target" type="text" required/>
+			</label>
+			<button type="submit">Send request</button>
+		</form>
+		<h2>Friends</h2>
+		if len(vm.Accepted) == 0 {
+			<p>No friends yet.</p>
+		} else {
+			<ul>
+				for _, f := range vm.Accepted {
+					<li>
+						{ friendLabel(f) }
+						@friendButton(vm.CSRFToken, f.AccountID, "unfriend", "Remove")
+						@friendButton(vm.CSRFToken, f.AccountID, "block", "Block")
+					</li>
+				}
+			</ul>
+		}
+		<h2>Incoming requests</h2>
+		if len(vm.IncomingPending) == 0 {
+			<p>None.</p>
+		} else {
+			<ul>
+				for _, f := range vm.IncomingPending {
+					<li>
+						{ friendLabel(f) }
+						@friendButton(vm.CSRFToken, f.AccountID, "accept", "Accept")
+						@friendButton(vm.CSRFToken, f.AccountID, "reject", "Decline")
+						@friendButton(vm.CSRFToken, f.AccountID, "block", "Block")
+					</li>
+				}
+			</ul>
+		}
+		<h2>Sent requests</h2>
+		if len(vm.OutgoingPending) == 0 {
+			<p>None.</p>
+		} else {
+			<ul>
+				for _, f := range vm.OutgoingPending {
+					<li>
+						{ friendLabel(f) }
+						@friendButton(vm.CSRFToken, f.AccountID, "unfriend", "Cancel")
+					</li>
+				}
+			</ul>
+		}
+		<h2>Blocked</h2>
+		if len(vm.Blocked) == 0 {
+			<p>None.</p>
+		} else {
+			<ul>
+				for _, f := range vm.Blocked {
+					<li>
+						{ friendLabel(f) }
+						@friendButton(vm.CSRFToken, f.AccountID, "unblock", "Unblock")
+					</li>
+				}
+			</ul>
+		}
+	}
+}
+
+templ friendButton(csrf, accountID, action, label string) {
+	<form method="post" action={ templ.URL("/v1/players/account/friends/" + accountID + "/" + action) }>
+		<input type="hidden" name="_csrf" value={ csrf }/>
+		<button type="submit">{ label }</button>
+	</form>
+}

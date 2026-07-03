@@ -11,103 +11,199 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const areFriendsAccepted = `-- name: AreFriendsAccepted :one
+const areAccountsFriendsAccepted = `-- name: AreAccountsFriendsAccepted :one
 SELECT id FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND ((from_user_id = $1 AND to_user_id = $2)
-       OR (from_user_id = $2 AND to_user_id = $1))
+WHERE ((from_account_id = $1 AND to_account_id = $2)
+       OR (from_account_id = $2 AND to_account_id = $1))
   AND status = 'accepted'
 LIMIT 1
 `
 
-type AreFriendsAcceptedParams struct {
-	FromUserID int64
-	ToUserID   int64
+type AreAccountsFriendsAcceptedParams struct {
+	A pgtype.UUID
+	B pgtype.UUID
 }
 
-// Returns the edge ID if an accepted friendship exists between the two
-// users in either direction; pgx.ErrNoRows if they are not friends.
-func (q *Queries) AreFriendsAccepted(ctx context.Context, arg AreFriendsAcceptedParams) (int64, error) {
-	row := q.db.QueryRow(ctx, areFriendsAccepted, arg.FromUserID, arg.ToUserID)
+// Edge id if an accepted friendship exists in either direction.
+func (q *Queries) AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error) {
+	row := q.db.QueryRow(ctx, areAccountsFriendsAccepted, arg.A, arg.B)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
 }
 
-const deleteFriendEdge = `-- name: DeleteFriendEdge :execrows
+const deleteFriendEdgeByAccount = `-- name: DeleteFriendEdgeByAccount :execrows
 DELETE FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND ((from_user_id = $1 AND to_user_id = $2)
-       OR (from_user_id = $2 AND to_user_id = $1))
+WHERE (from_account_id = $1 AND to_account_id = $2)
+   OR (from_account_id = $2 AND to_account_id = $1)
 `
 
-type DeleteFriendEdgeParams struct {
-	Me    int64
-	Other int64
+type DeleteFriendEdgeByAccountParams struct {
+	Me    pgtype.UUID
+	Other pgtype.UUID
 }
 
-// Symmetric unfriend: the caller can be on either side of the edge. The
-// previous one-directional query silently no-op'd when the friendship was
-// inbound, so a "delete" returned 204 without actually removing anything.
-func (q *Queries) DeleteFriendEdge(ctx context.Context, arg DeleteFriendEdgeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteFriendEdge, arg.Me, arg.Other)
+// Symmetric unfriend: caller can be on either side.
+func (q *Queries) DeleteFriendEdgeByAccount(ctx context.Context, arg DeleteFriendEdgeByAccountParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFriendEdgeByAccount, arg.Me, arg.Other)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const getFriendEdge = `-- name: GetFriendEdge :one
-SELECT id, status
-FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND from_user_id = $1
-  AND to_user_id   = $2
+const deleteFriendEdgeDirected = `-- name: DeleteFriendEdgeDirected :execrows
+DELETE FROM friend_edges
+WHERE from_account_id = $1
+  AND to_account_id   = $2
+  AND status = $3
 `
 
-type GetFriendEdgeParams struct {
-	FromUserID int64
-	ToUserID   int64
+type DeleteFriendEdgeDirectedParams struct {
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+	Status        string
 }
 
-type GetFriendEdgeRow struct {
+// Directed delete (unblock: only remove the edge the caller initiated).
+func (q *Queries) DeleteFriendEdgeDirected(ctx context.Context, arg DeleteFriendEdgeDirectedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteFriendEdgeDirected, arg.FromAccountID, arg.ToAccountID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const findAccountIDByEmail = `-- name: FindAccountIDByEmail :one
+SELECT id FROM player_accounts WHERE email = $1
+`
+
+func (q *Queries) FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, findAccountIDByEmail, email)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const findAccountIDsByDisplayName = `-- name: FindAccountIDsByDisplayName :many
+SELECT id, email::text AS email
+FROM player_accounts
+WHERE display_name = $1
+LIMIT 2
+`
+
+type FindAccountIDsByDisplayNameRow struct {
+	ID    pgtype.UUID
+	Email string
+}
+
+// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
+// names are not unique) and refuse rather than friend the wrong person.
+func (q *Queries) FindAccountIDsByDisplayName(ctx context.Context, displayName *string) ([]FindAccountIDsByDisplayNameRow, error) {
+	rows, err := q.db.Query(ctx, findAccountIDsByDisplayName, displayName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FindAccountIDsByDisplayNameRow
+	for rows.Next() {
+		var i FindAccountIDsByDisplayNameRow
+		if err := rows.Scan(&i.ID, &i.Email); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEndUserAccountID = `-- name: GetEndUserAccountID :one
+SELECT player_account_id
+FROM end_users
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+// Tenant-scoped: the global account an end_user is linked to (NULL if the
+// player is anonymous / unlinked).
+func (q *Queries) GetEndUserAccountID(ctx context.Context, id int64) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getEndUserAccountID, id)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
+}
+
+const getFriendEdgeByAccount = `-- name: GetFriendEdgeByAccount :one
+SELECT id, status
+FROM friend_edges
+WHERE from_account_id = $1
+  AND to_account_id   = $2
+`
+
+type GetFriendEdgeByAccountParams struct {
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+}
+
+type GetFriendEdgeByAccountRow struct {
 	ID     int64
 	Status string
 }
 
-func (q *Queries) GetFriendEdge(ctx context.Context, arg GetFriendEdgeParams) (GetFriendEdgeRow, error) {
-	row := q.db.QueryRow(ctx, getFriendEdge, arg.FromUserID, arg.ToUserID)
-	var i GetFriendEdgeRow
+func (q *Queries) GetFriendEdgeByAccount(ctx context.Context, arg GetFriendEdgeByAccountParams) (GetFriendEdgeByAccountRow, error) {
+	row := q.db.QueryRow(ctx, getFriendEdgeByAccount, arg.FromAccountID, arg.ToAccountID)
+	var i GetFriendEdgeByAccountRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
 }
 
-const listAcceptedFriendIDs = `-- name: ListAcceptedFriendIDs :many
-SELECT from_user_id, to_user_id
-FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND (from_user_id = $1 OR to_user_id = $1)
-  AND status = 'accepted'
+const isBlockedBetweenAccounts = `-- name: IsBlockedBetweenAccounts :one
+SELECT id FROM friend_edges
+WHERE ((from_account_id = $1 AND to_account_id = $2)
+       OR (from_account_id = $2 AND to_account_id = $1))
+  AND status = 'blocked'
+LIMIT 1
 `
 
-type ListAcceptedFriendIDsRow struct {
-	FromUserID int64
-	ToUserID   int64
+type IsBlockedBetweenAccountsParams struct {
+	A pgtype.UUID
+	B pgtype.UUID
 }
 
-// Returns (from_user_id, to_user_id) pairs for all accepted friendships
-// involving the given user. Callers resolve the "other" user by comparing
-// each column against their own ID.
-func (q *Queries) ListAcceptedFriendIDs(ctx context.Context, fromUserID int64) ([]ListAcceptedFriendIDsRow, error) {
-	rows, err := q.db.Query(ctx, listAcceptedFriendIDs, fromUserID)
+// Edge id if EITHER account has blocked the other. Defense-in-depth gate on
+// every interaction path (friend request, game invite, presence).
+func (q *Queries) IsBlockedBetweenAccounts(ctx context.Context, arg IsBlockedBetweenAccountsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, isBlockedBetweenAccounts, arg.A, arg.B)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const listAccountIdentities = `-- name: ListAccountIdentities :many
+SELECT id, email::text AS email, display_name
+FROM player_accounts
+WHERE id = ANY($1::uuid[])
+`
+
+type ListAccountIdentitiesRow struct {
+	ID          pgtype.UUID
+	Email       string
+	DisplayName *string
+}
+
+// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
+func (q *Queries) ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error) {
+	rows, err := q.db.Query(ctx, listAccountIdentities, accountIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListAcceptedFriendIDsRow
+	var items []ListAccountIdentitiesRow
 	for rows.Next() {
-		var i ListAcceptedFriendIDsRow
-		if err := rows.Scan(&i.FromUserID, &i.ToUserID); err != nil {
+		var i ListAccountIdentitiesRow
+		if err := rows.Scan(&i.ID, &i.Email, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -118,135 +214,31 @@ func (q *Queries) ListAcceptedFriendIDs(ctx context.Context, fromUserID int64) (
 	return items, nil
 }
 
-const listEndUserIdentitiesForUsers = `-- name: ListEndUserIdentitiesForUsers :many
-SELECT id AS end_user_id, COALESCE(email::text, '')::text AS email, xuid
-FROM end_users
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = ANY($1::bigint[])
-`
-
-type ListEndUserIdentitiesForUsersRow struct {
-	EndUserID int64
-	Email     string
-	Xuid      *string
-}
-
-// Bulk-fetch email + xuid for a set of users, used to enrich friend lists.
-// email is COALESCEd because anonymous users have none.
-func (q *Queries) ListEndUserIdentitiesForUsers(ctx context.Context, endUserIds []int64) ([]ListEndUserIdentitiesForUsersRow, error) {
-	rows, err := q.db.Query(ctx, listEndUserIdentitiesForUsers, endUserIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListEndUserIdentitiesForUsersRow
-	for rows.Next() {
-		var i ListEndUserIdentitiesForUsersRow
-		if err := rows.Scan(&i.EndUserID, &i.Email, &i.Xuid); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listFriendsByStatus = `-- name: ListFriendsByStatus :many
-SELECT id, from_user_id, to_user_id, status, created_at, updated_at
+const listFriendsByStatusForAccount = `-- name: ListFriendsByStatusForAccount :many
+SELECT id, from_account_id, to_account_id, status, created_at, updated_at
 FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND (from_user_id = $1 OR to_user_id = $1)
-  AND status = $2
-  AND id > $3
-ORDER BY id ASC
-LIMIT $4
-`
-
-type ListFriendsByStatusParams struct {
-	FromUserID int64
-	Status     string
-	ID         int64
-	Limit      int32
-}
-
-type ListFriendsByStatusRow struct {
-	ID         int64
-	FromUserID int64
-	ToUserID   int64
-	Status     string
-	CreatedAt  pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
-}
-
-func (q *Queries) ListFriendsByStatus(ctx context.Context, arg ListFriendsByStatusParams) ([]ListFriendsByStatusRow, error) {
-	rows, err := q.db.Query(ctx, listFriendsByStatus,
-		arg.FromUserID,
-		arg.Status,
-		arg.ID,
-		arg.Limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListFriendsByStatusRow
-	for rows.Next() {
-		var i ListFriendsByStatusRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.FromUserID,
-			&i.ToUserID,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listFriendsByStatusForCaller = `-- name: ListFriendsByStatusForCaller :many
-SELECT id, from_user_id, to_user_id, status, created_at, updated_at
-FROM friend_edges
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND (($1::text != 'blocked'
-            AND (from_user_id = $2 OR to_user_id = $2))
+WHERE (($1::text != 'blocked'
+            AND (from_account_id = $2 OR to_account_id = $2))
        OR ($1::text = 'blocked'
-            AND from_user_id = $2))
+            AND from_account_id = $2))
   AND status = $1
   AND id > $3
 ORDER BY id ASC
 LIMIT $4
 `
 
-type ListFriendsByStatusForCallerParams struct {
+type ListFriendsByStatusForAccountParams struct {
 	Status   string
-	Me       int64
+	Me       pgtype.UUID
 	Cursor   int64
 	RowLimit int32
 }
 
-type ListFriendsByStatusForCallerRow struct {
-	ID         int64
-	FromUserID int64
-	ToUserID   int64
-	Status     string
-	CreatedAt  pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
-}
-
-// Caller-aware list. For 'blocked', only rows where the caller initiated
-// the block are returned — never rows where the caller is the blockee
-// (which would let a blocked user enumerate who blocked them).
-func (q *Queries) ListFriendsByStatusForCaller(ctx context.Context, arg ListFriendsByStatusForCallerParams) ([]ListFriendsByStatusForCallerRow, error) {
-	rows, err := q.db.Query(ctx, listFriendsByStatusForCaller,
+// Caller-aware. For 'blocked', only rows the caller initiated are returned —
+// never rows where the caller is the blockee (which would let a blocked user
+// learn who blocked them).
+func (q *Queries) ListFriendsByStatusForAccount(ctx context.Context, arg ListFriendsByStatusForAccountParams) ([]FriendEdge, error) {
+	rows, err := q.db.Query(ctx, listFriendsByStatusForAccount,
 		arg.Status,
 		arg.Me,
 		arg.Cursor,
@@ -256,13 +248,13 @@ func (q *Queries) ListFriendsByStatusForCaller(ctx context.Context, arg ListFrie
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListFriendsByStatusForCallerRow
+	var items []FriendEdge
 	for rows.Next() {
-		var i ListFriendsByStatusForCallerRow
+		var i FriendEdge
 		if err := rows.Scan(
 			&i.ID,
-			&i.FromUserID,
-			&i.ToUserID,
+			&i.FromAccountID,
+			&i.ToAccountID,
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -277,56 +269,113 @@ func (q *Queries) ListFriendsByStatusForCaller(ctx context.Context, arg ListFrie
 	return items, nil
 }
 
-const requestFriend = `-- name: RequestFriend :one
-INSERT INTO friend_edges (tenant_id, from_user_id, to_user_id, status)
-VALUES (
-    current_setting('app.tenant_id', true)::bigint,
-    $1, $2, 'pending'
-)
-ON CONFLICT (tenant_id, from_user_id, to_user_id)
-DO UPDATE SET status     = 'pending',
-              updated_at = now()
+const requestFriendByAccount = `-- name: RequestFriendByAccount :one
+
+INSERT INTO friend_edges (from_account_id, to_account_id, status)
+VALUES ($1, $2, 'pending')
+ON CONFLICT (from_account_id, to_account_id)
+DO UPDATE SET status = 'pending', updated_at = now()
 WHERE friend_edges.status = 'rejected'
 RETURNING id, status
 `
 
-type RequestFriendParams struct {
-	FromUserID int64
-	ToUserID   int64
+type RequestFriendByAccountParams struct {
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
 }
 
-type RequestFriendRow struct {
+type RequestFriendByAccountRow struct {
 	ID     int64
 	Status string
 }
 
-// The unique index keeps one current row per directed pair, so re-requests
-// after rejection update in place. Pending/accepted are idempotent (the
-// WHERE clause filters them out, leaving DO UPDATE a no-op). Blocked is
-// terminal (the WHERE clause omits it). See migration 0012.
-func (q *Queries) RequestFriend(ctx context.Context, arg RequestFriendParams) (RequestFriendRow, error) {
-	row := q.db.QueryRow(ctx, requestFriend, arg.FromUserID, arg.ToUserID)
-	var i RequestFriendRow
+// Friend edges between GLOBAL player_accounts (Milestone 4). friend_edges has
+// no tenant_id and no RLS, so these run in either a tenant Pool.Q or a
+// BootstrapQ transaction. Account ids are UUIDs.
+// One current row per directed pair. Re-requests after rejection update in
+// place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
+// no-ops); blocked is terminal (WHERE omits it).
+func (q *Queries) RequestFriendByAccount(ctx context.Context, arg RequestFriendByAccountParams) (RequestFriendByAccountRow, error) {
+	row := q.db.QueryRow(ctx, requestFriendByAccount, arg.FromAccountID, arg.ToAccountID)
+	var i RequestFriendByAccountRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
 }
 
-const setFriendEdgeStatus = `-- name: SetFriendEdgeStatus :exec
-UPDATE friend_edges
-SET status     = $3,
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND from_user_id = $1
-  AND to_user_id   = $2
+const resolveEndUsersForAccountsInProject = `-- name: ResolveEndUsersForAccountsInProject :many
+SELECT id AS end_user_id, player_account_id
+FROM end_users
+WHERE project_id = $1
+  AND player_account_id = ANY($2::uuid[])
+  AND deleted_at IS NULL
 `
 
-type SetFriendEdgeStatusParams struct {
-	FromUserID int64
-	ToUserID   int64
-	Status     string
+type ResolveEndUsersForAccountsInProjectParams struct {
+	ProjectID  int64
+	AccountIds []pgtype.UUID
 }
 
-func (q *Queries) SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error {
-	_, err := q.db.Exec(ctx, setFriendEdgeStatus, arg.FromUserID, arg.ToUserID, arg.Status)
+type ResolveEndUsersForAccountsInProjectRow struct {
+	EndUserID       int64
+	PlayerAccountID pgtype.UUID
+}
+
+// Tenant-scoped: maps a set of accounts back to their end_user in a specific
+// project, for presence sharing and JSON-API user_id mapping.
+func (q *Queries) ResolveEndUsersForAccountsInProject(ctx context.Context, arg ResolveEndUsersForAccountsInProjectParams) ([]ResolveEndUsersForAccountsInProjectRow, error) {
+	rows, err := q.db.Query(ctx, resolveEndUsersForAccountsInProject, arg.ProjectID, arg.AccountIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ResolveEndUsersForAccountsInProjectRow
+	for rows.Next() {
+		var i ResolveEndUsersForAccountsInProjectRow
+		if err := rows.Scan(&i.EndUserID, &i.PlayerAccountID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setFriendEdgeStatusByAccount = `-- name: SetFriendEdgeStatusByAccount :exec
+UPDATE friend_edges
+SET status = $1, updated_at = now()
+WHERE from_account_id = $2
+  AND to_account_id   = $3
+`
+
+type SetFriendEdgeStatusByAccountParams struct {
+	Status        string
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+}
+
+func (q *Queries) SetFriendEdgeStatusByAccount(ctx context.Context, arg SetFriendEdgeStatusByAccountParams) error {
+	_, err := q.db.Exec(ctx, setFriendEdgeStatusByAccount, arg.Status, arg.FromAccountID, arg.ToAccountID)
+	return err
+}
+
+const upsertFriendEdgeStatusByAccount = `-- name: UpsertFriendEdgeStatusByAccount :exec
+INSERT INTO friend_edges (from_account_id, to_account_id, status)
+VALUES ($1, $2, $3)
+ON CONFLICT (from_account_id, to_account_id)
+DO UPDATE SET status = $3, updated_at = now()
+`
+
+type UpsertFriendEdgeStatusByAccountParams struct {
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+	Status        string
+}
+
+// Used for block: create-or-overwrite the directed edge to a terminal status
+// regardless of the prior state (blocking a stranger, a pending, or a friend).
+func (q *Queries) UpsertFriendEdgeStatusByAccount(ctx context.Context, arg UpsertFriendEdgeStatusByAccountParams) error {
+	_, err := q.db.Exec(ctx, upsertFriendEdgeStatusByAccount, arg.FromAccountID, arg.ToAccountID, arg.Status)
 	return err
 }
