@@ -20,6 +20,7 @@ import (
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -294,6 +295,14 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.confirmVerification(r.Context(), p.UserID, code)
+	switch {
+	case errors.Is(err, errBadVerifyCode), errors.Is(err, errVerifyExpired):
+		h.metrics.Verification(observability.VerifyInvalid)
+	case errors.Is(err, errVerifyLocked), errors.Is(err, errVerifyAccountLocked):
+		h.metrics.Verification(observability.VerifyThrottled)
+	case err == nil:
+		h.metrics.Verification(observability.VerifyOK)
+	}
 	switch {
 	case errors.Is(err, errAlreadyVerified):
 		// Account already verified — do not issue a session from the verify

@@ -25,6 +25,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -59,8 +60,10 @@ type Deps struct {
 	MailFrom   string
 	Cache      cache.Store
 	Registry   *prometheus.Registry
-	RBAC       *rbac.Authorizer
-	Now        func() time.Time
+	// Metrics carries the business/health counters. nil is a no-op (unit tests).
+	Metrics *observability.Metrics
+	RBAC    *rbac.Authorizer
+	Now     func() time.Time
 
 	// Fleet is the allocator for game-server slots. nil until a backend is
 	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
@@ -160,6 +163,7 @@ func NewRouter(d Deps) http.Handler {
 				RateLimitOverrides: d.RateLimitOverrides,
 				ProxyTrust:         d.ProxyTrust,
 				Registry:           reg,
+				Metrics:            d.Metrics,
 				Config:             d.Dashboard,
 				Bootstrap:          d.DashboardBootstrap,
 				Mailer:             d.Mailer,
@@ -177,6 +181,7 @@ func NewRouter(d Deps) http.Handler {
 				Limiter:    d.Limiter,
 				ProxyTrust: d.ProxyTrust,
 				Registry:   reg,
+				Metrics:    d.Metrics,
 			}))
 		}
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -121,6 +122,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, errVerifyRequired) {
 		// Password is correct but email isn't verified: mint a fresh code
 		// and bounce them to the verify page instead of failing.
+		h.metrics.Login(observability.SurfaceDashboard, observability.LoginUnverified)
 		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
 			http.Error(w, "verification start failed", http.StatusInternalServerError)
 			return
@@ -132,10 +134,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := http.StatusUnauthorized
 		msg := "Invalid email or password"
+		result := observability.LoginInvalid
 		if errors.Is(err, errLockedAccount) {
 			status = http.StatusLocked
 			msg = "Account is temporarily locked"
+			result = observability.LoginLocked
 		}
+		h.metrics.Login(observability.SurfaceDashboard, result)
 		w.WriteHeader(status)
 		webutil.Render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
 		return
@@ -152,6 +157,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session.User = user
+	h.metrics.Login(observability.SurfaceDashboard, observability.LoginOK)
 	htmxRedirect(w, r, pathDashboard)
 }
 
@@ -198,6 +204,7 @@ func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) (dashboardUse
 		return dashboardUser{}, err
 	}
 	h.bootstrap.complete()
+	h.metrics.Signup(observability.SignupDashboardUser)
 	return dashboardUser{ID: created.ID, Email: created.Email, IsPlatformAdmin: created.IsPlatformAdmin}, nil
 }
 

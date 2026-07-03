@@ -19,6 +19,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -363,6 +364,7 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, InvitePlayerPage(view))
 		return
 	}
+	h.metrics.InviteSent(observability.InvitePlayer)
 	h.sendPlayerInviteEmail(r.Context(), res, projectID)
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
@@ -508,6 +510,9 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		webutil.InternalError(w, "player ban toggle", err)
 		return
+	}
+	if ban {
+		h.metrics.BanIssued(observability.BanScopeTenant)
 	}
 	flash := "Player banned tenant-wide."
 	if !ban {

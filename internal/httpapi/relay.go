@@ -66,6 +66,7 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		d.Metrics.RelayCredentialIssued()
 		w.Header().Set("Content-Type", "application/json")
 		// The password field is the TURN-REST HMAC, intentionally returned
 		// to the authenticated player so they can authenticate against

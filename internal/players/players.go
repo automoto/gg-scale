@@ -33,6 +33,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -74,6 +75,8 @@ type Deps struct {
 	// behind a trusted reverse proxy. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
 	Registry   prometheus.Registerer
+	// Metrics carries the business counters. nil is a no-op (unit tests).
+	Metrics *observability.Metrics
 }
 
 // Handler owns player UI HTTP routes.
@@ -83,6 +86,7 @@ type Handler struct {
 	mailFrom string
 	cfg      Config
 	now      func() time.Time
+	metrics  *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie.
 	// Generated once at handler construction so each process has a fresh
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
@@ -96,7 +100,7 @@ func New(d Deps) http.Handler {
 	if _, err := rand.Read(key); err != nil {
 		panic("players: rand: " + err.Error())
 	}
-	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, verifySigningKey: key}
+	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, metrics: d.Metrics, verifySigningKey: key}
 
 	r := chi.NewRouter()
 	r.Use(webutil.PlayerSecurityHeaders)
@@ -213,6 +217,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	password := r.Form.Get("password")
 	if !validPlayerPassword(password) {
 		_ = bcrypt.CompareHashAndPassword(dummyPlayerBcryptHash, []byte(password))
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
 		w.WriteHeader(http.StatusUnauthorized)
 		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
@@ -230,6 +235,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		_ = bcrypt.CompareHashAndPassword(dummyPlayerBcryptHash, []byte(password))
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
 		w.WriteHeader(http.StatusUnauthorized)
 		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
@@ -239,11 +245,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) != nil {
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
 		w.WriteHeader(http.StatusUnauthorized)
 		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 		return
 	}
 	if row.DisabledAt.Valid {
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginLocked)
 		w.WriteHeader(http.StatusForbidden)
 		webutil.Render(r, w, LoginPage(LoginView{ProjectID: projectID, Email: email, Error: "This account has been disabled.", CSRFToken: h.csrf(r)}))
 		return
@@ -258,6 +266,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			webutil.InternalError(w, "player login: verification email", err)
 			return
 		}
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginUnverified)
 		h.setVerifyCookie(w, row.ID, email, projectID)
 		http.Redirect(w, r, playerVerifyPath(projectID), http.StatusSeeOther)
 		return
@@ -266,6 +275,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "player login: session", err)
 		return
 	}
+	h.metrics.Login(observability.SurfacePlayer, observability.LoginOK)
 	http.Redirect(w, r, playerAccountPath(projectID), http.StatusSeeOther)
 }
 
@@ -340,6 +350,7 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "player signup: insert", err)
 		return
 	}
+	h.metrics.Signup(observability.SignupPlayer)
 
 	if h.mailer != nil && h.mailFrom != "" {
 		if err := h.mailer.Send(r.Context(), mailer.Message{
@@ -392,6 +403,14 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 	}
 	err := h.confirmCode(r.Context(), p.PlayerID, code)
 	switch {
+	case errors.Is(err, errBadVerifyCode), errors.Is(err, errVerifyExpired):
+		h.metrics.Verification(observability.VerifyInvalid)
+	case errors.Is(err, errVerifyLocked), errors.Is(err, errVerifyAccountLocked):
+		h.metrics.Verification(observability.VerifyThrottled)
+	case err == nil:
+		h.metrics.Verification(observability.VerifyOK)
+	}
+	switch {
 	case errors.Is(err, errAlreadyVerified):
 		h.clearVerifyCookie(w, projectID)
 		http.Redirect(w, r, playerLoginPath(projectID), http.StatusSeeOther)
@@ -438,6 +457,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		_ = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 			return sqlcgen.New(tx).RevokePlayerSession(r.Context(), hash[:])
 		})
+		h.metrics.PlayerSessionClosed()
 	}
 	h.clearSessionCookie(w)
 	http.Redirect(w, r, playerLoginPath(projectID), http.StatusSeeOther)
@@ -631,6 +651,7 @@ func (h *Handler) issueSession(ctx context.Context, w http.ResponseWriter, userI
 	if err != nil {
 		return err
 	}
+	h.metrics.PlayerSessionOpened()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    refreshToken,

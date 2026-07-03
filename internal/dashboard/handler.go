@@ -17,6 +17,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -40,9 +41,11 @@ type Deps struct {
 	// behind a trusted reverse proxy. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
 	Registry   prometheus.Registerer
-	Config     Config
-	Bootstrap  *Bootstrap
-	Mailer     mailer.Mailer
+	// Metrics carries the business counters. nil is a no-op (unit tests).
+	Metrics   *observability.Metrics
+	Config    Config
+	Bootstrap *Bootstrap
+	Mailer    mailer.Mailer
 	// Fleet is the manager the dashboard reads allocations from and
 	// invokes manual Allocate/Deallocate against. nil when no backend is
 	// configured — fleet pages render "not configured" in that case.
@@ -84,6 +87,7 @@ type Handler struct {
 	pluginInfo     func() *PluginSnapshot
 	now            func() time.Time
 	proxyTrust     *ratelimit.ProxyTrust
+	metrics        *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie.
 	// Generated once at handler construction so each process has a fresh
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
@@ -118,6 +122,7 @@ func New(d Deps) http.Handler {
 		pluginInfo:       d.PluginInfo,
 		now:              time.Now,
 		proxyTrust:       d.ProxyTrust,
+		metrics:          d.Metrics,
 		verifySigningKey: key,
 	}
 	if d.Limiter != nil && d.Registry != nil {

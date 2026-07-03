@@ -77,6 +77,11 @@ func NewPoolWithTimeout(p *pgxpool.Pool, statementTimeout time.Duration) *Pool {
 	return &Pool{pool: p, statementTimeout: statementTimeout}
 }
 
+// Stat exposes the underlying pgxpool statistics for pool-health metrics.
+func (p *Pool) Stat() *pgxpool.Stat {
+	return p.pool.Stat()
+}
+
 // Q runs fn inside a transaction with `app.tenant_id` set to the tenant
 // extracted from ctx. The transaction is committed if fn returns nil and
 // rolled back otherwise. A deferred rollback guarded by `committed` runs on

@@ -144,6 +144,7 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
+		d.Metrics.MatchmakerTicket()
 		writeTicket(w, ticket, http.StatusCreated)
 	}
 }

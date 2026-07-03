@@ -71,6 +71,7 @@ func run() error {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector())
 	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	metrics := observability.NewMetrics(registry)
 
 	// Apply forward-only SQL migrations before anything else touches the DB.
 	// Runner returns ErrNoChange internally as a no-op so this is safe on
@@ -139,8 +140,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("mailer: %w", err)
 	}
+	// One wrap covers every surface: the same Mailer instance fans out to the
+	// api, dashboard, and player-site handlers.
+	m = mailer.Metered(m, metrics)
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
+	observability.RegisterPoolStats(registry, appPool.Stat)
 	authorizer, err := rbac.NewAuthorizer(appPool)
 	if err != nil {
 		return fmt.Errorf("rbac: %w", err)
@@ -214,6 +219,7 @@ func run() error {
 			MaxAttempts:   cfg.MatchmakerMaxAttempts,
 			WorkerCount:   cfg.MatchmakerWorkerCount,
 			SweepInterval: cfg.MatchmakerSweepInterval,
+			MatchCounter:  matchCounter{metrics},
 			Logger:        logger,
 		})
 		go func() {
@@ -238,6 +244,7 @@ func run() error {
 		MailFrom:             cfg.MailFrom,
 		Cache:                store,
 		Registry:             registry,
+		Metrics:              metrics,
 		RBAC:                 authorizer,
 		Fleet:                fleetMgr,
 		Hub:                  hub,
@@ -301,6 +308,12 @@ func run() error {
 	}
 	return shutdownErr
 }
+
+// matchCounter adapts *observability.Metrics to matchmaker.Counter so the
+// matchmaker package needn't import the metrics layer.
+type matchCounter struct{ m *observability.Metrics }
+
+func (c matchCounter) Inc() { c.m.MatchmakerMatch() }
 
 // startRiverJobs boots the River client (periodic game-session/invite GC) and
 // returns a stop function, or nil if River couldn't start. River runs under

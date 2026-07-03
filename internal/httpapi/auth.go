@@ -22,6 +22,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -233,6 +234,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "signup: tx", err)
 			return
 		}
+		d.Metrics.Signup(observability.SignupPlayer)
 
 		if d.Mailer != nil {
 			msg := mailer.Message{
@@ -335,19 +337,16 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			return errVerifyBadCode
 		})
 		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			http.Error(w, "invalid email or code", http.StatusBadRequest)
-			return
-		case errors.Is(err, errVerifyBadCode):
-			http.Error(w, "invalid email or code", http.StatusBadRequest)
-			return
-		case errors.Is(err, errVerifyExpired):
+		case errors.Is(err, pgx.ErrNoRows), errors.Is(err, errVerifyBadCode), errors.Is(err, errVerifyExpired):
+			d.Metrics.Verification(observability.VerifyInvalid)
 			http.Error(w, "invalid email or code", http.StatusBadRequest)
 			return
 		case errors.Is(err, errVerifyExhausted):
+			d.Metrics.Verification(observability.VerifyThrottled)
 			http.Error(w, "too many attempts", http.StatusTooManyRequests)
 			return
 		case errors.Is(err, errVerifyAccountLocked):
+			d.Metrics.Verification(observability.VerifyThrottled)
 			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
 			return
 		case err != nil:
@@ -355,10 +354,12 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		if lockedAfterAttempt {
+			d.Metrics.Verification(observability.VerifyThrottled)
 			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
 			return
 		}
 
+		d.Metrics.Verification(observability.VerifyOK)
 		writeJSON(w, map[string]any{"player_id": playerID, "verified": true})
 	}
 }
@@ -422,14 +423,17 @@ func loginHandler(d Deps) http.HandlerFunc {
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(req.Password))
+			d.Metrics.Login(observability.SurfaceAPI, observability.LoginInvalid)
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, errBadCredentials) {
+			d.Metrics.Login(observability.SurfaceAPI, observability.LoginInvalid)
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
 		if errors.Is(err, errPlayerBanned) {
+			d.Metrics.Login(observability.SurfaceAPI, observability.LoginLocked)
 			http.Error(w, "account banned", http.StatusForbidden)
 			return
 		}
@@ -437,6 +441,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			webutil.InternalError(w, "login: tx", err)
 			return
 		}
+		d.Metrics.Login(observability.SurfaceAPI, observability.LoginOK)
 
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{

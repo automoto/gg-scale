@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -353,6 +354,7 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account signup: insert", err)
 		return
 	}
+	h.metrics.Signup(observability.SignupAccount)
 
 	h.sendAccountVerifyEmail(r.Context(), email, code)
 	h.setAccountVerifyCookie(w, fromPgUUID(accountID), email)
@@ -391,6 +393,7 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if row.DisabledAt.Valid {
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginLocked)
 		w.WriteHeader(http.StatusForbidden)
 		webutil.Render(r, w, AccountLoginPage(AccountLoginView{Email: email, Error: "This account has been disabled.", CSRFToken: h.csrf(r)}))
 		return
@@ -403,6 +406,7 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 			webutil.InternalError(w, "account login: verification email", verr)
 			return
 		}
+		h.metrics.Login(observability.SurfacePlayer, observability.LoginUnverified)
 		h.setAccountVerifyCookie(w, fromPgUUID(row.ID), email)
 		http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 		return
@@ -411,10 +415,12 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account login: session", err)
 		return
 	}
+	h.metrics.Login(observability.SurfacePlayer, observability.LoginOK)
 	http.Redirect(w, r, accountBasePath+"/", http.StatusSeeOther)
 }
 
 func (h *Handler) renderAccountLoginError(w http.ResponseWriter, r *http.Request, email string) {
+	h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
 	w.WriteHeader(http.StatusUnauthorized)
 	webutil.Render(r, w, AccountLoginPage(AccountLoginView{Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
 }
@@ -437,6 +443,14 @@ func (h *Handler) accountVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := h.confirmAccountCode(r.Context(), toPgUUID(p.AccountID), code)
+	switch {
+	case errors.Is(err, errBadVerifyCode), errors.Is(err, errVerifyExpired):
+		h.metrics.Verification(observability.VerifyInvalid)
+	case errors.Is(err, errVerifyLocked), errors.Is(err, errVerifyAccountLocked):
+		h.metrics.Verification(observability.VerifyThrottled)
+	case err == nil:
+		h.metrics.Verification(observability.VerifyOK)
+	}
 	switch {
 	case errors.Is(err, errAlreadyVerified):
 		h.clearAccountVerifyCookie(w)
@@ -504,6 +518,7 @@ func (h *Handler) accountLogout(w http.ResponseWriter, r *http.Request) {
 		_ = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 			return sqlcgen.New(tx).RevokePlayerAccountSession(r.Context(), hash[:])
 		})
+		h.metrics.PlayerSessionClosed()
 	}
 	h.clearAccountSessionCookie(w)
 	http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
@@ -635,6 +650,7 @@ func (h *Handler) issueAccountSession(ctx context.Context, w http.ResponseWriter
 	}); err != nil {
 		return err
 	}
+	h.metrics.PlayerSessionOpened()
 	http.SetCookie(w, &http.Cookie{
 		Name:     accountSessionCookieName,
 		Value:    refreshToken,

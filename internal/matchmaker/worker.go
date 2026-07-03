@@ -64,7 +64,11 @@ type WorkerConfig struct {
 	// EventDropCounter is incremented when a bucket event is dropped
 	// because the consumer pool is saturated. Optional; nil disables.
 	EventDropCounter Counter
-	Logger           *slog.Logger
+	// MatchCounter is incremented once per committed match. Optional; nil
+	// disables. Lets main wire a Prometheus counter without this package
+	// importing the metrics layer.
+	MatchCounter Counter
+	Logger       *slog.Logger
 }
 
 // Worker consumes the queue, allocates servers, and notifies matched players.
@@ -302,6 +306,9 @@ func (w *Worker) processBucket(ctx context.Context, b Bucket) error {
 	if committed == 0 {
 		w.deallocateOrphan(tenantCtx, alloc, "claim drifted")
 		return nil
+	}
+	if w.cfg.MatchCounter != nil {
+		w.cfg.MatchCounter.Inc()
 	}
 
 	// If no client received match_ready, the match can't proceed — release

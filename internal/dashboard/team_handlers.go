@@ -14,6 +14,7 @@ import (
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -93,6 +94,7 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	h.metrics.InviteSent(observability.InviteTeam)
 	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectDashboard, "")
 	target := tenantTeamPath(tenantID) + queryFlash + url.QueryEscape("Invite sent to "+res.Email)
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -361,6 +363,9 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if res.IsNewUser {
+		h.metrics.Signup(observability.SignupDashboardUser)
+	}
 	// Auto-login: issue a session and redirect to the dashboard home.
 	if _, err := h.issueSession(r.Context(), w, res.UserID, h.clientIP(r), r.Header.Get("User-Agent")); err != nil {
 		slog.ErrorContext(r.Context(), "accept invite: issue session", "err", err)

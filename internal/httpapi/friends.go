@@ -12,6 +12,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -143,6 +144,7 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "request blocked", http.StatusForbidden)
 			return
 		}
+		d.Metrics.FriendRequest(observability.FriendRequestSent)
 		writeJSON(w, map[string]any{"status": status})
 	}
 }
@@ -358,6 +360,12 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 		case err != nil:
 			webutil.InternalError(w, "friend status: tx", err)
 			return
+		}
+		switch newStatus {
+		case "accepted":
+			d.Metrics.FriendRequest(observability.FriendRequestAccepted)
+		case "rejected":
+			d.Metrics.FriendRequest(observability.FriendRequestDeclined)
 		}
 		writeJSON(w, map[string]any{"status": newStatus})
 	}
