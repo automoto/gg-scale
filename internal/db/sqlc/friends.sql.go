@@ -34,8 +34,9 @@ func (q *Queries) AreAccountsFriendsAccepted(ctx context.Context, arg AreAccount
 
 const deleteFriendEdgeByAccount = `-- name: DeleteFriendEdgeByAccount :execrows
 DELETE FROM friend_edges
-WHERE (from_account_id = $1 AND to_account_id = $2)
-   OR (from_account_id = $2 AND to_account_id = $1)
+WHERE ((from_account_id = $1 AND to_account_id = $2)
+    OR (from_account_id = $2 AND to_account_id = $1))
+  AND status <> 'blocked'
 `
 
 type DeleteFriendEdgeByAccountParams struct {
@@ -43,7 +44,9 @@ type DeleteFriendEdgeByAccountParams struct {
 	Other pgtype.UUID
 }
 
-// Symmetric unfriend: caller can be on either side.
+// Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
+// edge — a block is cleared only via the directed unblock path
+// (DeleteFriendEdgeDirected), so a blockee cannot delete the blocker's block.
 func (q *Queries) DeleteFriendEdgeByAccount(ctx context.Context, arg DeleteFriendEdgeByAccountParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteFriendEdgeByAccount, arg.Me, arg.Other)
 	if err != nil {

@@ -44,6 +44,15 @@ WHERE gi.tenant_id   = current_setting('app.tenant_id', true)::bigint
   AND gi.expires_at  > now()
 ORDER BY gi.id ASC;
 
+-- name: CountPendingGameInviteForSessionPlayer :one
+-- Whether an unexpired invite exists for (session, recipient) in the caller's
+-- tenant. Gates joining/resolving a private session by a non-member.
+SELECT count(*) FROM game_invite
+WHERE tenant_id    = current_setting('app.tenant_id', true)::bigint
+  AND session_id   = sqlc.arg('session_id')
+  AND to_player_id = sqlc.arg('to_player_id')
+  AND expires_at   > now();
+
 -- name: DeleteExpiredGameInvitesForTenant :execrows
 -- Removes invites past their expiry for the current tenant. Called per
 -- tenant by the GC goroutine.

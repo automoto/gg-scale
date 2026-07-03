@@ -195,9 +195,15 @@ func run() error {
 
 	// Server-browser heartbeat registry. TTL=15s tolerates a missed
 	// heartbeat or two (game-servers send every 5s) without dropping
-	// live entries; GC every 10s reclaims stale rows.
-	serverListRegistry := serverlist.New(15 * time.Second)
-	go serverListRegistry.RunGC(ctx, 10*time.Second)
+	// live entries; GC every 10s reclaims stale rows. Built only when fleets
+	// are enabled — the server browser is part of the dedicated-servers
+	// feature, so with the kill switch off the registry stays nil and its
+	// /v1/fleets/* routes unmount (mirrors relayIssuer/fleetMgr).
+	var serverListRegistry *serverlist.Registry
+	if cfg.FeatureFleetEnabled {
+		serverListRegistry = serverlist.New(15 * time.Second)
+		go serverListRegistry.RunGC(ctx, 10*time.Second)
+	}
 
 	// Background jobs (River). Expired game-session/invite cleanup runs as a
 	// leader-elected periodic job, so it fires once across the fleet rather

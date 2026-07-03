@@ -127,21 +127,20 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 		case errors.Is(err, errNoAccount):
 			http.Error(w, linkAccountMsg, http.StatusForbidden)
 			return
-		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
+		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows), errors.Is(err, errFriendBlocked):
+			// A block never reveals itself to the blockee: a blocked request is
+			// indistinguishable from one to a non-existent target.
 			http.Error(w, "target not found", http.StatusNotFound)
 			return
 		case errors.Is(err, errFriendSelf):
 			http.Error(w, "cannot friend self", http.StatusBadRequest)
-			return
-		case errors.Is(err, errFriendBlocked):
-			http.Error(w, "request blocked", http.StatusForbidden)
 			return
 		case err != nil:
 			webutil.InternalError(w, "friend request: tx", err)
 			return
 		}
 		if status == "blocked" {
-			http.Error(w, "request blocked", http.StatusForbidden)
+			http.Error(w, "target not found", http.StatusNotFound)
 			return
 		}
 		d.Metrics.FriendRequest(observability.FriendRequestSent)
@@ -449,7 +448,11 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 						playerByAccount[pr.PlayerAccountID] = pr.PlayerID
 						playerIDs = append(playerIDs, pr.PlayerID)
 					}
-					if len(playerIDs) > 0 {
+					// Presence (online status + current session) is shared only
+					// between accepted friends. Never enrich a pending/blocked
+					// list — otherwise sending a friend request would leak the
+					// target's live presence without their consent.
+					if status == "accepted" && len(playerIDs) > 0 {
 						presRows, qerr := q.ListPresenceForUsers(ctx, playerIDs)
 						if qerr != nil {
 							return qerr

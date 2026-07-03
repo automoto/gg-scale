@@ -154,7 +154,7 @@ func (q *Queries) GetGameSession(ctx context.Context, id string) (GetGameSession
 }
 
 const getGameSessionByJoinCode = `-- name: GetGameSessionByJoinCode :one
-SELECT id, join_code, state
+SELECT id, join_code, state, private, host_player_id
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND join_code = $1
@@ -163,17 +163,26 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 `
 
 type GetGameSessionByJoinCodeRow struct {
-	ID       string
-	JoinCode string
-	State    string
+	ID           string
+	JoinCode     string
+	State        string
+	Private      bool
+	HostPlayerID int64
 }
 
 // Open, unexpired sessions only — an expired session lingering before GC
-// must not be resolvable by join code.
+// must not be resolvable by join code. Returns private + host so the handler
+// can withhold a private session from a non-member/non-invitee.
 func (q *Queries) GetGameSessionByJoinCode(ctx context.Context, joinCode string) (GetGameSessionByJoinCodeRow, error) {
 	row := q.db.QueryRow(ctx, getGameSessionByJoinCode, joinCode)
 	var i GetGameSessionByJoinCodeRow
-	err := row.Scan(&i.ID, &i.JoinCode, &i.State)
+	err := row.Scan(
+		&i.ID,
+		&i.JoinCode,
+		&i.State,
+		&i.Private,
+		&i.HostPlayerID,
+	)
 	return i, err
 }
 

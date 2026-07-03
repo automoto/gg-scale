@@ -34,10 +34,13 @@ ON CONFLICT (from_account_id, to_account_id)
 DO UPDATE SET status = sqlc.arg(status), updated_at = now();
 
 -- name: DeleteFriendEdgeByAccount :execrows
--- Symmetric unfriend: caller can be on either side.
+-- Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
+-- edge — a block is cleared only via the directed unblock path
+-- (DeleteFriendEdgeDirected), so a blockee cannot delete the blocker's block.
 DELETE FROM friend_edges
-WHERE (from_account_id = sqlc.arg('me') AND to_account_id = sqlc.arg('other'))
-   OR (from_account_id = sqlc.arg('other') AND to_account_id = sqlc.arg('me'));
+WHERE ((from_account_id = sqlc.arg('me') AND to_account_id = sqlc.arg('other'))
+    OR (from_account_id = sqlc.arg('other') AND to_account_id = sqlc.arg('me')))
+  AND status <> 'blocked';
 
 -- name: DeleteFriendEdgeDirected :execrows
 -- Directed delete (unblock: only remove the edge the caller initiated).

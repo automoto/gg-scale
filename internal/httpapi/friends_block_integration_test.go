@@ -37,10 +37,11 @@ func TestFriends_block_enforcement_e2e(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	assert.Contains(t, string(body), `"items":[]`)
 
-	// B cannot re-friend A — request is refused without revealing the block.
+	// B cannot re-friend A, and the refusal never reveals the block: it is
+	// indistinguishable from a request to a non-existent target (404).
 	resp, body = authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idA), "k", tokB, nil)
-	require.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
+	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 
 	// B must not learn who blocked them: B's blocked list is empty (only the
 	// blocker sees the edge).

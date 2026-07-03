@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -29,10 +30,11 @@ const (
 )
 
 var (
-	errGameSessionEnded   = errors.New("game session: ended")
-	errGameSessionExpired = errors.New("game session: expired")
-	errGameSessionFull    = errors.New("game session: full")
-	errGameSessionCapped  = errors.New("game session: project cap reached")
+	errGameSessionEnded     = errors.New("game session: ended")
+	errGameSessionExpired   = errors.New("game session: expired")
+	errGameSessionFull      = errors.New("game session: full")
+	errGameSessionCapped    = errors.New("game session: project cap reached")
+	errGameSessionForbidden = errors.New("game session: caller not a member")
 )
 
 func newJoinCode() (string, error) {
@@ -229,11 +231,40 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 	}
 }
 
+// canAccessPrivateSession reports whether callerID may see or join a private
+// session: the host, an existing peer, or the holder of an unexpired invite.
+func canAccessPrivateSession(ctx context.Context, q *sqlcgen.Queries, sessionID string, hostPlayerID, callerID int64) (bool, error) {
+	if callerID == hostPlayerID {
+		return true, nil
+	}
+	member, err := q.IsGameSessionMember(ctx, sqlcgen.IsGameSessionMemberParams{
+		SessionID: sessionID, PlayerID: callerID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if member {
+		return true, nil
+	}
+	invites, err := q.CountPendingGameInviteForSessionPlayer(ctx, sqlcgen.CountPendingGameInviteForSessionPlayerParams{
+		SessionID: sessionID, ToPlayerID: callerID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return invites > 0, nil
+}
+
 // GET /v1/game-session/{id}
 func gameSessionGetHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		sessionID := chi.URLParam(r, "id")
+		callerID, ok := playerauth.IDFromContext(ctx)
+		if !ok {
+			http.Error(w, "no player", http.StatusUnauthorized)
+			return
+		}
 
 		var (
 			sess  sqlcgen.GetGameSessionRow
@@ -246,11 +277,21 @@ func gameSessionGetHandler(d Deps) http.HandlerFunc {
 			if qerr != nil {
 				return qerr
 			}
+			// The roster (peer public IP:port) is member-only — the host or an
+			// existing peer. A non-member gets 404 so neither the roster nor
+			// the session's existence leaks (mirrors the heartbeat handler).
+			member, qerr := canAccessPrivateSession(ctx, q, sessionID, sess.HostPlayerID, callerID)
+			if qerr != nil {
+				return qerr
+			}
+			if !member {
+				return errGameSessionForbidden
+			}
 			peers, qerr = q.ListGameSessionPeers(ctx, sessionID)
 			return qerr
 		})
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errGameSessionForbidden) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
@@ -276,15 +317,35 @@ func gameSessionResolveHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "joinCode required", http.StatusBadRequest)
 			return
 		}
+		callerID, ok := playerauth.IDFromContext(ctx)
+		if !ok {
+			http.Error(w, "no player", http.StatusUnauthorized)
+			return
+		}
 
 		var row sqlcgen.GetGameSessionByJoinCodeRow
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+			q := sqlcgen.New(tx)
 			var qerr error
-			row, qerr = sqlcgen.New(tx).GetGameSessionByJoinCode(ctx, joinCode)
-			return qerr
+			row, qerr = q.GetGameSessionByJoinCode(ctx, joinCode)
+			if qerr != nil {
+				return qerr
+			}
+			// A private session is not discoverable by join code alone: only
+			// the host, an existing member, or an invitee may resolve it.
+			if row.Private {
+				allowed, aerr := canAccessPrivateSession(ctx, q, row.ID, row.HostPlayerID, callerID)
+				if aerr != nil {
+					return aerr
+				}
+				if !allowed {
+					return errGameSessionForbidden
+				}
+			}
+			return nil
 		})
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errGameSessionForbidden) {
 				http.Error(w, "not found", http.StatusNotFound)
 				return
 			}
@@ -332,6 +393,17 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 			if qerr != nil {
 				return qerr
 			}
+			// A private session admits only the host, an existing member, or an
+			// invitee — even a caller who somehow learned the session id.
+			if sess.Private {
+				allowed, aerr := canAccessPrivateSession(ctx, q, sessionID, sess.HostPlayerID, joinerID)
+				if aerr != nil {
+					return aerr
+				}
+				if !allowed {
+					return errGameSessionForbidden
+				}
+			}
 			if sess.State == "ended" {
 				return errGameSessionEnded
 			}
@@ -361,7 +433,7 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 			return qerr
 		})
 		switch {
-		case errors.Is(err, pgx.ErrNoRows):
+		case errors.Is(err, pgx.ErrNoRows), errors.Is(err, errGameSessionForbidden):
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		case errors.Is(err, errGameSessionEnded), errors.Is(err, errGameSessionExpired):

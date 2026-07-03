@@ -52,6 +52,9 @@ type Querier interface {
 	// Counts non-ended, non-expired sessions for the project. Used in the
 	// create handler to enforce a per-project session cap.
 	CountOpenGameSessionsForProject(ctx context.Context, projectID int64) (int64, error)
+	// Whether an unexpired invite exists for (session, recipient) in the caller's
+	// tenant. Gates joining/resolving a private session by a non-member.
+	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
@@ -115,7 +118,9 @@ type Querier interface {
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
-	// Symmetric unfriend: caller can be on either side.
+	// Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
+	// edge — a block is cleared only via the directed unblock path
+	// (DeleteFriendEdgeDirected), so a blockee cannot delete the blocker's block.
 	DeleteFriendEdgeByAccount(ctx context.Context, arg DeleteFriendEdgeByAccountParams) (int64, error)
 	// Directed delete (unblock: only remove the edge the caller initiated).
 	DeleteFriendEdgeDirected(ctx context.Context, arg DeleteFriendEdgeDirectedParams) (int64, error)
@@ -168,7 +173,8 @@ type Querier interface {
 	GetFriendEdgeByAccount(ctx context.Context, arg GetFriendEdgeByAccountParams) (GetFriendEdgeByAccountRow, error)
 	GetGameSession(ctx context.Context, id string) (GetGameSessionRow, error)
 	// Open, unexpired sessions only — an expired session lingering before GC
-	// must not be resolvable by join code.
+	// must not be resolvable by join code. Returns private + host so the handler
+	// can withhold a private session from a non-member/non-invitee.
 	GetGameSessionByJoinCode(ctx context.Context, joinCode string) (GetGameSessionByJoinCodeRow, error)
 	// Row-locking variant used by the join handler so concurrent joins for the
 	// same session serialize on the session row and max_players is enforced

@@ -228,7 +228,7 @@ func NewRouter(d Deps) http.Handler {
 
 				// Player authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
-					r.Use(playerauth.New(d.Signer))
+					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 					mountStorageRoutes(r, d)
 					mountLeaderboardRoutes(r, d)

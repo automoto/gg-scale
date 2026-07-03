@@ -32,8 +32,9 @@ FOR UPDATE;
 
 -- name: GetGameSessionByJoinCode :one
 -- Open, unexpired sessions only — an expired session lingering before GC
--- must not be resolvable by join code.
-SELECT id, join_code, state
+-- must not be resolvable by join code. Returns private + host so the handler
+-- can withhold a private session from a non-member/non-invitee.
+SELECT id, join_code, state, private, host_player_id
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND join_code = sqlc.arg('join_code')

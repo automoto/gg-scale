@@ -17,6 +17,20 @@ import (
 
 const headerName = "X-Session-Token"
 
+// ErrRevoked signals that the player no longer exists (deleted). An
+// EpochValidator returns it so the middleware can treat the session as invalid
+// rather than an infrastructure error.
+var ErrRevoked = errors.New("playerauth: session revoked")
+
+// EpochValidator reports a player's current session_epoch. The middleware
+// rejects a token whose epoch claim is behind the stored value — the player was
+// tenant-banned, disabled, or changed their password after the token was minted
+// (all bump the epoch). This makes revocation immediate on every player route,
+// not bounded by the access-token TTL.
+type EpochValidator interface {
+	CurrentEpoch(ctx context.Context, playerID int64) (int64, error)
+}
+
 type ctxKey struct{}
 type projectCtxKey struct{}
 
@@ -52,8 +66,11 @@ func ProjectIDFromContext(ctx context.Context) (int64, bool) {
 }
 
 // New builds the middleware. The tenant middleware must run first so the
-// request context already carries a tenant_id.
-func New(signer *auth.Signer) func(http.Handler) http.Handler {
+// request context already carries a tenant_id. When validator is non-nil the
+// middleware also re-checks the player's session_epoch on every request so a
+// ban/disable/password-change takes effect immediately (a nil validator skips
+// that check, preserving the token-TTL window).
+func New(signer *auth.Signer, validator EpochValidator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenantID, err := db.TenantFromContext(r.Context())
@@ -92,6 +109,25 @@ func New(signer *auth.Signer) func(http.Handler) http.Handler {
 			if projectID, ok := db.ProjectFromContext(r.Context()); ok {
 				if claims.ProjectID != projectID {
 					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+			}
+
+			if validator != nil {
+				epoch, verr := validator.CurrentEpoch(r.Context(), claims.PlayerID)
+				if errors.Is(verr, ErrRevoked) {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				if verr != nil {
+					http.Error(w, "internal error", http.StatusInternalServerError)
+					return
+				}
+				if claims.SessionEpoch != epoch {
+					// Stale epoch: the player was banned/disabled/changed
+					// password after this token was minted.
+					w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", error_description="session revoked"`)
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
 					return
 				}
 			}

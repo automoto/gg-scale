@@ -11,6 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countPendingGameInviteForSessionPlayer = `-- name: CountPendingGameInviteForSessionPlayer :one
+SELECT count(*) FROM game_invite
+WHERE tenant_id    = current_setting('app.tenant_id', true)::bigint
+  AND session_id   = $1
+  AND to_player_id = $2
+  AND expires_at   > now()
+`
+
+type CountPendingGameInviteForSessionPlayerParams struct {
+	SessionID  string
+	ToPlayerID int64
+}
+
+// Whether an unexpired invite exists for (session, recipient) in the caller's
+// tenant. Gates joining/resolving a private session by a non-member.
+func (q *Queries) CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingGameInviteForSessionPlayer, arg.SessionID, arg.ToPlayerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createGameInvite = `-- name: CreateGameInvite :one
 INSERT INTO game_invite (tenant_id, project_id, from_player_id, to_player_id, session_id, join_code, expires_at)
 VALUES (

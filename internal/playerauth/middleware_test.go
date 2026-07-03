@@ -46,7 +46,7 @@ func capturePlayerProject(out *int64) http.Handler {
 }
 
 func TestMiddleware_returns_401_when_X_Session_Token_missing(t *testing.T) {
-	mw := playerauth.New(newSigner(t))
+	mw := playerauth.New(newSigner(t), nil)
 
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(1)
@@ -56,7 +56,7 @@ func TestMiddleware_returns_401_when_X_Session_Token_missing(t *testing.T) {
 }
 
 func TestMiddleware_returns_401_when_token_signature_invalid(t *testing.T) {
-	mw := playerauth.New(newSigner(t))
+	mw := playerauth.New(newSigner(t), nil)
 
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(1)
@@ -74,7 +74,7 @@ func TestMiddleware_returns_401_when_token_expired(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(1)
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
@@ -87,7 +87,7 @@ func TestMiddleware_returns_403_when_token_tenant_does_not_match_context(t *test
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(1) // api_key resolved tenant 1; token claims tenant 999.
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
@@ -101,7 +101,7 @@ func TestMiddleware_injects_player_id_on_success(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(7)
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(capturePlayer(&captured)).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(capturePlayer(&captured)).ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.Equal(t, int64(42), captured)
@@ -118,7 +118,7 @@ func TestMiddleware_injects_project_id_on_success(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := reqWithTenant(7)
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(capturePlayerProject(&captured)).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(capturePlayerProject(&captured)).ServeHTTP(rr, req)
 
 	require.Equal(t, http.StatusOK, rr.Code)
 	assert.Equal(t, int64(9), captured)
@@ -137,7 +137,7 @@ func TestMiddleware_returns_403_when_token_project_pin_mismatches_api_key(t *tes
 	req := reqWithTenant(1)
 	req = req.WithContext(db.WithProject(req.Context(), 8))
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusForbidden, rr.Code)
 }
@@ -153,7 +153,7 @@ func TestMiddleware_passes_when_token_project_pin_matches_api_key(t *testing.T) 
 	req := reqWithTenant(1)
 	req = req.WithContext(db.WithProject(req.Context(), 7))
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusNotFound, rr.Code) // passes through to NotFoundHandler
 }
@@ -169,9 +169,62 @@ func TestMiddleware_rejects_project_pinned_key_when_token_has_no_project_pin(t *
 	req := reqWithTenant(1)
 	req = req.WithContext(db.WithProject(req.Context(), 8))
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+type fakeEpoch struct {
+	epoch int64
+	err   error
+}
+
+func (f fakeEpoch) CurrentEpoch(context.Context, int64) (int64, error) { return f.epoch, f.err }
+
+func TestMiddleware_rejects_stale_session_epoch(t *testing.T) {
+	signer := newSigner(t)
+	// Token minted at epoch 1; the stored epoch has since moved to 2 (ban).
+	tok, err := signer.Sign(auth.Claims{
+		PlayerID: 5, TenantID: 1, SessionEpoch: 1, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req.Header.Set("X-Session-Token", tok)
+	playerauth.New(signer, fakeEpoch{epoch: 2})(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestMiddleware_passes_when_session_epoch_matches(t *testing.T) {
+	signer := newSigner(t)
+	tok, err := signer.Sign(auth.Claims{
+		PlayerID: 5, TenantID: 1, SessionEpoch: 3, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req.Header.Set("X-Session-Token", tok)
+	playerauth.New(signer, fakeEpoch{epoch: 3})(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusNotFound, rr.Code) // passed through
+}
+
+func TestMiddleware_rejects_when_player_revoked(t *testing.T) {
+	signer := newSigner(t)
+	tok, err := signer.Sign(auth.Claims{
+		PlayerID: 5, TenantID: 1, SessionEpoch: 1, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	require.NoError(t, err)
+
+	rr := httptest.NewRecorder()
+	req := reqWithTenant(1)
+	req.Header.Set("X-Session-Token", tok)
+	playerauth.New(signer, fakeEpoch{err: playerauth.ErrRevoked})(http.NotFoundHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
 func TestIDFromContext_returns_false_on_bare_context(t *testing.T) {
@@ -196,7 +249,7 @@ func TestMiddleware_returns_500_when_no_tenant_in_context(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
 	req.Header.Set("X-Session-Token", tok)
-	playerauth.New(signer)(http.NotFoundHandler()).ServeHTTP(rr, req)
+	playerauth.New(signer, nil)(http.NotFoundHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
 }

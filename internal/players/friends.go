@@ -23,6 +23,10 @@ import (
 
 const friendsPath = accountBasePath + "/friends"
 
+// friendRequestSentFlash is shown whether or not the target exists, so the
+// form can't be used to enumerate which emails / display names have an account.
+const friendRequestSentFlash = "If an account matches, a friend request was sent."
+
 var (
 	errFriendTargetNotFound = errors.New("players: no account matches that email or name")
 	errFriendAmbiguous      = errors.New("players: multiple accounts share that display name — use an email")
@@ -185,7 +189,9 @@ func (h *Handler) friendRequest(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, errFriendTargetNotFound):
-		h.redirectFriends(w, r, "", "No account matches that email or name.")
+		// Uniform with the success path so a caller can't probe which emails /
+		// display names have an account (and a block stays hidden).
+		h.redirectFriends(w, r, friendRequestSentFlash, "")
 	case errors.Is(err, errFriendAmbiguous):
 		h.redirectFriends(w, r, "", "Multiple accounts share that display name — use an email.")
 	case errors.Is(err, errFriendSelfTarget):
@@ -193,7 +199,7 @@ func (h *Handler) friendRequest(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		webutil.InternalError(w, "friend request", err)
 	default:
-		h.redirectFriends(w, r, "Friend request sent.", "")
+		h.redirectFriends(w, r, friendRequestSentFlash, "")
 	}
 }
 
@@ -256,15 +262,30 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		switch action {
-		case "accept":
-			flash = "Friend added."
-			return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
-				FromAccountID: other, ToAccountID: me, Status: "accepted",
+		case "accept", "reject":
+			// Only a pending incoming request (other→me) may be accepted or
+			// rejected. Reading the current status first prevents flipping a
+			// 'blocked' or 'rejected' edge — the JSON path enforces the same
+			// guard, and without it a blocked user could turn the block into a
+			// friendship.
+			edge, err := q.GetFriendEdgeByAccount(ctx, sqlcgen.GetFriendEdgeByAccountParams{
+				FromAccountID: other, ToAccountID: me,
 			})
-		case "reject":
-			flash = "Request declined."
+			if errors.Is(err, pgx.ErrNoRows) || (err == nil && edge.Status != "pending") {
+				flash = "That request is no longer available."
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			newStatus := "accepted"
+			flash = "Friend added."
+			if action == "reject" {
+				newStatus = "rejected"
+				flash = "Request declined."
+			}
 			return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
-				FromAccountID: other, ToAccountID: me, Status: "rejected",
+				FromAccountID: other, ToAccountID: me, Status: newStatus,
 			})
 		case "unfriend":
 			flash = "Removed."
