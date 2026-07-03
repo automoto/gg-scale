@@ -346,9 +346,14 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if webutil.IsUniqueViolation(err) {
-			view.Error = "An account with that email already exists. Try logging in."
-			w.WriteHeader(http.StatusConflict)
-			webutil.Render(r, w, AccountSignupPage(view))
+			// Anti-enumeration: a duplicate email must be indistinguishable from a
+			// fresh signup, or the form leaks which emails have an account. Notify
+			// the real owner out of band and drop the caller into the same verify
+			// flow with a decoy id — every downstream code path (verify, resend)
+			// treats the unknown account as a wrong code / silent no-op.
+			h.sendAccountExistsEmail(r.Context(), email)
+			h.setAccountVerifyCookie(w, uuid.New(), email)
+			http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 			return
 		}
 		webutil.InternalError(w, "account signup: insert", err)
@@ -533,6 +538,9 @@ func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype
 		state, qerr = sqlcgen.New(tx).GetPlayerAccountVerificationState(ctx, accountID)
 		return qerr
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // decoy / unknown account: silent no-op, send no email
+		}
 		return err
 	}
 	if state.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(state.EmailVerificationLockedUntil.Time, h.now()) {
@@ -568,6 +576,11 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		state, err := q.GetPlayerAccountVerificationState(ctx, accountID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Decoy / unknown account (anti-enumeration signup): behave exactly
+			// like a wrong code.
+			return errBadVerifyCode
+		}
 		if err != nil {
 			return err
 		}
@@ -627,6 +640,21 @@ func (h *Handler) sendAccountVerifyEmail(ctx context.Context, email, code string
 		To:      []string{email},
 		Subject: verifySubject,
 		Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
+	})
+}
+
+// sendAccountExistsEmail notifies the owner of an existing account that someone
+// tried to sign up with their email. Paired with the decoy verify flow so the
+// signup form can't be used to enumerate registered emails.
+func (h *Handler) sendAccountExistsEmail(ctx context.Context, email string) {
+	if h.mailer == nil || h.mailFrom == "" {
+		return
+	}
+	_ = h.mailer.Send(ctx, mailer.Message{
+		From:    h.mailFrom,
+		To:      []string{email},
+		Subject: "ggscale account",
+		Body:    "Someone tried to sign up with this email, but an account already exists. If this was you, log in or reset your password instead.",
 	})
 }
 

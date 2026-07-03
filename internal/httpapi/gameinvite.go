@@ -114,7 +114,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 				return qerr
 			}
 
-			sess, qerr := q.GetGameSession(ctx, req.SessionID)
+			sess, qerr := q.GetGameSession(ctx, sqlcgen.GetGameSessionParams{ProjectID: projectID, ID: req.SessionID})
 			if qerr != nil {
 				return qerr
 			}

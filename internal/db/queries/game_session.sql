@@ -15,28 +15,35 @@ VALUES (
 RETURNING id, join_code, state, created_at;
 
 -- name: GetGameSession :one
+-- Scoped by project as well as tenant: the caller's key is project-pinned, so a
+-- player in project A must not read a session belonging to project B of the same
+-- tenant (which would leak peers' public IP:port across projects).
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg('project_id')
   AND id = sqlc.arg('id');
 
 -- name: GetGameSessionForUpdate :one
 -- Row-locking variant used by the join handler so concurrent joins for the
 -- same session serialize on the session row and max_players is enforced
--- without a TOCTOU race.
+-- without a TOCTOU race. Project-scoped (see GetGameSession).
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg('project_id')
   AND id = sqlc.arg('id')
 FOR UPDATE;
 
 -- name: GetGameSessionByJoinCode :one
 -- Open, unexpired sessions only — an expired session lingering before GC
 -- must not be resolvable by join code. Returns private + host so the handler
--- can withhold a private session from a non-member/non-invitee.
+-- can withhold a private session from a non-member/non-invitee. Project-scoped
+-- so a join code can't resolve a session in another project of the same tenant.
 SELECT id, join_code, state, private, host_player_id
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg('project_id')
   AND join_code = sqlc.arg('join_code')
   AND state     = 'open'
   AND expires_at > now();
@@ -44,7 +51,8 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 -- name: UpdateGameSessionState :exec
 UPDATE game_session
 SET state = sqlc.arg('state')
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg('project_id')
   AND id = sqlc.arg('id');
 
 -- name: DeleteGameSession :exec

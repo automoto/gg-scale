@@ -134,12 +134,12 @@ func TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 // middleware blocks anonymous form posts that don't carry the cookie/field.
 func TestH6_PlayerSitePOST_RejectsRequestWithoutCSRF(t *testing.T) {
 	c := startCluster(t)
-	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6")
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6")
 	srv := newPlayersServerForCluster(t, c)
 
 	form := url.Values{"email": {"someone@example.com"}, "password": {"hunter22"}}
 	req, err := http.NewRequest(http.MethodPost,
-		srv.URL+"/v1/players/p/"+strconv.FormatInt(projectID, 10)+"/login",
+		srv.URL+"/v1/players/account/login",
 		strings.NewReader(form.Encode()))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -156,14 +156,14 @@ func TestH6_PlayerSitePOST_RejectsRequestWithoutCSRF(t *testing.T) {
 // GET the page (cookie set + token rendered), POST back with both → 200/303.
 func TestH6_PlayerSitePOST_AcceptsRequestWithMatchingCSRF(t *testing.T) {
 	c := startCluster(t)
-	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6-ok")
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6-ok")
 	srv := newPlayersServerForCluster(t, c)
 
 	jar, err := cookiejar.New(nil)
 	require.NoError(t, err)
 	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 
-	loginPath := srv.URL + "/v1/players/p/" + strconv.FormatInt(projectID, 10) + "/login"
+	loginPath := srv.URL + "/v1/players/account/login"
 	getResp, err := client.Get(loginPath)
 	require.NoError(t, err)
 	body, _ := readAllString(getResp)

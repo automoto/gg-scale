@@ -19,99 +19,6 @@ templ playerLayout(title string) {
 	</html>
 }
 
-type LoginView struct {
-	ProjectID int64
-	Email     string
-	Error     string
-	CSRFToken string
-}
-
-templ LoginPage(vm LoginView) {
-	@playerLayout("Sign in") {
-		<h1>Sign in</h1>
-		<p class="subtitle">Sign in to play.</p>
-		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
-		}
-		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/login") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Email
-				<input name="email" type="email" value={ vm.Email } autocomplete="username" required/>
-			</label>
-			<label>Password
-				<input name="password" type="password" autocomplete="current-password" required/>
-			</label>
-			<button type="submit">Sign in</button>
-		</form>
-		<p><a href={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/signup") }>Create an account</a></p>
-	}
-}
-
-type SignupView struct {
-	ProjectID   int64
-	Email       string
-	Error       string
-	FieldErrors map[string]string
-	CSRFToken   string
-}
-
-templ SignupPage(vm SignupView) {
-	@playerLayout("Sign up") {
-		<h1>Create an account</h1>
-		<p class="subtitle">We'll send a 6-digit code to verify your email.</p>
-		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
-		}
-		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/signup") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Email
-				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
-				if msg, ok := vm.FieldErrors["email"]; ok {
-					<small class="error">{ msg }</small>
-				}
-			</label>
-			<label>Password (≥ 8 chars)
-				<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
-				if msg, ok := vm.FieldErrors["password"]; ok {
-					<small class="error">{ msg }</small>
-				}
-			</label>
-			<button type="submit">Create account</button>
-		</form>
-		<p><a href={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/login") }>I already have an account</a></p>
-	}
-}
-
-type VerifyView struct {
-	ProjectID int64
-	Email     string
-	Error     string
-	CSRFToken string
-}
-
-templ VerifyPage(vm VerifyView) {
-	@playerLayout("Verify email") {
-		<h1>Verify your email</h1>
-		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>.</p>
-		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
-		}
-		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/verify") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Verification code
-				<input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus/>
-			</label>
-			<button type="submit">Verify</button>
-		</form>
-	}
-}
-
-type AccountView struct {
-	ProjectID int64
-	Email     string
-	CSRFToken string
-}
-
 templ InviteAcceptPage(vm InviteAcceptView) {
 	@playerLayout("Accept invite") {
 		<h1>Accept invite</h1>
@@ -139,17 +46,5 @@ templ InviteAcceptPage(vm InviteAcceptView) {
 				<button type="submit">Accept invite</button>
 			</form>
 		}
-	}
-}
-
-templ AccountPage(vm AccountView) {
-	@playerLayout("Account") {
-		<h1>Your account</h1>
-		<p class="subtitle">Welcome back, <code>{ vm.Email }</code>.</p>
-		<p>Friends, leaderboards, and account-linking land here in a future release.</p>
-		<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/logout") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<button class="secondary" type="submit">Sign out</button>
-		</form>
 	}
 }

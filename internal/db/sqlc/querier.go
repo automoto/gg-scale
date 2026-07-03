@@ -171,15 +171,19 @@ type Querier interface {
 	// under the same name.
 	GetFleetByName(ctx context.Context, arg GetFleetByNameParams) (Fleet, error)
 	GetFriendEdgeByAccount(ctx context.Context, arg GetFriendEdgeByAccountParams) (GetFriendEdgeByAccountRow, error)
-	GetGameSession(ctx context.Context, id string) (GetGameSessionRow, error)
+	// Scoped by project as well as tenant: the caller's key is project-pinned, so a
+	// player in project A must not read a session belonging to project B of the same
+	// tenant (which would leak peers' public IP:port across projects).
+	GetGameSession(ctx context.Context, arg GetGameSessionParams) (GetGameSessionRow, error)
 	// Open, unexpired sessions only — an expired session lingering before GC
 	// must not be resolvable by join code. Returns private + host so the handler
-	// can withhold a private session from a non-member/non-invitee.
-	GetGameSessionByJoinCode(ctx context.Context, joinCode string) (GetGameSessionByJoinCodeRow, error)
+	// can withhold a private session from a non-member/non-invitee. Project-scoped
+	// so a join code can't resolve a session in another project of the same tenant.
+	GetGameSessionByJoinCode(ctx context.Context, arg GetGameSessionByJoinCodeParams) (GetGameSessionByJoinCodeRow, error)
 	// Row-locking variant used by the join handler so concurrent joins for the
 	// same session serialize on the session row and max_players is enforced
-	// without a TOCTOU race.
-	GetGameSessionForUpdate(ctx context.Context, id string) (GetGameSessionForUpdateRow, error)
+	// without a TOCTOU race. Project-scoped (see GetGameSession).
+	GetGameSessionForUpdate(ctx context.Context, arg GetGameSessionForUpdateParams) (GetGameSessionForUpdateRow, error)
 	// Most-specific-wins: a project-scoped row overrides a tenant-wide row for the
 	// same kind. Used by the invite throttle.
 	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)

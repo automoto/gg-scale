@@ -4,14 +4,87 @@ package httpapi_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// accountSignup drives the global-account signup form (GET for CSRF, then POST)
+// and returns the response status + Location header.
+func accountSignup(t *testing.T, baseURL, email, password string) (int, string) {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	signupURL := baseURL + "/v1/players/account/signup"
+
+	getResp, err := client.Get(signupURL)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(getResp.Body)
+	getResp.Body.Close()
+	require.Equal(t, http.StatusOK, getResp.StatusCode, string(body))
+	csrf := extractCSRFFromForm(t, string(body))
+
+	form := url.Values{"_csrf": {csrf}, "email": {email}, "password": {password}}
+	req, err := http.NewRequest(http.MethodPost, signupURL, strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	return resp.StatusCode, resp.Header.Get("Location")
+}
+
+// TestAccountSignup_duplicate_email_indistinguishable proves the anti-enumeration
+// decoy: a signup with an already-registered email returns exactly the same
+// response as a fresh signup (redirect to verify), not a distinguishing 409.
+func TestAccountSignup_duplicate_email_indistinguishable(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "sk")
+	srv, _ := newDashboardAndPlayerServer(t, c)
+
+	// Fresh signup creates the account and redirects to verify.
+	status, loc := accountSignup(t, srv.URL, "dup@example.com", "hunter2hunter2")
+	require.Equal(t, http.StatusSeeOther, status)
+	require.Contains(t, loc, "/verify")
+
+	// A second signup with the SAME email must be indistinguishable.
+	dupStatus, dupLoc := accountSignup(t, srv.URL, "dup@example.com", "hunter2hunter2")
+	assert.Equal(t, status, dupStatus, "duplicate signup status must match a fresh one")
+	assert.Equal(t, loc, dupLoc, "duplicate signup redirect must match a fresh one")
+
+	// A brand-new email is also the same response — no oracle either way.
+	newStatus, newLoc := accountSignup(t, srv.URL, "fresh@example.com", "hunter2hunter2")
+	assert.Equal(t, status, newStatus)
+	assert.Equal(t, loc, newLoc)
+}
+
+// seedProjectWithAPIKey adds a second project + project-pinned api key under an
+// existing tenant, so a test can exercise cross-project isolation within one
+// tenant.
+func seedProjectWithAPIKey(t *testing.T, c *cluster, tenantID int64, token string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	var projectID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, $2) RETURNING id`,
+		tenantID, "project-"+token).Scan(&projectID))
+	sum := sha256.Sum256([]byte(token))
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash) VALUES ($1, $2, $3)`,
+		tenantID, projectID, sum[:])
+	require.NoError(t, err)
+	return projectID
+}
 
 // bumpPlayerEpoch simulates a ban/disable/password-change by advancing the
 // player's session_epoch out of band (bootstrapPool bypasses RLS).
@@ -134,6 +207,37 @@ func TestGameSession_get_roster_requires_membership(t *testing.T) {
 	resp, body = authedReq(t, http.MethodGet,
 		fmt.Sprintf("%s/v1/game-session/%s", srv.URL, sess.SessionID), "k", tokStranger, nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+}
+
+// TestGameSession_cross_project_isolation proves a player authenticated for one
+// project cannot read, resolve, or join a session belonging to a different
+// project of the SAME tenant (which would leak peers' public IP:port across
+// projects).
+func TestGameSession_cross_project_isolation(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k1")
+	seedProjectWithAPIKey(t, c, tenantID, "k2") // second project, same tenant
+	srv := newServerForCluster(t, c)
+
+	// Host in project 1 creates a session.
+	tokH, _ := anonymousLoginWithID(t, srv.URL, "k1")
+	sess := createSession(t, srv.URL, "k1", tokH, 4)
+
+	// A player in project 2 (same tenant) must not touch project 1's session.
+	tokOther, _ := anonymousLoginWithID(t, srv.URL, "k2")
+
+	resp, body := authedReq(t, http.MethodGet,
+		fmt.Sprintf("%s/v1/game-session/%s", srv.URL, sess.SessionID), "k2", tokOther, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "cross-project GET: %s", string(body))
+
+	resp, body = authedReq(t, http.MethodGet,
+		fmt.Sprintf("%s/v1/game-session?joinCode=%s", srv.URL, sess.JoinCode), "k2", tokOther, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "cross-project resolve: %s", string(body))
+
+	resp, body = authedReq(t, http.MethodPost,
+		fmt.Sprintf("%s/v1/game-session/%s/join", srv.URL, sess.SessionID), "k2", tokOther,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "cross-project join: %s", string(body))
 }
 
 // TestGameSession_private_not_discoverable proves a private session can't be

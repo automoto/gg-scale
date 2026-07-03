@@ -57,16 +57,10 @@ func TestDecodeVerifyCookie_rejects_garbage(t *testing.T) {
 	}
 }
 
-func TestPathHelpers(t *testing.T) {
-	assert.Equal(t, "/v1/players/p/42/login", playerLoginPath(42))
-	assert.Equal(t, "/v1/players/p/42/verify", playerVerifyPath(42))
-	assert.Equal(t, "/v1/players/p/42/account", playerAccountPath(42))
-}
-
 func TestPlayerPagesUseStrictSecurityHeaders(t *testing.T) {
 	h := New(Deps{Config: Config{Mount: true}})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/p/42/login", nil)
+	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
 
 	h.ServeHTTP(rec, req)
 
@@ -81,7 +75,7 @@ func TestPlayerPagesUseStrictSecurityHeaders(t *testing.T) {
 func TestPlayerPagesDoNotRequestStylesheetsOrScripts(t *testing.T) {
 	h := New(Deps{Config: Config{Mount: true}})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/p/42/login", nil)
+	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
 
 	h.ServeHTTP(rec, req)
 

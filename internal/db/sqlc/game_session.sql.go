@@ -116,9 +116,15 @@ func (q *Queries) DeleteGameSession(ctx context.Context, id string) error {
 const getGameSession = `-- name: GetGameSession :one
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
 `
+
+type GetGameSessionParams struct {
+	ProjectID int64
+	ID        string
+}
 
 type GetGameSessionRow struct {
 	ID           string
@@ -134,8 +140,11 @@ type GetGameSessionRow struct {
 	ExpiresAt    pgtype.Timestamptz
 }
 
-func (q *Queries) GetGameSession(ctx context.Context, id string) (GetGameSessionRow, error) {
-	row := q.db.QueryRow(ctx, getGameSession, id)
+// Scoped by project as well as tenant: the caller's key is project-pinned, so a
+// player in project A must not read a session belonging to project B of the same
+// tenant (which would leak peers' public IP:port across projects).
+func (q *Queries) GetGameSession(ctx context.Context, arg GetGameSessionParams) (GetGameSessionRow, error) {
+	row := q.db.QueryRow(ctx, getGameSession, arg.ProjectID, arg.ID)
 	var i GetGameSessionRow
 	err := row.Scan(
 		&i.ID,
@@ -156,11 +165,17 @@ func (q *Queries) GetGameSession(ctx context.Context, id string) (GetGameSession
 const getGameSessionByJoinCode = `-- name: GetGameSessionByJoinCode :one
 SELECT id, join_code, state, private, host_player_id
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND join_code = $1
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND join_code = $2
   AND state     = 'open'
   AND expires_at > now()
 `
+
+type GetGameSessionByJoinCodeParams struct {
+	ProjectID int64
+	JoinCode  string
+}
 
 type GetGameSessionByJoinCodeRow struct {
 	ID           string
@@ -172,9 +187,10 @@ type GetGameSessionByJoinCodeRow struct {
 
 // Open, unexpired sessions only — an expired session lingering before GC
 // must not be resolvable by join code. Returns private + host so the handler
-// can withhold a private session from a non-member/non-invitee.
-func (q *Queries) GetGameSessionByJoinCode(ctx context.Context, joinCode string) (GetGameSessionByJoinCodeRow, error) {
-	row := q.db.QueryRow(ctx, getGameSessionByJoinCode, joinCode)
+// can withhold a private session from a non-member/non-invitee. Project-scoped
+// so a join code can't resolve a session in another project of the same tenant.
+func (q *Queries) GetGameSessionByJoinCode(ctx context.Context, arg GetGameSessionByJoinCodeParams) (GetGameSessionByJoinCodeRow, error) {
+	row := q.db.QueryRow(ctx, getGameSessionByJoinCode, arg.ProjectID, arg.JoinCode)
 	var i GetGameSessionByJoinCodeRow
 	err := row.Scan(
 		&i.ID,
@@ -189,10 +205,16 @@ func (q *Queries) GetGameSessionByJoinCode(ctx context.Context, joinCode string)
 const getGameSessionForUpdate = `-- name: GetGameSessionForUpdate :one
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
 FOR UPDATE
 `
+
+type GetGameSessionForUpdateParams struct {
+	ProjectID int64
+	ID        string
+}
 
 type GetGameSessionForUpdateRow struct {
 	ID           string
@@ -210,9 +232,9 @@ type GetGameSessionForUpdateRow struct {
 
 // Row-locking variant used by the join handler so concurrent joins for the
 // same session serialize on the session row and max_players is enforced
-// without a TOCTOU race.
-func (q *Queries) GetGameSessionForUpdate(ctx context.Context, id string) (GetGameSessionForUpdateRow, error) {
-	row := q.db.QueryRow(ctx, getGameSessionForUpdate, id)
+// without a TOCTOU race. Project-scoped (see GetGameSession).
+func (q *Queries) GetGameSessionForUpdate(ctx context.Context, arg GetGameSessionForUpdateParams) (GetGameSessionForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getGameSessionForUpdate, arg.ProjectID, arg.ID)
 	var i GetGameSessionForUpdateRow
 	err := row.Scan(
 		&i.ID,
@@ -244,16 +266,18 @@ func (q *Queries) LockProjectForGameSessionCreate(ctx context.Context, projectID
 const updateGameSessionState = `-- name: UpdateGameSessionState :exec
 UPDATE game_session
 SET state = $1
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $2
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $2
+  AND id = $3
 `
 
 type UpdateGameSessionStateParams struct {
-	State string
-	ID    string
+	State     string
+	ProjectID int64
+	ID        string
 }
 
 func (q *Queries) UpdateGameSessionState(ctx context.Context, arg UpdateGameSessionStateParams) error {
-	_, err := q.db.Exec(ctx, updateGameSessionState, arg.State, arg.ID)
+	_, err := q.db.Exec(ctx, updateGameSessionState, arg.State, arg.ProjectID, arg.ID)
 	return err
 }

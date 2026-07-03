@@ -265,6 +265,11 @@ func gameSessionGetHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			http.Error(w, "api key has no project pin", http.StatusBadRequest)
+			return
+		}
 
 		var (
 			sess  sqlcgen.GetGameSessionRow
@@ -273,7 +278,7 @@ func gameSessionGetHandler(d Deps) http.HandlerFunc {
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			var qerr error
-			sess, qerr = q.GetGameSession(ctx, sessionID)
+			sess, qerr = q.GetGameSession(ctx, sqlcgen.GetGameSessionParams{ProjectID: projectID, ID: sessionID})
 			if qerr != nil {
 				return qerr
 			}
@@ -322,12 +327,17 @@ func gameSessionResolveHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			http.Error(w, "api key has no project pin", http.StatusBadRequest)
+			return
+		}
 
 		var row sqlcgen.GetGameSessionByJoinCodeRow
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			var qerr error
-			row, qerr = q.GetGameSessionByJoinCode(ctx, joinCode)
+			row, qerr = q.GetGameSessionByJoinCode(ctx, sqlcgen.GetGameSessionByJoinCodeParams{ProjectID: projectID, JoinCode: joinCode})
 			if qerr != nil {
 				return qerr
 			}
@@ -372,6 +382,11 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			http.Error(w, "api key has no project pin", http.StatusBadRequest)
+			return
+		}
 		if !req.PublicAddr.valid() {
 			http.Error(w, "public_addr.port out of range", http.StatusBadRequest)
 			return
@@ -389,7 +404,7 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 			var qerr error
 			// FOR UPDATE serializes concurrent joins for this session so the
 			// capacity check below can't be raced.
-			sess, qerr = q.GetGameSessionForUpdate(ctx, sessionID)
+			sess, qerr = q.GetGameSessionForUpdate(ctx, sqlcgen.GetGameSessionForUpdateParams{ProjectID: projectID, ID: sessionID})
 			if qerr != nil {
 				return qerr
 			}
@@ -527,10 +542,15 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			http.Error(w, "api key has no project pin", http.StatusBadRequest)
+			return
+		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			sess, qerr := q.GetGameSession(ctx, sessionID)
+			sess, qerr := q.GetGameSession(ctx, sqlcgen.GetGameSessionParams{ProjectID: projectID, ID: sessionID})
 			if qerr != nil {
 				return qerr
 			}
@@ -538,8 +558,9 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 				// Host leaving → end the session and clear its roster so peer
 				// rows don't linger until GC.
 				if qerr := q.UpdateGameSessionState(ctx, sqlcgen.UpdateGameSessionStateParams{
-					State: "ended",
-					ID:    sessionID,
+					State:     "ended",
+					ProjectID: projectID,
+					ID:        sessionID,
 				}); qerr != nil {
 					return qerr
 				}
