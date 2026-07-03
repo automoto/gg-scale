@@ -17,6 +17,19 @@ func (h *Handler) reloadRBACPolicy(ctx context.Context) {
 	}
 }
 
+// requireFleetFeature is route middleware for the dedicated-server fleet
+// surface. When the FEATURE_FLEET_ENABLED kill switch is off it returns 404 so
+// the section is hidden rather than merely disabled.
+func (h *Handler) requireFleetFeature(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.cfg.FleetEnabled {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (h *Handler) requireDashboardPermission(w http.ResponseWriter, r *http.Request, tenantID int64, obj, act string) bool {
 	if h.rbac == nil {
 		http.Error(w, "authorization unavailable", http.StatusInternalServerError)

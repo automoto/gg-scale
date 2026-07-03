@@ -14,6 +14,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/verifycode"
 )
 
@@ -24,6 +25,8 @@ var (
 	errInviteNotFound     = errors.New("dashboard: invite not found")
 	errInviteExpired      = errors.New("dashboard: invite expired")
 	errCannotRemoveSelf   = errors.New("dashboard: cannot remove yourself")
+	errInvalidGrantRole   = errors.New("dashboard: role is not grantable")
+	errMemberNotInTenant  = errors.New("dashboard: user is not a member of this tenant")
 )
 
 func isUniqueViolation(err error) bool {
@@ -130,7 +133,7 @@ func (h *Handler) listTenantTeam(ctx context.Context, tenantID int64) ([]TeamMem
 			return fmt.Errorf("list members: %w", err)
 		}
 		for _, m := range mrows {
-			members = append(members, TeamMemberView{
+			member := TeamMemberView{
 				MembershipID:    m.MembershipID,
 				UserID:          m.UserID,
 				Email:           m.Email,
@@ -138,7 +141,11 @@ func (h *Handler) listTenantTeam(ctx context.Context, tenantID int64) ([]TeamMem
 				IsPlatformAdmin: m.IsPlatformAdmin,
 				LastLoginAt:     m.LastLoginAt.Time,
 				JoinedAt:        m.CreatedAt.Time,
-			})
+			}
+			if h.rbac != nil {
+				member.FleetOperator, _ = h.rbac.HasDashboardRole(m.UserID, tenantID, rbac.RoleFleetOperator)
+			}
+			members = append(members, member)
 		}
 		prows, err := q.ListDashboardInvitationsForTenant(ctx, &tenantID)
 		if err != nil {
@@ -253,6 +260,50 @@ WHERE id = $1
 			return errCannotRemoveSelf
 		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "dashboard.membership.remove", strconv.FormatInt(membershipID, 10), map[string]any{"tenant_id": tenantID})
+	})
+	if err != nil {
+		return err
+	}
+	h.reloadRBACPolicy(ctx)
+	return nil
+}
+
+// setTeamMemberRole grants or revokes an à-la-carte dashboard role (e.g.
+// fleet_operator) on a tenant member, alongside their membership role. Only
+// roles in rbac.GrantableDashboardRole are accepted; the target must be an
+// existing member of the tenant.
+func (h *Handler) setTeamMemberRole(ctx context.Context, actorID, tenantID, targetUserID int64, role string, grant bool) error {
+	if !rbac.GrantableDashboardRole(role) {
+		return errInvalidGrantRole
+	}
+	if h.rbac == nil {
+		return errors.New(msgDashboardPoolNeeded)
+	}
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM dashboard_memberships WHERE tenant_id = $1 AND dashboard_user_id = $2)`,
+			tenantID, targetUserID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return errMemberNotInTenant
+		}
+		if grant {
+			if err := h.rbac.AddDashboardRoleTx(ctx, tx, targetUserID, tenantID, role); err != nil {
+				return fmt.Errorf("rbac grant role: %w", err)
+			}
+		} else if err := h.rbac.RemoveDashboardRoleTx(ctx, tx, targetUserID, tenantID, role); err != nil {
+			return fmt.Errorf("rbac revoke role: %w", err)
+		}
+		action := "dashboard.member.role_revoke"
+		if grant {
+			action = "dashboard.member.role_grant"
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, action, strconv.FormatInt(targetUserID, 10), map[string]any{
+			"role":      role,
+			"tenant_id": tenantID,
+		})
 	})
 	if err != nil {
 		return err

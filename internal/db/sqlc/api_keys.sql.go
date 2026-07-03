@@ -95,7 +95,7 @@ func (q *Queries) CreateDashboardAPIKey(ctx context.Context, arg CreateDashboard
 }
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.revoked_at, t.tier
+SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
 WHERE k.key_hash = $1
@@ -106,6 +106,7 @@ type GetAPIKeyByHashRow struct {
 	TenantID  int64
 	ProjectID *int64
 	KeyType   string
+	Scopes    []string
 	RevokedAt pgtype.Timestamptz
 	Tier      string
 }
@@ -124,9 +125,28 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 		&i.TenantID,
 		&i.ProjectID,
 		&i.KeyType,
+		&i.Scopes,
 		&i.RevokedAt,
 		&i.Tier,
 	)
+	return i, err
+}
+
+const getAPIKeyScopes = `-- name: GetAPIKeyScopes :one
+SELECT scopes, project_id
+FROM api_keys
+WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+type GetAPIKeyScopesRow struct {
+	Scopes    []string
+	ProjectID *int64
+}
+
+func (q *Queries) GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error) {
+	row := q.db.QueryRow(ctx, getAPIKeyScopes, id)
+	var i GetAPIKeyScopesRow
+	err := row.Scan(&i.Scopes, &i.ProjectID)
 	return i, err
 }
 
@@ -184,6 +204,22 @@ WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
 
 func (q *Queries) RevokeAPIKey(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, revokeAPIKey, id)
+	return err
+}
+
+const setAPIKeyScopes = `-- name: SetAPIKeyScopes :exec
+UPDATE api_keys
+SET scopes = $1::text[]
+WHERE id = $2 AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+type SetAPIKeyScopesParams struct {
+	Scopes []string
+	ID     int64
+}
+
+func (q *Queries) SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error {
+	_, err := q.db.Exec(ctx, setAPIKeyScopes, arg.Scopes, arg.ID)
 	return err
 }
 

@@ -166,7 +166,10 @@ func run() error {
 	hub := realtime.NewHub()
 
 	var relayIssuer *relay.Issuer
-	if cfg.RelaySharedSecret != "" {
+	if !cfg.FeatureP2PRelayEnabled {
+		logger.Warn("p2p relay disabled: FEATURE_P2P_RELAY_ENABLED=false")
+	}
+	if cfg.FeatureP2PRelayEnabled && cfg.RelaySharedSecret != "" {
 		relayIssuer = relay.NewIssuer(cfg.RelaySharedSecret, cfg.RelayRealm, cfg.RelayCredTTL)
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
@@ -248,6 +251,8 @@ func run() error {
 			MailFrom:           cfg.MailFrom,
 			TrustedProxyHeader: cfg.TrustedProxyHeader,
 			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
+			FleetEnabled:       cfg.FeatureFleetEnabled,
+			RelayEnabled:       cfg.FeatureP2PRelayEnabled,
 		},
 		Players: players.Config{
 			Mount:        cfg.PlayersEnabled,
@@ -371,6 +376,10 @@ SELECT current_user,
 // Close() so the subprocess is reaped on shutdown. In-process backends
 // (docker, agones) return a nil closer.
 func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
+	if !cfg.FeatureFleetEnabled {
+		logger.Warn("fleet disabled: FEATURE_FLEET_ENABLED=false; matchmaker will reject Allocate")
+		return nil, nil, nil
+	}
 	if cfg.FleetBackend == "" {
 		logger.Warn("fleet disabled: FLEET_BACKEND unset; matchmaker will reject Allocate until a backend + fleet template are configured")
 		return nil, nil, nil

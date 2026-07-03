@@ -85,10 +85,9 @@ const (
 	RoleAnalyst       = "role:analyst"
 	RoleFleetOperator = "role:fleet_operator"
 
-	RolePlayerStandard   = "role:player_standard"
-	RolePlayerVerified   = "role:player_verified"
-	RolePlayerHighAccess = "role:player_high_access"
-	RolePlayerBanned     = "role:player_banned"
+	RolePlayerStandard = "role:player_standard"
+	RolePlayerVerified = "role:player_verified"
+	RolePlayerBanned   = "role:player_banned"
 
 	RoleAPIClient       = "role:api_client"
 	RoleAPIServer       = "role:api_server"
@@ -306,6 +305,82 @@ func (a *Authorizer) SetDashboardMembershipRoleTx(ctx context.Context, tx pgx.Tx
 	return a.setSubjectRoleTx(ctx, tx, DashboardSubject(userID), role, TenantDomain(tenantID))
 }
 
+// GrantableDashboardRole reports whether role is an à-la-carte dashboard role a
+// tenant admin may grant on top of a user's membership role. These coexist
+// with the membership role rather than replacing it.
+func GrantableDashboardRole(role string) bool {
+	switch role {
+	case RoleFleetOperator:
+		return true
+	default:
+		return false
+	}
+}
+
+// AddDashboardRole grants an à-la-carte dashboard role to a user, alongside
+// their membership role.
+func (a *Authorizer) AddDashboardRole(userID, tenantID int64, role string) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	if !GrantableDashboardRole(role) {
+		return fmt.Errorf("rbac: role %q is not grantable", role)
+	}
+	_, err := a.enforcer.AddGroupingPolicy(DashboardSubject(userID), role, TenantDomain(tenantID))
+	return err
+}
+
+// RemoveDashboardRole revokes a single à-la-carte dashboard role from a user,
+// leaving their membership role intact.
+func (a *Authorizer) RemoveDashboardRole(userID, tenantID int64, role string) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	if !GrantableDashboardRole(role) {
+		return fmt.Errorf("rbac: role %q is not grantable", role)
+	}
+	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+	return err
+}
+
+// AddDashboardRoleTx grants an à-la-carte dashboard role to a user in tx,
+// alongside their membership role.
+func (a *Authorizer) AddDashboardRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	if !GrantableDashboardRole(role) {
+		return fmt.Errorf("rbac: role %q is not grantable", role)
+	}
+	return insertRule(ctx, tx, "g", []string{DashboardSubject(userID), role, TenantDomain(tenantID)})
+}
+
+// RemoveDashboardRoleTx revokes a single à-la-carte dashboard role from a user
+// in tx, leaving their membership role intact.
+func (a *Authorizer) RemoveDashboardRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	if !GrantableDashboardRole(role) {
+		return fmt.Errorf("rbac: role %q is not grantable", role)
+	}
+	return removeFilteredRule(ctx, tx, "g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+}
+
+// HasDashboardRole reports whether a user holds an explicit role grant in a
+// tenant. Reads the in-memory enforcer, so callers that just mutated policy
+// should ReloadPolicy first.
+func (a *Authorizer) HasDashboardRole(userID, tenantID int64, role string) (bool, error) {
+	if a == nil {
+		return false, nil
+	}
+	rules, err := a.enforcer.GetFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+	if err != nil {
+		return false, fmt.Errorf("rbac: get grouping policy: %w", err)
+	}
+	return len(rules) > 0, nil
+}
+
 // AddPlatformAdmin grants the global platform-admin role to a dashboard user.
 func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 	if a == nil {
@@ -477,7 +552,7 @@ func APIKeyRole(keyType tenant.KeyType) (string, bool) {
 // PlayerRole reports whether role is safe to grant to a player subject.
 func PlayerRole(role string) bool {
 	switch role {
-	case RolePlayerStandard, RolePlayerVerified, RolePlayerHighAccess, RolePlayerBanned:
+	case RolePlayerStandard, RolePlayerVerified, RolePlayerBanned:
 		return true
 	default:
 		return false

@@ -8,8 +8,61 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
+
+func TestApplyScope_grant_and_revoke(t *testing.T) {
+	cases := []struct {
+		name   string
+		start  []string
+		scope  string
+		grant  bool
+		expect []string
+	}{
+		{"grant to empty", nil, "fleet", true, []string{"fleet"}},
+		{"grant idempotent", []string{"fleet"}, "fleet", true, []string{"fleet"}},
+		{"grant second", []string{"fleet"}, "p2p_relay", true, []string{"fleet", "p2p_relay"}},
+		{"revoke present", []string{"fleet", "p2p_relay"}, "fleet", false, []string{"p2p_relay"}},
+		{"revoke absent", []string{"p2p_relay"}, "fleet", false, []string{"p2p_relay"}},
+		{"revoke last", []string{"fleet"}, "fleet", false, []string{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.expect, applyScope(c.start, c.scope, c.grant))
+		})
+	}
+}
+
+func TestScopeGrantable_denies_by_default(t *testing.T) {
+	auth, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+
+	// Env switch on, but no feature_grants row (memory authorizer) → not grantable.
+	h := &Handler{cfg: Config{FleetEnabled: true, RelayEnabled: true}, rbac: auth}
+	assert.False(t, h.scopeGrantable(t.Context(), 7, nil, tenant.ScopeFleet),
+		"no feature_grants row → fleet scope not grantable")
+	assert.False(t, h.scopeGrantable(t.Context(), 7, nil, tenant.ScopeP2PRelay),
+		"no feature_grants row → relay scope not grantable")
+
+	// Env switch off → not grantable regardless of grants.
+	hOff := &Handler{cfg: Config{FleetEnabled: false, RelayEnabled: false}, rbac: auth}
+	assert.False(t, hOff.scopeGrantable(t.Context(), 7, nil, tenant.ScopeFleet))
+	assert.False(t, hOff.scopeGrantable(t.Context(), 7, nil, tenant.ScopeP2PRelay))
+}
+
+func TestScopeFeature_maps_known_scopes(t *testing.T) {
+	f, ok := scopeFeature(tenant.ScopeFleet)
+	require.True(t, ok)
+	assert.Equal(t, rbac.FeatureDedicatedServers, f)
+
+	f, ok = scopeFeature(tenant.ScopeP2PRelay)
+	require.True(t, ok)
+	assert.Equal(t, rbac.FeatureP2PRelay, f)
+
+	_, ok = scopeFeature("mystery")
+	assert.False(t, ok)
+}
 
 func TestRandomAPIKey_PrefixByType(t *testing.T) {
 	cases := []struct {

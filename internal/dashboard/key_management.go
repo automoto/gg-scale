@@ -15,6 +15,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -23,6 +24,9 @@ var (
 	errInvalidProjectName = errors.New("dashboard: project name is required")
 	errDuplicateProject   = errors.New("dashboard: project with that name already exists")
 	errInvalidKeyType     = errors.New("dashboard: key type must be 'publishable' or 'secret'")
+	errInvalidScope       = errors.New("dashboard: unknown feature scope")
+	errKeyNotInTenant     = errors.New("dashboard: api key not found in tenant")
+	errScopeNotGrantable  = errors.New("dashboard: feature is not enabled for this key")
 )
 
 type createKeyInput struct {
@@ -63,6 +67,7 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 				ProjectID:   row.ProjectID,
 				ProjectName: stringValue(row.ProjectName),
 				Label:       stringValue(row.Label),
+				Scopes:      row.Scopes,
 			}
 			if row.CreatedAt.Valid {
 				key.CreatedAt = row.CreatedAt.Time
@@ -71,11 +76,121 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 				t := row.RevokedAt.Time
 				key.RevokedAt = &t
 			}
+			key.FleetGrantable = h.scopeGrantable(ctx, tenantID, row.ProjectID, tenant.ScopeFleet)
+			key.RelayGrantable = h.scopeGrantable(ctx, tenantID, row.ProjectID, tenant.ScopeP2PRelay)
 			out = append(out, key)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// scopeGrantable reports whether a per-key feature scope can be granted: the
+// startup env kill switch must be on AND a feature_grant row must enable the
+// backing feature for the key's tenant/project. Keys pinned to no project use
+// tenant-level grants (projectID 0).
+func (h *Handler) scopeGrantable(ctx context.Context, tenantID int64, projectID *int64, scope string) bool {
+	feature, ok := scopeFeature(scope)
+	if !ok {
+		return false
+	}
+	switch scope {
+	case tenant.ScopeFleet:
+		if !h.cfg.FleetEnabled {
+			return false
+		}
+	case tenant.ScopeP2PRelay:
+		if !h.cfg.RelayEnabled {
+			return false
+		}
+	}
+	if h.rbac == nil {
+		return false
+	}
+	var pid int64
+	if projectID != nil {
+		pid = *projectID
+	}
+	enabled, err := h.rbac.FeatureEnabled(ctx, tenantID, pid, feature)
+	return err == nil && enabled
+}
+
+// scopeFeature maps a per-key scope to the feature_grant gate that governs it.
+func scopeFeature(scope string) (rbac.Feature, bool) {
+	switch scope {
+	case tenant.ScopeFleet:
+		return rbac.FeatureDedicatedServers, true
+	case tenant.ScopeP2PRelay:
+		return rbac.FeatureP2PRelay, true
+	default:
+		return "", false
+	}
+}
+
+// setAPIKeyScope grants or revokes a single feature scope on a key. Granting
+// re-validates that the feature is enabled so a scope can never outlive its
+// feature_grant / env switch; revoking is always allowed.
+func (h *Handler) setAPIKeyScope(ctx context.Context, actorID, tenantID, apiKeyID int64, scope string, grant bool) error {
+	if tenantID <= 0 {
+		return errInvalidTenant
+	}
+	if _, ok := scopeFeature(scope); !ok {
+		return errInvalidScope
+	}
+	ctx = db.WithTenant(ctx, tenantID)
+	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		row, err := q.GetAPIKeyScopes(ctx, apiKeyID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errKeyNotInTenant
+		}
+		if err != nil {
+			return fmt.Errorf("get api key scopes: %w", err)
+		}
+		if grant && !h.scopeGrantable(ctx, tenantID, row.ProjectID, scope) {
+			return errScopeNotGrantable
+		}
+		next := applyScope(row.Scopes, scope, grant)
+		if err := q.SetAPIKeyScopes(ctx, sqlcgen.SetAPIKeyScopesParams{ID: apiKeyID, Scopes: next}); err != nil {
+			return fmt.Errorf("set api key scopes: %w", err)
+		}
+		action := "dashboard.api_key.scope_revoke"
+		if grant {
+			action = "dashboard.api_key.scope_grant"
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, action, strconv.FormatInt(apiKeyID, 10), map[string]any{
+			"scope":     scope,
+			"tenant_id": tenantID,
+		})
+	}); err != nil {
+		return err
+	}
+	if h.cache != nil {
+		// Drop any cached rate-limit bucket so the middleware re-reads the key
+		// (and its refreshed scopes) on the next request.
+		_ = h.cache.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
+	}
+	return nil
+}
+
+// applyScope returns scopes with scope added (grant) or removed (revoke),
+// preserving order and de-duplicating.
+func applyScope(scopes []string, scope string, grant bool) []string {
+	out := make([]string, 0, len(scopes)+1)
+	seen := false
+	for _, s := range scopes {
+		if s == scope {
+			seen = true
+			if !grant {
+				continue
+			}
+		}
+		out = append(out, s)
+	}
+	if grant && !seen {
+		out = append(out, scope)
+	}
+	return out
 }
 
 func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOption, error) {

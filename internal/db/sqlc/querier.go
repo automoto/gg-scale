@@ -135,6 +135,7 @@ type Querier interface {
 	// tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
+	GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
 	GetDashboardInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetDashboardInvitationByCodeHashRow, error)
 	GetDashboardInvitationByID(ctx context.Context, id int64) (GetDashboardInvitationByIDRow, error)
@@ -381,6 +382,7 @@ type Querier interface {
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)
 	// Platform-admin search by email prefix. Bounded LIMIT keeps the scan cheap.
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
+	SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
 	// Nullable timestamptz so the same query handles disable (now()) and
 	// enable (NULL).

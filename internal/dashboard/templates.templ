@@ -304,8 +304,10 @@ templ ProjectsPage(vm ProjectsView) {
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
-									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") } role="button" class="secondary outline">Fleets</a>
-									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") } role="button" class="secondary outline">Allocations</a>
+									if vm.FleetEnabled {
+										<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") } role="button" class="secondary outline">Fleets</a>
+										<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") } role="button" class="secondary outline">Allocations</a>
+									}
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
 								</td>
 							</tr>
@@ -469,6 +471,7 @@ templ APIKeysPage(vm APIKeysView) {
 						<tr>
 							<th>Project</th>
 							<th>Key Name</th>
+							<th>Feature access</th>
 							<th>Created</th>
 							<th>Status</th>
 							<th></th>
@@ -499,6 +502,14 @@ templ APIKeysPage(vm APIKeysView) {
 										</form>
 									</details>
 								</td>
+								<td class="feature-cell">
+									if key.RevokedAt != nil {
+										<span class="muted">—</span>
+									} else {
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "fleet", "Fleet", key.FleetGrantable)
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "p2p_relay", "Relay", key.RelayGrantable)
+									}
+								</td>
 								<td>{ timeString(key.CreatedAt) }</td>
 								if key.RevokedAt != nil {
 									<td><span class="badge badge-revoked">Revoked</span></td>
@@ -518,6 +529,54 @@ templ APIKeysPage(vm APIKeysView) {
 				</table>
 			}
 		</section>
+	}
+}
+
+// scopeToggle renders one feature-scope grant/revoke control for an API key.
+// A held scope always shows a Revoke button. An unheld scope shows a Grant
+// button only when the feature is grantable (env switch on + feature_grant
+// row); otherwise it renders "no access" so operators can't grant a feature
+// the deployment refuses to run.
+templ scopeToggle(tenantID int64, csrf string, key APIKeyView, scope, label string, grantable bool) {
+	if key.HasScope(scope) {
+		<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenantID) + "/api-keys/" + stringFromInt(key.ID) + "/scopes") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="scope" value={ scope }/>
+			<input type="hidden" name="action" value="revoke"/>
+			<span class="badge badge-active">{ label }</span>
+			<button type="submit" class="secondary outline btn-inline">Revoke</button>
+		</form>
+	} else if grantable {
+		<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenantID) + "/api-keys/" + stringFromInt(key.ID) + "/scopes") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="scope" value={ scope }/>
+			<input type="hidden" name="action" value="grant"/>
+			<button type="submit" class="btn-inline">Grant { label }</button>
+		</form>
+	} else {
+		<span class="muted">{ label }: no access</span>
+	}
+}
+
+// fleetOperatorToggle renders the grant/revoke control for the à-la-carte
+// role:fleet_operator on a tenant member. Rendered only when the fleet feature
+// is enabled (the caller gates on vm.FleetEnabled).
+templ fleetOperatorToggle(tenantID int64, csrf string, m TeamMemberView) {
+	if m.FleetOperator {
+		<form method="post" action={ templ.URL(tenantTeamPath(tenantID) + "/members/" + stringFromInt(m.UserID) + "/roles") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="role" value="role:fleet_operator"/>
+			<input type="hidden" name="action" value="revoke"/>
+			<span class="badge badge-active">Fleet operator</span>
+			<button type="submit" class="secondary outline btn-inline">Revoke</button>
+		</form>
+	} else {
+		<form method="post" action={ templ.URL(tenantTeamPath(tenantID) + "/members/" + stringFromInt(m.UserID) + "/roles") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="role" value="role:fleet_operator"/>
+			<input type="hidden" name="action" value="grant"/>
+			<button type="submit" class="btn-inline">Grant fleet operator</button>
+		</form>
 	}
 }
 
@@ -634,6 +693,9 @@ templ TeamPage(vm TeamView) {
 						<tr>
 							<th>Email</th>
 							<th>Role</th>
+							if vm.FleetEnabled {
+								<th>Fleet access</th>
+							}
 							<th>Joined</th>
 							<th></th>
 						</tr>
@@ -643,6 +705,11 @@ templ TeamPage(vm TeamView) {
 							<tr>
 								<td>{ m.Email }</td>
 								<td><span class="badge badge-role">{ m.Role }</span></td>
+								if vm.FleetEnabled {
+									<td class="feature-cell">
+										@fleetOperatorToggle(vm.TenantID, vm.CSRFToken, m)
+									</td>
+								}
 								<td>{ timeString(m.JoinedAt) }</td>
 								<td class="actions-cell">
 									if m.UserID == vm.IsOwnerID {

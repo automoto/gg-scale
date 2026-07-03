@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ func baseProd() *config.Config {
 		DashboardBaseURL:            "https://dashboard.example.com",
 		JWTSigningKey:               "1234567890abcdef1234567890abcdef",
 		FleetBackend:                "agones",
+		FeatureFleetEnabled:         true,
 	}
 }
 
@@ -106,6 +108,33 @@ func TestValidateRejectsUnknownMailProvider(t *testing.T) {
 	c.MailProvider = "mystery"
 	err := c.Validate()
 	assert.ErrorContains(t, err, "MAIL_PROVIDER")
+}
+
+func TestValidateRejectsRelayConfiguredWhileFeatureOff(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = false
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	err := c.Validate()
+	assert.ErrorContains(t, err, "FEATURE_P2P_RELAY_ENABLED")
+}
+
+func TestValidateAcceptsRelayConfiguredWithFeatureOn(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	assert.NoError(t, c.Validate())
+}
+
+func TestValidateRejectsFleetBackendWhileFeatureOff(t *testing.T) {
+	c := baseProd()
+	c.FeatureFleetEnabled = false
+	c.FleetBackend = "docker"
+	c.DockerRequireDigest = true
+	c.GameServerPublicIP = "203.0.113.5"
+	err := c.Validate()
+	assert.ErrorContains(t, err, "FEATURE_FLEET_ENABLED")
 }
 
 func TestValidateAllowsDevWithoutCORS(t *testing.T) {

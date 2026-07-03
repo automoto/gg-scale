@@ -128,7 +128,8 @@ func newDashboardFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pl
 		Fleet:   mgr,
 		RBAC:    authorizer,
 		Dashboard: dashboard.Config{
-			Mount: true,
+			Mount:        true,
+			FleetEnabled: true,
 		},
 		DashboardPluginInfo: pluginInfo,
 	})

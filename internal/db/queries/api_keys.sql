@@ -5,7 +5,7 @@
 -- through. Note: this query does NOT filter by tenants table RLS because
 -- tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 -- a bootstrap policy on tenants, the JOIN keeps working.
-SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.revoked_at, t.tier
+SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
 WHERE k.key_hash = $1;
@@ -56,4 +56,14 @@ ORDER BY k.id DESC;
 -- name: UpdateAPIKeyLabel :exec
 UPDATE api_keys
 SET label = nullif(trim(sqlc.arg(label)::text), '')
+WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;
+
+-- name: GetAPIKeyScopes :one
+SELECT scopes, project_id
+FROM api_keys
+WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
+
+-- name: SetAPIKeyScopes :exec
+UPDATE api_keys
+SET scopes = sqlc.arg(scopes)::text[]
 WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;

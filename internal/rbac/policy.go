@@ -57,6 +57,8 @@ p, role:player_standard, *, storage, manage
 p, role:player_standard, *, friends, manage
 p, role:player_standard, *, leaderboard, read
 p, role:player_standard, *, realtime, connect
+p, role:player_standard, *, project:*:relay, issue_credentials
+p, role:player_standard, *, project:*:matchmaking:dedicated, create_ticket
 
 p, role:player_verified, *, profile, read
 p, role:player_verified, *, profile, update
@@ -64,9 +66,6 @@ p, role:player_verified, *, storage, manage
 p, role:player_verified, *, friends, manage
 p, role:player_verified, *, leaderboard, read
 p, role:player_verified, *, realtime, connect
-
-p, role:player_high_access, *, project:*:relay, issue_credentials
-p, role:player_high_access, *, project:*:matchmaking:dedicated, create_ticket
 
 p, role:api_client, *, auth, create
 p, role:api_client, *, profile, read

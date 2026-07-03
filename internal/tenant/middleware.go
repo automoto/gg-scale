@@ -59,6 +59,27 @@ type APIKey struct {
 	Tier      Tier
 	Type      KeyType
 	Revoked   bool
+	// Scopes are per-key feature grants (e.g. "fleet", "p2p_relay"). Empty by
+	// default: a key reaches a feature-gated route only when the matching
+	// scope is present. See RequireKeyScope.
+	Scopes []string
+}
+
+// Feature scopes carried in api_keys.scopes. A key must hold the matching
+// scope to reach the corresponding feature-gated route.
+const (
+	ScopeFleet    = "fleet"
+	ScopeP2PRelay = "p2p_relay"
+)
+
+// HasScope reports whether the key carries scope.
+func (k APIKey) HasScope(scope string) bool {
+	for _, s := range k.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }
 
 type apiKeyCtxKey struct{}
@@ -112,6 +133,27 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 			}
 			ctx = WithAPIKey(ctx, *key)
 			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// RequireKeyScope is middleware that returns 403 unless the resolved API key
+// carries scope. Mount AFTER New so APIKeyFromContext is populated. Keys have
+// no feature scopes by default, so a feature-gated route wrapped in
+// RequireKeyScope is deny-by-default until an operator grants the scope.
+func RequireKeyScope(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key, ok := APIKeyFromContext(r.Context())
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if !key.HasScope(scope) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

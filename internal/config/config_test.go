@@ -41,6 +41,22 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, 3322, cfg.CacheOlricMemberlistPort)
 	assert.Empty(t, cfg.CacheOlricPeers)
 	assert.Empty(t, cfg.TrustedProxyCIDRs)
+	assert.Empty(t, cfg.FleetBackend)
+	assert.False(t, cfg.FeatureFleetEnabled)
+	assert.False(t, cfg.FeatureP2PRelayEnabled)
+}
+
+func TestLoad_feature_switches_parse_true(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("FEATURE_FLEET_ENABLED", "true")
+	t.Setenv("FEATURE_P2P_RELAY_ENABLED", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.FeatureFleetEnabled)
+	assert.True(t, cfg.FeatureP2PRelayEnabled)
 }
 
 func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {

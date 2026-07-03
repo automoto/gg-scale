@@ -212,6 +212,44 @@ func TestRequireKeyType_returns_401_when_no_api_key_in_context(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
 
+func TestRequireKeyScope_returns_403_when_scope_absent(t *testing.T) {
+	mw := tenant.New(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{TenantID: 1, Type: tenant.KeyTypeSecret}, nil
+	})
+	gate := tenant.RequireKeyScope(tenant.ScopeFleet)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	rr := httptest.NewRecorder()
+	mw(gate(nopHandler())).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code)
+}
+
+func TestRequireKeyScope_passes_when_scope_present(t *testing.T) {
+	mw := tenant.New(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{TenantID: 1, Type: tenant.KeyTypeSecret, Scopes: []string{tenant.ScopeFleet}}, nil
+	})
+	gate := tenant.RequireKeyScope(tenant.ScopeFleet)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer t")
+	rr := httptest.NewRecorder()
+	mw(gate(nopHandler())).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestRequireKeyScope_returns_401_when_no_api_key_in_context(t *testing.T) {
+	gate := tenant.RequireKeyScope(tenant.ScopeP2PRelay)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	rr := httptest.NewRecorder()
+	gate(nopHandler()).ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
 func TestMiddleware_hashes_token_with_sha256_before_lookup(t *testing.T) {
 	var seen [][]byte
 	mw := tenant.New(func(_ context.Context, h []byte) (*tenant.APIKey, error) {

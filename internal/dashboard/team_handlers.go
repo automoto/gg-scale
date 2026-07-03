@@ -34,13 +34,14 @@ func (h *Handler) teamPage(w http.ResponseWriter, r *http.Request) {
 	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, TeamPage(TeamView{
-		UserEmail: session.User.Email,
-		CSRFToken: session.CSRFToken,
-		TenantID:  tenantID,
-		IsOwnerID: session.User.ID,
-		Members:   members,
-		Pending:   pending,
-		Message:   r.URL.Query().Get("flash"),
+		UserEmail:    session.User.Email,
+		CSRFToken:    session.CSRFToken,
+		TenantID:     tenantID,
+		IsOwnerID:    session.User.ID,
+		Members:      members,
+		Pending:      pending,
+		Message:      r.URL.Query().Get("flash"),
+		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
 }
@@ -138,6 +139,33 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Invite revoked."))
+}
+
+func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	targetUserID, ok := parsePathID(w, r, "userID")
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	grant := r.Form.Get("action") == "grant"
+	role := r.Form.Get("role")
+	session, _ := sessionFromContext(r.Context())
+	switch err := h.setTeamMemberRole(r.Context(), session.User.ID, tenantID, targetUserID, role, grant); {
+	case err == nil:
+		htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Roles updated."))
+	case errors.Is(err, errInvalidGrantRole):
+		http.Error(w, "role not grantable", http.StatusForbidden)
+	case errors.Is(err, errMemberNotInTenant):
+		http.Error(w, "not a member", http.StatusNotFound)
+	default:
+		http.Error(w, "role update failed", http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {

@@ -20,8 +20,19 @@ type Config struct {
 	// FLEET_BACKEND=docker. Empty is fine for local dev.
 	GameServerPublicIP string
 
+	// FeatureFleetEnabled is the startup kill switch for dedicated game-server
+	// fleets. Defaults false: no fleet manager is built and every fleet entry
+	// point refuses regardless of FleetBackend. Must be true for FleetBackend
+	// to take effect.
+	FeatureFleetEnabled bool
+	// FeatureP2PRelayEnabled is the startup kill switch for the TURN/P2P relay.
+	// Defaults false: no relay issuer or UDP listener is built and relay entry
+	// points refuse regardless of RelaySharedSecret.
+	FeatureP2PRelayEnabled bool
+
 	// FleetBackend selects the fleet allocator: docker | agones | openstack |
-	// plugin:<name>. Default "docker" matches the single-VPS self-host story.
+	// plugin:<name>. Empty by default so fleets stay off until an operator
+	// opts in; only consulted when FeatureFleetEnabled is true.
 	FleetBackend string
 	// FleetRegion is the region label persisted on every allocation and used
 	// by Agones GameServerSelector / region-aware backends. Default "local".
@@ -251,7 +262,23 @@ var declared = []varDecl{
 		return nil
 	}},
 
-	{name: "FLEET_BACKEND", defval: "docker", set: func(c *Config, v string) error {
+	{name: "FEATURE_FLEET_ENABLED", defval: "false", set: func(c *Config, v string) error {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("FEATURE_FLEET_ENABLED %q: %w", v, err)
+		}
+		c.FeatureFleetEnabled = enabled
+		return nil
+	}},
+	{name: "FEATURE_P2P_RELAY_ENABLED", defval: "false", set: func(c *Config, v string) error {
+		enabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("FEATURE_P2P_RELAY_ENABLED %q: %w", v, err)
+		}
+		c.FeatureP2PRelayEnabled = enabled
+		return nil
+	}},
+	{name: "FLEET_BACKEND", defval: "", set: func(c *Config, v string) error {
 		c.FleetBackend = v
 		return nil
 	}},

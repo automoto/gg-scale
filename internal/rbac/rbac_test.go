@@ -106,33 +106,69 @@ func TestDefaultPolicy_api_key_explicit_role_is_tenant_scoped(t *testing.T) {
 	assert.False(t, allowed)
 }
 
-func TestDefaultPolicy_denies_high_risk_player_access_by_default(t *testing.T) {
+func TestDefaultPolicy_allows_relay_and_dedicated_matchmaking_for_standard_player(t *testing.T) {
 	a := newAuthorizer(t)
 
-	allowed, err := a.CanPlayer(7, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
-
+	relay, err := a.CanPlayer(7, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
 	require.NoError(t, err)
-	assert.False(t, allowed)
+	assert.True(t, relay, "relay credential issuance is a base player capability, gated by feature_grants + key scope")
+
+	dedicated, err := a.CanPlayer(7, 123, rbac.ProjectDedicatedMatchmakingObject(99), rbac.ActionCreateTicket)
+	require.NoError(t, err)
+	assert.True(t, dedicated)
 }
 
-func TestDefaultPolicy_allows_explicit_high_access_player_role(t *testing.T) {
+func TestFleetOperator_coexists_with_membership_role(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.AddPlayerRole(123, 7, rbac.RolePlayerHighAccess))
+	// A member with the analyst membership role, then also granted fleet_operator.
+	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
+	require.NoError(t, a.AddDashboardRole(42, 7, rbac.RoleFleetOperator))
 
-	allowed, err := a.CanPlayer(7, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
-
+	u := rbac.DashboardUser{ID: 42}
+	// fleet_operator capability now applies...
+	manage, err := a.CanDashboard(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
-	assert.True(t, allowed)
+	assert.True(t, manage, "fleet_operator grants fleet manage")
+	// ...and the analyst membership capability is still intact.
+	read, err := a.CanDashboard(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	require.NoError(t, err)
+	assert.True(t, read, "membership role survives the extra grant")
+
+	has, err := a.HasDashboardRole(42, 7, rbac.RoleFleetOperator)
+	require.NoError(t, err)
+	assert.True(t, has)
 }
 
-func TestDefaultPolicy_player_explicit_role_is_tenant_scoped(t *testing.T) {
+func TestFleetOperator_revoke_leaves_membership(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.AddPlayerRole(123, 7, rbac.RolePlayerHighAccess))
+	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
+	require.NoError(t, a.AddDashboardRole(42, 7, rbac.RoleFleetOperator))
+	require.NoError(t, a.RemoveDashboardRole(42, 7, rbac.RoleFleetOperator))
 
-	allowed, err := a.CanPlayer(8, 123, rbac.ProjectRelayObject(99), rbac.ActionIssueCredentials)
-
+	u := rbac.DashboardUser{ID: 42}
+	manage, err := a.CanDashboard(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
-	assert.False(t, allowed)
+	assert.False(t, manage, "fleet manage gone after revoke")
+	read, err := a.CanDashboard(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	require.NoError(t, err)
+	assert.True(t, read, "membership role untouched by revoke")
+}
+
+func TestFeatureEnabled_denies_by_default(t *testing.T) {
+	// A fresh authorizer with no feature_grants backing store must deny every
+	// high-risk feature — the entitlement layer is deny-by-default.
+	a := newAuthorizer(t)
+	for _, f := range []rbac.Feature{rbac.FeatureP2PRelay, rbac.FeatureDedicatedServers, rbac.FeatureFleetDockerBackend} {
+		enabled, err := a.FeatureEnabled(t.Context(), 7, 99, f)
+		require.NoError(t, err)
+		assert.False(t, enabled, "feature %q must be off until a feature_grants row enables it", f)
+	}
+}
+
+func TestAddDashboardRole_rejects_non_grantable_role(t *testing.T) {
+	a := newAuthorizer(t)
+	err := a.AddDashboardRole(42, 7, rbac.RoleTenantOwner)
+	assert.Error(t, err, "membership roles are not à-la-carte grantable")
 }
 
 func TestAddPlayerRole_rejects_non_player_role(t *testing.T) {
@@ -146,7 +182,7 @@ func TestAddPlayerRole_rejects_non_player_role(t *testing.T) {
 func TestRoleMutations_return_error_when_authorizer_unavailable(t *testing.T) {
 	var a *rbac.Authorizer
 
-	err := a.AddPlayerRole(123, 7, rbac.RolePlayerHighAccess)
+	err := a.AddPlayerRole(123, 7, rbac.RolePlayerVerified)
 
 	assert.True(t, errors.Is(err, rbac.ErrAuthorizerUnavailable))
 }

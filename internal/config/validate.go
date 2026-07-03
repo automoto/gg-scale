@@ -33,6 +33,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("RELAY_SHARED_SECRET must be >= 32 bytes when set (got %d)", len(c.RelaySharedSecret))
 	}
 
+	// Feature kill switches default off. Configuring a feature while its switch
+	// is off is a contradiction we refuse to boot with, rather than silently
+	// leaving the feature dark.
+	if !c.FeatureP2PRelayEnabled && (c.RelayPublicIP != "" || c.RelaySharedSecret != "") {
+		return fmt.Errorf("RELAY_PUBLIC_IP/RELAY_SHARED_SECRET set while FEATURE_P2P_RELAY_ENABLED is false; enable the feature or clear the relay config")
+	}
+	if !c.FeatureFleetEnabled && c.FleetBackend != "" {
+		return fmt.Errorf("FLEET_BACKEND=%q set while FEATURE_FLEET_ENABLED is false; enable the feature or unset FLEET_BACKEND", c.FleetBackend)
+	}
+
 	if c.DBMaxConns < 4 {
 		return fmt.Errorf("DB_MAX_CONNS must be >= 4 (got %d); the LISTEN connection holds one slot for the process lifetime", c.DBMaxConns)
 	}

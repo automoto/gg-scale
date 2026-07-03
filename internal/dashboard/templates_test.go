@@ -134,6 +134,73 @@ func TestProjectsPage_HasNewProjectButtonInHeader(t *testing.T) {
 	assert.NotContains(t, html, `<h2>Create project</h2>`, "the inline create form moved to its own page")
 }
 
+func TestAPIKeysPage_scope_controls_reflect_grantability(t *testing.T) {
+	vm := APIKeysView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		CSRFToken: "tok",
+		Keys: []APIKeyView{
+			{ID: 1, Label: "granted-fleet", Scopes: []string{"fleet"}, FleetGrantable: true},
+			{ID: 2, Label: "grantable-relay", RelayGrantable: true},
+			{ID: 3, Label: "no-access"},
+		},
+	}
+	html := renderToString(t, APIKeysPage(vm))
+	// Key 1 already holds fleet → a revoke form to its scopes endpoint.
+	assert.Contains(t, html, `/api-keys/1/scopes"`)
+	assert.Contains(t, html, "Revoke")
+	// Key 2 can be granted relay.
+	assert.Contains(t, html, `/api-keys/2/scopes"`)
+	assert.Contains(t, html, "Grant Relay")
+	// Key 3 is dark on both features: no scope form, shows "no access".
+	assert.NotContains(t, html, `/api-keys/3/scopes"`)
+	assert.Contains(t, html, "no access")
+}
+
+func TestTeamPage_fleet_operator_control_gated_on_feature(t *testing.T) {
+	members := []TeamMemberView{
+		{MembershipID: 1, UserID: 10, Email: "op@example.com", Role: "member", FleetOperator: false},
+		{MembershipID: 2, UserID: 11, Email: "boss@example.com", Role: "admin", FleetOperator: true},
+	}
+
+	off := renderToString(t, TeamPage(TeamView{TenantID: 42, CSRFToken: "tok", Members: members, FleetEnabled: false}))
+	assert.NotContains(t, off, "/roles\"", "fleet-operator control hidden when feature off")
+	assert.NotContains(t, off, "Fleet access")
+
+	on := renderToString(t, TeamPage(TeamView{TenantID: 42, CSRFToken: "tok", Members: members, FleetEnabled: true}))
+	assert.Contains(t, on, "Fleet access")
+	assert.Contains(t, on, "/team/members/10/roles\"")
+	assert.Contains(t, on, "Grant fleet operator")
+	assert.Contains(t, on, "/team/members/11/roles\"")
+	assert.Contains(t, on, "Fleet operator")
+}
+
+func TestProjectsPage_hides_fleet_actions_when_feature_off(t *testing.T) {
+	vm := ProjectsView{
+		UserEmail:    "alice@example.com",
+		TenantID:     42,
+		CSRFToken:    "tok",
+		Projects:     []ProjectOption{{ID: 7, Name: "arcade-prod"}},
+		FleetEnabled: false,
+	}
+	html := renderToString(t, ProjectsPage(vm))
+	assert.NotContains(t, html, `/projects/7/fleets"`)
+	assert.NotContains(t, html, `/projects/7/allocations"`)
+}
+
+func TestProjectsPage_shows_fleet_actions_when_feature_on(t *testing.T) {
+	vm := ProjectsView{
+		UserEmail:    "alice@example.com",
+		TenantID:     42,
+		CSRFToken:    "tok",
+		Projects:     []ProjectOption{{ID: 7, Name: "arcade-prod"}},
+		FleetEnabled: true,
+	}
+	html := renderToString(t, ProjectsPage(vm))
+	assert.Contains(t, html, `/projects/7/fleets"`)
+	assert.Contains(t, html, `/projects/7/allocations"`)
+}
+
 func TestProjectsPage_RendersFlashMessage(t *testing.T) {
 	html := renderToString(t, ProjectsPage(ProjectsView{
 		UserEmail: "alice@example.com",

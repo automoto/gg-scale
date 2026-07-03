@@ -11,6 +11,26 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestRequireFleetFeature_404s_when_switch_off(t *testing.T) {
+	reached := false
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	h := &Handler{cfg: Config{FleetEnabled: false}}
+	rr := httptest.NewRecorder()
+	h.requireFleetFeature(next).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/x", nil))
+	assert.Equal(t, http.StatusNotFound, rr.Code)
+	assert.False(t, reached, "handler must not run when the fleet switch is off")
+
+	hOn := &Handler{cfg: Config{FleetEnabled: true}}
+	rr2 := httptest.NewRecorder()
+	hOn.requireFleetFeature(next).ServeHTTP(rr2, httptest.NewRequest(http.MethodGet, "/x", nil))
+	assert.Equal(t, http.StatusOK, rr2.Code)
+	assert.True(t, reached)
+}
+
 func TestFleetPage_renders_disabled_state_when_no_backend(t *testing.T) {
 	html := renderToString(t, FleetPage(FleetView{
 		TenantID:  1,

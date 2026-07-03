@@ -24,6 +24,14 @@ type Config struct {
 	// TrustedProxyCIDRs. Empty disables forwarded-IP trust.
 	TrustedProxyHeader string
 	TrustedProxyCIDRs  []string
+	// FleetEnabled mirrors the FEATURE_FLEET_ENABLED startup switch. When
+	// false the dashboard hides every dedicated-server fleet surface and its
+	// routes 404, so operators can't configure a feature the process refuses
+	// to run.
+	FleetEnabled bool
+	// RelayEnabled mirrors the FEATURE_P2P_RELAY_ENABLED startup switch. Gates
+	// whether the p2p_relay per-key scope can be granted from the dashboard.
+	RelayEnabled bool
 }
 
 // Enabled reports whether the dashboard should be mounted.
@@ -85,6 +93,25 @@ type APIKeyView struct {
 	Label       string
 	CreatedAt   time.Time
 	RevokedAt   *time.Time
+	// Scopes are the per-key feature grants currently set (e.g. "fleet",
+	// "p2p_relay").
+	Scopes []string
+	// FleetGrantable / RelayGrantable report whether the matching feature is
+	// enabled (env kill switch on AND a feature_grant row exists) for this
+	// key's tenant/project, so the UI can offer a grant toggle instead of
+	// "no access".
+	FleetGrantable bool
+	RelayGrantable bool
+}
+
+// HasScope reports whether the key currently holds scope.
+func (v APIKeyView) HasScope(scope string) bool {
+	for _, s := range v.Scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectOption is one project pickable in the API-key creation form.
@@ -113,6 +140,9 @@ type ProjectsView struct {
 	// TenantPublicJoining is the tenant master switch. Effective per-project
 	// join = TenantPublicJoining AND project.PublicJoiningEnabled.
 	TenantPublicJoining bool
+	// FleetEnabled hides the per-project Fleets/Allocations actions when the
+	// FEATURE_FLEET_ENABLED kill switch is off.
+	FleetEnabled bool
 }
 
 // NewProjectView is the data rendered by the create-project page.
@@ -175,6 +205,10 @@ type TeamMemberView struct {
 	IsPlatformAdmin bool
 	LastLoginAt     time.Time
 	JoinedAt        time.Time
+	// FleetOperator reports whether the member holds the à-la-carte
+	// role:fleet_operator grant in this tenant (in addition to their
+	// membership role).
+	FleetOperator bool
 }
 
 // PendingInviteView is one row of the pending-invitations table.
@@ -197,6 +231,10 @@ type TeamView struct {
 	Pending   []PendingInviteView
 	Message   string
 	Error     string
+	// FleetEnabled mirrors the FEATURE_FLEET_ENABLED switch. The fleet-operator
+	// grant control only appears when fleets are enabled — granting it while
+	// the feature is off would be a no-op (all fleet surfaces 404).
+	FleetEnabled bool
 }
 
 // InviteTeamView is the data rendered by the invite-teammate form.

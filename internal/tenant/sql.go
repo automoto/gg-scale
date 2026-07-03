@@ -31,6 +31,7 @@ func NewSQLLookup(pool *pgxpool.Pool) Lookup {
 			Tier:      Tier(row.Tier),
 			Type:      KeyType(row.KeyType),
 			Revoked:   row.RevokedAt.Valid,
+			Scopes:    row.Scopes,
 		}, nil
 	}
 }

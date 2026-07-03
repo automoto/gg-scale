@@ -151,11 +151,13 @@ func New(d Deps) http.Handler {
 			r.Get("/api-keys/new", h.newAPIKeyPage)
 			r.Post(segAPIKeys, h.createAPIKeyHandler)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
+			r.Post("/api-keys/{apiKeyID}/scopes", h.updateAPIKeyScopesHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
 			r.Get("/team", h.teamPage)
 			r.Get(segTeamInvite, h.inviteTeamPage)
 			r.Post(segTeamInvite, h.inviteTeammateHandler)
 			r.Post("/team/invites/{inviteID}/revoke", h.revokeInviteHandler)
+			r.Post("/team/members/{userID}/roles", h.updateMemberRoleHandler)
 			r.Post("/team/members/{membershipID}/remove", h.removeMemberHandler)
 			r.Get("/projects/{projectID}/players", h.playersListPage)
 			r.Get("/projects/{projectID}/players/{playerID}", h.playerDetailPage)
@@ -163,24 +165,31 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/players/{playerID}/ban", h.playerToggleBanHandler)
 			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
 			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
-			r.Get("/projects/{projectID}/allocations", h.allocationsListPage)
-			r.Get("/projects/{projectID}/allocations/table", h.allocationsListFragment)
-			r.Get("/projects/{projectID}/allocations/new", h.allocationsNewPage)
-			r.Post("/projects/{projectID}/allocations", h.allocationsAllocateHandler)
-			r.Get("/projects/{projectID}/allocations/{allocID}", h.allocationsDetailPage)
-			r.Get("/projects/{projectID}/allocations/{allocID}/events", h.allocationsDetailFragment)
-			r.Get("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocatePage)
-			r.Post("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocateHandler)
-			r.Get("/projects/{projectID}/fleets", h.fleetsListPage)
-			r.Get("/projects/{projectID}/fleets/new", h.fleetsNewPage)
-			r.Get("/projects/{projectID}/fleets/new/form", h.fleetsNewFormFragment)
-			r.Post("/projects/{projectID}/fleets", h.fleetsCreateHandler)
-			r.Get("/projects/{projectID}/fleets/{fleetID}", h.fleetsEditPage)
-			r.Post("/projects/{projectID}/fleets/{fleetID}", h.fleetsUpdateHandler)
-			r.Post("/projects/{projectID}/fleets/{fleetID}/delete", h.fleetsDeleteHandler)
-			r.Get("/projects/{projectID}/matchmaker", h.matchmakerQueuePage)
-			r.Get("/projects/{projectID}/matchmaker/table", h.matchmakerQueueFragment)
-			r.Get("/fleet/backends", h.fleetBackendsPage)
+			// Dedicated-server fleet surface (fleets, allocations, and the
+			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
+			// switch hides these routes entirely (404) when off, so operators
+			// can't configure a feature the process refuses to run.
+			r.Group(func(r chi.Router) {
+				r.Use(h.requireFleetFeature)
+				r.Get("/projects/{projectID}/matchmaker", h.matchmakerQueuePage)
+				r.Get("/projects/{projectID}/matchmaker/table", h.matchmakerQueueFragment)
+				r.Get("/projects/{projectID}/allocations", h.allocationsListPage)
+				r.Get("/projects/{projectID}/allocations/table", h.allocationsListFragment)
+				r.Get("/projects/{projectID}/allocations/new", h.allocationsNewPage)
+				r.Post("/projects/{projectID}/allocations", h.allocationsAllocateHandler)
+				r.Get("/projects/{projectID}/allocations/{allocID}", h.allocationsDetailPage)
+				r.Get("/projects/{projectID}/allocations/{allocID}/events", h.allocationsDetailFragment)
+				r.Get("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocatePage)
+				r.Post("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocateHandler)
+				r.Get("/projects/{projectID}/fleets", h.fleetsListPage)
+				r.Get("/projects/{projectID}/fleets/new", h.fleetsNewPage)
+				r.Get("/projects/{projectID}/fleets/new/form", h.fleetsNewFormFragment)
+				r.Post("/projects/{projectID}/fleets", h.fleetsCreateHandler)
+				r.Get("/projects/{projectID}/fleets/{fleetID}", h.fleetsEditPage)
+				r.Post("/projects/{projectID}/fleets/{fleetID}", h.fleetsUpdateHandler)
+				r.Post("/projects/{projectID}/fleets/{fleetID}/delete", h.fleetsDeleteHandler)
+				r.Get("/fleet/backends", h.fleetBackendsPage)
+			})
 		})
 		r.Route("/admin", func(r chi.Router) {
 			r.Use(h.requirePlatformAdmin)
@@ -280,6 +289,7 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		Projects:            projects,
 		Message:             message,
 		TenantPublicJoining: tenantJoining,
+		FleetEnabled:        h.cfg.FleetEnabled,
 	}))
 
 }
@@ -513,6 +523,29 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
+}
+
+func (h *Handler) updateAPIKeyScopesHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, apiKeyID, ok := parseTenantAndAPIKeyIDs(w, r)
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	grant := r.Form.Get("action") == "grant"
+	scope := r.Form.Get("scope")
+	session, _ := sessionFromContext(r.Context())
+	switch err := h.setAPIKeyScope(r.Context(), session.User.ID, tenantID, apiKeyID, scope, grant); {
+	case err == nil:
+		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
+	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable):
+		http.Error(w, err.Error(), http.StatusForbidden)
+	case errors.Is(err, errKeyNotInTenant):
+		http.Error(w, "api key not found", http.StatusNotFound)
+	default:
+		http.Error(w, "api key scope update failed", http.StatusInternalServerError)
+	}
 }
 
 func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {

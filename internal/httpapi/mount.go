@@ -97,7 +97,7 @@ func mountFleetHeartbeatRoute(r chi.Router, d Deps) {
 	if d.ServerList == nil {
 		return
 	}
-	r.Post("/fleets/heartbeat", fleetHeartbeatHandler(d))
+	r.With(tenant.RequireKeyScope(tenant.ScopeFleet)).Post("/fleets/heartbeat", fleetHeartbeatHandler(d))
 }
 
 // mountFleetListRoute is player tier. Any authenticated session can
@@ -106,7 +106,7 @@ func mountFleetListRoute(r chi.Router, d Deps) {
 	if d.ServerList == nil {
 		return
 	}
-	r.Get("/fleets/{fleet}/servers", fleetServersListHandler(d))
+	r.With(tenant.RequireKeyScope(tenant.ScopeFleet)).Get("/fleets/{fleet}/servers", fleetServersListHandler(d))
 }
 
 func mountMatchmakerRoutes(r chi.Router, d Deps) {
@@ -114,6 +114,7 @@ func mountMatchmakerRoutes(r chi.Router, d Deps) {
 		return
 	}
 	r.Route("/matchmaker/tickets", func(r chi.Router) {
+		r.Use(tenant.RequireKeyScope(tenant.ScopeFleet))
 		r.Post("/", matchmakerCreateTicketHandler(d))
 		r.Get("/{id}", matchmakerGetTicketHandler(d))
 		r.Delete("/{id}", matchmakerCancelTicketHandler(d))
@@ -124,7 +125,7 @@ func mountRelayRoutes(r chi.Router, d Deps) {
 	if d.RelayIssuer == nil {
 		return
 	}
-	r.Post("/relay/credentials", relayCredentialsHandler(d))
+	r.With(tenant.RequireKeyScope(tenant.ScopeP2PRelay)).Post("/relay/credentials", relayCredentialsHandler(d))
 }
 
 func mountGameSessionRoutes(r chi.Router, d Deps) {
