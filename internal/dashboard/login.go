@@ -68,9 +68,18 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		Email:    normalizeEmail(r.Form.Get("email")),
 		Password: r.Form.Get("password"),
 	}
-	err := h.createFirstAdmin(r, in)
+	user, err := h.createFirstAdmin(r, in)
 	if err == nil {
-		htmxRedirect(w, r, pathDashboardLogin)
+		// The first admin is created unverified. Instead of
+		// bouncing them to the login form (a second, confusing sign-in),
+		// start verification immediately, park the verify-pending cookie,
+		// and land them straight on the verify screen.
+		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
+			http.Error(w, "verification start failed", http.StatusInternalServerError)
+			return
+		}
+		h.setVerifyPendingCookie(w, verifyPendingPayload{UserID: user.ID, Email: user.Email})
+		htmxRedirect(w, r, "/v1/dashboard/verify")
 		return
 	}
 	switch {
@@ -158,36 +167,38 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	htmxRedirect(w, r, pathDashboardLogin)
 }
 
-func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) error {
+func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) (dashboardUser, error) {
 	if h.bootstrap == nil || !h.bootstrap.Pending() {
-		return errBootstrapUnavailable
+		return dashboardUser{}, errBootstrapUnavailable
 	}
 	if !h.bootstrap.tokenMatches(in.Token) {
-		return errInvalidCredentials
+		return dashboardUser{}, errInvalidCredentials
 	}
 	if !validDashboardEmail(in.Email) || len(in.Password) < minDashboardPassLen {
-		return errInvalidSignup
+		return dashboardUser{}, errInvalidSignup
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)
 	if err != nil {
-		return fmt.Errorf("setup bcrypt: %w", err)
+		return dashboardUser{}, fmt.Errorf("setup bcrypt: %w", err)
 	}
 
+	var created sqlcgen.CreateFirstDashboardAdminRow
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		_, err := sqlcgen.New(tx).CreateFirstDashboardAdmin(r.Context(), sqlcgen.CreateFirstDashboardAdminParams{
+		var qerr error
+		created, qerr = sqlcgen.New(tx).CreateFirstDashboardAdmin(r.Context(), sqlcgen.CreateFirstDashboardAdminParams{
 			Email:        in.Email,
 			PasswordHash: hash,
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(qerr, pgx.ErrNoRows) {
 			return errBootstrapUnavailable
 		}
-		return err
+		return qerr
 	})
 	if err != nil {
-		return err
+		return dashboardUser{}, err
 	}
 	h.bootstrap.complete()
-	return nil
+	return dashboardUser{ID: created.ID, Email: created.Email, IsPlatformAdmin: created.IsPlatformAdmin}, nil
 }
 
 func (h *Handler) authenticate(r *http.Request, email, password string) (dashboardUser, error) {

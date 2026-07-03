@@ -147,7 +147,7 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		return createKeyResult{}, errors.New(msgDashboardPoolNeeded)
 	}
 
-	apiKey, err := randomAPIKey()
+	apiKey, err := randomAPIKey(in.KeyType)
 	if err != nil {
 		return createKeyResult{}, err
 	}

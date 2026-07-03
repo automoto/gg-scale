@@ -212,7 +212,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if !row.EmailVerifiedAt.Valid {
 		// Re-mint code if cooldown expired and send the user to verify.
-		if err := h.startVerification(r.Context(), row.ID, email); err != nil {
+		// A resend cooldown (startVerification returns nil) or a
+		// lifetime-lockout (errVerifyAccountLocked) must NOT 500 — the
+		// verify screen surfaces the lockout when the user submits a code.
+		// Only genuine DB/mail failures are internal errors.
+		if err := h.startVerification(r.Context(), row.ID, email); err != nil && !errors.Is(err, errVerifyAccountLocked) {
 			webutil.InternalError(w, "player login: verification email", err)
 			return
 		}

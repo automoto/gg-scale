@@ -2,12 +2,32 @@ package dashboard
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/tenant"
 )
+
+func TestRandomAPIKey_PrefixByType(t *testing.T) {
+	cases := []struct {
+		keyType    tenant.KeyType
+		wantPrefix string
+	}{
+		{tenant.KeyTypePublishable, "ggp_"},
+		{tenant.KeyTypeSecret, "ggs_"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.keyType), func(t *testing.T) {
+			key, err := randomAPIKey(tc.keyType)
+			require.NoError(t, err)
+			assert.True(t, strings.HasPrefix(key, tc.wantPrefix), "key=%q", key)
+			assert.Greater(t, len(key), len(tc.wantPrefix)+16)
+		})
+	}
+}
 
 func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {
 	// Validation runs before the DB pool is touched, so a nil-pool handler

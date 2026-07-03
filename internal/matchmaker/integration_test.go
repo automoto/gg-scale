@@ -350,3 +350,53 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "swept ticket should be available for re-claim")
 }
+
+// TestPGQueueGetAndCancelAreEndUserScoped is the auth-followups §18
+// regression: a same-tenant, different-user caller must not be able to read
+// or cancel another player's ticket by ID. The SQL WHERE end_user_id filter
+// yields ErrNotFound (404 at the HTTP layer), never the ticket.
+func TestPGQueueGetAndCancelAreEndUserScoped(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID, ownerID, otherID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-idor') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'ticket-owner') RETURNING id`,
+		tenantID, projectID).Scan(&ownerID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'ticket-attacker') RETURNING id`,
+		tenantID, projectID).Scan(&otherID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+
+	queue := matchmaker.NewPGQueue(appPool)
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+		EndUserID: ownerID, Region: "us-east-1", GameMode: "1v1",
+	})
+	require.NoError(t, err)
+
+	// Different user, same tenant: get and cancel both denied.
+	_, err = queue.Get(tenantCtx, ticket.ID, otherID)
+	assert.ErrorIs(t, err, matchmaker.ErrNotFound, "cross-user get must not leak the ticket")
+
+	err = queue.Cancel(tenantCtx, ticket.ID, otherID)
+	assert.ErrorIs(t, err, matchmaker.ErrNotFound, "cross-user cancel must not touch the ticket")
+
+	// The owner can still read it and it remains queued (attacker's cancel
+	// was a no-op).
+	got, err := queue.Get(tenantCtx, ticket.ID, ownerID)
+	require.NoError(t, err)
+	assert.Equal(t, matchmaker.StatusQueued, got.Status)
+}

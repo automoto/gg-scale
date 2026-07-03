@@ -45,7 +45,8 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		return signupResult{}, errors.New(msgDashboardPoolNeeded)
 	}
 
-	apiKey, err := randomAPIKey()
+	// The bootstrap tenant-creation key is a secret key (server-side use).
+	apiKey, err := randomAPIKey(tenant.KeyTypeSecret)
 	if err != nil {
 		return signupResult{}, err
 	}
@@ -87,10 +88,19 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 	}, nil
 }
 
-func randomAPIKey() (string, error) {
+// randomAPIKey mints a fresh plaintext API key with a Stripe-style
+// type-indicating prefix: ggp_ for publishable, ggs_ for secret. The
+// prefix is part of the stored value (the caller hashes the whole string),
+// so it eases log-grep and accidental-leak detection without affecting
+// server policy.
+func randomAPIKey(keyType tenant.KeyType) (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("dashboard api key rand: %w", err)
 	}
-	return "ggs_" + base64.RawURLEncoding.EncodeToString(b[:]), nil
+	prefix := "ggs_"
+	if keyType == tenant.KeyTypePublishable {
+		prefix = "ggp_"
+	}
+	return prefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }

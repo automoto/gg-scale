@@ -22,12 +22,19 @@ import (
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboard.Bootstrap) *httptest.Server {
+	t.Helper()
+	srv, _ := newDashboardIntegrationServerWithMailer(t, c, bootstrap)
+	return srv
+}
+
+func newDashboardIntegrationServerWithMailer(t *testing.T, c *cluster, bootstrap *dashboard.Bootstrap) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
@@ -36,6 +43,7 @@ func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboar
 	require.NoError(t, err)
 	t.Cleanup(authorizer.Close)
 
+	rec := &mailer.Recorder{}
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1",
 		Commit:  "test",
@@ -44,19 +52,21 @@ func newDashboardIntegrationServer(t *testing.T, c *cluster, bootstrap *dashboar
 		Signer:  signer,
 		Cache:   c.cache,
 		RBAC:    authorizer,
+		Mailer:  rec,
 		Dashboard: dashboard.Config{
-			Mount: true,
+			Mount:    true,
+			MailFrom: "noreply@ggscale.test",
 		},
 		DashboardBootstrap: bootstrap,
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	return srv
+	return srv, rec
 }
 
 func TestDashboardSetup_creates_first_platform_admin_then_returns_410(t *testing.T) {
 	c := startCluster(t)
-	srv := newDashboardIntegrationServer(t, c, dashboard.NewBootstrap("setup-token", "/tmp/ggscale-bootstrap.token"))
+	srv, rec := newDashboardIntegrationServerWithMailer(t, c, dashboard.NewBootstrap("setup-token", "/tmp/ggscale-bootstrap.token"))
 	noRedirect := noRedirectClient()
 
 	form := url.Values{
@@ -68,8 +78,14 @@ func TestDashboardSetup_creates_first_platform_admin_then_returns_410(t *testing
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
+	// setup lands on the verify screen (not a second login)
+	// with a verification email already sent.
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Equal(t, "/v1/dashboard/login", resp.Header.Get("Location"))
+	assert.Equal(t, "/v1/dashboard/verify", resp.Header.Get("Location"))
+
+	require.Len(t, rec.Sent, 1)
+	assert.Equal(t, []string{"owner@example.com"}, rec.Sent[0].To)
+	assert.Contains(t, rec.Sent[0].Subject, "verification code")
 
 	var isAdmin bool
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
