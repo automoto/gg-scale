@@ -6,6 +6,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -67,7 +69,18 @@ type Querier interface {
 	CreateGameInvite(ctx context.Context, arg CreateGameInviteParams) (int64, error)
 	CreateGameSession(ctx context.Context, arg CreateGameSessionParams) (CreateGameSessionRow, error)
 	CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error)
+	// Tenant-scoped: creates a verified end_user already linked to a global
+	// account (public-join / invite-accept). The account's email ownership is
+	// already proven, so email_verified_at is set.
+	CreateLinkedEndUser(ctx context.Context, arg CreateLinkedEndUserParams) (int64, error)
 	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
+	// Global player accounts. Platform-global (no tenant RLS): every query here is
+	// run through db.Pool.BootstrapQ. See docs/temp/player-accounts.md.
+	// Creates an unverified account with its first verification code inlined
+	// (mirrors CreatePlayerEndUser). Fails on the UNIQUE email constraint if an
+	// account already exists.
+	CreatePlayerAccount(ctx context.Context, arg CreatePlayerAccountParams) (CreatePlayerAccountRow, error)
+	CreatePlayerAccountSession(ctx context.Context, arg CreatePlayerAccountSessionParams) (int64, error)
 	// Used by the player UI signup flow; takes project_id explicitly because
 	// the player site doesn't have an api_key bearer.
 	CreatePlayerEndUser(ctx context.Context, arg CreatePlayerEndUserParams) (CreatePlayerEndUserRow, error)
@@ -135,6 +148,9 @@ type Querier interface {
 	// the URL and looks up tenant + verification state in one shot.
 	GetEndUserByEmailProject(ctx context.Context, arg GetEndUserByEmailProjectParams) (GetEndUserByEmailProjectRow, error)
 	GetEndUserByExternalID(ctx context.Context, arg GetEndUserByExternalIDParams) (GetEndUserByExternalIDRow, error)
+	// Tenant-scoped: finds an existing (possibly unlinked) end_user by project +
+	// email so a public-join / invite can link it instead of creating a duplicate.
+	GetEndUserForAccountLink(ctx context.Context, arg GetEndUserForAccountLinkParams) (GetEndUserForAccountLinkRow, error)
 	// Lookup an end-user by ID for the POST /v1/end-users/verify endpoint
 	// (gameserver session-token verification). Filters deleted/disabled
 	// accounts so a forged token claiming a stale id rejects with 401.
@@ -164,6 +180,12 @@ type Querier interface {
 	GetGameSessionForUpdate(ctx context.Context, id string) (GetGameSessionForUpdateRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
+	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
+	GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (GetPlayerAccountByIDRow, error)
+	// Session lookup joins the account so the caller can enforce epoch match and
+	// the disabled gate in one round-trip.
+	GetPlayerAccountSession(ctx context.Context, refreshHash []byte) (GetPlayerAccountSessionRow, error)
+	GetPlayerAccountVerificationState(ctx context.Context, id pgtype.UUID) (GetPlayerAccountVerificationStateRow, error)
 	GetPlayerForProject(ctx context.Context, arg GetPlayerForProjectParams) (GetPlayerForProjectRow, error)
 	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
 	GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error)
@@ -177,6 +199,7 @@ type Querier interface {
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
+	GetTenantPublicJoining(ctx context.Context) (bool, error)
 	IncrementDashboardVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementEndUserVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
@@ -187,6 +210,13 @@ type Querier interface {
 	IsGameSessionMember(ctx context.Context, arg IsGameSessionMemberParams) (bool, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
+	// ListPlayerAccountLinkedProjects is intentionally NOT a sqlc query: it reads
+	// the SECURITY DEFINER player_account_linked_projects(uuid) table-function,
+	// which sqlc's analyzer can't resolve column types for. It is called via raw
+	// tx.Query in internal/players (same approach as player_end_user_tenant).
+	// Tenant-scoped (run under Pool.Q with app.tenant_id set): attaches a
+	// per-project end_user to a global account. Guarded by RLS on end_users.
+	LinkEndUserToAccount(ctx context.Context, arg LinkEndUserToAccountParams) error
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
 	// Returns (from_user_id, to_user_id) pairs for all accepted friendships
 	// involving the given user. Callers resolve the "other" user by comparing
@@ -249,6 +279,7 @@ type Querier interface {
 	// admin rows before counting them in the surrounding transaction.
 	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
 	LockEndUserVerification(ctx context.Context, arg LockEndUserVerificationParams) error
+	LockPlayerAccountVerification(ctx context.Context, arg LockPlayerAccountVerificationParams) error
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
@@ -258,6 +289,7 @@ type Querier interface {
 	MarkDashboardUserVerified(ctx context.Context, id int64) error
 	MarkEndUserInvitationAccepted(ctx context.Context, id int64) error
 	MarkEndUserVerified(ctx context.Context, id int64) error
+	MarkPlayerAccountVerified(ctx context.Context, id pgtype.UUID) error
 	MarkPlayerVerified(ctx context.Context, id int64) error
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 	// page. Returns the tenant_id so the caller can SET app.tenant_id and
@@ -293,17 +325,23 @@ type Querier interface {
 	// Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
 	// TOCTOU explanation). Returns 0 rows when already at cap.
 	ReserveEndUserVerifyAttempt(ctx context.Context, arg ReserveEndUserVerifyAttemptParams) (ReserveEndUserVerifyAttemptRow, error)
+	// Atomic check-and-bump; returns 0 rows when already at the per-code cap.
+	ReservePlayerAccountVerifyAttempt(ctx context.Context, arg ReservePlayerAccountVerifyAttemptParams) (ReservePlayerAccountVerifyAttemptRow, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
+	RevokeAllPlayerAccountSessions(ctx context.Context, playerAccountID pgtype.UUID) error
 	RevokeDashboardInvitation(ctx context.Context, id int64) error
 	RevokeDashboardSession(ctx context.Context, id int64) error
 	RevokeEndUserInvitation(ctx context.Context, id int64) error
 	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
 	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
 	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
+	RevokePlayerAccountSession(ctx context.Context, refreshHash []byte) error
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
 	RevokeSession(ctx context.Context, id int64) error
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)
+	// Platform-admin search by email prefix. Bounded LIMIT keeps the scan cheap.
+	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
 	// Nullable timestamptz so the same query handles disable (now()) and
 	// enable (NULL).
@@ -311,9 +349,18 @@ type Querier interface {
 	SetDashboardUserVerificationCode(ctx context.Context, arg SetDashboardUserVerificationCodeParams) error
 	SetEndUserVerificationCode(ctx context.Context, arg SetEndUserVerificationCodeParams) error
 	SetFriendEdgeStatus(ctx context.Context, arg SetFriendEdgeStatusParams) error
+	// Platform-level disable. Bumps session_epoch to kill live sessions.
+	SetPlayerAccountDisabled(ctx context.Context, id pgtype.UUID) error
+	SetPlayerAccountEnabled(ctx context.Context, id pgtype.UUID) error
+	// Password change bumps session_epoch so every outstanding account session is
+	// invalidated on its next request.
+	SetPlayerAccountPassword(ctx context.Context, arg SetPlayerAccountPasswordParams) error
+	SetPlayerAccountVerificationCode(ctx context.Context, arg SetPlayerAccountVerificationCodeParams) error
 	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
 	SetPlayerDisabledByTenant(ctx context.Context, arg SetPlayerDisabledByTenantParams) error
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
+	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
+	SetTenantPublicJoining(ctx context.Context, enabled bool) error
 	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
@@ -327,6 +374,7 @@ type Querier interface {
 	// so the heartbeat handler can reject non-members instead of leaking the
 	// roster.
 	TouchGameSessionPeer(ctx context.Context, arg TouchGameSessionPeerParams) (int64, error)
+	UnlinkEndUserFromAccount(ctx context.Context, id int64) error
 	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error
 	UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) error
 	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error

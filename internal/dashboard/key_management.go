@@ -94,7 +94,7 @@ func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOp
 		}
 		out = make([]ProjectOption, 0, len(rows))
 		for _, row := range rows {
-			opt := ProjectOption{ID: row.ID, Name: row.Name}
+			opt := ProjectOption{ID: row.ID, Name: row.Name, PublicJoiningEnabled: row.PublicJoiningEnabled}
 			if row.CreatedAt.Valid {
 				opt.CreatedAt = row.CreatedAt.Time
 			}

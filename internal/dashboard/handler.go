@@ -145,6 +145,8 @@ func New(d Deps) http.Handler {
 			r.Get("/projects", h.projectsPage)
 			r.Get("/projects/new", h.newProjectPage)
 			r.Post("/projects", h.createProjectHandler)
+			r.Post("/public-joining", h.setTenantPublicJoiningHandler)
+			r.Post("/projects/{projectID}/public-joining", h.setProjectPublicJoiningHandler)
 			r.Get(segAPIKeys, h.apiKeys)
 			r.Get("/api-keys/new", h.newAPIKeyPage)
 			r.Post(segAPIKeys, h.createAPIKeyHandler)
@@ -187,6 +189,10 @@ func New(d Deps) http.Handler {
 			r.Get("/users", h.platformUsersPage)
 			r.Post("/users/{userID}/disable", h.disableDashboardUserHandler)
 			r.Post("/users/{userID}/enable", h.enableDashboardUserHandler)
+			r.Get("/player-accounts", h.platformPlayerAccountsPage)
+			r.Get("/player-accounts/{accountID}", h.platformPlayerAccountDetailPage)
+			r.Post("/player-accounts/{accountID}/disable", h.disablePlayerAccountHandler)
+			r.Post("/player-accounts/{accountID}/enable", h.enablePlayerAccountHandler)
 			r.Get("/plugins", h.platformPluginsPage)
 		})
 		r.Post("/logout", h.logout)
@@ -256,13 +262,23 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
 		return
 	}
+	tenantJoining, err := h.getTenantPublicJoining(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
+	message := r.URL.Query().Get("created")
+	if flash := r.URL.Query().Get("flash"); flash != "" {
+		message = flash
+	}
 	webutil.Render(r, w, ProjectsPage(ProjectsView{
-		UserEmail: session.User.Email,
-		TenantID:  tenantID,
-		CSRFToken: session.CSRFToken,
-		Projects:  projects,
-		Message:   r.URL.Query().Get("created"),
+		UserEmail:           session.User.Email,
+		TenantID:            tenantID,
+		CSRFToken:           session.CSRFToken,
+		Projects:            projects,
+		Message:             message,
+		TenantPublicJoining: tenantJoining,
 	}))
 
 }

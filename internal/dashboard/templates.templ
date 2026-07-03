@@ -150,6 +150,7 @@ templ HomePage(vm HomeView) {
 			<div class="actions-cell">
 				if vm.IsPlatformAdmin {
 					<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Platform users</a>
+					<a href="/v1/dashboard/admin/player-accounts" role="button" class="secondary outline btn-inline">Player accounts</a>
 					<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
 				}
 				<a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">+ New tenant</a>
@@ -243,6 +244,27 @@ templ ProjectsPage(vm ProjectsView) {
 		</div>
 		@flashSuccess(vm.Message)
 		<section class="card">
+			<h2>Public joining</h2>
+			<p class="subtitle">
+				Master switch for this tenant. A player can publicly join a project only when BOTH this and the project's toggle are on. Disabling makes every project invite-only. Admin invites always bypass these switches.
+			</p>
+			if vm.TenantPublicJoining {
+				<p>Status: <span class="badge badge-active">enabled</span></p>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") } data-confirm="Disable public joining for the whole tenant? Every project becomes invite-only.">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value=""/>
+					<button type="submit" class="contrast outline btn-inline">Disable tenant-wide</button>
+				</form>
+			} else {
+				<p>Status: <span class="badge badge-revoked">disabled — invite only</span></p>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value="on"/>
+					<button type="submit" class="btn-inline">Enable tenant-wide</button>
+				</form>
+			}
+		</section>
+		<section class="card">
 			if len(vm.Projects) == 0 {
 				<div class="empty-state">
 					<p>No projects yet.</p>
@@ -253,6 +275,7 @@ templ ProjectsPage(vm ProjectsView) {
 					<thead>
 						<tr>
 							<th>Name</th>
+							<th>Public joining</th>
 							<th>Created</th>
 							<th></th>
 						</tr>
@@ -261,6 +284,23 @@ templ ProjectsPage(vm ProjectsView) {
 						for _, p := range vm.Projects {
 							<tr>
 								<td>{ p.Name }</td>
+								<td class="actions-cell">
+									if p.PublicJoiningEnabled {
+										<span class="badge badge-active">on</span>
+										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/public-joining") }>
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<input type="hidden" name="public_joining_enabled" value=""/>
+											<button type="submit" class="contrast outline btn-inline">Set invite-only</button>
+										</form>
+									} else {
+										<span class="badge badge-revoked">invite only</span>
+										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/public-joining") }>
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<input type="hidden" name="public_joining_enabled" value="on"/>
+											<button type="submit" class="btn-inline">Allow public joining</button>
+										</form>
+									}
+								</td>
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
@@ -1445,6 +1485,144 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 					</tbody>
 				</table>
 				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
+			}
+		</section>
+	}
+}
+
+templ PlayerAccountsPage(vm PlayerAccountsView) {
+	@appLayout("Player accounts — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Player accounts</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player accounts</p>
+				<h1>Player accounts</h1>
+				<p class="subtitle">Global gg-scale accounts across every project. Disabling locks the account out of the platform and revokes its sessions.</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<form method="get" action="/v1/dashboard/admin/player-accounts">
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email starts with…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Accounts) == 0 {
+				<div class="empty-state"><p>No player accounts found.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Verified</th>
+							<th>Status</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, a := range vm.Accounts {
+							<tr>
+								<td>{ a.Email }</td>
+								<td>
+									if a.Verified {
+										<span class="badge badge-active">verified</span>
+									} else {
+										<span class="badge">unverified</span>
+									}
+								</td>
+								<td>
+									if a.Disabled {
+										<span class="badge badge-revoked">disabled</span>
+									} else {
+										<span class="badge badge-active">active</span>
+									}
+								</td>
+								<td>{ timeString(a.CreatedAt) }</td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/dashboard/admin/player-accounts/" + a.ID) } role="button" class="secondary outline btn-inline">View</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
+	@appLayout("Player account — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / <a href="/v1/dashboard/admin/player-accounts">Player accounts</a> / { vm.Email }</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player account</p>
+				<h1>{ vm.Email }</h1>
+				<p class="subtitle">
+					if vm.DisplayName != "" {
+						{ vm.DisplayName } —
+					}
+					joined { timeString(vm.CreatedAt) }.
+				</p>
+			</div>
+			<div class="actions-cell">
+				if vm.Disabled {
+					<form method="post" action={ templ.URL("/v1/dashboard/admin/player-accounts/" + vm.ID + "/enable") } data-confirm="Re-enable this account?">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="secondary outline btn-inline">Re-enable</button>
+					</form>
+				} else {
+					<form method="post" action={ templ.URL("/v1/dashboard/admin/player-accounts/" + vm.ID + "/disable") } data-confirm="Disable this account platform-wide? Its sessions will be revoked.">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="contrast outline btn-inline">Disable</button>
+					</form>
+				}
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<p>
+				Status:
+				if vm.Disabled {
+					<span class="badge badge-revoked">disabled</span>
+				} else {
+					<span class="badge badge-active">active</span>
+				}
+				Email:
+				if vm.Verified {
+					<span class="badge badge-active">verified</span>
+				} else {
+					<span class="badge">unverified</span>
+				}
+			</p>
+		</section>
+		<section class="card">
+			<h2>Linked games</h2>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state"><p>No games linked.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Project</th>
+							<th>Tenant</th>
+							<th>External ID</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Projects {
+							<tr>
+								<td>{ p.ProjectName }</td>
+								<td>{ stringFromInt(p.TenantID) }</td>
+								<td><code>{ p.ExternalID }</code></td>
+							</tr>
+						}
+					</tbody>
+				</table>
 			}
 		</section>
 	}

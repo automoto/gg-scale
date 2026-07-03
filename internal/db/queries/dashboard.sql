@@ -1,9 +1,28 @@
 -- name: ListProjectsForTenant :many
-SELECT id, name, created_at
+SELECT id, name, created_at, public_joining_enabled
 FROM projects
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 ORDER BY name;
+
+-- name: GetTenantPublicJoining :one
+SELECT public_joining_enabled
+FROM tenants
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: SetTenantPublicJoining :exec
+UPDATE tenants
+SET public_joining_enabled = sqlc.arg(enabled)
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: SetProjectPublicJoining :exec
+UPDATE projects
+SET public_joining_enabled = sqlc.arg(enabled)
+WHERE id = sqlc.arg(project_id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
 
 -- name: CreateProjectForTenant :one
 INSERT INTO projects (tenant_id, name)

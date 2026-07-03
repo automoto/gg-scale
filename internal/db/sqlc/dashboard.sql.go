@@ -81,8 +81,22 @@ func (q *Queries) DashboardCreateTenant(ctx context.Context, arg DashboardCreate
 	return i, err
 }
 
+const getTenantPublicJoining = `-- name: GetTenantPublicJoining :one
+SELECT public_joining_enabled
+FROM tenants
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) GetTenantPublicJoining(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, getTenantPublicJoining)
+	var public_joining_enabled bool
+	err := row.Scan(&public_joining_enabled)
+	return public_joining_enabled, err
+}
+
 const listProjectsForTenant = `-- name: ListProjectsForTenant :many
-SELECT id, name, created_at
+SELECT id, name, created_at, public_joining_enabled
 FROM projects
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
@@ -90,9 +104,10 @@ ORDER BY name
 `
 
 type ListProjectsForTenantRow struct {
-	ID        int64
-	Name      string
-	CreatedAt pgtype.Timestamptz
+	ID                   int64
+	Name                 string
+	CreatedAt            pgtype.Timestamptz
+	PublicJoiningEnabled bool
 }
 
 func (q *Queries) ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error) {
@@ -104,7 +119,12 @@ func (q *Queries) ListProjectsForTenant(ctx context.Context) ([]ListProjectsForT
 	var items []ListProjectsForTenantRow
 	for rows.Next() {
 		var i ListProjectsForTenantRow
-		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.CreatedAt,
+			&i.PublicJoiningEnabled,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -113,4 +133,34 @@ func (q *Queries) ListProjectsForTenant(ctx context.Context) ([]ListProjectsForT
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectPublicJoining = `-- name: SetProjectPublicJoining :exec
+UPDATE projects
+SET public_joining_enabled = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type SetProjectPublicJoiningParams struct {
+	Enabled   bool
+	ProjectID int64
+}
+
+func (q *Queries) SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error {
+	_, err := q.db.Exec(ctx, setProjectPublicJoining, arg.Enabled, arg.ProjectID)
+	return err
+}
+
+const setTenantPublicJoining = `-- name: SetTenantPublicJoining :exec
+UPDATE tenants
+SET public_joining_enabled = $1
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) SetTenantPublicJoining(ctx context.Context, enabled bool) error {
+	_, err := q.db.Exec(ctx, setTenantPublicJoining, enabled)
+	return err
 }

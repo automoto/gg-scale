@@ -8,6 +8,7 @@ const (
 	pathDashboardLogin  = "/v1/dashboard/login"
 	pathTenantsPrefix   = "/v1/dashboard/tenants/"
 	pathAdminUsersFlash = "/v1/dashboard/admin/users?flash="
+	pathAdminAccounts   = "/v1/dashboard/admin/player-accounts"
 	segAPIKeys          = "/api-keys"
 	segTeamInvite       = "/team/invite"
 	queryFlash          = "?flash="

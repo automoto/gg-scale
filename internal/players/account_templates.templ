@@ -1,0 +1,153 @@
+package players
+
+// Global player-account pages (project-agnostic). Kept deliberately minimal,
+// mirroring the per-project player templates in templates.templ.
+
+type AccountLoginView struct {
+	Email     string
+	Error     string
+	CSRFToken string
+}
+
+templ AccountLoginPage(vm AccountLoginView) {
+	@playerLayout("Sign in") {
+		<h1>Sign in to gg-scale</h1>
+		<p class="subtitle">One account across every game.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/account/login") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Email
+				<input name="email" type="email" value={ vm.Email } autocomplete="username" required/>
+			</label>
+			<label>Password
+				<input name="password" type="password" autocomplete="current-password" required/>
+			</label>
+			<button type="submit">Sign in</button>
+		</form>
+		<p><a href={ templ.URL("/v1/players/account/signup") }>Create an account</a></p>
+	}
+}
+
+type AccountSignupView struct {
+	Email       string
+	DisplayName string
+	Error       string
+	FieldErrors map[string]string
+	CSRFToken   string
+}
+
+templ AccountSignupPage(vm AccountSignupView) {
+	@playerLayout("Sign up") {
+		<h1>Create your gg-scale account</h1>
+		<p class="subtitle">We'll send a 6-digit code to verify your email.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/account/signup") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Email
+				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
+				if msg, ok := vm.FieldErrors["email"]; ok {
+					<small class="error">{ msg }</small>
+				}
+			</label>
+			<label>Display name (optional)
+				<input name="display_name" type="text" value={ vm.DisplayName } autocomplete="nickname" maxlength="64"/>
+			</label>
+			<label>Password (≥ 8 chars)
+				<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
+				if msg, ok := vm.FieldErrors["password"]; ok {
+					<small class="error">{ msg }</small>
+				}
+			</label>
+			<button type="submit">Create account</button>
+		</form>
+		<p><a href={ templ.URL("/v1/players/account/login") }>I already have an account</a></p>
+	}
+}
+
+type AccountVerifyView struct {
+	Email     string
+	Error     string
+	CSRFToken string
+}
+
+templ AccountVerifyPage(vm AccountVerifyView) {
+	@playerLayout("Verify email") {
+		<h1>Verify your email</h1>
+		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>.</p>
+		if vm.Error != "" {
+			<p class="error">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/account/verify") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Verification code
+				<input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus/>
+			</label>
+			<button type="submit">Verify</button>
+		</form>
+		<form method="post" action={ templ.URL("/v1/players/account/verify/resend") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<button class="secondary" type="submit">Resend code</button>
+		</form>
+	}
+}
+
+// LinkedProject is one project the account is linked to (via an end_user row).
+type LinkedProject struct {
+	TenantID    int64
+	ProjectID   int64
+	ProjectName string
+	ExternalID  string
+}
+
+type AccountHomeView struct {
+	Email       string
+	DisplayName string
+	Projects    []LinkedProject
+	CSRFToken   string
+	Flash       string
+	FlashError  string
+}
+
+templ AccountHomePage(vm AccountHomeView) {
+	@playerLayout("Account") {
+		<h1>Your gg-scale account</h1>
+		if vm.DisplayName != "" {
+			<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<code>{ vm.Email }</code>).</p>
+		} else {
+			<p class="subtitle">Signed in as <code>{ vm.Email }</code>.</p>
+		}
+		if vm.Flash != "" {
+			<p class="flash">{ vm.Flash }</p>
+		}
+		if vm.FlashError != "" {
+			<p class="error">{ vm.FlashError }</p>
+		}
+		<h2>Linked games</h2>
+		if len(vm.Projects) == 0 {
+			<p>No games linked yet.</p>
+		} else {
+			<ul>
+				for _, p := range vm.Projects {
+					<li>{ p.ProjectName }</li>
+				}
+			</ul>
+		}
+		<h2>Join a game</h2>
+		<p class="subtitle">Enter a project ID to link your account. Invite-only games need an invite instead.</p>
+		<form method="post" action={ templ.URL("/v1/players/account/join") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Project ID
+				<input name="project_id" type="text" inputmode="numeric" required/>
+			</label>
+			<button type="submit">Join</button>
+		</form>
+		<form method="post" action={ templ.URL("/v1/players/account/logout") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<button class="secondary" type="submit">Sign out</button>
+		</form>
+	}
+}

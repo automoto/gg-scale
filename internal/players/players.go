@@ -97,6 +97,33 @@ func New(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(webutil.PlayerSecurityHeaders)
+
+	// Global player-account routes (project-agnostic). These sit alongside
+	// the per-project /p/{projectID} routes and drive the platform-wide
+	// account identity (signup / login / verify / account home). See
+	// docs/temp/player-accounts.md.
+	r.Route("/account", func(r chi.Router) {
+		if d.Limiter != nil {
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
+		}
+		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
+			Path:     "/v1/players",
+			Secure:   d.Config.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+		}))
+		r.Use(webutil.RequireCSRF)
+		r.Get("/", h.accountHomePage)
+		r.Post("/join", h.accountJoin)
+		r.Get("/login", h.accountLoginPage)
+		r.Post("/login", h.accountLogin)
+		r.Get("/signup", h.accountSignupPage)
+		r.Post("/signup", h.accountSignup)
+		r.Get("/verify", h.accountVerifyPage)
+		r.Post("/verify", h.accountVerify)
+		r.Post("/verify/resend", h.accountVerifyResend)
+		r.Post("/logout", h.accountLogout)
+	})
+
 	r.Route("/p/{projectID}", func(r chi.Router) {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.Registry))
@@ -627,6 +654,9 @@ type verifyCookiePayload struct {
 	ProjectID int64
 	ExpiresAt int64
 	Email     string
+	// AccountID is set only for the global-account verify cookie (a UUID
+	// string); empty for the per-project end-user verify cookie.
+	AccountID string `json:",omitempty"`
 }
 
 // playerVerifyTTL is the lifetime of a verify-pending cookie. Mirrors the

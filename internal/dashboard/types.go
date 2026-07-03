@@ -89,9 +89,10 @@ type APIKeyView struct {
 
 // ProjectOption is one project pickable in the API-key creation form.
 type ProjectOption struct {
-	ID        int64
-	Name      string
-	CreatedAt time.Time
+	ID                   int64
+	Name                 string
+	CreatedAt            time.Time
+	PublicJoiningEnabled bool
 }
 
 // NewTenantView is the data rendered by the create-tenant page.
@@ -109,6 +110,9 @@ type ProjectsView struct {
 	CSRFToken string
 	Projects  []ProjectOption
 	Message   string
+	// TenantPublicJoining is the tenant master switch. Effective per-project
+	// join = TenantPublicJoining AND project.PublicJoiningEnabled.
+	TenantPublicJoining bool
 }
 
 // NewProjectView is the data rendered by the create-project page.
@@ -259,6 +263,47 @@ type PlatformUsersView struct {
 	HasPrev   bool
 	HasNext   bool
 	Message   string
+}
+
+// PlayerAccountView is one row in the platform-admin player-accounts list.
+type PlayerAccountView struct {
+	ID         string // UUID
+	Email      string
+	Verified   bool
+	Disabled   bool
+	HasDisplay bool
+	CreatedAt  time.Time
+}
+
+// PlayerAccountsView is the data rendered by /v1/dashboard/admin/player-accounts.
+type PlayerAccountsView struct {
+	UserEmail string
+	CSRFToken string
+	Search    string
+	Accounts  []PlayerAccountView
+	Message   string
+}
+
+// LinkedProjectView is one project a global account is linked to.
+type LinkedProjectView struct {
+	TenantID    int64
+	ProjectID   int64
+	ProjectName string
+	ExternalID  string
+}
+
+// PlayerAccountDetailView renders a single account with its linked projects.
+type PlayerAccountDetailView struct {
+	UserEmail   string
+	CSRFToken   string
+	ID          string
+	Email       string
+	DisplayName string
+	Verified    bool
+	Disabled    bool
+	CreatedAt   time.Time
+	Projects    []LinkedProjectView
+	Message     string
 }
 
 // AcceptInviteView is the data rendered by the invite acceptance page.
