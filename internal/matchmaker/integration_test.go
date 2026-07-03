@@ -351,10 +351,10 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "swept ticket should be available for re-claim")
 }
 
-// TestPGQueueGetAndCancelAreEndUserScoped is the auth-followups §18
-// regression: a same-tenant, different-user caller must not be able to read
-// or cancel another player's ticket by ID. The SQL WHERE end_user_id filter
-// yields ErrNotFound (404 at the HTTP layer), never the ticket.
+// TestPGQueueGetAndCancelAreEndUserScoped is the ticket-ownership regression:
+// a same-tenant, different-user caller must not be able to read or cancel
+// another player's ticket by ID. The SQL WHERE end_user_id filter yields
+// ErrNotFound (404 at the HTTP layer), never the ticket.
 func TestPGQueueGetAndCancelAreEndUserScoped(t *testing.T) {
 	pool := startMigratedDB(t)
 	appPool := db.NewPool(pool)

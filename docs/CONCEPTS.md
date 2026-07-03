@@ -39,6 +39,22 @@ You. The humans who log in to manage tenants, projects, and keys. Dashboard user
 
 The people who actually play your game. They sign up, log in, and store data through ggscale's `/v1/auth/...` and storage APIs, which your game calls on their behalf using the tenant's API key. End users never touch this dashboard.
 
+### Player account (global)
+
+A platform-wide gg-scale account (`player_accounts`) that sits *above* the per-project end users. The same human is one account across every game; friends, remote addresses, invites, and tenant bans hang off it. An end user with no linked account is an anonymous player. Signing up for a global account is always open; *linking* an account into a specific project is what the public-join toggles and invites gate.
+
+### Suspension levels
+
+Three independent kill switches, from narrowest to broadest:
+
+| Level | Column / table | Scope | Blocks |
+|---|---|---|---|
+| **Project disable** | `end_users.disabled_at` | one player in one project | that end-user's login, session verify, gameplay in that project |
+| **Tenant ban** | `tenant_player_bans` | one global account across every project a tenant owns | login/refresh/custom-token, session verify, project join/link, invite acceptance, matchmaker tickets, relay credentials — for all of that account's end-users in the tenant |
+| **Platform disable** | `player_accounts.disabled_at` | the global account everywhere | all account-level auth (player site sign-in, account session) |
+
+Project disable and tenant ban both bump `end_users.session_epoch`, and that epoch is embedded in the player's JWT (`sepoch` claim). Server-side session verification (`POST /v1/end-users/verify`) rejects a token whose epoch is stale, so a disable or ban takes effect **immediately** rather than waiting out the 15-minute access-token TTL.
+
 ## How a request flows
 
 ```

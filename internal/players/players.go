@@ -114,6 +114,7 @@ func New(d Deps) http.Handler {
 		r.Use(webutil.RequireCSRF)
 		r.Get("/", h.accountHomePage)
 		r.Post("/join", h.accountJoin)
+		r.Post("/remote-addrs", h.accountRemoteAddrUpdate)
 		r.Get("/friends", h.friendsPage)
 		r.Post("/friends/request", h.friendRequest)
 		r.Post("/friends/{accountID}/accept", h.friendAction("accept"))

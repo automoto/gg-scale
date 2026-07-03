@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -75,14 +76,81 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account home: linked projects", err)
 		return
 	}
-	webutil.Render(r, w, AccountHomePage(AccountHomeView{
+	var addrs sqlcgen.GetPlayerAccountRemoteAddrsRow
+	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+		var e error
+		addrs, e = sqlcgen.New(tx).GetPlayerAccountRemoteAddrs(r.Context(), toPgUUID(sess.AccountID))
+		return e
+	}); err != nil {
+		webutil.InternalError(w, "account home: remote addrs", err)
+		return
+	}
+	view := AccountHomeView{
 		Email:       sess.Email,
 		DisplayName: sess.DisplayName,
 		Projects:    projects,
 		CSRFToken:   h.csrf(r),
 		Flash:       r.URL.Query().Get("flash"),
 		FlashError:  r.URL.Query().Get("error"),
-	}))
+	}
+	if addrs.PrimaryRemoteAddr != nil {
+		view.PrimaryAddr = *addrs.PrimaryRemoteAddr
+	}
+	if addrs.SecondaryRemoteAddr != nil {
+		view.SecondaryAddr = *addrs.SecondaryRemoteAddr
+	}
+	webutil.Render(r, w, AccountHomePage(view))
+}
+
+// accountRemoteAddrUpdate is the player-site owner write path for remote
+// addresses. Validation matches the JSON API (length + printable non-control).
+func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	primary := strings.TrimSpace(r.Form.Get("primary_remote_addr"))
+	secondary := strings.TrimSpace(r.Form.Get("secondary_remote_addr"))
+	if !validPlayerRemoteAddr(primary) || !validPlayerRemoteAddr(secondary) {
+		h.redirectAccountHome(w, r, "", "Address too long or contains control characters.")
+		return
+	}
+	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), sqlcgen.SetPlayerAccountRemoteAddrsParams{
+			ID:                  toPgUUID(sess.AccountID),
+			PrimaryRemoteAddr:   emptyToNil(primary),
+			SecondaryRemoteAddr: emptyToNil(secondary),
+		})
+	}); err != nil {
+		webutil.InternalError(w, "account remote-addr update", err)
+		return
+	}
+	h.redirectAccountHome(w, r, "Remote addresses saved.", "")
+}
+
+const playerRemoteAddrMaxLen = 255
+
+func validPlayerRemoteAddr(s string) bool {
+	if len(s) > playerRemoteAddrMaxLen {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func emptyToNil(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 var (
@@ -172,6 +240,14 @@ func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession,
 	tctx := db.WithTenant(ctx, tenantID)
 	return h.pool.Q(tctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		// A tenant-banned account cannot join / re-link.
+		if _, berr := q.IsAccountBannedInTenant(tctx, sqlcgen.IsAccountBannedInTenantParams{
+			TenantID: tenantID, PlayerAccountID: accountUUID,
+		}); berr == nil {
+			return errJoinDisabled
+		} else if !errors.Is(berr, pgx.ErrNoRows) {
+			return berr
+		}
 		emailPtr := &sess.Email
 		existing, err := q.GetEndUserForAccountLink(tctx, sqlcgen.GetEndUserForAccountLinkParams{
 			ProjectID: projectID,

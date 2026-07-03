@@ -1,4 +1,4 @@
--- Global player accounts (Milestone 2 of the production launch sprint).
+-- Global player accounts.
 --
 -- player_accounts is a PLATFORM-GLOBAL identity that sits above the
 -- per-project end_users rows. It has no tenant_id and no row-level-security

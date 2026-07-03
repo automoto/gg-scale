@@ -958,10 +958,56 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 					<button type="submit" class="btn-inline">Re-enable player</button>
 				} else {
 					<input type="hidden" name="enable" value="false"/>
-					<button type="submit" class="secondary outline btn-inline">Disable player</button>
+					<button type="submit" class="secondary outline btn-inline">Disable player (this project)</button>
 				}
 			</form>
 		</section>
+		if vm.Player.AccountID != "" {
+			<section class="card">
+				<h2>gg-scale account</h2>
+				<dl class="kv">
+					<dt>Account</dt>
+					<dd><code>{ vm.Player.AccountID }</code></dd>
+					<dt>Primary remote address</dt>
+					<dd>
+						if vm.Player.PrimaryAddr != "" {
+							<code>{ vm.Player.PrimaryAddr }</code>
+						} else {
+							<span class="muted">—</span>
+						}
+					</dd>
+					<dt>Secondary remote address</dt>
+					<dd>
+						if vm.Player.SecondaryAddr != "" {
+							<code>{ vm.Player.SecondaryAddr }</code>
+						} else {
+							<span class="muted">—</span>
+						}
+					</dd>
+					<dt>Tenant ban</dt>
+					<dd>
+						if vm.Player.TenantBanned {
+							<span class="badge badge-revoked">banned</span>
+						} else {
+							<span class="badge badge-active">not banned</span>
+						}
+					</dd>
+				</dl>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/ban") } data-confirm="Ban this player's account across the whole tenant?">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					if vm.Player.TenantBanned {
+						<input type="hidden" name="ban" value="false"/>
+						<button type="submit" class="secondary outline btn-inline">Lift tenant ban</button>
+					} else {
+						<input type="hidden" name="ban" value="true"/>
+						<label>Reason (optional)
+							<input name="reason" type="text" maxlength="200"/>
+						</label>
+						<button type="submit" class="contrast outline btn-inline">Ban account tenant-wide</button>
+					}
+				</form>
+			</section>
+		}
 	}
 }
 

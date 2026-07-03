@@ -52,6 +52,15 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+		// Tenant-ban enforcement point: a banned account can't get relay
+		// credentials.
+		if banned, berr := endUserTenantBanned(ctx, d, endUserID); berr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		} else if banned {
+			http.Error(w, "account banned", http.StatusForbidden)
+			return
+		}
 		creds, err := d.RelayIssuer.Issue(tenantID, endUserID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)

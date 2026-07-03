@@ -120,15 +120,22 @@ templ InviteAcceptPage(vm InviteAcceptView) {
 		} else {
 			<p class="subtitle">You've been invited to <strong>{ vm.ProjectName }</strong>.</p>
 			<p>Email: <code>{ vm.Email }</code></p>
+			if vm.NewAccount {
+				<p>Accepting creates your gg-scale account and links it to this game.</p>
+			} else {
+				<p>Accepting links your existing gg-scale account to this game and signs you in.</p>
+			}
 			<form method="post" action={ templ.URL("/v1/players/p/" + pid(vm.ProjectID) + "/invite/accept") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<input type="hidden" name="code" value={ vm.Code }/>
-				<label>Set a password (≥ 8 chars)
-					<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
-					if msg, ok := vm.FieldErrors["password"]; ok {
-						<small class="error">{ msg }</small>
-					}
-				</label>
+				if vm.NewAccount {
+					<label>Set a password (≥ 8 chars)
+						<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
+						if msg, ok := vm.FieldErrors["password"]; ok {
+							<small class="error">{ msg }</small>
+						}
+					</label>
+				}
 				<button type="submit">Accept invite</button>
 			</form>
 		}

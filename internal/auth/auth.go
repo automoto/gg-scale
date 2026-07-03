@@ -31,14 +31,19 @@ type Claims struct {
 	EndUserID int64
 	TenantID  int64
 	ProjectID int64 // 0 when the session has no project pin
-	ExpiresAt time.Time
+	// SessionEpoch snapshots end_users.session_epoch at issuance. Server-side
+	// verify rejects the token if the DB epoch has moved past it (disable /
+	// tenant ban), so revocation is immediate rather than TTL-bounded.
+	SessionEpoch int64
+	ExpiresAt    time.Time
 }
 
 type registeredClaims struct {
 	jwt.RegisteredClaims
-	EndUserID int64 `json:"euid"`
-	TenantID  int64 `json:"tid"`
-	ProjectID int64 `json:"pid,omitempty"`
+	EndUserID    int64 `json:"euid"`
+	TenantID     int64 `json:"tid"`
+	ProjectID    int64 `json:"pid,omitempty"`
+	SessionEpoch int64 `json:"sepoch,omitempty"`
 }
 
 // Signer issues and verifies HMAC-SHA256 JWTs.
@@ -95,9 +100,10 @@ func (s *Signer) Sign(c Claims) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(c.ExpiresAt),
 			ID:        hex.EncodeToString(nonce),
 		},
-		EndUserID: c.EndUserID,
-		TenantID:  c.TenantID,
-		ProjectID: c.ProjectID,
+		EndUserID:    c.EndUserID,
+		TenantID:     c.TenantID,
+		ProjectID:    c.ProjectID,
+		SessionEpoch: c.SessionEpoch,
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, rc)
@@ -128,9 +134,10 @@ func (s *Signer) Verify(token string) (Claims, error) {
 
 	exp, _ := rc.GetExpirationTime()
 	out := Claims{
-		EndUserID: rc.EndUserID,
-		TenantID:  rc.TenantID,
-		ProjectID: rc.ProjectID,
+		EndUserID:    rc.EndUserID,
+		TenantID:     rc.TenantID,
+		ProjectID:    rc.ProjectID,
+		SessionEpoch: rc.SessionEpoch,
 	}
 	if exp != nil {
 		out.ExpiresAt = exp.Time

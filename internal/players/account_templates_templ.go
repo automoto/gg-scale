@@ -397,12 +397,14 @@ type LinkedProject struct {
 }
 
 type AccountHomeView struct {
-	Email       string
-	DisplayName string
-	Projects    []LinkedProject
-	CSRFToken   string
-	Flash       string
-	FlashError  string
+	Email         string
+	DisplayName   string
+	Projects      []LinkedProject
+	CSRFToken     string
+	Flash         string
+	FlashError    string
+	PrimaryAddr   string
+	SecondaryAddr string
 }
 
 func AccountHomePage(vm AccountHomeView) templ.Component {
@@ -436,7 +438,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(vm.DisplayName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 118, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 120, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -449,7 +451,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Email)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 118, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 120, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 				if templ_7745c5c3_Err != nil {
@@ -467,7 +469,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Email)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 120, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 122, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -490,7 +492,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Flash)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 123, Col: 30}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 125, Col: 30}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -513,7 +515,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(vm.FlashError)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 126, Col: 35}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 128, Col: 35}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
@@ -546,7 +548,7 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(p.ProjectName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 134, Col: 24}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 136, Col: 24}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -571,12 +573,45 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Manage friends</a></p><h2>Join a game</h2><p class=\"subtitle\">Enter a project ID to link your account. Invite-only games need an invite instead.</p><form method=\"post\" action=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Manage friends</a></p><h2>Remote addresses</h2><p class=\"subtitle\">Opaque endpoints (IP, Tailscale, iroh) shared with your accepted friends and the games you play. Never public.</p><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var28 templ.SafeURL = templ.URL("/v1/players/account/join")
+			var templ_7745c5c3_Var28 templ.SafeURL = templ.URL("/v1/players/account/remote-addrs")
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var28)))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.CSRFToken))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Primary <input name=\"primary_remote_addr\" type=\"text\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.PrimaryAddr))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" maxlength=\"255\"></label> <label>Secondary <input name=\"secondary_remote_addr\" type=\"text\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(vm.SecondaryAddr))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" maxlength=\"255\"></label> <button type=\"submit\">Save addresses</button></form><h2>Join a game</h2><p class=\"subtitle\">Enter a project ID to link your account. Invite-only games need an invite instead.</p><form method=\"post\" action=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var29 templ.SafeURL = templ.URL("/v1/players/account/join")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var29)))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -592,8 +627,8 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var29 templ.SafeURL = templ.URL("/v1/players/account/logout")
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var29)))
+			var templ_7745c5c3_Var30 templ.SafeURL = templ.URL("/v1/players/account/logout")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(string(templ_7745c5c3_Var30)))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

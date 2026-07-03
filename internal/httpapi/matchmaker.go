@@ -110,6 +110,13 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 		if !allowMatchmakerAction(w, r, d, tenantID, projectID, endUserID, "create", matchmakerCreateRate, matchmakerCreateBurst) {
 			return
 		}
+		if banned, berr := endUserTenantBanned(ctx, d, endUserID); berr != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		} else if banned {
+			http.Error(w, "account banned", http.StatusForbidden)
+			return
+		}
 		if d.Fleet == nil {
 			http.Error(w, "fleet backend not configured", http.StatusServiceUnavailable)
 			return

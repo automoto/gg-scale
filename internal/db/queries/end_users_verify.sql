@@ -11,6 +11,8 @@ SELECT u.id,
        u.tenant_id,
        u.project_id,
        u.external_id,
+       u.session_epoch,
+       u.player_account_id,
        coalesce(u.email, '')::text AS email
 FROM end_users u
 JOIN tenants  t ON t.id = u.tenant_id  AND t.deleted_at IS NULL
@@ -19,3 +21,7 @@ WHERE u.id = $1
   AND u.tenant_id = nullif(current_setting('app.tenant_id', true), '')::bigint
   AND u.deleted_at IS NULL
   AND u.disabled_at IS NULL;
+
+-- name: GetEndUserSessionEpoch :one
+-- PK lookup used at token issuance to snapshot the current epoch into the JWT.
+SELECT session_epoch FROM end_users WHERE id = sqlc.arg(id);

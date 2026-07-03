@@ -42,6 +42,13 @@ func makeFriends(t *testing.T, c *cluster, baseURL, apiKey string, idA int64, to
 // tests since friends are account-scoped.
 func linkEndUserAccount(t *testing.T, c *cluster, endUserID int64) {
 	t.Helper()
+	// Idempotent: makeFriends may call this on an already-linked end_user.
+	var existing *string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT player_account_id::text FROM end_users WHERE id = $1`, endUserID).Scan(&existing))
+	if existing != nil {
+		return
+	}
 	var accID string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`INSERT INTO player_accounts (email, password_hash, email_verified_at)

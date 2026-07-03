@@ -1,4 +1,4 @@
--- Signup / public-join controls (Milestone 3). A player can publicly join a
+-- Signup / public-join controls. A player can publicly join a
 -- project only when BOTH the tenant master switch AND the per-project toggle
 -- allow it: effective policy = tenant.public_joining_enabled AND
 -- project.public_joining_enabled. Admin invites bypass both toggles by design.

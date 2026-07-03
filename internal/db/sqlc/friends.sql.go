@@ -289,9 +289,9 @@ type RequestFriendByAccountRow struct {
 	Status string
 }
 
-// Friend edges between GLOBAL player_accounts (Milestone 4). friend_edges has
-// no tenant_id and no RLS, so these run in either a tenant Pool.Q or a
-// BootstrapQ transaction. Account ids are UUIDs.
+// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
+// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
+// transaction. Account ids are UUIDs.
 // One current row per directed pair. Re-requests after rejection update in
 // place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
 // no-ops); blocked is terminal (WHERE omits it).

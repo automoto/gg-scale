@@ -1,5 +1,5 @@
 -- Rework friend_edges to reference GLOBAL player_accounts instead of
--- per-project end_users (Milestone 4). Friends are platform-wide: the same
+-- per-project end_users. Friends are platform-wide: the same
 -- human is one account across every game, so friendships live between
 -- account UUIDs, not tenant-scoped end_user rows.
 --

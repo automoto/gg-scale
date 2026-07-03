@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(58), v)
+	assert.Equal(t, uint(59), v)
 	assert.False(t, dirty)
 }
 
@@ -183,8 +183,8 @@ func TestUp_enables_rls_with_isolation_policy(t *testing.T) {
 		assert.GreaterOrEqual(t, policyCount(t, dsn, table), 1, "%s should have an RLS policy", table)
 	}
 	// friend_edges was reworked in migration 0058 to reference GLOBAL
-	// player_accounts (Milestone 4); like player_accounts it is platform-wide
-	// and deliberately carries NO tenant RLS policy.
+	// player_accounts; like player_accounts it is platform-wide and
+	// deliberately carries NO tenant RLS policy.
 	assert.Equal(t, 0, policyCount(t, dsn, "friend_edges"), "friend_edges is global — no RLS policy")
 	assert.Equal(t, 0, policyCount(t, dsn, "player_accounts"), "player_accounts is global — no RLS policy")
 }

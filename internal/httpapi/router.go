@@ -206,6 +206,10 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
 					mountFleetHeartbeatRoute(r, d)
+					// Server-tier remote-address read: a game server reads a
+					// linked player's opaque endpoint for that project. Secret
+					// keys only — publishable keys never reach this group.
+					r.Get("/server/players/{user_id}/remote-addrs", serverRemoteAddrGetHandler(d))
 				})
 
 				// End-user authenticated: requires X-Session-Token JWT.
@@ -216,6 +220,7 @@ func NewRouter(d Deps) http.Handler {
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)
 					mountProfileRoutes(r, d)
+					mountRemoteAddrRoutes(r, d)
 					mountRealtimeRoutes(r, d)
 					mountMatchmakerRoutes(r, d)
 					mountFleetListRoute(r, d)

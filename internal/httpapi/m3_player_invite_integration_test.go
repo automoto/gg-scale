@@ -203,14 +203,25 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 		`SELECT accepted_at::text FROM end_user_invitations WHERE email = 'newplayer@example.com'`).Scan(&accepted))
 	assert.NotNil(t, accepted)
 
-	// 7) Session cookie was issued.
+	// 7) Global account session cookie was issued (invites now sign the
+	// invitee into their gg-scale account, not a per-project session).
 	var sawSession bool
 	for _, ck := range acceptResp.Cookies() {
-		if ck.Name == "ggscale_player_session" {
+		if ck.Name == "ggscale_account_session" {
 			sawSession = true
 		}
 	}
-	assert.True(t, sawSession, "expected ggscale_player_session cookie after accept")
+	assert.True(t, sawSession, "expected ggscale_account_session cookie after accept")
+
+	// 8) The end_user is linked to a verified global account.
+	var linkedAccount *string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT player_account_id::text FROM end_users WHERE email = 'newplayer@example.com'`).Scan(&linkedAccount))
+	require.NotNil(t, linkedAccount)
+	var acctVerified *string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT email_verified_at::text FROM player_accounts WHERE email = 'newplayer@example.com'`).Scan(&acctVerified))
+	assert.NotNil(t, acctVerified)
 }
 
 // csrfHiddenFieldRE matches the rendered `<input ... name="_csrf" value="…">`

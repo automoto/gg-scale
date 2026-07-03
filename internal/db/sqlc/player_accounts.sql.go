@@ -126,6 +126,50 @@ func (q *Queries) CreatePlayerAccountSession(ctx context.Context, arg CreatePlay
 	return id, err
 }
 
+const createVerifiedPlayerAccount = `-- name: CreateVerifiedPlayerAccount :one
+INSERT INTO player_accounts (email, password_hash, display_name, email_verified_at)
+VALUES ($1, $2, $3, now())
+RETURNING id
+`
+
+type CreateVerifiedPlayerAccountParams struct {
+	Email        string
+	PasswordHash []byte
+	DisplayName  *string
+}
+
+// Creates an already-verified account (used by invite acceptance, where the
+// magic link delivered to the invited inbox proves email ownership).
+func (q *Queries) CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVerifiedPlayerAccountParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createVerifiedPlayerAccount, arg.Email, arg.PasswordHash, arg.DisplayName)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getEndUserAccountForProjectRead = `-- name: GetEndUserAccountForProjectRead :one
+SELECT player_account_id
+FROM end_users
+WHERE id = $1
+  AND project_id = $2
+  AND deleted_at IS NULL
+`
+
+type GetEndUserAccountForProjectReadParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+// Tenant-scoped: resolve an end_user (in a project the caller's secret key is
+// pinned to) to its linked account id, for the server-side remote-address
+// read path. NULL account => unlinked player, no address.
+func (q *Queries) GetEndUserAccountForProjectRead(ctx context.Context, arg GetEndUserAccountForProjectReadParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getEndUserAccountForProjectRead, arg.ID, arg.ProjectID)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
+}
+
 const getEndUserForAccountLink = `-- name: GetEndUserForAccountLink :one
 SELECT id, player_account_id
 FROM end_users
@@ -226,6 +270,24 @@ func (q *Queries) GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (Get
 		&i.SessionEpoch,
 		&i.CreatedAt,
 	)
+	return i, err
+}
+
+const getPlayerAccountRemoteAddrs = `-- name: GetPlayerAccountRemoteAddrs :one
+SELECT primary_remote_addr, secondary_remote_addr
+FROM player_accounts
+WHERE id = $1
+`
+
+type GetPlayerAccountRemoteAddrsRow struct {
+	PrimaryRemoteAddr   *string
+	SecondaryRemoteAddr *string
+}
+
+func (q *Queries) GetPlayerAccountRemoteAddrs(ctx context.Context, id pgtype.UUID) (GetPlayerAccountRemoteAddrsRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerAccountRemoteAddrs, id)
+	var i GetPlayerAccountRemoteAddrsRow
+	err := row.Scan(&i.PrimaryRemoteAddr, &i.SecondaryRemoteAddr)
 	return i, err
 }
 
@@ -530,6 +592,25 @@ type SetPlayerAccountPasswordParams struct {
 // invalidated on its next request.
 func (q *Queries) SetPlayerAccountPassword(ctx context.Context, arg SetPlayerAccountPasswordParams) error {
 	_, err := q.db.Exec(ctx, setPlayerAccountPassword, arg.PasswordHash, arg.ID)
+	return err
+}
+
+const setPlayerAccountRemoteAddrs = `-- name: SetPlayerAccountRemoteAddrs :exec
+UPDATE player_accounts
+SET primary_remote_addr   = $1,
+    secondary_remote_addr = $2,
+    updated_at            = now()
+WHERE id = $3
+`
+
+type SetPlayerAccountRemoteAddrsParams struct {
+	PrimaryRemoteAddr   *string
+	SecondaryRemoteAddr *string
+	ID                  pgtype.UUID
+}
+
+func (q *Queries) SetPlayerAccountRemoteAddrs(ctx context.Context, arg SetPlayerAccountRemoteAddrsParams) error {
+	_, err := q.db.Exec(ctx, setPlayerAccountRemoteAddrs, arg.PrimaryRemoteAddr, arg.SecondaryRemoteAddr, arg.ID)
 	return err
 }
 

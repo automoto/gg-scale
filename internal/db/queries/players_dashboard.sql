@@ -29,6 +29,10 @@ WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(email_filter)::text IS NULL OR coalesce(u.email, '')::text ILIKE '%' || sqlc.narg(email_filter)::text || '%');
 
 -- name: GetPlayerForProject :one
+-- Enriched with the linked global account: remote addresses (project admins
+-- may read them; publishable keys never) and tenant-ban status. player_accounts
+-- and tenant_player_bans are global (no RLS), so the LEFT JOINs resolve under
+-- the tenant Pool.Q used by the dashboard.
 SELECT
     u.id,
     u.external_id,
@@ -37,17 +41,28 @@ SELECT
     u.disabled_at,
     u.created_at,
     u.tenant_id,
-    u.project_id
+    u.project_id,
+    u.player_account_id,
+    a.primary_remote_addr,
+    a.secondary_remote_addr,
+    (b.id IS NOT NULL)::boolean AS tenant_banned
 FROM end_users u
 JOIN projects p ON p.id = u.project_id
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
+LEFT JOIN tenant_player_bans b
+       ON b.player_account_id = u.player_account_id AND b.tenant_id = p.tenant_id
 WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND u.project_id = sqlc.arg(project_id)
   AND u.id = sqlc.arg(id)
   AND u.deleted_at IS NULL;
 
--- name: SetPlayerDisabledByTenant :exec
+-- name: SetPlayerDisabledInProject :exec
+-- Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
+-- tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
+-- server-verify immediately.
 UPDATE end_users
-SET disabled_at = sqlc.arg(disabled_at)
+SET disabled_at   = sqlc.arg(disabled_at),
+    session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id)
   AND project_id = sqlc.arg(project_id)
   AND tenant_id = sqlc.arg(tenant_id)

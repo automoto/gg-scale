@@ -13,12 +13,17 @@ import (
 type Querier interface {
 	// Edge id if an accepted friendship exists in either direction.
 	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
+	// Bump every end_user of an account within a tenant (tenant-ban path), so all
+	// their live JWTs are rejected at server-verify immediately.
+	BumpAccountEndUserEpochsInTenant(ctx context.Context, arg BumpAccountEndUserEpochsInTenantParams) error
 	// Atomic increment + conditional lockout. The previous read-then-write
 	// pattern was TOCTOU-racy: N parallel failed logins all read the same value
 	// and wrote N+1, so 10 simultaneous wrong passwords landed at login_failures=1
 	// and the lockout never fired. UPDATE...RETURNING serialises under the row
 	// lock pgx already takes.
 	BumpDashboardLoginFailure(ctx context.Context, arg BumpDashboardLoginFailureParams) (BumpDashboardLoginFailureRow, error)
+	// Single end_user (project disable path).
+	BumpEndUserSessionEpoch(ctx context.Context, id int64) error
 	// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 	// CommitClaim will find zero rows and deallocate the orphan server.
 	CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error)
@@ -86,9 +91,16 @@ type Querier interface {
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	// Tenant-wide player bans. tenant_player_bans has no RLS, so every query
+	// filters tenant_id explicitly. Enforcement runs in both tenant Pool.Q and
+	// account BootstrapQ contexts.
+	CreateTenantPlayerBan(ctx context.Context, arg CreateTenantPlayerBanParams) error
 	// Used by invite acceptance: creates a new user who is verified by
 	// definition (they had to click the invite link in their inbox).
 	CreateVerifiedDashboardUser(ctx context.Context, arg CreateVerifiedDashboardUserParams) (CreateVerifiedDashboardUserRow, error)
+	// Creates an already-verified account (used by invite acceptance, where the
+	// magic link delivered to the invited inbox proves email ownership).
+	CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVerifiedPlayerAccountParams) (pgtype.UUID, error)
 	DashboardCreateTenant(ctx context.Context, arg DashboardCreateTenantParams) (DashboardCreateTenantRow, error)
 	// Used when the host ends the session so peer rows don't linger until GC.
 	DeleteAllGameSessionPeers(ctx context.Context, sessionID string) error
@@ -111,6 +123,7 @@ type Querier interface {
 	DeleteGameInvite(ctx context.Context, arg DeleteGameInviteParams) (int64, error)
 	DeleteGameSession(ctx context.Context, id string) error
 	DeleteGameSessionPeer(ctx context.Context, arg DeleteGameSessionPeerParams) error
+	DeleteTenantPlayerBan(ctx context.Context, arg DeleteTenantPlayerBanParams) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
@@ -142,6 +155,10 @@ type Querier interface {
 	GetDashboardUserByEmail(ctx context.Context, email string) (GetDashboardUserByEmailRow, error)
 	GetDashboardUserByID(ctx context.Context, id int64) (GetDashboardUserByIDRow, error)
 	GetDashboardUserVerificationState(ctx context.Context, id int64) (GetDashboardUserVerificationStateRow, error)
+	// Tenant-scoped: resolve an end_user (in a project the caller's secret key is
+	// pinned to) to its linked account id, for the server-side remote-address
+	// read path. NULL account => unlinked player, no address.
+	GetEndUserAccountForProjectRead(ctx context.Context, arg GetEndUserAccountForProjectReadParams) (pgtype.UUID, error)
 	// Tenant-scoped: the global account an end_user is linked to (NULL if the
 	// player is anonymous / unlinked).
 	GetEndUserAccountID(ctx context.Context, id int64) (pgtype.UUID, error)
@@ -169,6 +186,8 @@ type Querier interface {
 	// Resolves an invite recipient by email within the caller's project.
 	GetEndUserIDByEmail(ctx context.Context, arg GetEndUserIDByEmailParams) (int64, error)
 	GetEndUserInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetEndUserInvitationByCodeHashRow, error)
+	// PK lookup used at token issuance to snapshot the current epoch into the JWT.
+	GetEndUserSessionEpoch(ctx context.Context, id int64) (int32, error)
 	GetEndUserVerificationState(ctx context.Context, arg GetEndUserVerificationStateParams) (GetEndUserVerificationStateRow, error)
 	GetFleetByID(ctx context.Context, id int64) (Fleet, error)
 	// Resolves a project-scoped name to a fleet row. Soft-deleted rows are
@@ -188,10 +207,15 @@ type Querier interface {
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
 	GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (GetPlayerAccountByIDRow, error)
+	GetPlayerAccountRemoteAddrs(ctx context.Context, id pgtype.UUID) (GetPlayerAccountRemoteAddrsRow, error)
 	// Session lookup joins the account so the caller can enforce epoch match and
 	// the disabled gate in one round-trip.
 	GetPlayerAccountSession(ctx context.Context, refreshHash []byte) (GetPlayerAccountSessionRow, error)
 	GetPlayerAccountVerificationState(ctx context.Context, id pgtype.UUID) (GetPlayerAccountVerificationStateRow, error)
+	// Enriched with the linked global account: remote addresses (project admins
+	// may read them; publishable keys never) and tenant-ban status. player_accounts
+	// and tenant_player_bans are global (no RLS), so the LEFT JOINs resolve under
+	// the tenant Pool.Q used by the dashboard.
 	GetPlayerForProject(ctx context.Context, arg GetPlayerForProjectParams) (GetPlayerForProjectRow, error)
 	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
 	GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error)
@@ -213,9 +237,14 @@ type Querier interface {
 	// bounded per allocation_id; callers can fire-and-forget.
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
+	IsAccountBannedInTenant(ctx context.Context, arg IsAccountBannedInTenantParams) (int64, error)
 	// Edge id if EITHER account has blocked the other. Defense-in-depth gate on
 	// every interaction path (friend request, game invite, presence).
 	IsBlockedBetweenAccounts(ctx context.Context, arg IsBlockedBetweenAccountsParams) (int64, error)
+	// Enforcement helper: is the given end_user's linked account tenant-banned in
+	// the end_user's own tenant? Runs in a tenant Pool.Q (end_users RLS-filtered).
+	// Returns pgx.ErrNoRows when not banned (or the player is unlinked).
+	IsEndUserBannedByTenant(ctx context.Context, endUserID int64) (int64, error)
 	IsGameSessionMember(ctx context.Context, arg IsGameSessionMemberParams) (bool, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
@@ -274,6 +303,8 @@ type Querier interface {
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	// Dashboard list for a tenant, enriched with the banned account's email.
+	ListTenantPlayerBans(ctx context.Context, tenantID int64) ([]ListTenantPlayerBansRow, error)
 	// Set the lockout window on an account that just tipped over
 	// MaxLifetimeAttempts. The Go side computes the timestamp so the lockout
 	// duration stays a single source of truth.
@@ -314,9 +345,9 @@ type Querier interface {
 	// Worker-driven release: allocator failed (or the worker is giving up).
 	// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
 	ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error)
-	// Friend edges between GLOBAL player_accounts (Milestone 4). friend_edges has
-	// no tenant_id and no RLS, so these run in either a tenant Pool.Q or a
-	// BootstrapQ transaction. Account ids are UUIDs.
+	// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
+	// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
+	// transaction. Account ids are UUIDs.
 	// One current row per directed pair. Re-requests after rejection update in
 	// place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
 	// no-ops); blocked is terminal (WHERE omits it).
@@ -363,9 +394,13 @@ type Querier interface {
 	// Password change bumps session_epoch so every outstanding account session is
 	// invalidated on its next request.
 	SetPlayerAccountPassword(ctx context.Context, arg SetPlayerAccountPasswordParams) error
+	SetPlayerAccountRemoteAddrs(ctx context.Context, arg SetPlayerAccountRemoteAddrsParams) error
 	SetPlayerAccountVerificationCode(ctx context.Context, arg SetPlayerAccountVerificationCodeParams) error
 	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
-	SetPlayerDisabledByTenant(ctx context.Context, arg SetPlayerDisabledByTenantParams) error
+	// Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
+	// tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
+	// server-verify immediately.
+	SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
 	SetTenantPublicJoining(ctx context.Context, enabled bool) error

@@ -1,6 +1,6 @@
 package dashboard
 
-// Platform-admin view over global player_accounts (Milestone 2). Accounts are
+// Platform-admin view over global player_accounts. Accounts are
 // platform-global, so every query runs through BootstrapQ. Gated by
 // requirePlatformAdmin at the router.
 

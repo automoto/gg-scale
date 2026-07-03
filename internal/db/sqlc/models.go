@@ -257,6 +257,7 @@ type EndUser struct {
 	EmailVerificationLockedUntil      pgtype.Timestamptz
 	Xuid                              *string
 	PlayerAccountID                   pgtype.UUID
+	SessionEpoch                      int32
 }
 
 type EndUserInvitation struct {
@@ -433,6 +434,8 @@ type PlayerAccount struct {
 	EmailVerificationLastSentAt       pgtype.Timestamptz
 	CreatedAt                         pgtype.Timestamptz
 	UpdatedAt                         pgtype.Timestamptz
+	PrimaryRemoteAddr                 *string
+	SecondaryRemoteAddr               *string
 }
 
 type PlayerAccountSession struct {
@@ -549,6 +552,15 @@ type Tenant struct {
 	DeletedAt            pgtype.Timestamptz
 	CustomTokenSecret    []byte
 	PublicJoiningEnabled bool
+}
+
+type TenantPlayerBan struct {
+	ID              int64
+	TenantID        int64
+	PlayerAccountID pgtype.UUID
+	Reason          *string
+	CreatedBy       *int64
+	CreatedAt       pgtype.Timestamptz
 }
 
 type UsageSample struct {

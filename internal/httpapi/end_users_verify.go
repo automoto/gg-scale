@@ -22,6 +22,10 @@ type endUserVerifyRequest struct {
 	SessionToken string `json:"session_token"`
 }
 
+// errStaleSession marks a token rejected by the epoch/ban gate. Collapses to
+// the same opaque 401 as every other verify failure.
+var errStaleSession = errors.New("end_users verify: stale session")
+
 // endUserVerifyResponse is what game-servers get back on a valid token.
 // ExternalID is the per-game stable identifier (Steam ID, anonymous
 // UUID, etc.) — the same column that auth/anonymous returns. Email is
@@ -91,13 +95,35 @@ func endUsersVerifyHandler(d Deps) http.HandlerFunc {
 
 		var row sqlcgen.GetEndUserForVerifyRow
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
+			q := sqlcgen.New(tx)
 			var qerr error
-			row, qerr = sqlcgen.New(tx).GetEndUserForVerify(ctx, claims.EndUserID)
+			row, qerr = q.GetEndUserForVerify(ctx, claims.EndUserID)
 			if qerr != nil {
 				return qerr
 			}
+			// Reject a session whose epoch is stale — the end_user was disabled
+			// or tenant-banned after this token was minted (both bump
+			// session_epoch). Makes revocation immediate, not TTL-bounded.
+			if claims.SessionEpoch != int64(row.SessionEpoch) {
+				return errStaleSession
+			}
+			// Tenant-ban gate: even inside the epoch window, a banned linked
+			// account cannot be verified.
+			if row.PlayerAccountID.Valid {
+				if _, berr := q.IsAccountBannedInTenant(ctx, sqlcgen.IsAccountBannedInTenantParams{
+					TenantID: row.TenantID, PlayerAccountID: row.PlayerAccountID,
+				}); berr == nil {
+					return errStaleSession
+				} else if !errors.Is(berr, pgx.ErrNoRows) {
+					return berr
+				}
+			}
 			return auditlog.Write(ctx, tx, row.ID, "auth.server_verify", "", nil)
 		})
+		if errors.Is(err, errStaleSession) {
+			writeInvalidSession(w)
+			return
+		}
 		if err != nil {
 			// ErrNoRows is the expected miss (deleted/disabled user,
 			// soft-deleted project/tenant, or wrong tenant under RLS).

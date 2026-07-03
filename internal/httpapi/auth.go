@@ -389,7 +389,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		now := apiNow(d)
-		var endUserID int64
+		var endUserID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
@@ -403,7 +403,18 @@ func loginHandler(d Deps) http.HandlerFunc {
 			if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(req.Password)) != nil {
 				return errBadCredentials
 			}
+			// Tenant-ban enforcement: a banned account cannot log in.
+			if _, berr := q.IsEndUserBannedByTenant(ctx, row.ID); berr == nil {
+				return errPlayerBanned
+			} else if !errors.Is(berr, pgx.ErrNoRows) {
+				return berr
+			}
 			endUserID = row.ID
+			ep, eerr := q.GetEndUserSessionEpoch(ctx, row.ID)
+			if eerr != nil {
+				return eerr
+			}
+			sessionEpoch = int64(ep)
 			if err := insertSession(ctx, tx, projectID, row.ID, refreshToken, now); err != nil {
 				return err
 			}
@@ -418,6 +429,10 @@ func loginHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid credentials", http.StatusUnauthorized)
 			return
 		}
+		if errors.Is(err, errPlayerBanned) {
+			http.Error(w, "account banned", http.StatusForbidden)
+			return
+		}
 		if err != nil {
 			webutil.InternalError(w, "login: tx", err)
 			return
@@ -426,7 +441,8 @@ func loginHandler(d Deps) http.HandlerFunc {
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
-			ExpiresAt: expiresAt,
+			SessionEpoch: sessionEpoch,
+			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
 			webutil.InternalError(w, "login: sign", err)
@@ -466,7 +482,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 		}
 		now := apiNow(d)
 
-		var endUserID int64
+		var endUserID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			row, err := q.GetSessionByRefreshHash(ctx, sqlcgen.GetSessionByRefreshHashParams{
@@ -479,7 +495,18 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			if row.RevokedAt.Valid || row.ExpiresAt.Time.Before(now) {
 				return errSessionRevoked
 			}
+			// A tenant-banned account cannot refresh into a new access token.
+			if _, berr := q.IsEndUserBannedByTenant(ctx, row.EndUserID); berr == nil {
+				return errPlayerBanned
+			} else if !errors.Is(berr, pgx.ErrNoRows) {
+				return berr
+			}
 			endUserID = row.EndUserID
+			ep, eerr := q.GetEndUserSessionEpoch(ctx, row.EndUserID)
+			if eerr != nil {
+				return eerr
+			}
+			sessionEpoch = int64(ep)
 			if err := q.RevokeSession(ctx, row.ID); err != nil {
 				return err
 			}
@@ -492,6 +519,10 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "invalid refresh", http.StatusUnauthorized)
 			return
 		}
+		if errors.Is(err, errPlayerBanned) {
+			http.Error(w, "account banned", http.StatusForbidden)
+			return
+		}
 		if err != nil {
 			webutil.InternalError(w, "refresh: tx", err)
 			return
@@ -500,7 +531,8 @@ func refreshHandler(d Deps) http.HandlerFunc {
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
-			ExpiresAt: expiresAt,
+			SessionEpoch: sessionEpoch,
+			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
 			webutil.InternalError(w, "refresh: sign", err)
@@ -571,10 +603,11 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		tenantID, _ := db.TenantFromContext(ctx)
 
 		var (
-			secret     []byte
-			endUserID  int64
-			externalID string
-			refreshTok string
+			secret       []byte
+			endUserID    int64
+			sessionEpoch int64
+			externalID   string
+			refreshTok   string
 		)
 		var err error
 		refreshTok, err = webutil.RandomHex("", 32)
@@ -626,6 +659,16 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 				return fmt.Errorf("upsert end_user: %w", err)
 			}
 			endUserID = id
+			if _, berr := q.IsEndUserBannedByTenant(ctx, id); berr == nil {
+				return errPlayerBanned
+			} else if !errors.Is(berr, pgx.ErrNoRows) {
+				return berr
+			}
+			ep, eerr := q.GetEndUserSessionEpoch(ctx, id)
+			if eerr != nil {
+				return eerr
+			}
+			sessionEpoch = int64(ep)
 			if err := insertSession(ctx, tx, projectID, id, refreshTok, now); err != nil {
 				return err
 			}
@@ -638,6 +681,9 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		case errors.Is(err, errCustomTokenInvalid):
 			http.Error(w, "invalid custom token", http.StatusUnauthorized)
 			return
+		case errors.Is(err, errPlayerBanned):
+			http.Error(w, "account banned", http.StatusForbidden)
+			return
 		case err != nil:
 			webutil.InternalError(w, "custom-token: tx", err)
 			return
@@ -646,7 +692,8 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
 			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
-			ExpiresAt: expiresAt,
+			SessionEpoch: sessionEpoch,
+			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
 			webutil.InternalError(w, "custom-token: sign", err)
@@ -672,6 +719,7 @@ const customTokenAudience = "ggscale-custom-token" //nolint:gosec // aud claim v
 var (
 	errBadCredentials           = errors.New("auth: bad credentials")
 	errSessionRevoked           = errors.New("auth: session revoked or expired")
+	errPlayerBanned             = errors.New("auth: player banned in tenant")
 	errCustomTokenNotConfigured = errors.New("auth: custom token secret not set")
 	errCustomTokenInvalid       = errors.New("auth: custom token invalid")
 	errVerifyBadCode            = errors.New("auth: bad verification code")

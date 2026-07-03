@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -123,6 +125,12 @@ type PlayerView struct {
 	EmailVerifiedAt time.Time
 	DisabledAt      time.Time
 	CreatedAt       time.Time
+	// Account link + remote-address / ban fields. AccountID is empty for
+	// anonymous players.
+	AccountID     string
+	PrimaryAddr   string
+	SecondaryAddr string
+	TenantBanned  bool
 }
 
 // PlayersView is the data rendered by the players list page.
@@ -269,15 +277,8 @@ func (h *Handler) playerDetailPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: session.CSRFToken,
 		TenantID:  tenantID,
 		ProjectID: projectID,
-		Player: PlayerView{
-			ID:              row.ID,
-			ExternalID:      row.ExternalID,
-			Email:           row.Email,
-			EmailVerifiedAt: row.EmailVerifiedAt.Time,
-			DisabledAt:      row.DisabledAt.Time,
-			CreatedAt:       row.CreatedAt.Time,
-		},
-		Message: r.URL.Query().Get("flash"),
+		Player:    playerViewFromDetail(row),
+		Message:   r.URL.Query().Get("flash"),
 	}))
 
 }
@@ -379,7 +380,7 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	}
 	ctx := db.WithTenant(r.Context(), tenantID)
 	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerDisabledByTenant(ctx, sqlcgen.SetPlayerDisabledByTenantParams{
+		return sqlcgen.New(tx).SetPlayerDisabledInProject(ctx, sqlcgen.SetPlayerDisabledInProjectParams{
 			ID:         playerID,
 			ProjectID:  projectID,
 			TenantID:   tenantID,
@@ -399,3 +400,110 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash + url.QueryEscape(flash)
 	htmxRedirect(w, r, target)
 }
+
+func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
+	pv := PlayerView{
+		ID:              row.ID,
+		ExternalID:      row.ExternalID,
+		Email:           row.Email,
+		EmailVerifiedAt: row.EmailVerifiedAt.Time,
+		DisabledAt:      row.DisabledAt.Time,
+		CreatedAt:       row.CreatedAt.Time,
+		TenantBanned:    row.TenantBanned,
+	}
+	if row.PlayerAccountID.Valid {
+		pv.AccountID = uuid.UUID(row.PlayerAccountID.Bytes).String()
+	}
+	if row.PrimaryRemoteAddr != nil {
+		pv.PrimaryAddr = *row.PrimaryRemoteAddr
+	}
+	if row.SecondaryRemoteAddr != nil {
+		pv.SecondaryAddr = *row.SecondaryRemoteAddr
+	}
+	return pv
+}
+
+// playerToggleBanHandler bans / unbans a player's GLOBAL account across the
+// tenant. Requires the player to be linked to an account. Bumps session_epoch
+// on every end_user of the account in this tenant so live JWTs die immediately.
+func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projectID, ok := parsePathID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	playerID, ok := parsePathID(w, r, "playerID")
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	ban := r.Form.Get("ban") == "true"
+	reason := strings.TrimSpace(r.Form.Get("reason"))
+	session, _ := sessionFromContext(r.Context())
+	ctx := db.WithTenant(r.Context(), tenantID)
+
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		row, err := q.GetPlayerForProject(ctx, sqlcgen.GetPlayerForProjectParams{
+			TenantID: tenantID, ProjectID: projectID, ID: playerID,
+		})
+		if err != nil {
+			return err
+		}
+		if !row.PlayerAccountID.Valid {
+			return errPlayerNotLinked
+		}
+		acctID := row.PlayerAccountID
+		if ban {
+			var reasonPtr *string
+			if reason != "" {
+				reasonPtr = &reason
+			}
+			actor := session.User.ID
+			if err := q.CreateTenantPlayerBan(ctx, sqlcgen.CreateTenantPlayerBanParams{
+				TenantID: tenantID, PlayerAccountID: acctID, Reason: reasonPtr, CreatedBy: &actor,
+			}); err != nil {
+				return err
+			}
+		} else if _, err := q.DeleteTenantPlayerBan(ctx, sqlcgen.DeleteTenantPlayerBanParams{
+			TenantID: tenantID, PlayerAccountID: acctID,
+		}); err != nil {
+			return err
+		}
+		if err := q.BumpAccountEndUserEpochsInTenant(ctx, sqlcgen.BumpAccountEndUserEpochsInTenantParams{
+			TenantID: tenantID, PlayerAccountID: acctID,
+		}); err != nil {
+			return err
+		}
+		action := "dashboard.player.tenant_unban"
+		if ban {
+			action = "dashboard.player.tenant_ban"
+		}
+		return auditlog.WritePlatform(ctx, tx, session.User.ID, action,
+			"player_account:"+uuid.UUID(acctID.Bytes).String(),
+			map[string]any{"tenant_id": tenantID, "reason": reason})
+	})
+	if errors.Is(err, errPlayerNotLinked) {
+		http.Error(w, "player has no linked gg-scale account to ban", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		webutil.InternalError(w, "player ban toggle", err)
+		return
+	}
+	flash := "Player banned tenant-wide."
+	if !ban {
+		flash = "Player unbanned."
+	}
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) +
+		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash + url.QueryEscape(flash)
+	htmxRedirect(w, r, target)
+}
+
+var errPlayerNotLinked = errors.New("dashboard: player has no linked account")

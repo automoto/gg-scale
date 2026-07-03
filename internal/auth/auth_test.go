@@ -44,6 +44,22 @@ func TestSign_then_Verify_round_trips_claims(t *testing.T) {
 	assert.Equal(t, want.ProjectID, got.ProjectID)
 }
 
+func TestSign_then_Verify_round_trips_session_epoch(t *testing.T) {
+	s := newSigner(t)
+	want := auth.Claims{
+		EndUserID:    42,
+		TenantID:     7,
+		ProjectID:    9,
+		SessionEpoch: 3,
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+	tok, err := s.Sign(want)
+	require.NoError(t, err)
+	got, err := s.Verify(tok)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), got.SessionEpoch)
+}
+
 func TestVerify_rejects_modified_token(t *testing.T) {
 	s := newSigner(t)
 	tok, err := s.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})

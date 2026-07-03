@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestFriends_block_enforcement_e2e is the Milestone 4 end-to-end blocking
-// assertion: request → accept → block → the blocked player's re-request is
+// TestFriends_block_enforcement_e2e is the end-to-end blocking assertion:
+// request → accept → block → the blocked player's re-request is
 // refused and a game invite to them is rejected → unblock → interaction
 // restored. Blocking never reveals itself to the blockee.
 func TestFriends_block_enforcement_e2e(t *testing.T) {

@@ -16,6 +16,13 @@ VALUES (
 )
 RETURNING id, email::text AS email, created_at;
 
+-- name: CreateVerifiedPlayerAccount :one
+-- Creates an already-verified account (used by invite acceptance, where the
+-- magic link delivered to the invited inbox proves email ownership).
+INSERT INTO player_accounts (email, password_hash, display_name, email_verified_at)
+VALUES (sqlc.arg(email), sqlc.arg(password_hash), sqlc.narg(display_name), now())
+RETURNING id;
+
 -- name: GetPlayerAccountByEmail :one
 SELECT
     id,
@@ -196,6 +203,28 @@ VALUES (
     sqlc.arg(player_account_id)
 )
 RETURNING id;
+
+-- name: GetPlayerAccountRemoteAddrs :one
+SELECT primary_remote_addr, secondary_remote_addr
+FROM player_accounts
+WHERE id = sqlc.arg(id);
+
+-- name: SetPlayerAccountRemoteAddrs :exec
+UPDATE player_accounts
+SET primary_remote_addr   = sqlc.narg(primary_remote_addr),
+    secondary_remote_addr = sqlc.narg(secondary_remote_addr),
+    updated_at            = now()
+WHERE id = sqlc.arg(id);
+
+-- name: GetEndUserAccountForProjectRead :one
+-- Tenant-scoped: resolve an end_user (in a project the caller's secret key is
+-- pinned to) to its linked account id, for the server-side remote-address
+-- read path. NULL account => unlinked player, no address.
+SELECT player_account_id
+FROM end_users
+WHERE id = sqlc.arg(id)
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL;
 
 -- name: SearchPlayerAccounts :many
 -- Platform-admin search by email prefix. Bounded LIMIT keeps the scan cheap.

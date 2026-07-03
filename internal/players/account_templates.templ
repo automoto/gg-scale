@@ -104,12 +104,14 @@ type LinkedProject struct {
 }
 
 type AccountHomeView struct {
-	Email       string
-	DisplayName string
-	Projects    []LinkedProject
-	CSRFToken   string
-	Flash       string
-	FlashError  string
+	Email         string
+	DisplayName   string
+	Projects      []LinkedProject
+	CSRFToken     string
+	Flash         string
+	FlashError    string
+	PrimaryAddr   string
+	SecondaryAddr string
 }
 
 templ AccountHomePage(vm AccountHomeView) {
@@ -137,6 +139,18 @@ templ AccountHomePage(vm AccountHomeView) {
 			</ul>
 		}
 		<p><a href={ templ.URL("/v1/players/account/friends") }>Manage friends</a></p>
+		<h2>Remote addresses</h2>
+		<p class="subtitle">Opaque endpoints (IP, Tailscale, iroh) shared with your accepted friends and the games you play. Never public.</p>
+		<form method="post" action={ templ.URL("/v1/players/account/remote-addrs") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Primary
+				<input name="primary_remote_addr" type="text" value={ vm.PrimaryAddr } maxlength="255"/>
+			</label>
+			<label>Secondary
+				<input name="secondary_remote_addr" type="text" value={ vm.SecondaryAddr } maxlength="255"/>
+			</label>
+			<button type="submit">Save addresses</button>
+		</form>
 		<h2>Join a game</h2>
 		<p class="subtitle">Enter a project ID to link your account. Invite-only games need an invite instead.</p>
 		<form method="post" action={ templ.URL("/v1/players/account/join") }>

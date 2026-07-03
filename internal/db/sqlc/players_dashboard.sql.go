@@ -43,9 +43,16 @@ SELECT
     u.disabled_at,
     u.created_at,
     u.tenant_id,
-    u.project_id
+    u.project_id,
+    u.player_account_id,
+    a.primary_remote_addr,
+    a.secondary_remote_addr,
+    (b.id IS NOT NULL)::boolean AS tenant_banned
 FROM end_users u
 JOIN projects p ON p.id = u.project_id
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
+LEFT JOIN tenant_player_bans b
+       ON b.player_account_id = u.player_account_id AND b.tenant_id = p.tenant_id
 WHERE p.tenant_id = $1
   AND u.project_id = $2
   AND u.id = $3
@@ -59,16 +66,24 @@ type GetPlayerForProjectParams struct {
 }
 
 type GetPlayerForProjectRow struct {
-	ID              int64
-	ExternalID      string
-	Email           string
-	EmailVerifiedAt pgtype.Timestamptz
-	DisabledAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	TenantID        int64
-	ProjectID       int64
+	ID                  int64
+	ExternalID          string
+	Email               string
+	EmailVerifiedAt     pgtype.Timestamptz
+	DisabledAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
+	TenantID            int64
+	ProjectID           int64
+	PlayerAccountID     pgtype.UUID
+	PrimaryRemoteAddr   *string
+	SecondaryRemoteAddr *string
+	TenantBanned        bool
 }
 
+// Enriched with the linked global account: remote addresses (project admins
+// may read them; publishable keys never) and tenant-ban status. player_accounts
+// and tenant_player_bans are global (no RLS), so the LEFT JOINs resolve under
+// the tenant Pool.Q used by the dashboard.
 func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProjectParams) (GetPlayerForProjectRow, error) {
 	row := q.db.QueryRow(ctx, getPlayerForProject, arg.TenantID, arg.ProjectID, arg.ID)
 	var i GetPlayerForProjectRow
@@ -81,6 +96,10 @@ func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProje
 		&i.CreatedAt,
 		&i.TenantID,
 		&i.ProjectID,
+		&i.PlayerAccountID,
+		&i.PrimaryRemoteAddr,
+		&i.SecondaryRemoteAddr,
+		&i.TenantBanned,
 	)
 	return i, err
 }
@@ -157,24 +176,28 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 	return items, nil
 }
 
-const setPlayerDisabledByTenant = `-- name: SetPlayerDisabledByTenant :exec
+const setPlayerDisabledInProject = `-- name: SetPlayerDisabledInProject :exec
 UPDATE end_users
-SET disabled_at = $1
+SET disabled_at   = $1,
+    session_epoch = session_epoch + 1
 WHERE id = $2
   AND project_id = $3
   AND tenant_id = $4
   AND deleted_at IS NULL
 `
 
-type SetPlayerDisabledByTenantParams struct {
+type SetPlayerDisabledInProjectParams struct {
 	DisabledAt pgtype.Timestamptz
 	ID         int64
 	ProjectID  int64
 	TenantID   int64
 }
 
-func (q *Queries) SetPlayerDisabledByTenant(ctx context.Context, arg SetPlayerDisabledByTenantParams) error {
-	_, err := q.db.Exec(ctx, setPlayerDisabledByTenant,
+// Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
+// tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
+// server-verify immediately.
+func (q *Queries) SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error {
+	_, err := q.db.Exec(ctx, setPlayerDisabledInProject,
 		arg.DisabledAt,
 		arg.ID,
 		arg.ProjectID,

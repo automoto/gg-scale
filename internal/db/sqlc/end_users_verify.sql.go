@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getEndUserForVerify = `-- name: GetEndUserForVerify :one
@@ -14,6 +16,8 @@ SELECT u.id,
        u.tenant_id,
        u.project_id,
        u.external_id,
+       u.session_epoch,
+       u.player_account_id,
        coalesce(u.email, '')::text AS email
 FROM end_users u
 JOIN tenants  t ON t.id = u.tenant_id  AND t.deleted_at IS NULL
@@ -25,11 +29,13 @@ WHERE u.id = $1
 `
 
 type GetEndUserForVerifyRow struct {
-	ID         int64
-	TenantID   int64
-	ProjectID  int64
-	ExternalID string
-	Email      string
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	ExternalID      string
+	SessionEpoch    int32
+	PlayerAccountID pgtype.UUID
+	Email           string
 }
 
 // Lookup an end-user by ID for the POST /v1/end-users/verify endpoint
@@ -48,7 +54,21 @@ func (q *Queries) GetEndUserForVerify(ctx context.Context, id int64) (GetEndUser
 		&i.TenantID,
 		&i.ProjectID,
 		&i.ExternalID,
+		&i.SessionEpoch,
+		&i.PlayerAccountID,
 		&i.Email,
 	)
 	return i, err
+}
+
+const getEndUserSessionEpoch = `-- name: GetEndUserSessionEpoch :one
+SELECT session_epoch FROM end_users WHERE id = $1
+`
+
+// PK lookup used at token issuance to snapshot the current epoch into the JWT.
+func (q *Queries) GetEndUserSessionEpoch(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, getEndUserSessionEpoch, id)
+	var session_epoch int32
+	err := row.Scan(&session_epoch)
+	return session_epoch, err
 }
