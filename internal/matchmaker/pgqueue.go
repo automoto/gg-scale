@@ -30,7 +30,7 @@ func NewPGQueue(pool *db.Pool) *PGQueue {
 	return &PGQueue{pool: pool}
 }
 
-// Enqueue persists a queued ticket. The caller must have an end-user
+// Enqueue persists a queued ticket. The caller must have a player
 // authenticated context (tenant_id is read via RLS).
 func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, error) {
 	attrs := req.Attributes
@@ -42,7 +42,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		row, qerr := sqlcgen.New(tx).InsertMatchmakingTicket(ctx, sqlcgen.InsertMatchmakingTicketParams{
 			ProjectID:  req.ProjectID,
 			FleetID:    &req.FleetID,
-			EndUserID:  req.EndUserID,
+			PlayerID:   req.PlayerID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
 			Attributes: attrs,
@@ -55,7 +55,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 			TenantID:   req.TenantID,
 			ProjectID:  req.ProjectID,
 			FleetID:    req.FleetID,
-			EndUserID:  req.EndUserID,
+			PlayerID:   req.PlayerID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
 			Attributes: req.Attributes,
@@ -72,12 +72,12 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 
 // Get returns the ticket if it belongs to the tenant on ctx; otherwise
 // ErrNotFound.
-func (q *PGQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error) {
+func (q *PGQueue) Get(ctx context.Context, id, playerID int64) (*Ticket, error) {
 	var t *Ticket
 	err := q.pool.Q(ctx, func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).GetMatchmakingTicket(ctx, sqlcgen.GetMatchmakingTicketParams{
-			ID:        id,
-			EndUserID: endUserID,
+			ID:       id,
+			PlayerID: playerID,
 		})
 		if qerr != nil {
 			if errors.Is(qerr, pgx.ErrNoRows) {
@@ -85,7 +85,7 @@ func (q *PGQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error)
 			}
 			return qerr
 		}
-		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, derefFleetID(row.FleetID), row.EndUserID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress, row.MatchProtocol)
+		t = rowToTicket(row.ID, row.TenantID, row.ProjectID, derefFleetID(row.FleetID), row.PlayerID, row.Region, row.GameMode, row.Attributes, row.Status, row.MatchAddress, row.MatchProtocol)
 		t.CreatedAt = row.CreatedAt.Time
 		if row.MatchedAt.Valid {
 			v := row.MatchedAt.Time
@@ -105,11 +105,11 @@ func derefFleetID(p *int64) int64 {
 
 // Cancel sets a queued ticket to cancelled and clears any active claim.
 // Returns ErrAlreadyTerminal when the ticket is past 'queued'.
-func (q *PGQueue) Cancel(ctx context.Context, id, endUserID int64) error {
+func (q *PGQueue) Cancel(ctx context.Context, id, playerID int64) error {
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
 		arg := sqlcgen.CancelMatchmakingTicketParams{
-			ID:        id,
-			EndUserID: endUserID,
+			ID:       id,
+			PlayerID: playerID,
 		}
 		_, qerr := sqlcgen.New(tx).CancelMatchmakingTicket(ctx, arg)
 		if errors.Is(qerr, pgx.ErrNoRows) {
@@ -198,7 +198,7 @@ func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, n int, ttl tim
 	}
 	tickets := make([]*Ticket, 0, len(rows))
 	for _, r := range rows {
-		t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.EndUserID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress, r.MatchProtocol)
+		t := rowToTicket(r.ID, r.TenantID, r.ProjectID, derefFleetID(r.FleetID), r.PlayerID, r.Region, r.GameMode, r.Attributes, r.Status, r.MatchAddress, r.MatchProtocol)
 		t.CreatedAt = r.CreatedAt.Time
 		tickets = append(tickets, t)
 	}
@@ -290,13 +290,13 @@ func (q *PGQueue) Listen(ctx context.Context, fn func(Bucket)) error {
 	})
 }
 
-func rowToTicket(id, tenantID, projectID, fleetID, endUserID int64, region, gameMode string, attrs []byte, status, matchAddress, matchProtocol string) *Ticket {
+func rowToTicket(id, tenantID, projectID, fleetID, playerID int64, region, gameMode string, attrs []byte, status, matchAddress, matchProtocol string) *Ticket {
 	return &Ticket{
 		ID:            id,
 		TenantID:      tenantID,
 		ProjectID:     projectID,
 		FleetID:       fleetID,
-		EndUserID:     endUserID,
+		PlayerID:      playerID,
 		Region:        region,
 		GameMode:      gameMode,
 		Attributes:    attrs,

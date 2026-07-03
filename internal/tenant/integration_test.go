@@ -84,11 +84,11 @@ func seedTenant(t *testing.T, pool *pgxpool.Pool, name string) (tenantID, projec
 	return
 }
 
-func seedEndUser(t *testing.T, pool *pgxpool.Pool, tenantID, projectID int64, externalID string) int64 {
+func seedPlayer(t *testing.T, pool *pgxpool.Pool, tenantID, projectID int64, externalID string) int64 {
 	t.Helper()
 	var id int64
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, $3) RETURNING id`,
 		tenantID, projectID, externalID).Scan(&id))
 	return id
@@ -103,13 +103,13 @@ func seedAPIKey(t *testing.T, pool *pgxpool.Pool, tenantID, projectID int64, tok
 	require.NoError(t, err)
 }
 
-func TestRLS_isolates_end_users_across_tenants_with_overlapping_external_ids(t *testing.T) {
+func TestRLS_isolates_project_players_across_tenants_with_overlapping_external_ids(t *testing.T) {
 	bootstrap, app := startCluster(t)
 
 	tenantA, projectA := seedTenant(t, bootstrap, "tenant-a")
 	tenantB, projectB := seedTenant(t, bootstrap, "tenant-b")
-	idA := seedEndUser(t, bootstrap, tenantA, projectA, "shared-external-id")
-	idB := seedEndUser(t, bootstrap, tenantB, projectB, "shared-external-id")
+	idA := seedPlayer(t, bootstrap, tenantA, projectA, "shared-external-id")
+	idB := seedPlayer(t, bootstrap, tenantB, projectB, "shared-external-id")
 	require.NotEqual(t, idA, idB)
 
 	p := db.NewPool(app)
@@ -118,7 +118,7 @@ func TestRLS_isolates_end_users_across_tenants_with_overlapping_external_ids(t *
 	var visibleIDs []int64
 	require.NoError(t, p.Q(db.WithTenant(context.Background(), tenantA), func(tx pgx.Tx) error {
 		rows, err := tx.Query(context.Background(),
-			`SELECT id FROM end_users WHERE external_id = 'shared-external-id'`)
+			`SELECT id FROM project_players WHERE external_id = 'shared-external-id'`)
 		if err != nil {
 			return err
 		}
@@ -138,7 +138,7 @@ func TestRLS_isolates_end_users_across_tenants_with_overlapping_external_ids(t *
 	visibleIDs = visibleIDs[:0]
 	require.NoError(t, p.Q(db.WithTenant(context.Background(), tenantB), func(tx pgx.Tx) error {
 		rows, err := tx.Query(context.Background(),
-			`SELECT id FROM end_users WHERE external_id = 'shared-external-id'`)
+			`SELECT id FROM project_players WHERE external_id = 'shared-external-id'`)
 		if err != nil {
 			return err
 		}
@@ -160,8 +160,8 @@ func TestRLS_blocks_cross_tenant_storage_reads(t *testing.T) {
 
 	tenantA, projectA := seedTenant(t, bootstrap, "a")
 	tenantB, projectB := seedTenant(t, bootstrap, "b")
-	userA := seedEndUser(t, bootstrap, tenantA, projectA, "alice")
-	userB := seedEndUser(t, bootstrap, tenantB, projectB, "bob")
+	userA := seedPlayer(t, bootstrap, tenantA, projectA, "alice")
+	userB := seedPlayer(t, bootstrap, tenantB, projectB, "bob")
 
 	for _, row := range []struct {
 		tenantID, projectID, userID int64

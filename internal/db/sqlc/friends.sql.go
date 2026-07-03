@@ -119,22 +119,6 @@ func (q *Queries) FindAccountIDsByDisplayName(ctx context.Context, displayName *
 	return items, nil
 }
 
-const getEndUserAccountID = `-- name: GetEndUserAccountID :one
-SELECT player_account_id
-FROM end_users
-WHERE id = $1
-  AND deleted_at IS NULL
-`
-
-// Tenant-scoped: the global account an end_user is linked to (NULL if the
-// player is anonymous / unlinked).
-func (q *Queries) GetEndUserAccountID(ctx context.Context, id int64) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, getEndUserAccountID, id)
-	var player_account_id pgtype.UUID
-	err := row.Scan(&player_account_id)
-	return player_account_id, err
-}
-
 const getFriendEdgeByAccount = `-- name: GetFriendEdgeByAccount :one
 SELECT id, status
 FROM friend_edges
@@ -157,6 +141,22 @@ func (q *Queries) GetFriendEdgeByAccount(ctx context.Context, arg GetFriendEdgeB
 	var i GetFriendEdgeByAccountRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
+}
+
+const getPlayerLinkedAccountID = `-- name: GetPlayerLinkedAccountID :one
+SELECT player_account_id
+FROM project_players
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+// Tenant-scoped: the global account a player is linked to (NULL if the
+// player is anonymous / unlinked).
+func (q *Queries) GetPlayerLinkedAccountID(ctx context.Context, id int64) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getPlayerLinkedAccountID, id)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
 }
 
 const isBlockedBetweenAccounts = `-- name: IsBlockedBetweenAccounts :one
@@ -302,36 +302,36 @@ func (q *Queries) RequestFriendByAccount(ctx context.Context, arg RequestFriendB
 	return i, err
 }
 
-const resolveEndUsersForAccountsInProject = `-- name: ResolveEndUsersForAccountsInProject :many
-SELECT id AS end_user_id, player_account_id
-FROM end_users
+const resolvePlayersForAccountsInProject = `-- name: ResolvePlayersForAccountsInProject :many
+SELECT id AS player_id, player_account_id
+FROM project_players
 WHERE project_id = $1
   AND player_account_id = ANY($2::uuid[])
   AND deleted_at IS NULL
 `
 
-type ResolveEndUsersForAccountsInProjectParams struct {
+type ResolvePlayersForAccountsInProjectParams struct {
 	ProjectID  int64
 	AccountIds []pgtype.UUID
 }
 
-type ResolveEndUsersForAccountsInProjectRow struct {
-	EndUserID       int64
+type ResolvePlayersForAccountsInProjectRow struct {
+	PlayerID        int64
 	PlayerAccountID pgtype.UUID
 }
 
-// Tenant-scoped: maps a set of accounts back to their end_user in a specific
+// Tenant-scoped: maps a set of accounts back to their player in a specific
 // project, for presence sharing and JSON-API user_id mapping.
-func (q *Queries) ResolveEndUsersForAccountsInProject(ctx context.Context, arg ResolveEndUsersForAccountsInProjectParams) ([]ResolveEndUsersForAccountsInProjectRow, error) {
-	rows, err := q.db.Query(ctx, resolveEndUsersForAccountsInProject, arg.ProjectID, arg.AccountIds)
+func (q *Queries) ResolvePlayersForAccountsInProject(ctx context.Context, arg ResolvePlayersForAccountsInProjectParams) ([]ResolvePlayersForAccountsInProjectRow, error) {
+	rows, err := q.db.Query(ctx, resolvePlayersForAccountsInProject, arg.ProjectID, arg.AccountIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ResolveEndUsersForAccountsInProjectRow
+	var items []ResolvePlayersForAccountsInProjectRow
 	for rows.Next() {
-		var i ResolveEndUsersForAccountsInProjectRow
-		if err := rows.Scan(&i.EndUserID, &i.PlayerAccountID); err != nil {
+		var i ResolvePlayersForAccountsInProjectRow
+		if err := rows.Scan(&i.PlayerID, &i.PlayerAccountID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

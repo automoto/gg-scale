@@ -1,6 +1,6 @@
 -- name: InsertMatchmakingTicket :one
 INSERT INTO matchmaking_tickets (
-    tenant_id, project_id, fleet_id, end_user_id, region, game_mode, attributes
+    tenant_id, project_id, fleet_id, player_id, region, game_mode, attributes
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -9,13 +9,13 @@ VALUES (
 RETURNING id, status::text AS status, created_at;
 
 -- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
+SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        created_at, matched_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id)
-  AND end_user_id = sqlc.arg(end_user_id);
+  AND player_id = sqlc.arg(player_id);
 
 -- name: CancelMatchmakingTicket :one
 -- Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
@@ -27,7 +27,7 @@ SET status           = 'cancelled',
     claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id)
-  AND end_user_id = sqlc.arg(end_user_id)
+  AND player_id = sqlc.arg(player_id)
   AND status = 'queued'
 RETURNING id;
 
@@ -68,7 +68,7 @@ SET claim_id         = sqlc.arg('claim_id')::uuid,
     claim_expires_at = now() + sqlc.arg('ttl')::interval
 FROM candidates c
 WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
+RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.created_at, t.matched_at;
 

@@ -206,11 +206,11 @@ func TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 	ctx := context.Background()
 	var pidA, pidB int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id, email)
+		`INSERT INTO project_players (tenant_id, project_id, external_id, email)
 		 VALUES ($1, $2, 'alice-player', 'alice-player@example.com') RETURNING id`,
 		tenantA, projectA).Scan(&pidA))
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id, email)
+		`INSERT INTO project_players (tenant_id, project_id, external_id, email)
 		 VALUES ($1, $2, 'bob-player', 'bob-player@example.com') RETURNING id`,
 		tenantB, projectB).Scan(&pidB))
 
@@ -300,7 +300,7 @@ func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 }
 
 // TestH13_LifetimeLockout_SurvivesResend exercises the lifetime ceiling:
-// an end-user one short of MaxLifetimeAttempts (simulating a long
+// a player one short of MaxLifetimeAttempts (simulating a long
 // /resend → exhaust → /resend cycle) trips the lock on the next wrong
 // code. Pre-staging the lifetime counter dodges the per-IP rate limiter,
 // which would otherwise throttle a real burst of 20+ verify POSTs.
@@ -315,7 +315,7 @@ func TestH13_LifetimeLockout_SurvivesResend(t *testing.T) {
 	require.GreaterOrEqual(t, len(rec.Sent), 1)
 
 	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE end_users
+		`UPDATE project_players
 		 SET email_verification_lifetime_attempts = $1,
 		     email_verification_attempts = 0
 		 WHERE tenant_id = $2 AND email = 'h13@example.com'`,
@@ -329,7 +329,7 @@ func TestH13_LifetimeLockout_SurvivesResend(t *testing.T) {
 
 	var locked *time.Time
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT email_verification_locked_until FROM end_users
+		`SELECT email_verification_locked_until FROM project_players
 		 WHERE tenant_id = $1 AND email = 'h13@example.com'`, tenantID).Scan(&locked))
 	require.NotNil(t, locked, "locked_until must be set once the lifetime cap is reached")
 	assert.True(t, locked.After(time.Now()), "locked_until must be in the future")

@@ -13,7 +13,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 )
 
 // Options configures ServeWS. Hub is required; everything else is optional.
@@ -25,10 +25,10 @@ type Options struct {
 	Cache        cache.Store
 	MaxPerTenant int64
 
-	// MaxPerEndUser caps simultaneous connections from a single end-user
+	// MaxPerPlayer caps simultaneous connections from a single player
 	// (one player). Stops a single player from opening N sockets and
 	// burning the entire per-tenant budget. 0 disables the per-user cap.
-	MaxPerEndUser int64
+	MaxPerPlayer int64
 
 	// HeartbeatInterval controls server-initiated WebSocket pings. Zero
 	// uses 30s in production; tests pass a large value to disable.
@@ -48,7 +48,7 @@ const (
 )
 
 // ServeWS returns the HTTP handler that upgrades to a WebSocket and ties
-// the connection into the Hub. The tenant + enduser middlewares must run
+// the connection into the Hub. The tenant + player middlewares must run
 // first so the request context already carries both ids.
 func ServeWS(opts Options) http.HandlerFunc {
 	heartbeat := opts.HeartbeatInterval
@@ -70,7 +70,7 @@ func ServeWS(opts Options) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		endUserID, ok := enduser.IDFromContext(r.Context())
+		playerID, ok := playerauth.IDFromContext(r.Context())
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -78,16 +78,16 @@ func ServeWS(opts Options) http.HandlerFunc {
 
 		var refreshSlots func(context.Context)
 
-		// Per-end-user cap first: a single misbehaving player can't drain
+		// Per-player cap first: a single misbehaving player can't drain
 		// the per-tenant budget for everyone else. The order matters —
 		// failing the user-level cap before the tenant one means a
 		// flapping user doesn't briefly hold a tenant slot before being
 		// rejected.
-		if opts.MaxPerEndUser > 0 && opts.Cache != nil {
-			userKey := slotKeyForEndUser(tenantID, endUserID)
-			acquired, _, slotErr := opts.Cache.AcquireSlot(r.Context(), userKey, opts.MaxPerEndUser, slotTTL)
+		if opts.MaxPerPlayer > 0 && opts.Cache != nil {
+			userKey := slotKeyForPlayer(tenantID, playerID)
+			acquired, _, slotErr := opts.Cache.AcquireSlot(r.Context(), userKey, opts.MaxPerPlayer, slotTTL)
 			if slotErr != nil {
-				logger.Error("realtime: AcquireSlot (end_user) failed", "err", slotErr, "tenant_id", tenantID, "end_user_id", endUserID)
+				logger.Error("realtime: AcquireSlot (player) failed", "err", slotErr, "tenant_id", tenantID, "player_id", playerID)
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
@@ -97,12 +97,12 @@ func ServeWS(opts Options) http.HandlerFunc {
 			}
 			defer func() {
 				if rerr := opts.Cache.ReleaseSlot(context.Background(), userKey); rerr != nil {
-					logger.Warn("realtime: ReleaseSlot (end_user) failed", "err", rerr, "tenant_id", tenantID, "end_user_id", endUserID)
+					logger.Warn("realtime: ReleaseSlot (player) failed", "err", rerr, "tenant_id", tenantID, "player_id", playerID)
 				}
 			}()
 			refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
 				if rerr := opts.Cache.RefreshSlot(ctx, userKey, slotTTL); rerr != nil {
-					logger.Warn("realtime: RefreshSlot (end_user) failed", "err", rerr, "tenant_id", tenantID, "end_user_id", endUserID)
+					logger.Warn("realtime: RefreshSlot (player) failed", "err", rerr, "tenant_id", tenantID, "player_id", playerID)
 				}
 			})
 		}
@@ -140,7 +140,7 @@ func ServeWS(opts Options) http.HandlerFunc {
 		defer conn.CloseNow() //nolint:errcheck // best-effort cleanup
 
 		writer := &wsWriter{ws: conn}
-		unregister := opts.Hub.Register(tenantID, endUserID, writer)
+		unregister := opts.Hub.Register(tenantID, playerID, writer)
 		defer unregister()
 
 		runConnection(r.Context(), conn, heartbeat, refreshSlots, logger)
@@ -230,6 +230,6 @@ func slotKeyForTenant(tenantID int64) string {
 	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10)
 }
 
-func slotKeyForEndUser(tenantID, endUserID int64) string {
-	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10) + ":user:" + strconv.FormatInt(endUserID, 10)
+func slotKeyForPlayer(tenantID, playerID int64) string {
+	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10) + ":user:" + strconv.FormatInt(playerID, 10)
 }

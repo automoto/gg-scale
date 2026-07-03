@@ -139,10 +139,10 @@ UPDATE dashboard_users
 SET is_platform_admin = true
 WHERE id = sqlc.arg(id);
 
--- End-user (player) invitations.
+-- Player invitations.
 
--- name: CreateEndUserInvitation :one
-INSERT INTO end_user_invitations (
+-- name: CreatePlayerInvitation :one
+INSERT INTO player_invitations (
     tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id
 )
 VALUES (
@@ -155,7 +155,7 @@ VALUES (
 )
 RETURNING id, created_at, expires_at;
 
--- name: GetEndUserInvitationByCodeHash :one
+-- name: GetPlayerInvitationByCodeHash :one
 SELECT
     i.id,
     i.tenant_id,
@@ -167,35 +167,35 @@ SELECT
     i.invited_by_user_id,
     i.created_at,
     p.name AS project_name
-FROM end_user_invitations i
+FROM player_invitations i
 JOIN projects p ON p.id = i.project_id
 WHERE i.code_hash = sqlc.arg(code_hash)
   AND i.accepted_at IS NULL
   AND i.revoked_at IS NULL;
 
--- name: ListEndUserInvitationsForProject :many
+-- name: ListPlayerInvitationsForProject :many
 SELECT
     id,
     email::text AS email,
     expires_at,
     invited_by_user_id,
     created_at
-FROM end_user_invitations
+FROM player_invitations
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg(project_id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 ORDER BY created_at DESC;
 
--- name: MarkEndUserInvitationAccepted :exec
-UPDATE end_user_invitations
+-- name: MarkPlayerInvitationAccepted :exec
+UPDATE player_invitations
 SET accepted_at = now()
 WHERE id = sqlc.arg(id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL;
 
--- name: RevokeEndUserInvitation :exec
-UPDATE end_user_invitations
+-- name: RevokePlayerInvitation :exec
+UPDATE player_invitations
 SET revoked_at = now()
 WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -211,8 +211,8 @@ FROM projects
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
--- name: GetEndUserByEmailProject :one
--- Privileged variant of GetEndUserByEmail used by the player UI before
+-- name: GetPlayerByEmailProject :one
+-- Privileged variant of GetPlayerByEmail used by the player UI before
 -- the tenant context is set; the caller already knows the project_id from
 -- the URL and looks up tenant + verification state in one shot.
 SELECT
@@ -227,15 +227,15 @@ SELECT
     email_verification_attempts,
     email_verification_last_sent_at,
     disabled_at
-FROM end_users
+FROM project_players
 WHERE project_id = sqlc.arg(project_id)
   AND email = sqlc.arg(email)
   AND deleted_at IS NULL;
 
--- name: CreatePlayerEndUser :one
+-- name: CreatePlayer :one
 -- Used by the player UI signup flow; takes project_id explicitly because
 -- the player site doesn't have an api_key bearer.
-INSERT INTO end_users (
+INSERT INTO project_players (
     tenant_id, project_id, external_id, email, password_hash,
     email_verification_code_hash, email_verification_salt,
     email_verification_expires_at, email_verification_last_sent_at
@@ -255,8 +255,8 @@ WHERE p.id = sqlc.arg(project_id)
   AND p.deleted_at IS NULL
 RETURNING id, tenant_id;
 
--- name: MarkPlayerVerified :exec
-UPDATE end_users
+-- name: MarkPlayerVerifiedByID :exec
+UPDATE project_players
 SET email_verified_at               = now(),
     email_verification_code_hash    = NULL,
     email_verification_salt         = NULL,
@@ -264,14 +264,14 @@ SET email_verified_at               = now(),
     email_verification_attempts     = 0
 WHERE id = sqlc.arg(id);
 
--- name: IncrementPlayerVerificationAttempts :one
-UPDATE end_users
+-- name: IncrementPlayerVerificationAttemptsByID :one
+UPDATE project_players
 SET email_verification_attempts = email_verification_attempts + 1
 WHERE id = sqlc.arg(id)
 RETURNING email_verification_attempts;
 
--- name: SetPlayerVerificationCode :exec
-UPDATE end_users
+-- name: SetPlayerVerificationCodeByID :exec
+UPDATE project_players
 SET email_verification_code_hash    = sqlc.arg(code_hash),
     email_verification_salt         = sqlc.arg(code_salt),
     email_verification_expires_at   = sqlc.arg(expires_at),
@@ -289,20 +289,20 @@ SELECT
     email_verification_lifetime_attempts,
     email_verification_locked_until,
     email_verification_last_sent_at
-FROM end_users
+FROM project_players
 WHERE id = sqlc.arg(id);
 
 -- name: CreatePlayerSession :one
-INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
-SELECT u.tenant_id, u.project_id, sqlc.arg(end_user_id), sqlc.arg(refresh_hash), sqlc.arg(expires_at)
-FROM end_users u
-WHERE u.id = sqlc.arg(end_user_id)
+INSERT INTO sessions (tenant_id, project_id, player_id, refresh_hash, expires_at)
+SELECT u.tenant_id, u.project_id, sqlc.arg(player_id), sqlc.arg(refresh_hash), sqlc.arg(expires_at)
+FROM project_players u
+WHERE u.id = sqlc.arg(player_id)
 RETURNING id;
 
 -- name: GetPlayerSession :one
-SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at, u.email, u.project_id, u.tenant_id, u.disabled_at
+SELECT s.id, s.player_id, s.expires_at, s.revoked_at, u.email, u.project_id, u.tenant_id, u.disabled_at
 FROM sessions s
-JOIN end_users u ON u.id = s.end_user_id
+JOIN project_players u ON u.id = s.player_id
 WHERE s.refresh_hash = sqlc.arg(refresh_hash);
 
 -- name: RevokePlayerSession :exec
@@ -311,7 +311,7 @@ SET revoked_at = now()
 WHERE refresh_hash = sqlc.arg(refresh_hash) AND revoked_at IS NULL;
 
 -- name: SetPlayerDisabled :exec
-UPDATE end_users
+UPDATE project_players
 SET disabled_at = $2
 WHERE id = $1;
 

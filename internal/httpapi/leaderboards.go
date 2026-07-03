@@ -14,7 +14,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -34,9 +34,9 @@ type submitScoreRequest struct {
 }
 
 type leaderboardEntry struct {
-	EndUserID int64 `json:"end_user_id"`
-	Score     int64 `json:"score"`
-	Rank      int64 `json:"rank"`
+	PlayerID int64 `json:"player_id"`
+	Score    int64 `json:"score"`
+	Rank     int64 `json:"rank"`
 }
 
 func leaderboardTopCacheKey(tenantID, leaderboardID int64, limit int32) string {
@@ -58,9 +58,9 @@ func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 
 		ctx := r.Context()
 		tenantID, _ := db.TenantFromContext(ctx)
-		userID, ok := enduser.IDFromContext(ctx)
+		userID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -70,7 +70,7 @@ func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
 				return err
 			}
 			_, err := q.SubmitScore(ctx, sqlcgen.SubmitScoreParams{
-				LeaderboardID: leaderboardID, EndUserID: userID, Score: req.Score,
+				LeaderboardID: leaderboardID, PlayerID: userID, Score: req.Score,
 			})
 			return err
 		})
@@ -148,9 +148,9 @@ func leaderboardAroundMeHandler(d Deps) http.HandlerFunc {
 		}
 		radius := parseLimit(r.URL.Query().Get("radius"), 5, 50)
 		ctx := r.Context()
-		userID, ok := enduser.IDFromContext(ctx)
+		userID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -174,7 +174,7 @@ func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int
 		}
 		for i, row := range rows {
 			out = append(out, leaderboardEntry{
-				EndUserID: row.EndUserID, Score: row.BestScore, Rank: int64(i),
+				PlayerID: row.PlayerID, Score: row.BestScore, Rank: int64(i),
 			})
 		}
 		return nil
@@ -189,7 +189,7 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, ra
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		rank, rerr := q.LeaderboardUserRank(ctx, sqlcgen.LeaderboardUserRankParams{
-			LeaderboardID: leaderboardID, EndUserID: userID,
+			LeaderboardID: leaderboardID, PlayerID: userID,
 		})
 		if errors.Is(rerr, pgx.ErrNoRows) {
 			return nil
@@ -213,8 +213,8 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, ra
 		}
 		for _, row := range rows {
 			entries = append(entries, leaderboardEntry{
-				EndUserID: row.EndUserID,
-				Score:     row.BestScore,
+				PlayerID: row.PlayerID,
+				Score:    row.BestScore,
 				// Internal rank is 1-based per RANK(); convert to the
 				// 0-based rank the SDK has historically seen from ZREVRANK.
 				Rank: row.Rank - 1,

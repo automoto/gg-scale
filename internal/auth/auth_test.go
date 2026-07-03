@@ -28,7 +28,7 @@ func TestNewSigner_rejects_short_keys(t *testing.T) {
 func TestSign_then_Verify_round_trips_claims(t *testing.T) {
 	s := newSigner(t)
 	want := auth.Claims{
-		EndUserID: 42,
+		PlayerID:  42,
 		TenantID:  7,
 		ProjectID: 9,
 		ExpiresAt: time.Now().Add(time.Hour),
@@ -39,7 +39,7 @@ func TestSign_then_Verify_round_trips_claims(t *testing.T) {
 
 	got, err := s.Verify(tok)
 	require.NoError(t, err)
-	assert.Equal(t, want.EndUserID, got.EndUserID)
+	assert.Equal(t, want.PlayerID, got.PlayerID)
 	assert.Equal(t, want.TenantID, got.TenantID)
 	assert.Equal(t, want.ProjectID, got.ProjectID)
 }
@@ -47,7 +47,7 @@ func TestSign_then_Verify_round_trips_claims(t *testing.T) {
 func TestSign_then_Verify_round_trips_session_epoch(t *testing.T) {
 	s := newSigner(t)
 	want := auth.Claims{
-		EndUserID:    42,
+		PlayerID:     42,
 		TenantID:     7,
 		ProjectID:    9,
 		SessionEpoch: 3,
@@ -62,7 +62,7 @@ func TestSign_then_Verify_round_trips_session_epoch(t *testing.T) {
 
 func TestVerify_rejects_modified_token(t *testing.T) {
 	s := newSigner(t)
-	tok, err := s.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
+	tok, err := s.Sign(auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 
 	_, err = s.Verify(tok + "x")
@@ -72,7 +72,7 @@ func TestVerify_rejects_modified_token(t *testing.T) {
 
 func TestVerify_rejects_expired_token(t *testing.T) {
 	s := newSigner(t)
-	tok, err := s.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(-time.Hour)})
+	tok, err := s.Sign(auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(-time.Hour)})
 	require.NoError(t, err)
 
 	_, err = s.Verify(tok)
@@ -84,7 +84,7 @@ func TestVerify_rejects_token_signed_with_different_key(t *testing.T) {
 	a, _ := auth.NewSigner([]byte("key-a-padded-to-thirty-two-bytes!"))
 	b, _ := auth.NewSigner([]byte("key-b-padded-to-thirty-two-bytes!"))
 
-	tok, err := a.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
+	tok, err := a.Sign(auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 
 	_, err = b.Verify(tok)
@@ -107,7 +107,7 @@ func TestVerify_rejects_token_signed_with_hs512_alg_downgrade(t *testing.T) {
 	key := []byte("test-key-must-be-at-least-32-bytes-long")
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS512, jwt.MapClaims{
-		"euid": float64(1),
+		"puid": float64(1),
 		"tid":  float64(1),
 		"exp":  jwt.NewNumericDate(time.Now().Add(time.Hour)).Unix(),
 	})
@@ -124,7 +124,7 @@ func TestVerify_rejects_token_without_exp(t *testing.T) {
 	key := []byte("test-key-must-be-at-least-32-bytes-long")
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"euid": float64(1),
+		"puid": float64(1),
 		"tid":  float64(1),
 	})
 	signed, err := tok.SignedString(key)
@@ -137,7 +137,7 @@ func TestVerify_rejects_token_without_exp(t *testing.T) {
 
 func TestSign_returns_distinct_jti_per_call(t *testing.T) {
 	s := newSigner(t)
-	c := auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)}
+	c := auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)}
 
 	tok1, err := s.Sign(c)
 	require.NoError(t, err)
@@ -151,17 +151,17 @@ func TestNewSigner_with_random_key_works_when_no_key_provided(t *testing.T) {
 	s, err := auth.NewSignerRandom()
 	require.NoError(t, err)
 
-	tok, err := s.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
+	tok, err := s.Sign(auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 
 	got, err := s.Verify(tok)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), got.EndUserID)
+	assert.Equal(t, int64(1), got.PlayerID)
 }
 
 func TestVerify_returns_ErrTokenExpired_on_expired(t *testing.T) {
 	s := newSigner(t)
-	tok, err := s.Sign(auth.Claims{EndUserID: 1, TenantID: 1, ExpiresAt: time.Now().Add(-time.Hour)})
+	tok, err := s.Sign(auth.Claims{PlayerID: 1, TenantID: 1, ExpiresAt: time.Now().Add(-time.Hour)})
 	require.NoError(t, err)
 
 	_, err = s.Verify(tok)

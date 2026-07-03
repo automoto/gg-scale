@@ -36,7 +36,7 @@ func TestLogin_access_token_verifies_with_hmac_signer(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var session struct {
 		AccessToken string `json:"access_token"`
-		EndUserID   int64  `json:"end_user_id"`
+		PlayerID    int64  `json:"player_id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &session))
 	require.NotEmpty(t, session.AccessToken)
@@ -45,7 +45,7 @@ func TestLogin_access_token_verifies_with_hmac_signer(t *testing.T) {
 	require.NoError(t, err)
 	claims, err := signer.Verify(session.AccessToken)
 	require.NoError(t, err)
-	assert.Equal(t, session.EndUserID, claims.EndUserID)
+	assert.Equal(t, session.PlayerID, claims.PlayerID)
 	assert.Greater(t, claims.TenantID, int64(0))
 	assert.False(t, claims.ExpiresAt.IsZero())
 }

@@ -97,9 +97,9 @@ VALUES
     ('p', 'role:player_high_access', '*', 'project:*:matchmaking:dedicated', 'create_ticket'),
     ('p', 'role:api_client', '*', 'auth', 'create'),
     ('p', 'role:api_client', '*', 'profile', 'read'),
-    ('p', 'role:api_server', '*', 'end_user', 'verify'),
+    ('p', 'role:api_server', '*', 'player', 'verify'),
     ('p', 'role:api_server', '*', 'leaderboard', 'submit'),
-    ('p', 'role:api_fleet_runtime', '*', 'end_user', 'verify'),
+    ('p', 'role:api_fleet_runtime', '*', 'player', 'verify'),
     ('p', 'role:api_fleet_runtime', '*', 'project:*:allocation', 'read'),
     ('p', 'role:api_fleet_runtime', '*', 'project:*:allocation', 'update')
 ON CONFLICT DO NOTHING;

@@ -78,52 +78,8 @@ func (q *Queries) CreateDashboardMembership(ctx context.Context, arg CreateDashb
 	return id, err
 }
 
-const createEndUserInvitation = `-- name: CreateEndUserInvitation :one
-
-INSERT INTO end_user_invitations (
-    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id
-)
-VALUES (
-    current_setting('app.tenant_id', true)::bigint,
-    $1,
-    $2,
-    $3,
-    $4,
-    $5
-)
-RETURNING id, created_at, expires_at
-`
-
-type CreateEndUserInvitationParams struct {
-	ProjectID       int64
-	Email           string
-	CodeHash        []byte
-	ExpiresAt       pgtype.Timestamptz
-	InvitedByUserID int64
-}
-
-type CreateEndUserInvitationRow struct {
-	ID        int64
-	CreatedAt pgtype.Timestamptz
-	ExpiresAt pgtype.Timestamptz
-}
-
-// End-user (player) invitations.
-func (q *Queries) CreateEndUserInvitation(ctx context.Context, arg CreateEndUserInvitationParams) (CreateEndUserInvitationRow, error) {
-	row := q.db.QueryRow(ctx, createEndUserInvitation,
-		arg.ProjectID,
-		arg.Email,
-		arg.CodeHash,
-		arg.ExpiresAt,
-		arg.InvitedByUserID,
-	)
-	var i CreateEndUserInvitationRow
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.ExpiresAt)
-	return i, err
-}
-
-const createPlayerEndUser = `-- name: CreatePlayerEndUser :one
-INSERT INTO end_users (
+const createPlayer = `-- name: CreatePlayer :one
+INSERT INTO project_players (
     tenant_id, project_id, external_id, email, password_hash,
     email_verification_code_hash, email_verification_salt,
     email_verification_expires_at, email_verification_last_sent_at
@@ -144,7 +100,7 @@ WHERE p.id = $7
 RETURNING id, tenant_id
 `
 
-type CreatePlayerEndUserParams struct {
+type CreatePlayerParams struct {
 	ExternalID   string
 	Email        *string
 	PasswordHash []byte
@@ -154,15 +110,15 @@ type CreatePlayerEndUserParams struct {
 	ProjectID    int64
 }
 
-type CreatePlayerEndUserRow struct {
+type CreatePlayerRow struct {
 	ID       int64
 	TenantID int64
 }
 
 // Used by the player UI signup flow; takes project_id explicitly because
 // the player site doesn't have an api_key bearer.
-func (q *Queries) CreatePlayerEndUser(ctx context.Context, arg CreatePlayerEndUserParams) (CreatePlayerEndUserRow, error) {
-	row := q.db.QueryRow(ctx, createPlayerEndUser,
+func (q *Queries) CreatePlayer(ctx context.Context, arg CreatePlayerParams) (CreatePlayerRow, error) {
+	row := q.db.QueryRow(ctx, createPlayer,
 		arg.ExternalID,
 		arg.Email,
 		arg.PasswordHash,
@@ -171,27 +127,71 @@ func (q *Queries) CreatePlayerEndUser(ctx context.Context, arg CreatePlayerEndUs
 		arg.ExpiresAt,
 		arg.ProjectID,
 	)
-	var i CreatePlayerEndUserRow
+	var i CreatePlayerRow
 	err := row.Scan(&i.ID, &i.TenantID)
 	return i, err
 }
 
+const createPlayerInvitation = `-- name: CreatePlayerInvitation :one
+
+INSERT INTO player_invitations (
+    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id
+)
+VALUES (
+    current_setting('app.tenant_id', true)::bigint,
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+)
+RETURNING id, created_at, expires_at
+`
+
+type CreatePlayerInvitationParams struct {
+	ProjectID       int64
+	Email           string
+	CodeHash        []byte
+	ExpiresAt       pgtype.Timestamptz
+	InvitedByUserID int64
+}
+
+type CreatePlayerInvitationRow struct {
+	ID        int64
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
+// Player invitations.
+func (q *Queries) CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error) {
+	row := q.db.QueryRow(ctx, createPlayerInvitation,
+		arg.ProjectID,
+		arg.Email,
+		arg.CodeHash,
+		arg.ExpiresAt,
+		arg.InvitedByUserID,
+	)
+	var i CreatePlayerInvitationRow
+	err := row.Scan(&i.ID, &i.CreatedAt, &i.ExpiresAt)
+	return i, err
+}
+
 const createPlayerSession = `-- name: CreatePlayerSession :one
-INSERT INTO sessions (tenant_id, project_id, end_user_id, refresh_hash, expires_at)
+INSERT INTO sessions (tenant_id, project_id, player_id, refresh_hash, expires_at)
 SELECT u.tenant_id, u.project_id, $1, $2, $3
-FROM end_users u
+FROM project_players u
 WHERE u.id = $1
 RETURNING id
 `
 
 type CreatePlayerSessionParams struct {
-	EndUserID   int64
+	PlayerID    int64
 	RefreshHash []byte
 	ExpiresAt   pgtype.Timestamptz
 }
 
 func (q *Queries) CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createPlayerSession, arg.EndUserID, arg.RefreshHash, arg.ExpiresAt)
+	row := q.db.QueryRow(ctx, createPlayerSession, arg.PlayerID, arg.RefreshHash, arg.ExpiresAt)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -331,7 +331,7 @@ func (q *Queries) GetDashboardInvitationByID(ctx context.Context, id int64) (Get
 	return i, err
 }
 
-const getEndUserByEmailProject = `-- name: GetEndUserByEmailProject :one
+const getPlayerByEmailProject = `-- name: GetPlayerByEmailProject :one
 SELECT
     id,
     tenant_id,
@@ -344,18 +344,18 @@ SELECT
     email_verification_attempts,
     email_verification_last_sent_at,
     disabled_at
-FROM end_users
+FROM project_players
 WHERE project_id = $1
   AND email = $2
   AND deleted_at IS NULL
 `
 
-type GetEndUserByEmailProjectParams struct {
+type GetPlayerByEmailProjectParams struct {
 	ProjectID int64
 	Email     *string
 }
 
-type GetEndUserByEmailProjectRow struct {
+type GetPlayerByEmailProjectRow struct {
 	ID                          int64
 	TenantID                    int64
 	ProjectID                   int64
@@ -369,12 +369,12 @@ type GetEndUserByEmailProjectRow struct {
 	DisabledAt                  pgtype.Timestamptz
 }
 
-// Privileged variant of GetEndUserByEmail used by the player UI before
+// Privileged variant of GetPlayerByEmail used by the player UI before
 // the tenant context is set; the caller already knows the project_id from
 // the URL and looks up tenant + verification state in one shot.
-func (q *Queries) GetEndUserByEmailProject(ctx context.Context, arg GetEndUserByEmailProjectParams) (GetEndUserByEmailProjectRow, error) {
-	row := q.db.QueryRow(ctx, getEndUserByEmailProject, arg.ProjectID, arg.Email)
-	var i GetEndUserByEmailProjectRow
+func (q *Queries) GetPlayerByEmailProject(ctx context.Context, arg GetPlayerByEmailProjectParams) (GetPlayerByEmailProjectRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerByEmailProject, arg.ProjectID, arg.Email)
+	var i GetPlayerByEmailProjectRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -391,7 +391,7 @@ func (q *Queries) GetEndUserByEmailProject(ctx context.Context, arg GetEndUserBy
 	return i, err
 }
 
-const getEndUserInvitationByCodeHash = `-- name: GetEndUserInvitationByCodeHash :one
+const getPlayerInvitationByCodeHash = `-- name: GetPlayerInvitationByCodeHash :one
 SELECT
     i.id,
     i.tenant_id,
@@ -403,14 +403,14 @@ SELECT
     i.invited_by_user_id,
     i.created_at,
     p.name AS project_name
-FROM end_user_invitations i
+FROM player_invitations i
 JOIN projects p ON p.id = i.project_id
 WHERE i.code_hash = $1
   AND i.accepted_at IS NULL
   AND i.revoked_at IS NULL
 `
 
-type GetEndUserInvitationByCodeHashRow struct {
+type GetPlayerInvitationByCodeHashRow struct {
 	ID              int64
 	TenantID        int64
 	ProjectID       int64
@@ -423,9 +423,9 @@ type GetEndUserInvitationByCodeHashRow struct {
 	ProjectName     string
 }
 
-func (q *Queries) GetEndUserInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetEndUserInvitationByCodeHashRow, error) {
-	row := q.db.QueryRow(ctx, getEndUserInvitationByCodeHash, codeHash)
-	var i GetEndUserInvitationByCodeHashRow
+func (q *Queries) GetPlayerInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetPlayerInvitationByCodeHashRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerInvitationByCodeHash, codeHash)
+	var i GetPlayerInvitationByCodeHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -442,15 +442,15 @@ func (q *Queries) GetEndUserInvitationByCodeHash(ctx context.Context, codeHash [
 }
 
 const getPlayerSession = `-- name: GetPlayerSession :one
-SELECT s.id, s.end_user_id, s.expires_at, s.revoked_at, u.email, u.project_id, u.tenant_id, u.disabled_at
+SELECT s.id, s.player_id, s.expires_at, s.revoked_at, u.email, u.project_id, u.tenant_id, u.disabled_at
 FROM sessions s
-JOIN end_users u ON u.id = s.end_user_id
+JOIN project_players u ON u.id = s.player_id
 WHERE s.refresh_hash = $1
 `
 
 type GetPlayerSessionRow struct {
 	ID         int64
-	EndUserID  int64
+	PlayerID   int64
 	ExpiresAt  pgtype.Timestamptz
 	RevokedAt  pgtype.Timestamptz
 	Email      *string
@@ -464,7 +464,7 @@ func (q *Queries) GetPlayerSession(ctx context.Context, refreshHash []byte) (Get
 	var i GetPlayerSessionRow
 	err := row.Scan(
 		&i.ID,
-		&i.EndUserID,
+		&i.PlayerID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.Email,
@@ -485,7 +485,7 @@ SELECT
     email_verification_lifetime_attempts,
     email_verification_locked_until,
     email_verification_last_sent_at
-FROM end_users
+FROM project_players
 WHERE id = $1
 `
 
@@ -539,15 +539,15 @@ func (q *Queries) GetProjectTenant(ctx context.Context, id int64) (GetProjectTen
 	return i, err
 }
 
-const incrementPlayerVerificationAttempts = `-- name: IncrementPlayerVerificationAttempts :one
-UPDATE end_users
+const incrementPlayerVerificationAttemptsByID = `-- name: IncrementPlayerVerificationAttemptsByID :one
+UPDATE project_players
 SET email_verification_attempts = email_verification_attempts + 1
 WHERE id = $1
 RETURNING email_verification_attempts
 `
 
-func (q *Queries) IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementPlayerVerificationAttempts, id)
+func (q *Queries) IncrementPlayerVerificationAttemptsByID(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementPlayerVerificationAttemptsByID, id)
 	var email_verification_attempts int32
 	err := row.Scan(&email_verification_attempts)
 	return email_verification_attempts, err
@@ -657,55 +657,6 @@ func (q *Queries) ListDashboardMembersForTenant(ctx context.Context, tenantID in
 	return items, nil
 }
 
-const listEndUserInvitationsForProject = `-- name: ListEndUserInvitationsForProject :many
-SELECT
-    id,
-    email::text AS email,
-    expires_at,
-    invited_by_user_id,
-    created_at
-FROM end_user_invitations
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND project_id = $1
-  AND accepted_at IS NULL
-  AND revoked_at IS NULL
-ORDER BY created_at DESC
-`
-
-type ListEndUserInvitationsForProjectRow struct {
-	ID              int64
-	Email           string
-	ExpiresAt       pgtype.Timestamptz
-	InvitedByUserID int64
-	CreatedAt       pgtype.Timestamptz
-}
-
-func (q *Queries) ListEndUserInvitationsForProject(ctx context.Context, projectID int64) ([]ListEndUserInvitationsForProjectRow, error) {
-	rows, err := q.db.Query(ctx, listEndUserInvitationsForProject, projectID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListEndUserInvitationsForProjectRow
-	for rows.Next() {
-		var i ListEndUserInvitationsForProjectRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.ExpiresAt,
-			&i.InvitedByUserID,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPlatformAdminInvitations = `-- name: ListPlatformAdminInvitations :many
 SELECT
     id,
@@ -800,6 +751,55 @@ func (q *Queries) ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsR
 	return items, nil
 }
 
+const listPlayerInvitationsForProject = `-- name: ListPlayerInvitationsForProject :many
+SELECT
+    id,
+    email::text AS email,
+    expires_at,
+    invited_by_user_id,
+    created_at
+FROM player_invitations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+ORDER BY created_at DESC
+`
+
+type ListPlayerInvitationsForProjectRow struct {
+	ID              int64
+	Email           string
+	ExpiresAt       pgtype.Timestamptz
+	InvitedByUserID int64
+	CreatedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) ListPlayerInvitationsForProject(ctx context.Context, projectID int64) ([]ListPlayerInvitationsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listPlayerInvitationsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPlayerInvitationsForProjectRow
+	for rows.Next() {
+		var i ListPlayerInvitationsForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.ExpiresAt,
+			&i.InvitedByUserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markDashboardInvitationAccepted = `-- name: MarkDashboardInvitationAccepted :exec
 UPDATE dashboard_invitations
 SET accepted_at = now()
@@ -813,21 +813,21 @@ func (q *Queries) MarkDashboardInvitationAccepted(ctx context.Context, id int64)
 	return err
 }
 
-const markEndUserInvitationAccepted = `-- name: MarkEndUserInvitationAccepted :exec
-UPDATE end_user_invitations
+const markPlayerInvitationAccepted = `-- name: MarkPlayerInvitationAccepted :exec
+UPDATE player_invitations
 SET accepted_at = now()
 WHERE id = $1
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 `
 
-func (q *Queries) MarkEndUserInvitationAccepted(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markEndUserInvitationAccepted, id)
+func (q *Queries) MarkPlayerInvitationAccepted(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markPlayerInvitationAccepted, id)
 	return err
 }
 
-const markPlayerVerified = `-- name: MarkPlayerVerified :exec
-UPDATE end_users
+const markPlayerVerifiedByID = `-- name: MarkPlayerVerifiedByID :exec
+UPDATE project_players
 SET email_verified_at               = now(),
     email_verification_code_hash    = NULL,
     email_verification_salt         = NULL,
@@ -836,8 +836,8 @@ SET email_verified_at               = now(),
 WHERE id = $1
 `
 
-func (q *Queries) MarkPlayerVerified(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markPlayerVerified, id)
+func (q *Queries) MarkPlayerVerifiedByID(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markPlayerVerifiedByID, id)
 	return err
 }
 
@@ -907,8 +907,8 @@ func (q *Queries) RevokeDashboardInvitation(ctx context.Context, id int64) error
 	return err
 }
 
-const revokeEndUserInvitation = `-- name: RevokeEndUserInvitation :exec
-UPDATE end_user_invitations
+const revokePlayerInvitation = `-- name: RevokePlayerInvitation :exec
+UPDATE player_invitations
 SET revoked_at = now()
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -916,8 +916,8 @@ WHERE id = $1
   AND revoked_at IS NULL
 `
 
-func (q *Queries) RevokeEndUserInvitation(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokeEndUserInvitation, id)
+func (q *Queries) RevokePlayerInvitation(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, revokePlayerInvitation, id)
 	return err
 }
 
@@ -933,7 +933,7 @@ func (q *Queries) RevokePlayerSession(ctx context.Context, refreshHash []byte) e
 }
 
 const setPlayerDisabled = `-- name: SetPlayerDisabled :exec
-UPDATE end_users
+UPDATE project_players
 SET disabled_at = $2
 WHERE id = $1
 `
@@ -948,8 +948,8 @@ func (q *Queries) SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledPa
 	return err
 }
 
-const setPlayerVerificationCode = `-- name: SetPlayerVerificationCode :exec
-UPDATE end_users
+const setPlayerVerificationCodeByID = `-- name: SetPlayerVerificationCodeByID :exec
+UPDATE project_players
 SET email_verification_code_hash    = $1,
     email_verification_salt         = $2,
     email_verification_expires_at   = $3,
@@ -958,15 +958,15 @@ SET email_verification_code_hash    = $1,
 WHERE id = $4
 `
 
-type SetPlayerVerificationCodeParams struct {
+type SetPlayerVerificationCodeByIDParams struct {
 	CodeHash  []byte
 	CodeSalt  []byte
 	ExpiresAt pgtype.Timestamptz
 	ID        int64
 }
 
-func (q *Queries) SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error {
-	_, err := q.db.Exec(ctx, setPlayerVerificationCode,
+func (q *Queries) SetPlayerVerificationCodeByID(ctx context.Context, arg SetPlayerVerificationCodeByIDParams) error {
+	_, err := q.db.Exec(ctx, setPlayerVerificationCodeByID,
 		arg.CodeHash,
 		arg.CodeSalt,
 		arg.ExpiresAt,

@@ -14,7 +14,7 @@ import (
 const countActiveGameSessionPeers = `-- name: CountActiveGameSessionPeers :one
 SELECT count(*) FROM game_session_peer
 WHERE session_id   = $1
-  AND end_user_id != $2
+  AND player_id != $2
   AND last_seen    > now() - interval '30 seconds'
 `
 
@@ -46,16 +46,16 @@ func (q *Queries) DeleteAllGameSessionPeers(ctx context.Context, sessionID strin
 const deleteGameSessionPeer = `-- name: DeleteGameSessionPeer :exec
 DELETE FROM game_session_peer
 WHERE session_id  = $1
-  AND end_user_id = $2
+  AND player_id = $2
 `
 
 type DeleteGameSessionPeerParams struct {
 	SessionID string
-	EndUserID int64
+	PlayerID  int64
 }
 
 func (q *Queries) DeleteGameSessionPeer(ctx context.Context, arg DeleteGameSessionPeerParams) error {
-	_, err := q.db.Exec(ctx, deleteGameSessionPeer, arg.SessionID, arg.EndUserID)
+	_, err := q.db.Exec(ctx, deleteGameSessionPeer, arg.SessionID, arg.PlayerID)
 	return err
 }
 
@@ -63,17 +63,17 @@ const isGameSessionMember = `-- name: IsGameSessionMember :one
 SELECT EXISTS (
     SELECT 1 FROM game_session_peer
     WHERE session_id  = $1
-      AND end_user_id = $2
+      AND player_id = $2
 ) AS is_member
 `
 
 type IsGameSessionMemberParams struct {
 	SessionID string
-	EndUserID int64
+	PlayerID  int64
 }
 
 func (q *Queries) IsGameSessionMember(ctx context.Context, arg IsGameSessionMemberParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isGameSessionMember, arg.SessionID, arg.EndUserID)
+	row := q.db.QueryRow(ctx, isGameSessionMember, arg.SessionID, arg.PlayerID)
 	var is_member bool
 	err := row.Scan(&is_member)
 	return is_member, err
@@ -81,26 +81,26 @@ func (q *Queries) IsGameSessionMember(ctx context.Context, arg IsGameSessionMemb
 
 const listGameSessionPeers = `-- name: ListGameSessionPeers :many
 SELECT
-    p.end_user_id,
+    p.player_id,
     p.ip,
     p.port,
     p.qos,
     p.last_seen,
     u.xuid
 FROM game_session_peer p
-LEFT JOIN end_users u ON u.id = p.end_user_id
+LEFT JOIN project_players u ON u.id = p.player_id
 WHERE p.session_id = $1
   AND p.last_seen  > now() - interval '30 seconds'
 ORDER BY p.last_seen ASC
 `
 
 type ListGameSessionPeersRow struct {
-	EndUserID int64
-	Ip        *string
-	Port      *int32
-	Qos       []byte
-	LastSeen  pgtype.Timestamptz
-	Xuid      *string
+	PlayerID int64
+	Ip       *string
+	Port     *int32
+	Qos      []byte
+	LastSeen pgtype.Timestamptz
+	Xuid     *string
 }
 
 // Returns active peers (last_seen within 30 s) with each peer's optional
@@ -115,7 +115,7 @@ func (q *Queries) ListGameSessionPeers(ctx context.Context, sessionID string) ([
 	for rows.Next() {
 		var i ListGameSessionPeersRow
 		if err := rows.Scan(
-			&i.EndUserID,
+			&i.PlayerID,
 			&i.Ip,
 			&i.Port,
 			&i.Qos,
@@ -151,20 +151,20 @@ UPDATE game_session_peer
 SET last_seen = now(),
     qos       = CASE WHEN $1::jsonb IS NOT NULL THEN $1 ELSE qos END
 WHERE session_id  = $2
-  AND end_user_id = $3
+  AND player_id = $3
 `
 
 type TouchGameSessionPeerParams struct {
 	Qos       []byte
 	SessionID string
-	EndUserID int64
+	PlayerID  int64
 }
 
 // Returns rows affected (0 when the caller isn't a member of the session)
 // so the heartbeat handler can reject non-members instead of leaking the
 // roster.
 func (q *Queries) TouchGameSessionPeer(ctx context.Context, arg TouchGameSessionPeerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, touchGameSessionPeer, arg.Qos, arg.SessionID, arg.EndUserID)
+	result, err := q.db.Exec(ctx, touchGameSessionPeer, arg.Qos, arg.SessionID, arg.PlayerID)
 	if err != nil {
 		return 0, err
 	}
@@ -172,7 +172,7 @@ func (q *Queries) TouchGameSessionPeer(ctx context.Context, arg TouchGameSession
 }
 
 const upsertGameSessionPeer = `-- name: UpsertGameSessionPeer :exec
-INSERT INTO game_session_peer (tenant_id, session_id, end_user_id, ip, port, qos, last_seen)
+INSERT INTO game_session_peer (tenant_id, session_id, player_id, ip, port, qos, last_seen)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
     $1,
@@ -182,7 +182,7 @@ VALUES (
     $5,
     now()
 )
-ON CONFLICT (session_id, end_user_id)
+ON CONFLICT (session_id, player_id)
 DO UPDATE SET
     ip        = EXCLUDED.ip,
     port      = EXCLUDED.port,
@@ -192,7 +192,7 @@ DO UPDATE SET
 
 type UpsertGameSessionPeerParams struct {
 	SessionID string
-	EndUserID int64
+	PlayerID  int64
 	Ip        *string
 	Port      *int32
 	Qos       []byte
@@ -201,7 +201,7 @@ type UpsertGameSessionPeerParams struct {
 func (q *Queries) UpsertGameSessionPeer(ctx context.Context, arg UpsertGameSessionPeerParams) error {
 	_, err := q.db.Exec(ctx, upsertGameSessionPeer,
 		arg.SessionID,
-		arg.EndUserID,
+		arg.PlayerID,
 		arg.Ip,
 		arg.Port,
 		arg.Qos,

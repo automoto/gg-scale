@@ -26,18 +26,18 @@ func seedGCFixtures(t *testing.T, c *cluster, token string) int64 {
 
 	var hostID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id) VALUES ($1,$2,$3) RETURNING id`,
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1,$2,$3) RETURNING id`,
 		tenantID, projectID, "gc_host_"+token).Scan(&hostID))
 
 	_, err := c.bootstrapPool.Exec(ctx,
-		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_user_id, state, props, max_players, expires_at) VALUES
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at) VALUES
 		   ($4||'_exp',  $5||'X', $1, $2, $3, 'open', '{}', 2, now() - interval '1 hour'),
 		   ($4||'_live', $5||'L', $1, $2, $3, 'open', '{}', 2, now() + interval '1 hour')`,
 		tenantID, projectID, hostID, "gs_"+token, "JC"+token)
 	require.NoError(t, err)
 
 	_, err = c.bootstrapPool.Exec(ctx,
-		`INSERT INTO game_invite (tenant_id, project_id, from_user_id, to_user_id, session_id, join_code, expires_at) VALUES
+		`INSERT INTO game_invite (tenant_id, project_id, from_player_id, to_player_id, session_id, join_code, expires_at) VALUES
 		   ($1, $2, $3, $3, $4||'_live', $5||'L', now() - interval '1 minute'),
 		   ($1, $2, $3, $3, $4||'_live', $5||'L', now() + interval '1 minute')`,
 		tenantID, projectID, hostID, "gs_"+token, "JC"+token)

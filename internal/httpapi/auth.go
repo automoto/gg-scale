@@ -49,7 +49,7 @@ const bcryptCost = webutil.BcryptCost
 type anonymousResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	EndUserID    int64  `json:"end_user_id"`
+	PlayerID     int64  `json:"player_id"`
 	ExternalID   string `json:"external_id"`
 	ExpiresAt    string `json:"expires_at"`
 }
@@ -57,7 +57,7 @@ type anonymousResponse struct {
 type sessionResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	EndUserID    int64  `json:"end_user_id"`
+	PlayerID     int64  `json:"player_id"`
 	ExpiresAt    string `json:"expires_at"`
 }
 
@@ -112,17 +112,17 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 
 		now := apiNow(d)
 		accessExpiresAt := now.Add(accessTokenTTL)
-		var endUserID int64
+		var playerID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			user, err := q.CreateAnonymousEndUser(ctx, sqlcgen.CreateAnonymousEndUserParams{
+			user, err := q.CreateAnonymousPlayer(ctx, sqlcgen.CreateAnonymousPlayerParams{
 				ProjectID:  projectID,
 				ExternalID: externalID,
 			})
 			if err != nil {
-				return fmt.Errorf("insert end_user: %w", err)
+				return fmt.Errorf("insert player: %w", err)
 			}
-			endUserID = user.ID
+			playerID = user.ID
 			if err := insertSession(ctx, tx, projectID, user.ID, refreshToken, now); err != nil {
 				return err
 			}
@@ -134,7 +134,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 		}
 
 		accessToken, err := d.Signer.Sign(auth.Claims{
-			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
+			PlayerID: playerID, TenantID: tenantID, ProjectID: projectID,
 			ExpiresAt: accessExpiresAt,
 		})
 		if err != nil {
@@ -144,7 +144,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 
 		writeJSON(w, anonymousResponse{
 			AccessToken: accessToken, RefreshToken: refreshToken,
-			EndUserID: endUserID, ExternalID: externalID,
+			PlayerID: playerID, ExternalID: externalID,
 			ExpiresAt: accessExpiresAt.UTC().Format(time.RFC3339),
 		})
 	}
@@ -196,7 +196,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 			q := sqlcgen.New(tx)
 			email := req.Email
 			expires := pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true}
-			id, err := q.CreateEmailEndUser(ctx, sqlcgen.CreateEmailEndUserParams{
+			id, err := q.CreateEmailPlayer(ctx, sqlcgen.CreateEmailPlayerParams{
 				ProjectID:                  projectID,
 				ExternalID:                 externalID,
 				Email:                      &email,
@@ -206,7 +206,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 				EmailVerificationExpiresAt: expires,
 			})
 			if err != nil {
-				return fmt.Errorf("insert end_user: %w", err)
+				return fmt.Errorf("insert player: %w", err)
 			}
 			return auditlog.Write(ctx, tx, id, "auth.signup", email, nil)
 		})
@@ -271,13 +271,13 @@ func verifyHandler(d Deps) http.HandlerFunc {
 		now := apiNow(d)
 
 		var (
-			endUserID          int64
+			playerID           int64
 			lockedAfterAttempt bool
 		)
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
-			row, err := q.GetEndUserVerificationState(ctx, sqlcgen.GetEndUserVerificationStateParams{
+			row, err := q.GetPlayerVerificationState(ctx, sqlcgen.GetPlayerVerificationStateParams{
 				ProjectID: projectID,
 				Email:     &email,
 			})
@@ -285,7 +285,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				return err
 			}
 			if row.EmailVerifiedAt.Valid {
-				endUserID = row.ID
+				playerID = row.ID
 				return nil
 			}
 			if row.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(row.EmailVerificationLockedUntil.Time, now) {
@@ -299,7 +299,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			}
 			// Atomic check-and-bump replaces the prior fetch-then-increment
 			// pattern that could undercount concurrent wrong codes.
-			reserved, err := q.ReserveEndUserVerifyAttempt(ctx, sqlcgen.ReserveEndUserVerifyAttemptParams{
+			reserved, err := q.ReservePlayerVerifyAttempt(ctx, sqlcgen.ReservePlayerVerifyAttemptParams{
 				ID:          row.ID,
 				MaxAttempts: int32(verifycode.MaxAttempts),
 			})
@@ -316,7 +316,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			// dedicated guard at the head of the closure on the next call.
 			if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
 				lockedUntil := pgtype.Timestamptz{Time: now.Add(verifycode.LockoutDuration), Valid: true}
-				if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
+				if lerr := q.LockPlayerVerification(ctx, sqlcgen.LockPlayerVerificationParams{
 					ID: row.ID, LockedUntil: lockedUntil,
 				}); lerr != nil {
 					return lerr
@@ -326,10 +326,10 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			}
 			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
 			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) == 1 {
-				if err := q.MarkEndUserVerified(ctx, row.ID); err != nil {
+				if err := q.MarkPlayerVerified(ctx, row.ID); err != nil {
 					return err
 				}
-				endUserID = row.ID
+				playerID = row.ID
 				return auditlog.Write(ctx, tx, row.ID, "auth.verify", "", nil)
 			}
 			return errVerifyBadCode
@@ -359,7 +359,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, map[string]any{"end_user_id": endUserID, "verified": true})
+		writeJSON(w, map[string]any{"player_id": playerID, "verified": true})
 	}
 }
 
@@ -389,11 +389,11 @@ func loginHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		now := apiNow(d)
-		var endUserID, sessionEpoch int64
+		var playerID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			email := req.Email
-			row, err := q.GetEndUserByEmail(ctx, sqlcgen.GetEndUserByEmailParams{
+			row, err := q.GetPlayerByEmail(ctx, sqlcgen.GetPlayerByEmailParams{
 				ProjectID: projectID,
 				Email:     &email,
 			})
@@ -404,13 +404,13 @@ func loginHandler(d Deps) http.HandlerFunc {
 				return errBadCredentials
 			}
 			// Tenant-ban enforcement: a banned account cannot log in.
-			if _, berr := q.IsEndUserBannedByTenant(ctx, row.ID); berr == nil {
+			if _, berr := q.IsPlayerBannedByTenant(ctx, row.ID); berr == nil {
 				return errPlayerBanned
 			} else if !errors.Is(berr, pgx.ErrNoRows) {
 				return berr
 			}
-			endUserID = row.ID
-			ep, eerr := q.GetEndUserSessionEpoch(ctx, row.ID)
+			playerID = row.ID
+			ep, eerr := q.GetPlayerSessionEpoch(ctx, row.ID)
 			if eerr != nil {
 				return eerr
 			}
@@ -440,7 +440,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
-			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
+			PlayerID: playerID, TenantID: tenantID, ProjectID: projectID,
 			SessionEpoch: sessionEpoch,
 			ExpiresAt:    expiresAt,
 		})
@@ -450,7 +450,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 		}
 		writeJSON(w, sessionResponse{
 			AccessToken: accessToken, RefreshToken: refreshToken,
-			EndUserID: endUserID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 		})
 	}
 }
@@ -482,7 +482,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 		}
 		now := apiNow(d)
 
-		var endUserID, sessionEpoch int64
+		var playerID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			row, err := q.GetSessionByRefreshHash(ctx, sqlcgen.GetSessionByRefreshHashParams{
@@ -496,13 +496,13 @@ func refreshHandler(d Deps) http.HandlerFunc {
 				return errSessionRevoked
 			}
 			// A tenant-banned account cannot refresh into a new access token.
-			if _, berr := q.IsEndUserBannedByTenant(ctx, row.EndUserID); berr == nil {
+			if _, berr := q.IsPlayerBannedByTenant(ctx, row.PlayerID); berr == nil {
 				return errPlayerBanned
 			} else if !errors.Is(berr, pgx.ErrNoRows) {
 				return berr
 			}
-			endUserID = row.EndUserID
-			ep, eerr := q.GetEndUserSessionEpoch(ctx, row.EndUserID)
+			playerID = row.PlayerID
+			ep, eerr := q.GetPlayerSessionEpoch(ctx, row.PlayerID)
 			if eerr != nil {
 				return eerr
 			}
@@ -510,10 +510,10 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			if err := q.RevokeSession(ctx, row.ID); err != nil {
 				return err
 			}
-			if err := insertSession(ctx, tx, row.ProjectID, row.EndUserID, newRefresh, now); err != nil {
+			if err := insertSession(ctx, tx, row.ProjectID, row.PlayerID, newRefresh, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, row.EndUserID, "auth.refresh", "", nil)
+			return auditlog.Write(ctx, tx, row.PlayerID, "auth.refresh", "", nil)
 		})
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errSessionRevoked) {
 			http.Error(w, "invalid refresh", http.StatusUnauthorized)
@@ -530,7 +530,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
-			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
+			PlayerID: playerID, TenantID: tenantID, ProjectID: projectID,
 			SessionEpoch: sessionEpoch,
 			ExpiresAt:    expiresAt,
 		})
@@ -540,7 +540,7 @@ func refreshHandler(d Deps) http.HandlerFunc {
 		}
 		writeJSON(w, sessionResponse{
 			AccessToken: accessToken, RefreshToken: newRefresh,
-			EndUserID: endUserID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 		})
 	}
 }
@@ -561,7 +561,7 @@ func logoutHandler(d Deps) http.HandlerFunc {
 		hash := sha256.Sum256([]byte(req.RefreshToken))
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			endUserID, err := q.RevokeSessionByRefreshHash(ctx, hash[:])
+			playerID, err := q.RevokeSessionByRefreshHash(ctx, hash[:])
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					// Unknown or already-revoked refresh token. Treat the
@@ -571,7 +571,7 @@ func logoutHandler(d Deps) http.HandlerFunc {
 				}
 				return err
 			}
-			return auditlog.Write(ctx, tx, endUserID, "auth.logout", "", nil)
+			return auditlog.Write(ctx, tx, playerID, "auth.logout", "", nil)
 		})
 		if err != nil {
 			webutil.InternalError(w, "logout: tx", err)
@@ -604,7 +604,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 
 		var (
 			secret       []byte
-			endUserID    int64
+			playerID     int64
 			sessionEpoch int64
 			externalID   string
 			refreshTok   string
@@ -651,20 +651,20 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			}
 			externalID = parsed.External
 
-			id, err := q.UpsertEndUserByExternalID(ctx, sqlcgen.UpsertEndUserByExternalIDParams{
+			id, err := q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
 				ProjectID:  projectID,
 				ExternalID: externalID,
 			})
 			if err != nil {
-				return fmt.Errorf("upsert end_user: %w", err)
+				return fmt.Errorf("upsert player: %w", err)
 			}
-			endUserID = id
-			if _, berr := q.IsEndUserBannedByTenant(ctx, id); berr == nil {
+			playerID = id
+			if _, berr := q.IsPlayerBannedByTenant(ctx, id); berr == nil {
 				return errPlayerBanned
 			} else if !errors.Is(berr, pgx.ErrNoRows) {
 				return berr
 			}
-			ep, eerr := q.GetEndUserSessionEpoch(ctx, id)
+			ep, eerr := q.GetPlayerSessionEpoch(ctx, id)
 			if eerr != nil {
 				return eerr
 			}
@@ -691,7 +691,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 
 		expiresAt := now.Add(accessTokenTTL)
 		accessToken, err := d.Signer.Sign(auth.Claims{
-			EndUserID: endUserID, TenantID: tenantID, ProjectID: projectID,
+			PlayerID: playerID, TenantID: tenantID, ProjectID: projectID,
 			SessionEpoch: sessionEpoch,
 			ExpiresAt:    expiresAt,
 		})
@@ -701,7 +701,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		}
 		writeJSON(w, sessionResponse{
 			AccessToken: accessToken, RefreshToken: refreshTok,
-			EndUserID: endUserID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 		})
 	}
 }
@@ -741,12 +741,12 @@ func mustGenerateDummyHash() []byte {
 	return h
 }
 
-func insertSession(ctx context.Context, tx pgx.Tx, projectID, endUserID int64, refreshToken string, now time.Time) error {
+func insertSession(ctx context.Context, tx pgx.Tx, projectID, playerID int64, refreshToken string, now time.Time) error {
 	q := sqlcgen.New(tx)
 	sum := sha256.Sum256([]byte(refreshToken))
 	_, err := q.CreateSession(ctx, sqlcgen.CreateSessionParams{
 		ProjectID:   projectID,
-		EndUserID:   endUserID,
+		PlayerID:    playerID,
 		RefreshHash: sum[:],
 		ExpiresAt:   pgtype.Timestamptz{Time: now.Add(refreshTokenTTL), Valid: true},
 	})

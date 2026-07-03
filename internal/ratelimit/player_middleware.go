@@ -10,31 +10,31 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 )
 
-// EndUserRate / EndUserBurst are the defaults for the per-end-user
+// PlayerRate / PlayerBurst are the defaults for the per-player
 // limiter mounted on authenticated routes. 30 requests/sec with a burst
 // of 60 is the rough budget a single player can sustain for storage,
 // leaderboard, matchmaker, and relay calls. Operators tune via env.
 const (
-	EndUserRate  = 30.0
-	EndUserBurst = 60.0
+	PlayerRate  = 30.0
+	PlayerBurst = 60.0
 )
 
-// NewEndUserLimiter buckets requests per (tenant, end_user_id). It sits
+// NewPlayerLimiter buckets requests per (tenant, player_id). It sits
 // alongside the per-api-key limiter so one abusive player can't drain the
 // shared api-key bucket for every other player on the same key.
 //
-// Mount inside the end-user-authenticated subgroup (after enduser.New
-// installs the id on the request context). When no end-user is in
+// Mount inside the player-authenticated subgroup (after playerauth.New
+// installs the id on the request context). When no player is in
 // context the middleware is a no-op — the upstream tenant + api-key
 // limiters still apply.
-func NewEndUserLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus.Registerer) func(http.Handler) http.Handler {
+func NewPlayerLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus.Registerer) func(http.Handler) http.Handler {
 	throttled := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "ggscale_ratelimit_enduser_throttled_total",
-			Help: "Authenticated requests throttled by the per-end-user limiter.",
+			Name: "ggscale_ratelimit_player_throttled_total",
+			Help: "Authenticated requests throttled by the per-player limiter.",
 		},
 		[]string{"route_class"},
 	)
@@ -48,13 +48,13 @@ func NewEndUserLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			endUserID, ok := enduser.IDFromContext(r.Context())
+			playerID, ok := playerauth.IDFromContext(r.Context())
 			if !ok {
 				next.ServeHTTP(w, r)
 				return
 			}
 			tenantID, _ := db.TenantFromContext(r.Context())
-			bucket := endUserBucketKey(tenantID, endUserID)
+			bucket := playerBucketKey(tenantID, playerID)
 			decision, err := lim.Allow(r.Context(), bucket, ratePerSecond, burst)
 			if err != nil {
 				http.Error(w, "internal error", http.StatusInternalServerError)
@@ -72,7 +72,7 @@ func NewEndUserLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus
 					"error":               "rate_limit_exceeded",
 					"retry_after_seconds": retrySec,
 				})
-				throttled.WithLabelValues("enduser").Inc()
+				throttled.WithLabelValues("player").Inc()
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -80,6 +80,6 @@ func NewEndUserLimiter(lim Limiter, ratePerSecond, burst float64, reg prometheus
 	}
 }
 
-func endUserBucketKey(tenantID, endUserID int64) string {
-	return fmt.Sprintf("ratelimit:enduser:%d:%d", tenantID, endUserID)
+func playerBucketKey(tenantID, playerID int64) string {
+	return fmt.Sprintf("ratelimit:player:%d:%d", tenantID, playerID)
 }

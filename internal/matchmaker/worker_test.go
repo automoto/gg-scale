@@ -74,24 +74,24 @@ type fakeNotifier struct {
 	mu            sync.Mutex
 	sent          []sentMessage
 	failErr       error
-	failForUserID int64 // when non-zero, only this end_user_id gets ErrNotConnected
+	failForUserID int64 // when non-zero, only this player_id gets ErrNotConnected
 }
 
 type sentMessage struct {
-	tenantID, endUserID int64
-	msg                 realtime.Message
+	tenantID, playerID int64
+	msg                realtime.Message
 }
 
-func (f *fakeNotifier) Send(_ context.Context, tenantID, endUserID int64, msg realtime.Message) error {
+func (f *fakeNotifier) Send(_ context.Context, tenantID, playerID int64, msg realtime.Message) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failErr != nil {
 		return f.failErr
 	}
-	if f.failForUserID != 0 && endUserID == f.failForUserID {
+	if f.failForUserID != 0 && playerID == f.failForUserID {
 		return realtime.ErrNotConnected
 	}
-	f.sent = append(f.sent, sentMessage{tenantID, endUserID, msg})
+	f.sent = append(f.sent, sentMessage{tenantID, playerID, msg})
 	return nil
 }
 
@@ -116,7 +116,7 @@ func TestWorkerAllocatesAndNotifiesOnFullBucket(t *testing.T) {
 	hub := &fakeNotifier{}
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{BucketSize: 1})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -124,7 +124,7 @@ func TestWorkerAllocatesAndNotifiesOnFullBucket(t *testing.T) {
 	sent := hub.Sent()
 	require.Len(t, sent, 1)
 	assert.Equal(t, int64(1), sent[0].tenantID)
-	assert.Equal(t, int64(42), sent[0].endUserID)
+	assert.Equal(t, int64(42), sent[0].playerID)
 	assert.Equal(t, "match_ready", sent[0].msg.Type)
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(sent[0].msg.Payload, &payload))
@@ -136,7 +136,7 @@ func TestWorkerSkipsBucketsThatDoNotMeetSize(t *testing.T) {
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 2})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, Region: "us-east-1", GameMode: "1v1", EndUserID: 1})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, Region: "us-east-1", GameMode: "1v1", PlayerID: 1})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -147,7 +147,7 @@ func TestWorkerForwardsTenantContextToAllocator(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1})
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 99, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 99, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -164,7 +164,7 @@ func TestWorkerFailsTicketAfterMaxAttempts(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{err: errors.New("backend down")}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1, MaxAttempts: 1})
-	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -177,7 +177,7 @@ func TestWorkerRetriesUnderAttemptCap(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{err: errors.New("backend down")}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 1, MaxAttempts: 3})
-	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -190,7 +190,7 @@ func TestWorkerDeallocatesOrphanWhenCommitFindsNoRows(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	hub := &fakeNotifier{}
-	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	// Race: player cancels mid-allocate. Allocate takes long enough that
 	// the cancel runs between ClaimBucket and CommitClaim; CommitClaim then
@@ -231,9 +231,9 @@ func TestWorkerIsolatesTenantsAndProjects(t *testing.T) {
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{BucketSize: 2})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 1, Region: "r", GameMode: "g"})
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 2, Region: "r", GameMode: "g"})
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 2, ProjectID: 7, EndUserID: 1, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 1, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 2, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 2, ProjectID: 7, PlayerID: 1, Region: "r", GameMode: "g"})
 
 	require.NoError(t, w.Tick(context.Background()))
 
@@ -273,7 +273,7 @@ func TestWorkerProcessesBucketOnListenerEvent(t *testing.T) {
 		BucketSize: 1,
 		Interval:   time.Hour,
 	})
-	enqueue(t, q.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "us-east-1", GameMode: "1v1"})
+	enqueue(t, q.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -295,7 +295,7 @@ func TestWorkerReleasesAllocationWhenNoClientIsReachable(t *testing.T) {
 	hub := &fakeNotifier{failErr: realtime.ErrNotConnected}
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{BucketSize: 1})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "r", GameMode: "g"})
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())
@@ -312,8 +312,8 @@ func TestWorkerKeepsAllocationWhenAnyClientReachable(t *testing.T) {
 	hub := &fakeNotifier{failForUserID: 42} // one of two players is offline
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{BucketSize: 2})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 41, Region: "r", GameMode: "g"})
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, EndUserID: 42, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 41, Region: "r", GameMode: "g"})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Region: "r", GameMode: "g"})
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())

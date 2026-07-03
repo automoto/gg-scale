@@ -11,34 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const bumpAccountEndUserEpochsInTenant = `-- name: BumpAccountEndUserEpochsInTenant :exec
-UPDATE end_users
+const bumpAccountPlayerEpochsInTenant = `-- name: BumpAccountPlayerEpochsInTenant :exec
+UPDATE project_players
 SET session_epoch = session_epoch + 1
 WHERE tenant_id = $1
   AND player_account_id = $2
 `
 
-type BumpAccountEndUserEpochsInTenantParams struct {
+type BumpAccountPlayerEpochsInTenantParams struct {
 	TenantID        int64
 	PlayerAccountID pgtype.UUID
 }
 
-// Bump every end_user of an account within a tenant (tenant-ban path), so all
+// Bump every player of an account within a tenant (tenant-ban path), so all
 // their live JWTs are rejected at server-verify immediately.
-func (q *Queries) BumpAccountEndUserEpochsInTenant(ctx context.Context, arg BumpAccountEndUserEpochsInTenantParams) error {
-	_, err := q.db.Exec(ctx, bumpAccountEndUserEpochsInTenant, arg.TenantID, arg.PlayerAccountID)
+func (q *Queries) BumpAccountPlayerEpochsInTenant(ctx context.Context, arg BumpAccountPlayerEpochsInTenantParams) error {
+	_, err := q.db.Exec(ctx, bumpAccountPlayerEpochsInTenant, arg.TenantID, arg.PlayerAccountID)
 	return err
 }
 
-const bumpEndUserSessionEpoch = `-- name: BumpEndUserSessionEpoch :exec
-UPDATE end_users
+const bumpPlayerSessionEpoch = `-- name: BumpPlayerSessionEpoch :exec
+UPDATE project_players
 SET session_epoch = session_epoch + 1
 WHERE id = $1
 `
 
-// Single end_user (project disable path).
-func (q *Queries) BumpEndUserSessionEpoch(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, bumpEndUserSessionEpoch, id)
+// Single player (project disable path).
+func (q *Queries) BumpPlayerSessionEpoch(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, bumpPlayerSessionEpoch, id)
 	return err
 }
 
@@ -108,9 +108,9 @@ func (q *Queries) IsAccountBannedInTenant(ctx context.Context, arg IsAccountBann
 	return id, err
 }
 
-const isEndUserBannedByTenant = `-- name: IsEndUserBannedByTenant :one
+const isPlayerBannedByTenant = `-- name: IsPlayerBannedByTenant :one
 SELECT b.id
-FROM end_users u
+FROM project_players u
 JOIN tenant_player_bans b
   ON b.player_account_id = u.player_account_id
  AND b.tenant_id = u.tenant_id
@@ -119,11 +119,11 @@ WHERE u.id = $1
 LIMIT 1
 `
 
-// Enforcement helper: is the given end_user's linked account tenant-banned in
-// the end_user's own tenant? Runs in a tenant Pool.Q (end_users RLS-filtered).
+// Enforcement helper: is the given player's linked account tenant-banned in
+// the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
 // Returns pgx.ErrNoRows when not banned (or the player is unlinked).
-func (q *Queries) IsEndUserBannedByTenant(ctx context.Context, endUserID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, isEndUserBannedByTenant, endUserID)
+func (q *Queries) IsPlayerBannedByTenant(ctx context.Context, playerID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, isPlayerBannedByTenant, playerID)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

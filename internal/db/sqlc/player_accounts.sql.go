@@ -11,8 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createLinkedEndUser = `-- name: CreateLinkedEndUser :one
-INSERT INTO end_users (
+const createLinkedPlayer = `-- name: CreateLinkedPlayer :one
+INSERT INTO project_players (
     tenant_id, project_id, external_id, email, email_verified_at, player_account_id
 )
 VALUES (
@@ -26,18 +26,18 @@ VALUES (
 RETURNING id
 `
 
-type CreateLinkedEndUserParams struct {
+type CreateLinkedPlayerParams struct {
 	ProjectID       int64
 	ExternalID      string
 	Email           *string
 	PlayerAccountID pgtype.UUID
 }
 
-// Tenant-scoped: creates a verified end_user already linked to a global
+// Tenant-scoped: creates a verified player already linked to a global
 // account (public-join / invite-accept). The account's email ownership is
 // already proven, so email_verified_at is set.
-func (q *Queries) CreateLinkedEndUser(ctx context.Context, arg CreateLinkedEndUserParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createLinkedEndUser,
+func (q *Queries) CreateLinkedPlayer(ctx context.Context, arg CreateLinkedPlayerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createLinkedPlayer,
 		arg.ProjectID,
 		arg.ExternalID,
 		arg.Email,
@@ -80,7 +80,7 @@ type CreatePlayerAccountRow struct {
 // Global player accounts. Platform-global (no tenant RLS): every query here is
 // run through db.Pool.BootstrapQ. See docs/temp/player-accounts.md.
 // Creates an unverified account with its first verification code inlined
-// (mirrors CreatePlayerEndUser). Fails on the UNIQUE email constraint if an
+// (mirrors CreatePlayer). Fails on the UNIQUE email constraint if an
 // account already exists.
 func (q *Queries) CreatePlayerAccount(ctx context.Context, arg CreatePlayerAccountParams) (CreatePlayerAccountRow, error) {
 	row := q.db.QueryRow(ctx, createPlayerAccount,
@@ -145,56 +145,6 @@ func (q *Queries) CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVer
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
-}
-
-const getEndUserAccountForProjectRead = `-- name: GetEndUserAccountForProjectRead :one
-SELECT player_account_id
-FROM end_users
-WHERE id = $1
-  AND project_id = $2
-  AND deleted_at IS NULL
-`
-
-type GetEndUserAccountForProjectReadParams struct {
-	ID        int64
-	ProjectID int64
-}
-
-// Tenant-scoped: resolve an end_user (in a project the caller's secret key is
-// pinned to) to its linked account id, for the server-side remote-address
-// read path. NULL account => unlinked player, no address.
-func (q *Queries) GetEndUserAccountForProjectRead(ctx context.Context, arg GetEndUserAccountForProjectReadParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, getEndUserAccountForProjectRead, arg.ID, arg.ProjectID)
-	var player_account_id pgtype.UUID
-	err := row.Scan(&player_account_id)
-	return player_account_id, err
-}
-
-const getEndUserForAccountLink = `-- name: GetEndUserForAccountLink :one
-SELECT id, player_account_id
-FROM end_users
-WHERE project_id = $1
-  AND email = $2
-  AND deleted_at IS NULL
-`
-
-type GetEndUserForAccountLinkParams struct {
-	ProjectID int64
-	Email     *string
-}
-
-type GetEndUserForAccountLinkRow struct {
-	ID              int64
-	PlayerAccountID pgtype.UUID
-}
-
-// Tenant-scoped: finds an existing (possibly unlinked) end_user by project +
-// email so a public-join / invite can link it instead of creating a duplicate.
-func (q *Queries) GetEndUserForAccountLink(ctx context.Context, arg GetEndUserForAccountLinkParams) (GetEndUserForAccountLinkRow, error) {
-	row := q.db.QueryRow(ctx, getEndUserForAccountLink, arg.ProjectID, arg.Email)
-	var i GetEndUserForAccountLinkRow
-	err := row.Scan(&i.ID, &i.PlayerAccountID)
-	return i, err
 }
 
 const getPlayerAccountByEmail = `-- name: GetPlayerAccountByEmail :one
@@ -271,6 +221,29 @@ func (q *Queries) GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (Get
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getPlayerAccountForProjectRead = `-- name: GetPlayerAccountForProjectRead :one
+SELECT player_account_id
+FROM project_players
+WHERE id = $1
+  AND project_id = $2
+  AND deleted_at IS NULL
+`
+
+type GetPlayerAccountForProjectReadParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+// Tenant-scoped: resolve a player (in a project the caller's secret key is
+// pinned to) to its linked account id, for the server-side remote-address
+// read path. NULL account => unlinked player, no address.
+func (q *Queries) GetPlayerAccountForProjectRead(ctx context.Context, arg GetPlayerAccountForProjectReadParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getPlayerAccountForProjectRead, arg.ID, arg.ProjectID)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
 }
 
 const getPlayerAccountRemoteAddrs = `-- name: GetPlayerAccountRemoteAddrs :one
@@ -385,15 +358,42 @@ func (q *Queries) GetPlayerAccountVerificationState(ctx context.Context, id pgty
 	return i, err
 }
 
-const linkEndUserToAccount = `-- name: LinkEndUserToAccount :exec
+const getPlayerForAccountLink = `-- name: GetPlayerForAccountLink :one
+SELECT id, player_account_id
+FROM project_players
+WHERE project_id = $1
+  AND email = $2
+  AND deleted_at IS NULL
+`
 
-UPDATE end_users
+type GetPlayerForAccountLinkParams struct {
+	ProjectID int64
+	Email     *string
+}
+
+type GetPlayerForAccountLinkRow struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+}
+
+// Tenant-scoped: finds an existing (possibly unlinked) player by project +
+// email so a public-join / invite can link it instead of creating a duplicate.
+func (q *Queries) GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForAccountLinkParams) (GetPlayerForAccountLinkRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerForAccountLink, arg.ProjectID, arg.Email)
+	var i GetPlayerForAccountLinkRow
+	err := row.Scan(&i.ID, &i.PlayerAccountID)
+	return i, err
+}
+
+const linkPlayerToAccount = `-- name: LinkPlayerToAccount :exec
+
+UPDATE project_players
 SET player_account_id = $1
 WHERE id = $2
   AND deleted_at IS NULL
 `
 
-type LinkEndUserToAccountParams struct {
+type LinkPlayerToAccountParams struct {
 	PlayerAccountID pgtype.UUID
 	ID              int64
 }
@@ -401,11 +401,11 @@ type LinkEndUserToAccountParams struct {
 // ListPlayerAccountLinkedProjects is intentionally NOT a sqlc query: it reads
 // the SECURITY DEFINER player_account_linked_projects(uuid) table-function,
 // which sqlc's analyzer can't resolve column types for. It is called via raw
-// tx.Query in internal/players (same approach as player_end_user_tenant).
+// tx.Query in internal/players (same approach as project_player_tenant).
 // Tenant-scoped (run under Pool.Q with app.tenant_id set): attaches a
-// per-project end_user to a global account. Guarded by RLS on end_users.
-func (q *Queries) LinkEndUserToAccount(ctx context.Context, arg LinkEndUserToAccountParams) error {
-	_, err := q.db.Exec(ctx, linkEndUserToAccount, arg.PlayerAccountID, arg.ID)
+// per-project player to a global account. Guarded by RLS on project_players.
+func (q *Queries) LinkPlayerToAccount(ctx context.Context, arg LinkPlayerToAccountParams) error {
+	_, err := q.db.Exec(ctx, linkPlayerToAccount, arg.PlayerAccountID, arg.ID)
 	return err
 }
 
@@ -642,14 +642,14 @@ func (q *Queries) SetPlayerAccountVerificationCode(ctx context.Context, arg SetP
 	return err
 }
 
-const unlinkEndUserFromAccount = `-- name: UnlinkEndUserFromAccount :exec
-UPDATE end_users
+const unlinkPlayerFromAccount = `-- name: UnlinkPlayerFromAccount :exec
+UPDATE project_players
 SET player_account_id = NULL
 WHERE id = $1
   AND deleted_at IS NULL
 `
 
-func (q *Queries) UnlinkEndUserFromAccount(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, unlinkEndUserFromAccount, id)
+func (q *Queries) UnlinkPlayerFromAccount(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, unlinkPlayerFromAccount, id)
 	return err
 }

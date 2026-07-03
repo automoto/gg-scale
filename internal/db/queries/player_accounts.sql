@@ -3,7 +3,7 @@
 
 -- name: CreatePlayerAccount :one
 -- Creates an unverified account with its first verification code inlined
--- (mirrors CreatePlayerEndUser). Fails on the UNIQUE email constraint if an
+-- (mirrors CreatePlayer). Fails on the UNIQUE email constraint if an
 -- account already exists.
 INSERT INTO player_accounts (
     email, password_hash, display_name,
@@ -162,36 +162,36 @@ WHERE player_account_id = sqlc.arg(player_account_id)
 -- ListPlayerAccountLinkedProjects is intentionally NOT a sqlc query: it reads
 -- the SECURITY DEFINER player_account_linked_projects(uuid) table-function,
 -- which sqlc's analyzer can't resolve column types for. It is called via raw
--- tx.Query in internal/players (same approach as player_end_user_tenant).
+-- tx.Query in internal/players (same approach as project_player_tenant).
 
--- name: LinkEndUserToAccount :exec
+-- name: LinkPlayerToAccount :exec
 -- Tenant-scoped (run under Pool.Q with app.tenant_id set): attaches a
--- per-project end_user to a global account. Guarded by RLS on end_users.
-UPDATE end_users
+-- per-project player to a global account. Guarded by RLS on project_players.
+UPDATE project_players
 SET player_account_id = sqlc.arg(player_account_id)
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
--- name: UnlinkEndUserFromAccount :exec
-UPDATE end_users
+-- name: UnlinkPlayerFromAccount :exec
+UPDATE project_players
 SET player_account_id = NULL
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
--- name: GetEndUserForAccountLink :one
--- Tenant-scoped: finds an existing (possibly unlinked) end_user by project +
+-- name: GetPlayerForAccountLink :one
+-- Tenant-scoped: finds an existing (possibly unlinked) player by project +
 -- email so a public-join / invite can link it instead of creating a duplicate.
 SELECT id, player_account_id
-FROM end_users
+FROM project_players
 WHERE project_id = sqlc.arg(project_id)
   AND email = sqlc.arg(email)
   AND deleted_at IS NULL;
 
--- name: CreateLinkedEndUser :one
--- Tenant-scoped: creates a verified end_user already linked to a global
+-- name: CreateLinkedPlayer :one
+-- Tenant-scoped: creates a verified player already linked to a global
 -- account (public-join / invite-accept). The account's email ownership is
 -- already proven, so email_verified_at is set.
-INSERT INTO end_users (
+INSERT INTO project_players (
     tenant_id, project_id, external_id, email, email_verified_at, player_account_id
 )
 VALUES (
@@ -216,12 +216,12 @@ SET primary_remote_addr   = sqlc.narg(primary_remote_addr),
     updated_at            = now()
 WHERE id = sqlc.arg(id);
 
--- name: GetEndUserAccountForProjectRead :one
--- Tenant-scoped: resolve an end_user (in a project the caller's secret key is
+-- name: GetPlayerAccountForProjectRead :one
+-- Tenant-scoped: resolve a player (in a project the caller's secret key is
 -- pinned to) to its linked account id, for the server-side remote-address
 -- read path. NULL account => unlinked player, no address.
 SELECT player_account_id
-FROM end_users
+FROM project_players
 WHERE id = sqlc.arg(id)
   AND project_id = sqlc.arg(project_id)
   AND deleted_at IS NULL;

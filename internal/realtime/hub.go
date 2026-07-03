@@ -1,5 +1,5 @@
 // Package realtime is the WebSocket fan-out for ggscale. The Hub keeps a
-// (tenant, end-user) → live socket map so the matchmaker can push MatchReady
+// (tenant, player) → live socket map so the matchmaker can push MatchReady
 // envelopes to a specific player without knowing the underlying transport.
 //
 // Transport detail (coder/websocket, framing, heartbeat) lives in server.go;
@@ -14,10 +14,10 @@ import (
 )
 
 // ErrNotConnected is returned by Send when no socket is registered for the
-// target (tenant, end-user) pair. Callers (matchmaker) treat this as a
+// target (tenant, player) pair. Callers (matchmaker) treat this as a
 // signal the player has disconnected and should retry later or fail the
 // ticket.
-var ErrNotConnected = errors.New("realtime: end user not connected")
+var ErrNotConnected = errors.New("realtime: player not connected")
 
 // Message is the wire envelope. Type discriminates payloads (match_ready,
 // presence, chat …). Payload is opaque JSON.
@@ -34,11 +34,11 @@ type Writer interface {
 }
 
 type connKey struct {
-	tenantID  int64
-	endUserID int64
+	tenantID int64
+	playerID int64
 }
 
-// Hub tracks active sockets keyed by (tenant, end-user). One Hub per
+// Hub tracks active sockets keyed by (tenant, player). One Hub per
 // process; safe for concurrent use.
 type Hub struct {
 	mu      sync.RWMutex
@@ -50,13 +50,13 @@ func NewHub() *Hub {
 	return &Hub{writers: make(map[connKey]Writer)}
 }
 
-// Register attaches w as the active socket for (tenantID, endUserID). A
+// Register attaches w as the active socket for (tenantID, playerID). A
 // pre-existing writer in the slot is closed (newer-wins) so a reconnecting
 // client doesn't leave stale frames in flight. The returned func removes
 // only this specific registration — calling it after a newer Register won't
 // evict the newer writer.
-func (h *Hub) Register(tenantID, endUserID int64, w Writer) func() {
-	k := connKey{tenantID, endUserID}
+func (h *Hub) Register(tenantID, playerID int64, w Writer) func() {
+	k := connKey{tenantID, playerID}
 	h.mu.Lock()
 	if old, ok := h.writers[k]; ok {
 		_ = old.Close()
@@ -74,9 +74,9 @@ func (h *Hub) Register(tenantID, endUserID int64, w Writer) func() {
 
 // Send marshals msg as JSON and writes it to the registered socket. Returns
 // ErrNotConnected when the target has no live socket.
-func (h *Hub) Send(ctx context.Context, tenantID, endUserID int64, msg Message) error {
+func (h *Hub) Send(ctx context.Context, tenantID, playerID int64, msg Message) error {
 	h.mu.RLock()
-	w, ok := h.writers[connKey{tenantID, endUserID}]
+	w, ok := h.writers[connKey{tenantID, playerID}]
 	h.mu.RUnlock()
 	if !ok {
 		return ErrNotConnected

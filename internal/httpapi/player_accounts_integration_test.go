@@ -179,7 +179,7 @@ func TestPlayerAccount_public_join_respects_effective_policy(t *testing.T) {
 	base := srv.URL + "/v1/players/account"
 	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "join-key")
 
-	// Enabled project: the account joins and an end_user is linked.
+	// Enabled project: the account joins and a player is linked.
 	const email = "joiner@example.com"
 	seedVerifiedPlayerAccount(t, c, email, "correct-horse-battery-staple")
 	client := loginPlayerAccount(t, base, email, "correct-horse-battery-staple")
@@ -193,7 +193,7 @@ func TestPlayerAccount_public_join_respects_effective_policy(t *testing.T) {
 
 	var linked int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM end_users e
+		`SELECT count(*) FROM project_players e
 		 JOIN player_accounts a ON a.id = e.player_account_id
 		 WHERE e.project_id = $1 AND a.email = $2`, projectID, email).Scan(&linked))
 	assert.Equal(t, 1, linked)
@@ -215,7 +215,7 @@ func TestPlayerAccount_public_join_respects_effective_policy(t *testing.T) {
 
 	var linked2 int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM end_users e
+		`SELECT count(*) FROM project_players e
 		 JOIN player_accounts a ON a.id = e.player_account_id
 		 WHERE e.project_id = $1 AND a.email = $2`, projectID, email2).Scan(&linked2))
 	assert.Equal(t, 0, linked2, "invite-only project must not create a link")

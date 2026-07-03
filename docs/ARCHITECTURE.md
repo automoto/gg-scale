@@ -258,7 +258,7 @@ them across two headers:
 | Header | Carries | Issued to | Lifetime |
 |---|---|---|---|
 | `Authorization: Bearer <api_key>` | The **tenant** identity (the game studio) | Tenant operator at project create time | Long-lived; rotated only on revoke |
-| `X-Session-Token: <jwt>` | The **end-user** identity (the player) | `/v1/auth/*` after sign-up / login / anonymous / custom-token | 15 minutes (refresh via `/v1/auth/refresh`) |
+| `X-Session-Token: <jwt>` | The **player** identity (the player) | `/v1/auth/*` after sign-up / login / anonymous / custom-token | 15 minutes (refresh via `/v1/auth/refresh`) |
 
 This is intentionally inverted from the convention some HTTP guides
 recommend (where the user JWT lives in `Authorization`). The reasoning:
@@ -268,15 +268,15 @@ recommend (where the user JWT lives in `Authorization`). The reasoning:
   `X-Session-Token` per session. Players signing in/out doesn't disturb
   the api_key plumbing.
 - **Independent middleware tiers.** `internal/tenant` (Layer 1 above)
-  reads `Authorization` and runs *before* rate-limiting. The end-user
-  middleware (`internal/enduser`) reads `X-Session-Token` and runs only
+  reads `Authorization` and runs *before* rate-limiting. The player
+  middleware (`internal/playerauth`) reads `X-Session-Token` and runs only
   on routes that need the player identity. Cleanly separating the
   headers keeps each middleware single-purpose.
 - **Mirrors Firebase / Supabase**, where the SDK ships the project
   api_key in one slot and the user JWT in another.
 
 A stolen `X-Session-Token` cannot be replayed under a different tenant's
-api_key: `enduser.New` asserts `claims.TenantID == ctx.tenant`.
+api_key: `playerauth.New` asserts `claims.TenantID == ctx.tenant`.
 
 ## Game-server fleet
 
@@ -328,7 +328,7 @@ Postgres-backed allocations still receive `app.tenant_id` for RLS.
 
 `internal/realtime` is the WebSocket fan-out for ggscale. Players open
 one persistent connection to `/v1/ws` after authenticating; the server
-registers it in `realtime.Hub` keyed by `(tenant_id, end_user_id)` so
+registers it in `realtime.Hub` keyed by `(tenant_id, player_id)` so
 any backend goroutine — matchmaker, presence, future lobby/chat — can
 push a message at a specific player without knowing how they're
 connected.
@@ -345,7 +345,7 @@ Key contracts:
   before upgrading and `ReleaseSlot` on disconnect. The Olric cache
   backend shares the counter across multi-VM regions.
 - **Send.** Matchmaker and other callers invoke `Hub.Send(ctx,
-  tenantID, endUserID, Message{Type:"match_ready", Payload: ...})`.
+  tenantID, playerID, Message{Type:"match_ready", Payload: ...})`.
   Returns `ErrNotConnected` when the player is offline; callers decide
   whether to retry or fall back to polling.
 
@@ -355,7 +355,7 @@ exercises the real upgrade path against an httptest server.
 
 ## Matchmaker
 
-The matchmaker (`internal/matchmaker`) turns end-user "find me a match"
+The matchmaker (`internal/matchmaker`) turns player "find me a match"
 requests into game-server allocations. Players POST a ticket to
 `/v1/matchmaker/tickets`; a background worker batches tickets into
 buckets keyed by `(tenant_id, project_id, region, game_mode)` and, once
@@ -389,9 +389,9 @@ reconnect to recover from any missed `match_ready` delivery.
 
 ## TURN relay
 
-`internal/relay` wraps `pion/turn/v3` with ggscale's tenant + end-user
+`internal/relay` wraps `pion/turn/v3` with ggscale's tenant + player
 identity model. Authentication follows the standard TURN-REST shape:
-the username encodes `<expires>:<tenant_id>:<end_user_id>` and the
+the username encodes `<expires>:<tenant_id>:<player_id>` and the
 password is a base64 HMAC-SHA1 of the username under
 `RELAY_SHARED_SECRET`. An authenticated player calls `POST
 /v1/relay/credentials` and receives `{username, password, ttl, realm,

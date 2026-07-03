@@ -1,10 +1,10 @@
-// Package enduser holds the middleware that authenticates an end-user via
+// Package playerauth holds the middleware that authenticates a player via
 // a JWT in the X-Session-Token header. Mount it after tenant.New on routes
 // that need the calling player's identity (storage, leaderboards, friends,
 // profile). The token's tid claim is checked against the api_key's tenant
 // context — a stolen token cannot be replayed under a different tenant's
 // api_key.
-package enduser
+package playerauth
 
 import (
 	"context"
@@ -20,9 +20,9 @@ const headerName = "X-Session-Token"
 type ctxKey struct{}
 type projectCtxKey struct{}
 
-// WithID returns a derived context carrying endUserID.
-func WithID(ctx context.Context, endUserID int64) context.Context {
-	return context.WithValue(ctx, ctxKey{}, endUserID)
+// WithID returns a derived context carrying playerID.
+func WithID(ctx context.Context, playerID int64) context.Context {
+	return context.WithValue(ctx, ctxKey{}, playerID)
 }
 
 // WithProjectID returns a derived context carrying the project id from the
@@ -31,8 +31,8 @@ func WithProjectID(ctx context.Context, projectID int64) context.Context {
 	return context.WithValue(ctx, projectCtxKey{}, projectID)
 }
 
-// IDFromContext extracts the end_user_id installed by the middleware.
-// Returns (0, false) when no end-user has been authenticated.
+// IDFromContext extracts the player_id installed by the middleware.
+// Returns (0, false) when no player has been authenticated.
 func IDFromContext(ctx context.Context) (int64, bool) {
 	v, ok := ctx.Value(ctxKey{}).(int64)
 	if !ok || v == 0 {
@@ -96,7 +96,7 @@ func New(signer *auth.Signer) func(http.Handler) http.Handler {
 				}
 			}
 
-			ctx := WithID(r.Context(), claims.EndUserID)
+			ctx := WithID(r.Context(), claims.PlayerID)
 			if claims.ProjectID != 0 {
 				ctx = WithProjectID(ctx, claims.ProjectID)
 			}

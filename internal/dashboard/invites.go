@@ -5,7 +5,7 @@ import (
 )
 
 // Re-exported for the rest of the dashboard package; the shared
-// primitives live in internal/verifycode so the end-user flow can use
+// primitives live in internal/verifycode so the player flow can use
 // the same code generation + hashing convention.
 
 var (

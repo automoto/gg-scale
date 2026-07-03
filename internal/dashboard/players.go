@@ -49,10 +49,10 @@ func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID in
 	codeHash := verifycode.Hash(nil, code)
 	expiresAt := h.now().Add(verifycode.InviteTTL)
 
-	var row sqlcgen.CreateEndUserInvitationRow
+	var row sqlcgen.CreatePlayerInvitationRow
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		// Set app.tenant_id first so RLS on projects + end_user_invitations
+		// Set app.tenant_id first so RLS on projects + player_invitations
 		// admits both the ownership check and the insert.
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", stringFromInt(tenantID)); err != nil {
 			return fmt.Errorf("set app.tenant_id: %w", err)
@@ -72,7 +72,7 @@ func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID in
 		if proj.TenantID != tenantID {
 			return errProjectNotInTenant
 		}
-		r, qerr := q.CreateEndUserInvitation(ctx, sqlcgen.CreateEndUserInvitationParams{
+		r, qerr := q.CreatePlayerInvitation(ctx, sqlcgen.CreatePlayerInvitationParams{
 			ProjectID:       projectID,
 			Email:           email,
 			CodeHash:        codeHash,
@@ -425,7 +425,7 @@ func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
 
 // playerToggleBanHandler bans / unbans a player's GLOBAL account across the
 // tenant. Requires the player to be linked to an account. Bumps session_epoch
-// on every end_user of the account in this tenant so live JWTs die immediately.
+// on every player of the account in this tenant so live JWTs die immediately.
 func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
@@ -475,7 +475,7 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 		}); err != nil {
 			return err
 		}
-		if err := q.BumpAccountEndUserEpochsInTenant(ctx, sqlcgen.BumpAccountEndUserEpochsInTenantParams{
+		if err := q.BumpAccountPlayerEpochsInTenant(ctx, sqlcgen.BumpAccountPlayerEpochsInTenantParams{
 			TenantID: tenantID, PlayerAccountID: acctID,
 		}); err != nil {
 			return err

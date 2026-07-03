@@ -15,7 +15,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -78,10 +78,10 @@ type gameSessionHeartbeatRequest struct {
 }
 
 type peerEntry struct {
-	EndUserID int64           `json:"end_user_id"`
-	XUID      string          `json:"xuid,omitempty"`
-	Addr      gameSessionAddr `json:"addr"`
-	Relay     any             `json:"relay"`
+	PlayerID int64           `json:"player_id"`
+	XUID     string          `json:"xuid,omitempty"`
+	Addr     gameSessionAddr `json:"addr"`
+	Relay    any             `json:"relay"`
 }
 
 type gameSessionResponse struct {
@@ -94,7 +94,7 @@ type gameSessionResponse struct {
 func buildPeerEntries(rows []sqlcgen.ListGameSessionPeersRow) []peerEntry {
 	out := make([]peerEntry, 0, len(rows))
 	for _, r := range rows {
-		p := peerEntry{EndUserID: r.EndUserID}
+		p := peerEntry{PlayerID: r.PlayerID}
 		if r.Xuid != nil {
 			p.XUID = *r.Xuid
 		}
@@ -123,9 +123,9 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "api key has no project pin", http.StatusBadRequest)
 			return
 		}
-		hostUserID, ok := enduser.IDFromContext(ctx)
+		hostUserID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		if !req.PublicAddr.valid() {
@@ -180,22 +180,22 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 					return errGameSessionCapped
 				}
 				sess, qerr = q.CreateGameSession(ctx, sqlcgen.CreateGameSessionParams{
-					ID:         sessionID,
-					JoinCode:   joinCode,
-					ProjectID:  projectID,
-					TitleID:    req.TitleID,
-					HostUserID: hostUserID,
-					Props:      []byte(props),
-					MaxPlayers: int32(maxPlayers), //nolint:gosec // validated: ≤64
-					Private:    req.Private,
-					ExpiresAt:  pgtype.Timestamptz{Time: now.Add(gameSessionTTL), Valid: true},
+					ID:           sessionID,
+					JoinCode:     joinCode,
+					ProjectID:    projectID,
+					TitleID:      req.TitleID,
+					HostPlayerID: hostUserID,
+					Props:        []byte(props),
+					MaxPlayers:   int32(maxPlayers), //nolint:gosec // validated: ≤64
+					Private:      req.Private,
+					ExpiresAt:    pgtype.Timestamptz{Time: now.Add(gameSessionTTL), Valid: true},
 				})
 				if qerr != nil {
 					return qerr
 				}
 				if qerr := q.UpsertGameSessionPeer(ctx, sqlcgen.UpsertGameSessionPeerParams{
 					SessionID: sessionID,
-					EndUserID: hostUserID,
+					PlayerID:  hostUserID,
 					Ip:        &ip,
 					Port:      &port,
 					Qos:       []byte("{}"),
@@ -306,9 +306,9 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 
 		ctx := r.Context()
 		sessionID := chi.URLParam(r, "id")
-		joinerID, ok := enduser.IDFromContext(ctx)
+		joinerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		if !req.PublicAddr.valid() {
@@ -350,7 +350,7 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 			}
 			if qerr := q.UpsertGameSessionPeer(ctx, sqlcgen.UpsertGameSessionPeerParams{
 				SessionID: sessionID,
-				EndUserID: joinerID,
+				PlayerID:  joinerID,
 				Ip:        &ip,
 				Port:      &port,
 				Qos:       []byte("{}"),
@@ -394,9 +394,9 @@ func gameSessionHeartbeatHandler(d Deps) http.HandlerFunc {
 
 		ctx := r.Context()
 		sessionID := chi.URLParam(r, "id")
-		callerID, ok := enduser.IDFromContext(ctx)
+		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -415,7 +415,7 @@ func gameSessionHeartbeatHandler(d Deps) http.HandlerFunc {
 			affected, qerr := q.TouchGameSessionPeer(ctx, sqlcgen.TouchGameSessionPeerParams{
 				Qos:       qos,
 				SessionID: sessionID,
-				EndUserID: callerID,
+				PlayerID:  callerID,
 			})
 			if qerr != nil {
 				return qerr
@@ -450,9 +450,9 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		sessionID := chi.URLParam(r, "id")
-		callerID, ok := enduser.IDFromContext(ctx)
+		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -462,7 +462,7 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 			if qerr != nil {
 				return qerr
 			}
-			if sess.HostUserID == callerID {
+			if sess.HostPlayerID == callerID {
 				// Host leaving → end the session and clear its roster so peer
 				// rows don't linger until GC.
 				if qerr := q.UpdateGameSessionState(ctx, sqlcgen.UpdateGameSessionStateParams{
@@ -476,7 +476,7 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 			// Joiner leaving → remove only their peer row.
 			return q.DeleteGameSessionPeer(ctx, sqlcgen.DeleteGameSessionPeerParams{
 				SessionID: sessionID,
-				EndUserID: callerID,
+				PlayerID:  callerID,
 			})
 		})
 		if err != nil {

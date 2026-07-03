@@ -205,7 +205,7 @@ func (h *Handler) redirectAccountHome(w http.ResponseWriter, r *http.Request, fl
 }
 
 // linkAccountToProject enforces the effective public-join policy and links (or
-// creates) the account's end_user in the target project.
+// creates) the account's player in the target project.
 func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession, projectID int64) error {
 	// Read the effective policy + tenant via the SECURITY DEFINER helper
 	// (BootstrapQ: no tenant context yet).
@@ -249,7 +249,7 @@ func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession,
 			return berr
 		}
 		emailPtr := &sess.Email
-		existing, err := q.GetEndUserForAccountLink(tctx, sqlcgen.GetEndUserForAccountLinkParams{
+		existing, err := q.GetPlayerForAccountLink(tctx, sqlcgen.GetPlayerForAccountLinkParams{
 			ProjectID: projectID,
 			Email:     emailPtr,
 		})
@@ -262,7 +262,7 @@ func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession,
 				}
 				return errJoinOtherOwner
 			}
-			return q.LinkEndUserToAccount(tctx, sqlcgen.LinkEndUserToAccountParams{
+			return q.LinkPlayerToAccount(tctx, sqlcgen.LinkPlayerToAccountParams{
 				ID:              existing.ID,
 				PlayerAccountID: accountUUID,
 			})
@@ -271,7 +271,7 @@ func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession,
 			if gerr != nil {
 				return gerr
 			}
-			_, cerr := q.CreateLinkedEndUser(tctx, sqlcgen.CreateLinkedEndUserParams{
+			_, cerr := q.CreateLinkedPlayer(tctx, sqlcgen.CreateLinkedPlayerParams{
 				ProjectID:       projectID,
 				ExternalID:      externalID,
 				Email:           emailPtr,
@@ -691,7 +691,7 @@ func (h *Handler) clearAccountSessionCookie(w http.ResponseWriter) {
 
 // listAccountLinkedProjects reads the SECURITY DEFINER helper via raw SQL
 // (sqlc can't resolve the table-function's columns). Same pattern as
-// player_end_user_tenant in issueSession.
+// project_player_tenant in issueSession.
 func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.UUID) ([]LinkedProject, error) {
 	var out []LinkedProject
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {

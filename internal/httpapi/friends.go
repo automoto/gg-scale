@@ -12,13 +12,13 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 // Friends are between GLOBAL player_accounts. The JSON API caller is an
-// end_user with a session; the operation resolves the caller's linked account
-// (403 if the player is anonymous / unlinked) and the target end_user's
+// player with a session; the operation resolves the caller's linked account
+// (403 if the player is anonymous / unlinked) and the target player's
 // account, then works on account-to-account edges. See docs/temp/player-accounts.md.
 
 var (
@@ -39,7 +39,7 @@ type friendPresence struct {
 type friendEntry struct {
 	ID          int64           `json:"id"`
 	AccountID   string          `json:"account_id"`
-	UserID      *int64          `json:"user_id,omitempty"`
+	PlayerID    *int64          `json:"player_id,omitempty"`
 	Status      string          `json:"status"`
 	Email       *string         `json:"email,omitempty"`
 	DisplayName *string         `json:"display_name,omitempty"`
@@ -48,10 +48,10 @@ type friendEntry struct {
 	UpdatedAt   string          `json:"updated_at"`
 }
 
-// callerAccount resolves the linked account UUID for the current end_user.
+// callerAccount resolves the linked account UUID for the current player.
 // Returns errNoAccount when the player is anonymous / unlinked.
-func callerAccount(ctx context.Context, tx pgx.Tx, endUserID int64) (pgtype.UUID, error) {
-	acc, err := sqlcgen.New(tx).GetEndUserAccountID(ctx, endUserID)
+func callerAccount(ctx context.Context, tx pgx.Tx, playerID int64) (pgtype.UUID, error) {
+	acc, err := sqlcgen.New(tx).GetPlayerLinkedAccountID(ctx, playerID)
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
@@ -61,18 +61,18 @@ func callerAccount(ctx context.Context, tx pgx.Tx, endUserID int64) (pgtype.UUID
 	return acc, nil
 }
 
-// POST /v1/friends/{user_id}/request
+// POST /v1/friends/{player_id}/request
 func friendRequestHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		toUser, ok := pathInt64(r, "user_id")
+		toUser, ok := pathInt64(r, "player_id")
 		if !ok {
-			http.Error(w, "user_id required", http.StatusBadRequest)
+			http.Error(w, "player_id required", http.StatusBadRequest)
 			return
 		}
-		fromUser, ok := enduser.IDFromContext(ctx)
+		fromUser, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		if fromUser == toUser {
@@ -87,7 +87,7 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 			if err != nil {
 				return err
 			}
-			toAcc, err := q.GetEndUserAccountID(ctx, toUser)
+			toAcc, err := q.GetPlayerLinkedAccountID(ctx, toUser)
 			if err != nil {
 				return err
 			}
@@ -147,28 +147,28 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// POST /v1/friends/{user_id}/accept
+// POST /v1/friends/{player_id}/accept
 func friendAcceptHandler(d Deps) http.HandlerFunc {
 	return changeStatusHandler(d, "accepted", []string{"pending"})
 }
 
-// POST /v1/friends/{user_id}/reject
+// POST /v1/friends/{player_id}/reject
 func friendRejectHandler(d Deps) http.HandlerFunc {
 	return changeStatusHandler(d, "rejected", []string{"pending", "accepted"})
 }
 
-// DELETE /v1/friends/{user_id}
+// DELETE /v1/friends/{player_id}
 func friendDeleteHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		toUser, ok := pathInt64(r, "user_id")
+		toUser, ok := pathInt64(r, "player_id")
 		if !ok {
-			http.Error(w, "user_id required", http.StatusBadRequest)
+			http.Error(w, "player_id required", http.StatusBadRequest)
 			return
 		}
-		fromUser, ok := enduser.IDFromContext(ctx)
+		fromUser, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -179,7 +179,7 @@ func friendDeleteHandler(d Deps) http.HandlerFunc {
 			if err != nil {
 				return err
 			}
-			toAcc, err := q.GetEndUserAccountID(ctx, toUser)
+			toAcc, err := q.GetPlayerLinkedAccountID(ctx, toUser)
 			if err != nil {
 				return err
 			}
@@ -211,7 +211,7 @@ func friendDeleteHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-// POST /v1/friends/{user_id}/block and /unblock
+// POST /v1/friends/{player_id}/block and /unblock
 func friendBlockHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		friendBlockToggle(d, w, r, true)
@@ -226,14 +226,14 @@ func friendUnblockHandler(d Deps) http.HandlerFunc {
 
 func friendBlockToggle(d Deps, w http.ResponseWriter, r *http.Request, block bool) {
 	ctx := r.Context()
-	toUser, ok := pathInt64(r, "user_id")
+	toUser, ok := pathInt64(r, "player_id")
 	if !ok {
-		http.Error(w, "user_id required", http.StatusBadRequest)
+		http.Error(w, "player_id required", http.StatusBadRequest)
 		return
 	}
-	fromUser, ok := enduser.IDFromContext(ctx)
+	fromUser, ok := playerauth.IDFromContext(ctx)
 	if !ok {
-		http.Error(w, "no end user", http.StatusUnauthorized)
+		http.Error(w, "no player", http.StatusUnauthorized)
 		return
 	}
 	if fromUser == toUser {
@@ -247,7 +247,7 @@ func friendBlockToggle(d Deps, w http.ResponseWriter, r *http.Request, block boo
 		if err != nil {
 			return err
 		}
-		toAcc, err := q.GetEndUserAccountID(ctx, toUser)
+		toAcc, err := q.GetPlayerLinkedAccountID(ctx, toUser)
 		if err != nil {
 			return err
 		}
@@ -306,16 +306,16 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		// {user_id} is the OTHER user — for accept/reject the "from" of the
+		// {player_id} is the OTHER user — for accept/reject the "from" of the
 		// request is them, "to" is the current user.
-		other, ok := pathInt64(r, "user_id")
+		other, ok := pathInt64(r, "player_id")
 		if !ok {
-			http.Error(w, "user_id required", http.StatusBadRequest)
+			http.Error(w, "player_id required", http.StatusBadRequest)
 			return
 		}
-		me, ok := enduser.IDFromContext(ctx)
+		me, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -325,7 +325,7 @@ func changeStatusHandler(d Deps, newStatus string, allowed []string) http.Handle
 			if err != nil {
 				return err
 			}
-			otherAcc, err := q.GetEndUserAccountID(ctx, other)
+			otherAcc, err := q.GetPlayerLinkedAccountID(ctx, other)
 			if err != nil {
 				return err
 			}
@@ -375,9 +375,9 @@ var allowedFriendStatuses = map[string]struct{}{
 func friendsListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		me, ok := enduser.IDFromContext(ctx)
+		me, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		projectID, _ := db.ProjectFromContext(ctx)
@@ -417,7 +417,7 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 			}
 
 			idMap := map[pgtype.UUID]sqlcgen.ListAccountIdentitiesRow{}
-			euMap := map[pgtype.UUID]int64{}
+			playerByAccount := map[pgtype.UUID]int64{}
 			presMap := map[int64]sqlcgen.ListPresenceForUsersRow{}
 			if len(friendAccts) > 0 {
 				idRows, qerr := q.ListAccountIdentities(ctx, friendAccts)
@@ -427,27 +427,27 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 				for _, ir := range idRows {
 					idMap[ir.ID] = ir
 				}
-				// Resolve each friend account to an end_user in the caller's
-				// project for user_id + presence (best-effort).
+				// Resolve each friend account to a player in the caller's
+				// project for player_id + presence (best-effort).
 				if projectID > 0 {
-					euRows, qerr := q.ResolveEndUsersForAccountsInProject(ctx, sqlcgen.ResolveEndUsersForAccountsInProjectParams{
+					playerRows, qerr := q.ResolvePlayersForAccountsInProject(ctx, sqlcgen.ResolvePlayersForAccountsInProjectParams{
 						ProjectID: projectID, AccountIds: friendAccts,
 					})
 					if qerr != nil {
 						return qerr
 					}
-					euIDs := make([]int64, 0, len(euRows))
-					for _, er := range euRows {
-						euMap[er.PlayerAccountID] = er.EndUserID
-						euIDs = append(euIDs, er.EndUserID)
+					playerIDs := make([]int64, 0, len(playerRows))
+					for _, pr := range playerRows {
+						playerByAccount[pr.PlayerAccountID] = pr.PlayerID
+						playerIDs = append(playerIDs, pr.PlayerID)
 					}
-					if len(euIDs) > 0 {
-						presRows, qerr := q.ListPresenceForUsers(ctx, euIDs)
+					if len(playerIDs) > 0 {
+						presRows, qerr := q.ListPresenceForUsers(ctx, playerIDs)
 						if qerr != nil {
 							return qerr
 						}
 						for _, pr := range presRows {
-							presMap[pr.EndUserID] = pr
+							presMap[pr.PlayerID] = pr
 						}
 					}
 				}
@@ -472,10 +472,10 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 					}
 					entry.DisplayName = ir.DisplayName
 				}
-				if euID, ok := euMap[other]; ok {
-					id := euID
-					entry.UserID = &id
-					if pr, ok := presMap[euID]; ok {
+				if pid, ok := playerByAccount[other]; ok {
+					id := pid
+					entry.PlayerID = &id
+					if pr, ok := presMap[pid]; ok {
 						entry.Presence = &friendPresence{Status: pr.Status, SessionID: pr.SessionID}
 					}
 				}

@@ -22,7 +22,7 @@ func TestFriends_block_enforcement_e2e(t *testing.T) {
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
-	setEndUserEmail(t, c, idB, "blockb@example.com")
+	setPlayerEmail(t, c, idB, "blockb@example.com")
 	// makeFriends links both accounts and establishes an accepted friendship.
 	makeFriends(t, c, srv.URL, "k", idA, tokA, idB, tokB)
 

@@ -42,7 +42,7 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 			TenantID:   req.TenantID,
 			ProjectID:  req.ProjectID,
 			FleetID:    req.FleetID,
-			EndUserID:  req.EndUserID,
+			PlayerID:   req.PlayerID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
 			Attributes: req.Attributes,
@@ -56,7 +56,7 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 
 // Get returns a tenant-scoped view of the ticket. The tenant id is read
 // from ctx via db.TenantFromContext, mirroring the Postgres RLS path.
-func (q *MemQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error) {
+func (q *MemQueue) Get(ctx context.Context, id, playerID int64) (*Ticket, error) {
 	tenantID, err := tenantFromCtx(ctx)
 	if err != nil {
 		return nil, err
@@ -64,7 +64,7 @@ func (q *MemQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	t, ok := q.tickets[id]
-	if !ok || t.TenantID != tenantID || t.EndUserID != endUserID {
+	if !ok || t.TenantID != tenantID || t.PlayerID != playerID {
 		return nil, ErrNotFound
 	}
 	return cloneTicket(&t.Ticket), nil
@@ -74,7 +74,7 @@ func (q *MemQueue) Get(ctx context.Context, id, endUserID int64) (*Ticket, error
 // the ticket has already reached matched/cancelled/failed. Cancelling a
 // claimed ticket clears the claim cols too, so the worker's CommitClaim
 // finds zero rows and deallocates the orphan.
-func (q *MemQueue) Cancel(ctx context.Context, id, endUserID int64) error {
+func (q *MemQueue) Cancel(ctx context.Context, id, playerID int64) error {
 	tenantID, err := tenantFromCtx(ctx)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (q *MemQueue) Cancel(ctx context.Context, id, endUserID int64) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	t, ok := q.tickets[id]
-	if !ok || t.TenantID != tenantID || t.EndUserID != endUserID {
+	if !ok || t.TenantID != tenantID || t.PlayerID != playerID {
 		return ErrNotFound
 	}
 	if t.Status != StatusQueued {

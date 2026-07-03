@@ -69,13 +69,13 @@ func (q *Queries) GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardR
 
 const leaderboardRangeByRank = `-- name: LeaderboardRangeByRank :many
 WITH ranked AS (
-    SELECT end_user_id,
+    SELECT player_id,
            CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
            RANK() OVER (
              ORDER BY
                CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
                CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               end_user_id ASC
+               player_id ASC
            ) AS r
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
@@ -83,9 +83,9 @@ WITH ranked AS (
       AND le.leaderboard_id = $1
       AND l.tenant_id = le.tenant_id
       AND l.deleted_at IS NULL
-    GROUP BY end_user_id
+    GROUP BY player_id
 )
-SELECT end_user_id, best_score, r::bigint AS rank
+SELECT player_id, best_score, r::bigint AS rank
 FROM ranked
 WHERE r BETWEEN $2::bigint AND $3::bigint
 ORDER BY r
@@ -98,7 +98,7 @@ type LeaderboardRangeByRankParams struct {
 }
 
 type LeaderboardRangeByRankRow struct {
-	EndUserID int64
+	PlayerID  int64
 	BestScore int64
 	Rank      int64
 }
@@ -112,7 +112,7 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 	var items []LeaderboardRangeByRankRow
 	for rows.Next() {
 		var i LeaderboardRangeByRankRow
-		if err := rows.Scan(&i.EndUserID, &i.BestScore, &i.Rank); err != nil {
+		if err := rows.Scan(&i.PlayerID, &i.BestScore, &i.Rank); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -125,12 +125,12 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 
 const leaderboardUserRank = `-- name: LeaderboardUserRank :one
 WITH ranked AS (
-    SELECT end_user_id,
+    SELECT player_id,
            RANK() OVER (
              ORDER BY
                CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
                CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               end_user_id ASC
+               player_id ASC
            ) AS r
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
@@ -138,20 +138,20 @@ WITH ranked AS (
       AND le.leaderboard_id = $1
       AND l.tenant_id = le.tenant_id
       AND l.deleted_at IS NULL
-    GROUP BY end_user_id
+    GROUP BY player_id
 )
 SELECT r::bigint AS rank
 FROM ranked
-WHERE end_user_id = $2
+WHERE player_id = $2
 `
 
 type LeaderboardUserRankParams struct {
 	LeaderboardID int64
-	EndUserID     int64
+	PlayerID      int64
 }
 
 func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error) {
-	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.LeaderboardID, arg.EndUserID)
+	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.LeaderboardID, arg.PlayerID)
 	var rank int64
 	err := row.Scan(&rank)
 	return rank, err
@@ -159,7 +159,7 @@ func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRa
 
 const submitScore = `-- name: SubmitScore :one
 INSERT INTO leaderboard_entries (
-    tenant_id, leaderboard_id, end_user_id, score, recorded_at
+    tenant_id, leaderboard_id, player_id, score, recorded_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -170,7 +170,7 @@ RETURNING id, recorded_at
 
 type SubmitScoreParams struct {
 	LeaderboardID int64
-	EndUserID     int64
+	PlayerID      int64
 	Score         int64
 }
 
@@ -180,14 +180,14 @@ type SubmitScoreRow struct {
 }
 
 func (q *Queries) SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error) {
-	row := q.db.QueryRow(ctx, submitScore, arg.LeaderboardID, arg.EndUserID, arg.Score)
+	row := q.db.QueryRow(ctx, submitScore, arg.LeaderboardID, arg.PlayerID, arg.Score)
 	var i SubmitScoreRow
 	err := row.Scan(&i.ID, &i.RecordedAt)
 	return i, err
 }
 
 const topN = `-- name: TopN :many
-SELECT le.end_user_id,
+SELECT le.player_id,
        CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
        MIN(le.recorded_at)::timestamptz AS first_seen
 FROM leaderboard_entries le
@@ -196,11 +196,11 @@ WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND le.leaderboard_id = $1
   AND l.tenant_id = le.tenant_id
   AND l.deleted_at IS NULL
-GROUP BY le.end_user_id
+GROUP BY le.player_id
 ORDER BY
   CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
   CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-  le.end_user_id ASC
+  le.player_id ASC
 LIMIT $2
 `
 
@@ -210,7 +210,7 @@ type TopNParams struct {
 }
 
 type TopNRow struct {
-	EndUserID int64
+	PlayerID  int64
 	BestScore int64
 	FirstSeen pgtype.Timestamptz
 }
@@ -224,7 +224,7 @@ func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 	var items []TopNRow
 	for rows.Next() {
 		var i TopNRow
-		if err := rows.Scan(&i.EndUserID, &i.BestScore, &i.FirstSeen); err != nil {
+		if err := rows.Scan(&i.PlayerID, &i.BestScore, &i.FirstSeen); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

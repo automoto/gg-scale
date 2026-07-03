@@ -28,7 +28,7 @@ func TestValidEmail(t *testing.T) {
 
 func TestEncodeDecodeVerifyCookie_roundtrip(t *testing.T) {
 	key := []byte("test-signing-key-32-bytes-long-aa")
-	p := verifyCookiePayload{EndUserID: 99, ProjectID: 7, Email: "p@example.com"}
+	p := verifyCookiePayload{PlayerID: 99, ProjectID: 7, Email: "p@example.com"}
 	enc := encodeVerifyCookie(p, key)
 	require.NotEmpty(t, enc)
 	out, ok := decodeVerifyCookie(enc, key)
@@ -38,14 +38,14 @@ func TestEncodeDecodeVerifyCookie_roundtrip(t *testing.T) {
 
 func TestDecodeVerifyCookie_rejects_tampered_payload(t *testing.T) {
 	key := []byte("k")
-	enc := encodeVerifyCookie(verifyCookiePayload{EndUserID: 1, ProjectID: 1, Email: "a@b.c"}, key)
+	enc := encodeVerifyCookie(verifyCookiePayload{PlayerID: 1, ProjectID: 1, Email: "a@b.c"}, key)
 	bad := "x" + enc[1:]
 	_, ok := decodeVerifyCookie(bad, key)
 	assert.False(t, ok)
 }
 
 func TestDecodeVerifyCookie_rejects_wrong_key(t *testing.T) {
-	enc := encodeVerifyCookie(verifyCookiePayload{EndUserID: 1, ProjectID: 1, Email: "a@b.c"}, []byte("kA"))
+	enc := encodeVerifyCookie(verifyCookiePayload{PlayerID: 1, ProjectID: 1, Email: "a@b.c"}, []byte("kA"))
 	_, ok := decodeVerifyCookie(enc, []byte("kB"))
 	assert.False(t, ok)
 }

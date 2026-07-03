@@ -388,7 +388,7 @@ func AccountVerifyPage(vm AccountVerifyView) templ.Component {
 	})
 }
 
-// LinkedProject is one project the account is linked to (via an end_user row).
+// LinkedProject is one project the account is linked to (via a project_players row).
 type LinkedProject struct {
 	TenantID    int64
 	ProjectID   int64

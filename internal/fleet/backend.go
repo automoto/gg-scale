@@ -92,7 +92,7 @@ type AllocationID int64
 // land in backend-specific places (Kubernetes label selectors, Docker
 // labels, plugin gRPC). They are treated here as already-validated inputs.
 // The validation boundary lives at the matchmaker HTTP handler (M6), which
-// is the surface receiving end-user SDK input — validating again here
+// is the surface receiving player SDK input — validating again here
 // would put the check on the wrong side of the boundary.
 type AllocationRequest struct {
 	TenantID  int64

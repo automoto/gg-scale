@@ -1,5 +1,5 @@
 // Package relay wraps a pion/turn/v3 TURN server with ggscale's tenant +
-// end-user identity model. Credentials are issued via the standard TURN
+// player identity model. Credentials are issued via the standard TURN
 // REST API (RFC draft-uberti-rtcweb-turn-rest-00) so any client SDK can
 // consume them; the server-side AuthHandler reconstructs the HMAC password
 // for incoming TURN auth checks.
@@ -55,10 +55,10 @@ func NewIssuer(secret, realm string, ttl time.Duration) *Issuer {
 // SetURLs sets the list of TURN URIs reported in issued credentials.
 func (i *Issuer) SetURLs(urls []string) { i.urls = urls }
 
-// Issue returns a fresh credential pair scoped to (tenantID, endUserID).
-func (i *Issuer) Issue(tenantID, endUserID int64) (*Credentials, error) {
+// Issue returns a fresh credential pair scoped to (tenantID, playerID).
+func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
 	expires := i.now().Add(i.ttl).Unix()
-	username := fmt.Sprintf("%d:%d:%d", expires, tenantID, endUserID)
+	username := fmt.Sprintf("%d:%d:%d", expires, tenantID, playerID)
 	password := i.passwordFor(username)
 	return &Credentials{
 		Username:   username,
@@ -70,7 +70,7 @@ func (i *Issuer) Issue(tenantID, endUserID int64) (*Credentials, error) {
 }
 
 // Verify checks the username + password pair, returning the embedded
-// (tenantID, endUserID) on success.
+// (tenantID, playerID) on success.
 func (i *Issuer) Verify(username, password string) (int64, int64, error) {
 	parts := strings.SplitN(username, ":", 3)
 	if len(parts) != 3 {
@@ -87,7 +87,7 @@ func (i *Issuer) Verify(username, password string) (int64, int64, error) {
 	if err != nil {
 		return 0, 0, ErrCredentialsInvalid
 	}
-	endUserID, err := strconv.ParseInt(parts[2], 10, 64)
+	playerID, err := strconv.ParseInt(parts[2], 10, 64)
 	if err != nil {
 		return 0, 0, ErrCredentialsInvalid
 	}
@@ -95,7 +95,7 @@ func (i *Issuer) Verify(username, password string) (int64, int64, error) {
 	if subtle.ConstantTimeCompare([]byte(want), []byte(password)) != 1 {
 		return 0, 0, ErrCredentialsInvalid
 	}
-	return tenantID, endUserID, nil
+	return tenantID, playerID, nil
 }
 
 func (i *Issuer) passwordFor(username string) string {

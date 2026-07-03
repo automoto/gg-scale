@@ -18,25 +18,25 @@ import (
 // inviting abuse.
 const maxVerifyBodyBytes = 8 << 10
 
-type endUserVerifyRequest struct {
+type playerVerifyRequest struct {
 	SessionToken string `json:"session_token"`
 }
 
 // errStaleSession marks a token rejected by the epoch/ban gate. Collapses to
 // the same opaque 401 as every other verify failure.
-var errStaleSession = errors.New("end_users verify: stale session")
+var errStaleSession = errors.New("project_players verify: stale session")
 
-// endUserVerifyResponse is what game-servers get back on a valid token.
+// playerVerifyResponse is what game-servers get back on a valid token.
 // ExternalID is the per-game stable identifier (Steam ID, anonymous
 // UUID, etc.) — the same column that auth/anonymous returns. Email is
 // omitempty because it's optional on the account.
-type endUserVerifyResponse struct {
-	UserID     int64  `json:"user_id"`
+type playerVerifyResponse struct {
+	PlayerID   int64  `json:"player_id"`
 	ExternalID string `json:"external_id"`
 	Email      string `json:"email,omitempty"`
 }
 
-// endUsersVerifyHandler validates an end-user session token on behalf
+// playerSessionVerifyHandler validates a player session token on behalf
 // of a game-server. The server-tier API key on the request
 // authenticates the CALLER (the game-server workload); the body's
 // session_token is the PLAYER's session being verified.
@@ -50,7 +50,7 @@ type endUserVerifyResponse struct {
 // keys (embedded in shipped game binaries) off this oracle entirely.
 //
 // See docs/temp/gameserver-auth.md for the design rationale.
-func endUsersVerifyHandler(d Deps) http.HandlerFunc {
+func playerSessionVerifyHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 
@@ -68,7 +68,7 @@ func endUsersVerifyHandler(d Deps) http.HandlerFunc {
 		r.Body = http.MaxBytesReader(w, r.Body, maxVerifyBodyBytes)
 		dec := json.NewDecoder(r.Body)
 		dec.DisallowUnknownFields()
-		var req endUserVerifyRequest
+		var req playerVerifyRequest
 		if err := dec.Decode(&req); err != nil {
 			writeInvalidSession(w)
 			return
@@ -93,15 +93,15 @@ func endUsersVerifyHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		var row sqlcgen.GetEndUserForVerifyRow
+		var row sqlcgen.GetPlayerForVerifyRow
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			var qerr error
-			row, qerr = q.GetEndUserForVerify(ctx, claims.EndUserID)
+			row, qerr = q.GetPlayerForVerify(ctx, claims.PlayerID)
 			if qerr != nil {
 				return qerr
 			}
-			// Reject a session whose epoch is stale — the end_user was disabled
+			// Reject a session whose epoch is stale — the player was disabled
 			// or tenant-banned after this token was minted (both bump
 			// session_epoch). Makes revocation immediate, not TTL-bounded.
 			if claims.SessionEpoch != int64(row.SessionEpoch) {
@@ -130,7 +130,7 @@ func endUsersVerifyHandler(d Deps) http.HandlerFunc {
 			// Any other error is a real DB problem; log server-side
 			// but collapse to the same opaque 401 on the wire.
 			if !errors.Is(err, pgx.ErrNoRows) {
-				slog.ErrorContext(ctx, "end_users verify: lookup", "err", err)
+				slog.ErrorContext(ctx, "project_players verify: lookup", "err", err)
 			}
 			writeInvalidSession(w)
 			return
@@ -144,8 +144,8 @@ func endUsersVerifyHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, endUserVerifyResponse{
-			UserID:     row.ID,
+		writeJSON(w, playerVerifyResponse{
+			PlayerID:   row.ID,
 			ExternalID: row.ExternalID,
 			Email:      row.Email,
 		})

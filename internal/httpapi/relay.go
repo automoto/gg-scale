@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/rbac"
 )
 
@@ -17,12 +17,12 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		endUserID, ok := enduser.IDFromContext(ctx)
+		playerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
-		projectID, ok := enduser.ProjectIDFromContext(ctx)
+		projectID, ok := playerauth.ProjectIDFromContext(ctx)
 		if !ok {
 			projectID, ok = db.ProjectFromContext(ctx)
 		}
@@ -34,7 +34,7 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "authorization unavailable", http.StatusInternalServerError)
 			return
 		}
-		allowed, err := d.RBAC.CanEndUser(tenantID, endUserID, rbac.ProjectRelayObject(projectID), rbac.ActionIssueCredentials)
+		allowed, err := d.RBAC.CanPlayer(tenantID, playerID, rbac.ProjectRelayObject(projectID), rbac.ActionIssueCredentials)
 		if err != nil {
 			http.Error(w, "authorization check failed", http.StatusInternalServerError)
 			return
@@ -54,21 +54,21 @@ func relayCredentialsHandler(d Deps) http.HandlerFunc {
 		}
 		// Tenant-ban enforcement point: a banned account can't get relay
 		// credentials.
-		if banned, berr := endUserTenantBanned(ctx, d, endUserID); berr != nil {
+		if banned, berr := playerTenantBanned(ctx, d, playerID); berr != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		} else if banned {
 			http.Error(w, "account banned", http.StatusForbidden)
 			return
 		}
-		creds, err := d.RelayIssuer.Issue(tenantID, endUserID)
+		creds, err := d.RelayIssuer.Issue(tenantID, playerID)
 		if err != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		// The password field is the TURN-REST HMAC, intentionally returned
-		// to the authenticated end-user so they can authenticate against
+		// to the authenticated player so they can authenticate against
 		// the relay. Not a secret-at-rest leak.
 		_ = json.NewEncoder(w).Encode(creds) //nolint:gosec // G117: TURN-REST credential payload
 	}

@@ -1,5 +1,5 @@
-// Package matchmaker turns end-user "find me a match" requests into game
-// server allocations. End-users POST tickets through HTTP; a background
+// Package matchmaker turns player "find me a match" requests into game
+// server allocations. Players POST tickets through HTTP; a background
 // worker batches them by bucket (tenant, project, fleet, region, game_mode),
 // stakes a claim on the bucket, calls fleet.Manager.Allocate when a bucket
 // fills, then commits the claim — flipping the rows to 'matched' and pushing
@@ -36,7 +36,7 @@ type Ticket struct {
 	TenantID      int64
 	ProjectID     int64
 	FleetID       int64
-	EndUserID     int64
+	PlayerID      int64
 	Region        string
 	GameMode      string
 	Attributes    json.RawMessage
@@ -55,7 +55,7 @@ type EnqueueRequest struct {
 	TenantID   int64
 	ProjectID  int64
 	FleetID    int64
-	EndUserID  int64
+	PlayerID   int64
 	Region     string
 	GameMode   string
 	Attributes json.RawMessage
@@ -93,8 +93,8 @@ type Claim struct {
 // run cross-tenant from the worker goroutine.
 type Queue interface {
 	Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, error)
-	Get(ctx context.Context, id, endUserID int64) (*Ticket, error)
-	Cancel(ctx context.Context, id, endUserID int64) error
+	Get(ctx context.Context, id, playerID int64) (*Ticket, error)
+	Cancel(ctx context.Context, id, playerID int64) error
 
 	ListReadyBuckets(ctx context.Context, minTickets int) ([]Bucket, error)
 	// ClaimBucket stakes a claim on up to n unclaimed queued tickets in the

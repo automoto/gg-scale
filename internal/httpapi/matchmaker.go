@@ -11,9 +11,9 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/matchmaker"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -62,9 +62,9 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no project", http.StatusBadRequest)
 			return
 		}
-		endUserID, ok := enduser.IDFromContext(ctx)
+		playerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -89,7 +89,7 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "authorization unavailable", http.StatusInternalServerError)
 			return
 		}
-		allowed, aerr := d.RBAC.CanEndUser(tenantID, endUserID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
+		allowed, aerr := d.RBAC.CanPlayer(tenantID, playerID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
 		if aerr != nil {
 			http.Error(w, "authorization check failed", http.StatusInternalServerError)
 			return
@@ -107,10 +107,10 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		if !allowMatchmakerAction(w, r, d, tenantID, projectID, endUserID, "create", matchmakerCreateRate, matchmakerCreateBurst) {
+		if !allowMatchmakerAction(w, r, d, tenantID, projectID, playerID, "create", matchmakerCreateRate, matchmakerCreateBurst) {
 			return
 		}
-		if banned, berr := endUserTenantBanned(ctx, d, endUserID); berr != nil {
+		if banned, berr := playerTenantBanned(ctx, d, playerID); berr != nil {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		} else if banned {
@@ -135,7 +135,7 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			TenantID:   tenantID,
 			ProjectID:  projectID,
 			FleetID:    f.ID,
-			EndUserID:  endUserID,
+			PlayerID:   playerID,
 			Region:     req.Region,
 			GameMode:   req.GameMode,
 			Attributes: req.Attributes,
@@ -154,12 +154,12 @@ func matchmakerGetTicketHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		endUserID, ok := enduser.IDFromContext(r.Context())
+		playerID, ok := playerauth.IDFromContext(r.Context())
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
-		ticket, err := d.Matchmaker.Get(r.Context(), id, endUserID)
+		ticket, err := d.Matchmaker.Get(r.Context(), id, playerID)
 		if errors.Is(err, matchmaker.ErrNotFound) {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
@@ -178,9 +178,9 @@ func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		endUserID, ok := enduser.IDFromContext(r.Context())
+		playerID, ok := playerauth.IDFromContext(r.Context())
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		projectID, ok := db.ProjectFromContext(r.Context())
@@ -193,10 +193,10 @@ func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
 		}
-		if !allowMatchmakerAction(w, r, d, tenantID, projectID, endUserID, "cancel", matchmakerCancelRate, matchmakerCancelBurst) {
+		if !allowMatchmakerAction(w, r, d, tenantID, projectID, playerID, "cancel", matchmakerCancelRate, matchmakerCancelBurst) {
 			return
 		}
-		err = d.Matchmaker.Cancel(r.Context(), id, endUserID)
+		err = d.Matchmaker.Cancel(r.Context(), id, playerID)
 		switch {
 		case errors.Is(err, matchmaker.ErrNotFound):
 			http.Error(w, "not found", http.StatusNotFound)
@@ -210,12 +210,12 @@ func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-func allowMatchmakerAction(w http.ResponseWriter, r *http.Request, d Deps, tenantID, projectID, endUserID int64, action string, rate, burst float64) bool {
+func allowMatchmakerAction(w http.ResponseWriter, r *http.Request, d Deps, tenantID, projectID, playerID int64, action string, rate, burst float64) bool {
 	if d.Limiter == nil {
 		http.Error(w, "rate limiter unavailable", http.StatusInternalServerError)
 		return false
 	}
-	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, endUserID)
+	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, playerID)
 	decision, err := d.Limiter.Allow(r.Context(), key, rate, burst)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)

@@ -19,20 +19,20 @@ SET status           = 'cancelled',
     claim_expires_at = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
-  AND end_user_id = $2
+  AND player_id = $2
   AND status = 'queued'
 RETURNING id
 `
 
 type CancelMatchmakingTicketParams struct {
-	ID        int64
-	EndUserID int64
+	ID       int64
+	PlayerID int64
 }
 
 // Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 // CommitClaim will find zero rows and deallocate the orphan server.
 func (q *Queries) CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error) {
-	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, arg.ID, arg.EndUserID)
+	row := q.db.QueryRow(ctx, cancelMatchmakingTicket, arg.ID, arg.PlayerID)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -59,7 +59,7 @@ SET claim_id         = $6::uuid,
     claim_expires_at = now() + $7::interval
 FROM candidates c
 WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.end_user_id, t.region,
+RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.created_at, t.matched_at
 `
@@ -80,7 +80,7 @@ type ClaimMatchmakerBucketRow struct {
 	TenantID      int64
 	ProjectID     int64
 	FleetID       *int64
-	EndUserID     int64
+	PlayerID      int64
 	Region        string
 	GameMode      string
 	Attributes    []byte
@@ -120,7 +120,7 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 			&i.TenantID,
 			&i.ProjectID,
 			&i.FleetID,
-			&i.EndUserID,
+			&i.PlayerID,
 			&i.Region,
 			&i.GameMode,
 			&i.Attributes,
@@ -172,18 +172,18 @@ func (q *Queries) CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmake
 }
 
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, fleet_id, end_user_id, region, game_mode,
+SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        created_at, matched_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
-  AND end_user_id = $2
+  AND player_id = $2
 `
 
 type GetMatchmakingTicketParams struct {
-	ID        int64
-	EndUserID int64
+	ID       int64
+	PlayerID int64
 }
 
 type GetMatchmakingTicketRow struct {
@@ -191,7 +191,7 @@ type GetMatchmakingTicketRow struct {
 	TenantID      int64
 	ProjectID     int64
 	FleetID       *int64
-	EndUserID     int64
+	PlayerID      int64
 	Region        string
 	GameMode      string
 	Attributes    []byte
@@ -203,14 +203,14 @@ type GetMatchmakingTicketRow struct {
 }
 
 func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error) {
-	row := q.db.QueryRow(ctx, getMatchmakingTicket, arg.ID, arg.EndUserID)
+	row := q.db.QueryRow(ctx, getMatchmakingTicket, arg.ID, arg.PlayerID)
 	var i GetMatchmakingTicketRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.ProjectID,
 		&i.FleetID,
-		&i.EndUserID,
+		&i.PlayerID,
 		&i.Region,
 		&i.GameMode,
 		&i.Attributes,
@@ -225,7 +225,7 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 
 const insertMatchmakingTicket = `-- name: InsertMatchmakingTicket :one
 INSERT INTO matchmaking_tickets (
-    tenant_id, project_id, fleet_id, end_user_id, region, game_mode, attributes
+    tenant_id, project_id, fleet_id, player_id, region, game_mode, attributes
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -237,7 +237,7 @@ RETURNING id, status::text AS status, created_at
 type InsertMatchmakingTicketParams struct {
 	ProjectID  int64
 	FleetID    *int64
-	EndUserID  int64
+	PlayerID   int64
 	Region     string
 	GameMode   string
 	Attributes []byte
@@ -253,7 +253,7 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 	row := q.db.QueryRow(ctx, insertMatchmakingTicket,
 		arg.ProjectID,
 		arg.FleetID,
-		arg.EndUserID,
+		arg.PlayerID,
 		arg.Region,
 		arg.GameMode,
 		arg.Attributes,

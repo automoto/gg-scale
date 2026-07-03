@@ -215,11 +215,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var row sqlcgen.GetEndUserByEmailProjectRow
+	var row sqlcgen.GetPlayerByEmailProjectRow
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		var err error
 		emailPtr := &email
-		row, err = sqlcgen.New(tx).GetEndUserByEmailProject(r.Context(), sqlcgen.GetEndUserByEmailProjectParams{
+		row, err = sqlcgen.New(tx).GetPlayerByEmailProject(r.Context(), sqlcgen.GetPlayerByEmailProjectParams{
 			ProjectID: projectID,
 			Email:     emailPtr,
 		})
@@ -312,11 +312,11 @@ func (h *Handler) signup(w http.ResponseWriter, r *http.Request) {
 	}
 	codeHash := verifycode.Hash(salt, code)
 
-	var inserted sqlcgen.CreatePlayerEndUserRow
+	var inserted sqlcgen.CreatePlayerRow
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		var err error
 		emailPtr := &email
-		inserted, err = sqlcgen.New(tx).CreatePlayerEndUser(r.Context(), sqlcgen.CreatePlayerEndUserParams{
+		inserted, err = sqlcgen.New(tx).CreatePlayer(r.Context(), sqlcgen.CreatePlayerParams{
 			ProjectID:    projectID,
 			ExternalID:   externalID,
 			Email:        emailPtr,
@@ -387,7 +387,7 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, VerifyPage(view))
 		return
 	}
-	err := h.confirmCode(r.Context(), p.EndUserID, code)
+	err := h.confirmCode(r.Context(), p.PlayerID, code)
 	switch {
 	case errors.Is(err, errAlreadyVerified):
 		h.clearVerifyCookie(w, projectID)
@@ -418,7 +418,7 @@ func (h *Handler) verify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clearVerifyCookie(w, projectID)
-	if err := h.issueSession(r.Context(), w, p.EndUserID); err != nil {
+	if err := h.issueSession(r.Context(), w, p.PlayerID); err != nil {
 		webutil.InternalError(w, "player verify session", err)
 		return
 	}
@@ -468,7 +468,7 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 	}
 	codeHash := verifycode.Hash(salt, code)
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerVerificationCode(ctx, sqlcgen.SetPlayerVerificationCodeParams{
+		return sqlcgen.New(tx).SetPlayerVerificationCodeByID(ctx, sqlcgen.SetPlayerVerificationCodeByIDParams{
 			ID:        userID,
 			CodeHash:  codeHash,
 			CodeSalt:  salt,
@@ -517,7 +517,7 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 			return errVerifyExpired
 		}
 		// Atomic per-code cap (replaces fetch-then-bump).
-		reserved, rerr := q.ReserveEndUserVerifyAttempt(ctx, sqlcgen.ReserveEndUserVerifyAttemptParams{
+		reserved, rerr := q.ReservePlayerVerifyAttempt(ctx, sqlcgen.ReservePlayerVerifyAttemptParams{
 			ID:          userID,
 			MaxAttempts: int32(verifycode.MaxAttempts),
 		})
@@ -529,7 +529,7 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 		}
 		if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
 			lockedUntil := pgtype.Timestamptz{Time: h.now().Add(verifycode.LockoutDuration), Valid: true}
-			if lerr := q.LockEndUserVerification(ctx, sqlcgen.LockEndUserVerificationParams{
+			if lerr := q.LockPlayerVerification(ctx, sqlcgen.LockPlayerVerificationParams{
 				ID: userID, LockedUntil: lockedUntil,
 			}); lerr != nil {
 				return lerr
@@ -541,7 +541,7 @@ func (h *Handler) confirmCode(ctx context.Context, userID int64, code string) er
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
 			return errBadVerifyCode
 		}
-		return q.MarkPlayerVerified(ctx, userID)
+		return q.MarkPlayerVerifiedByID(ctx, userID)
 	})
 	if err != nil {
 		return err
@@ -577,7 +577,7 @@ func (h *Handler) sessionFromRequest(r *http.Request) (playerSession, bool) {
 		if qerr != nil {
 			return qerr
 		}
-		out.UserID = row.EndUserID
+		out.UserID = row.PlayerID
 		out.ProjectID = row.ProjectID
 		expires = row.ExpiresAt
 		revoked = row.RevokedAt
@@ -605,21 +605,21 @@ func (h *Handler) issueSession(ctx context.Context, w http.ResponseWriter, userI
 	hash := sha256.Sum256([]byte(refreshToken))
 	expires := h.now().Add(sessionTTL)
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		// The CreatePlayerSession SQL reads end_users.tenant_id via JOIN
-		// to populate sessions.tenant_id; end_users has RLS that
+		// The CreatePlayerSession SQL reads project_players.tenant_id via JOIN
+		// to populate sessions.tenant_id; project_players has RLS that
 		// requires app.tenant_id. Look the tenant up first via the
-		// SECURITY DEFINER player_end_user_tenant helper (added in
+		// SECURITY DEFINER project_player_tenant helper (added in
 		// migration 0027), then SET app.tenant_id so the JOIN sees the
 		// row.
 		var tenantID int64
-		if err := tx.QueryRow(ctx, "SELECT tenant_id FROM player_end_user_tenant($1)", userID).Scan(&tenantID); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT tenant_id FROM project_player_tenant($1)", userID).Scan(&tenantID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(tenantID, 10)); err != nil {
 			return err
 		}
 		_, err := sqlcgen.New(tx).CreatePlayerSession(ctx, sqlcgen.CreatePlayerSessionParams{
-			EndUserID:   userID,
+			PlayerID:    userID,
 			RefreshHash: hash[:],
 			ExpiresAt:   pgtype.Timestamptz{Time: expires, Valid: true},
 		})
@@ -658,12 +658,12 @@ func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
 // ExpiresAt is a server-checked Unix-seconds expiry — the cookie MaxAge
 // is client-controlled and not trusted.
 type verifyCookiePayload struct {
-	EndUserID int64
+	PlayerID  int64
 	ProjectID int64
 	ExpiresAt int64
 	Email     string
 	// AccountID is set only for the global-account verify cookie (a UUID
-	// string); empty for the per-project end-user verify cookie.
+	// string); empty for the per-project player verify cookie.
 	AccountID string `json:",omitempty"`
 }
 
@@ -674,7 +674,7 @@ const playerVerifyTTL = 30 * time.Minute
 
 func (h *Handler) setVerifyCookie(w http.ResponseWriter, userID int64, email string, projectID int64) {
 	expiresAt := h.now().Add(playerVerifyTTL).Unix()
-	val := encodeVerifyCookie(verifyCookiePayload{EndUserID: userID, ProjectID: projectID, ExpiresAt: expiresAt, Email: email}, h.verifySigningKey)
+	val := encodeVerifyCookie(verifyCookiePayload{PlayerID: userID, ProjectID: projectID, ExpiresAt: expiresAt, Email: email}, h.verifySigningKey)
 	http.SetCookie(w, &http.Cookie{
 		Name:     verifyCookieName,
 		Value:    val,

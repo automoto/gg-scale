@@ -22,7 +22,7 @@ import (
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
-// Many score submissions from distinct end-users produce a stable top-N from
+// Many score submissions from distinct players produce a stable top-N from
 // Postgres; a new app instance with an empty cache must return the same ordering.
 
 func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_cache(t *testing.T) {
@@ -53,11 +53,11 @@ func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_
 	}
 
 	want := make([]struct {
-		endUserID int64
-		best      int64
+		playerID int64
+		best     int64
 	}, 10)
 	for i := range 10 {
-		want[i].endUserID = ids[i]
+		want[i].playerID = ids[i]
 		want[i].best = int64(i*10 + 9)
 	}
 
@@ -77,7 +77,7 @@ func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_
 	entries := readTop(srv.URL)
 	require.Len(t, entries, 10)
 	for i := range 10 {
-		assert.Equal(t, want[9-i].endUserID, entries[i].EndUserID)
+		assert.Equal(t, want[9-i].playerID, entries[i].PlayerID)
 		assert.Equal(t, want[9-i].best, entries[i].Score)
 	}
 
@@ -105,7 +105,7 @@ func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_
 }
 
 type leaderboardTopEntry struct {
-	EndUserID int64 `json:"end_user_id"`
-	Score     int64 `json:"score"`
-	Rank      int64 `json:"rank"`
+	PlayerID int64 `json:"player_id"`
+	Score    int64 `json:"score"`
+	Rank     int64 `json:"rank"`
 }

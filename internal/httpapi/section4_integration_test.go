@@ -113,10 +113,10 @@ func anonymousLoginWithID(t *testing.T, baseURL, apiKey string) (string, int64) 
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	var out struct {
 		AccessToken string `json:"access_token"`
-		EndUserID   int64  `json:"end_user_id"`
+		PlayerID    int64  `json:"player_id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &out))
-	return out.AccessToken, out.EndUserID
+	return out.AccessToken, out.PlayerID
 }
 
 func extractVerifyToken(t *testing.T, body string) string {
@@ -153,7 +153,7 @@ func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 	var session struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
-		EndUserID    int64  `json:"end_user_id"`
+		PlayerID     int64  `json:"player_id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &session))
 	require.NotEmpty(t, session.AccessToken)
@@ -246,15 +246,15 @@ func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
 	var session struct {
-		EndUserID int64 `json:"end_user_id"`
+		PlayerID int64 `json:"player_id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &session))
-	assert.Greater(t, session.EndUserID, int64(0))
+	assert.Greater(t, session.PlayerID, int64(0))
 
 	var got string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT external_id FROM end_users WHERE id = $1 AND project_id = $2`,
-		session.EndUserID, projectID).Scan(&got))
+		`SELECT external_id FROM project_players WHERE id = $1 AND project_id = $2`,
+		session.PlayerID, projectID).Scan(&got))
 	assert.Equal(t, "steam_99", got)
 }
 
@@ -406,8 +406,8 @@ func TestFriends_request_accept_list(t *testing.T) {
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
-	linkEndUserAccount(t, c, idA)
-	linkEndUserAccount(t, c, idB)
+	linkPlayerAccount(t, c, idA)
+	linkPlayerAccount(t, c, idB)
 
 	resp, _ := authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "k", tokA, nil)
@@ -437,8 +437,8 @@ func TestFriends_re_request_after_rejection_transitions_to_pending(t *testing.T)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
 	tokB, idB := anonymousLoginWithID(t, srv.URL, "k")
-	linkEndUserAccount(t, c, idA)
-	linkEndUserAccount(t, c, idB)
+	linkPlayerAccount(t, c, idA)
+	linkPlayerAccount(t, c, idB)
 
 	_, _ = authedReq(t, http.MethodPost,
 		fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "k", tokA, nil)

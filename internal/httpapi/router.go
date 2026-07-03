@@ -21,11 +21,11 @@ import (
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
@@ -61,10 +61,10 @@ type Deps struct {
 	// and degrades to a not-implemented error when unset.
 	Fleet *fleet.Manager
 
-	// Hub fans WS messages out to connected end-users. nil disables /v1/ws.
-	Hub                   *realtime.Hub
-	RealtimeMaxPerTenant  int64
-	RealtimeMaxPerEndUser int64
+	// Hub fans WS messages out to connected players. nil disables /v1/ws.
+	Hub                  *realtime.Hub
+	RealtimeMaxPerTenant int64
+	RealtimeMaxPerPlayer int64
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
@@ -176,7 +176,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(tenant.New(d.Lookup))
 				r.Use(ratelimit.New(d.Limiter, reg))
 
-				// /v1/auth/* — tenant-scoped, end-user-anonymous (api_key
+				// /v1/auth/* — tenant-scoped, player-anonymous (api_key
 				// suffices). Auth endpoints get an additional per-IP
 				// limiter on top of the per-api-key bucket because each
 				// login/signup runs bcrypt (~250ms CPU) and a single
@@ -192,15 +192,15 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/auth/custom-token", customTokenHandler(d))
 				})
 
-				// /v1/end-users/verify — server-tier endpoint used by
+				// /v1/server/player-sessions/verify — server-tier endpoint used by
 				// game-server workloads to verify a player's session
 				// token (the request body) under their own API-key auth
 				// (the Authorization header). Gated by RBAC permission so
 				// publishable keys (embedded in shipped game binaries) can't
 				// be used as a session-validity oracle.
 				r.Group(func(r chi.Router) {
-					r.Use(requireAPIKeyPermission(d, rbac.ObjectEndUser, rbac.ActionVerify))
-					r.Post("/end-users/verify", endUsersVerifyHandler(d))
+					r.Use(requireAPIKeyPermission(d, rbac.ObjectPlayer, rbac.ActionVerify))
+					r.Post("/server/player-sessions/verify", playerSessionVerifyHandler(d))
 				})
 
 				r.Group(func(r chi.Router) {
@@ -209,13 +209,13 @@ func NewRouter(d Deps) http.Handler {
 					// Server-tier remote-address read: a game server reads a
 					// linked player's opaque endpoint for that project. Secret
 					// keys only — publishable keys never reach this group.
-					r.Get("/server/players/{user_id}/remote-addrs", serverRemoteAddrGetHandler(d))
+					r.Get("/server/players/{player_id}/remote-addrs", serverRemoteAddrGetHandler(d))
 				})
 
-				// End-user authenticated: requires X-Session-Token JWT.
+				// Player authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
-					r.Use(enduser.New(d.Signer))
-					r.Use(ratelimit.NewEndUserLimiter(d.Limiter, ratelimit.EndUserRate, ratelimit.EndUserBurst, reg))
+					r.Use(playerauth.New(d.Signer))
+					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 					mountStorageRoutes(r, d)
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)

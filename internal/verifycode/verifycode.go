@@ -1,6 +1,6 @@
 // Package verifycode provides the shared primitives for 6-digit email
 // verification codes used by both the operator dashboard and the
-// player-facing end-user flow:
+// player-facing player flow:
 //
 //   - 6-digit numeric code generation
 //   - per-user salt + SHA-256 hashing (avoids precomputed rainbow tables

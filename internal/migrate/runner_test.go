@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(59), v)
+	assert.Equal(t, uint(60), v)
 	assert.False(t, dirty)
 }
 
@@ -150,7 +150,7 @@ func TestUp_creates_all_phase1_tables(t *testing.T) {
 
 	for _, table := range []string{
 		"tenants", "projects", "api_keys",
-		"end_users", "sessions",
+		"project_players", "sessions",
 		"storage_objects",
 		"leaderboards", "leaderboard_entries",
 		"friend_edges",
@@ -174,7 +174,7 @@ func TestUp_enables_rls_with_isolation_policy(t *testing.T) {
 
 	for _, table := range []string{
 		"tenants", "projects", "api_keys",
-		"end_users", "sessions",
+		"project_players", "sessions",
 		"storage_objects",
 		"leaderboards", "leaderboard_entries",
 		"audit_log",

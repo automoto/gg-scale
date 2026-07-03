@@ -19,7 +19,7 @@ func tenantCtx(tenantID int64) context.Context {
 func TestMemQueueEnqueueAssignsIdAndQueuedStatus(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 
-	ticket, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, EndUserID: 3, Region: "r", GameMode: "g"})
+	ticket, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g"})
 
 	require.NoError(t, err)
 	assert.NotZero(t, ticket.ID)
@@ -28,7 +28,7 @@ func TestMemQueueEnqueueAssignsIdAndQueuedStatus(t *testing.T) {
 
 func TestMemQueueGetIsTenantScoped(t *testing.T) {
 	q := matchmaker.NewMemQueue()
-	mine, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, EndUserID: 3})
+	mine, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3})
 	require.NoError(t, err)
 
 	_, err = q.Get(tenantCtx(2), mine.ID, 3)
@@ -36,9 +36,9 @@ func TestMemQueueGetIsTenantScoped(t *testing.T) {
 	assert.ErrorIs(t, err, matchmaker.ErrNotFound)
 }
 
-func TestMemQueueGetIsEndUserScoped(t *testing.T) {
+func TestMemQueueGetIsPlayerScoped(t *testing.T) {
 	q := matchmaker.NewMemQueue()
-	mine, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, EndUserID: 3})
+	mine, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3})
 	require.NoError(t, err)
 
 	_, err = q.Get(tenantCtx(1), mine.ID, 4)
@@ -48,7 +48,7 @@ func TestMemQueueGetIsEndUserScoped(t *testing.T) {
 
 func TestMemQueueCancelTransitionsQueuedToCancelled(t *testing.T) {
 	q := matchmaker.NewMemQueue()
-	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, EndUserID: 3})
+	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3})
 	require.NoError(t, err)
 
 	require.NoError(t, q.Cancel(tenantCtx(1), t1.ID, 3))
@@ -58,9 +58,9 @@ func TestMemQueueCancelTransitionsQueuedToCancelled(t *testing.T) {
 	assert.Equal(t, matchmaker.StatusCancelled, got.Status)
 }
 
-func TestMemQueueCancelIsEndUserScoped(t *testing.T) {
+func TestMemQueueCancelIsPlayerScoped(t *testing.T) {
 	q := matchmaker.NewMemQueue()
-	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, EndUserID: 3})
+	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3})
 	require.NoError(t, err)
 
 	err = q.Cancel(tenantCtx(1), t1.ID, 4)

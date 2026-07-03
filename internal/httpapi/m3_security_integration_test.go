@@ -12,11 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// disablePlayer flips disabled_at to now() for the given end_user.
-func disablePlayer(t *testing.T, c *cluster, endUserID int64) {
+// disablePlayer flips disabled_at to now() for the given player.
+func disablePlayer(t *testing.T, c *cluster, playerID int64) {
 	t.Helper()
 	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE end_users SET disabled_at = now() WHERE id = $1`, endUserID)
+		`UPDATE project_players SET disabled_at = now() WHERE id = $1`, playerID)
 	require.NoError(t, err)
 }
 
@@ -40,10 +40,10 @@ func TestLogin_rejects_disabled_player(t *testing.T) {
 		map[string]string{"email": "ghosted@example.com", "password": "supersecret"})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	var endUserID int64
+	var playerID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT id FROM end_users WHERE email = 'ghosted@example.com'`).Scan(&endUserID))
-	disablePlayer(t, c, endUserID)
+		`SELECT id FROM project_players WHERE email = 'ghosted@example.com'`).Scan(&playerID))
+	disablePlayer(t, c, playerID)
 
 	resp, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",
 		map[string]string{"email": "ghosted@example.com", "password": "supersecret"})
@@ -70,12 +70,12 @@ func TestRefresh_rejects_disabled_player(t *testing.T) {
 
 	var s struct {
 		RefreshToken string `json:"refresh_token"`
-		EndUserID    int64  `json:"end_user_id"`
+		PlayerID     int64  `json:"player_id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &s))
 	require.NotEmpty(t, s.RefreshToken)
 
-	disablePlayer(t, c, s.EndUserID)
+	disablePlayer(t, c, s.PlayerID)
 
 	resp, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/refresh", "k",
 		map[string]string{"refresh_token": s.RefreshToken})

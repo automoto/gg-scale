@@ -23,7 +23,7 @@ func mountLeaderboardRoutes(r chi.Router, d Deps) {
 	r.Route("/leaderboards", func(r chi.Router) {
 		// Score submission is server-authoritative: only callers with a
 		// secret key (game server / tenant backend) may submit scores.
-		// The end-user session in X-Session-Token still identifies the
+		// The player session in X-Session-Token still identifies the
 		// subject — the secret key authorises the proxying caller.
 		r.Group(func(r chi.Router) {
 			r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
@@ -63,12 +63,12 @@ func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Ha
 func mountFriendRoutes(r chi.Router, d Deps) {
 	r.Route("/friends", func(r chi.Router) {
 		r.Get("/", friendsListHandler(d))
-		r.Post("/{user_id}/request", friendRequestHandler(d))
-		r.Post("/{user_id}/accept", friendAcceptHandler(d))
-		r.Post("/{user_id}/reject", friendRejectHandler(d))
-		r.Post("/{user_id}/block", friendBlockHandler(d))
-		r.Post("/{user_id}/unblock", friendUnblockHandler(d))
-		r.Delete("/{user_id}", friendDeleteHandler(d))
+		r.Post("/{player_id}/request", friendRequestHandler(d))
+		r.Post("/{player_id}/accept", friendAcceptHandler(d))
+		r.Post("/{player_id}/reject", friendRejectHandler(d))
+		r.Post("/{player_id}/block", friendBlockHandler(d))
+		r.Post("/{player_id}/unblock", friendUnblockHandler(d))
+		r.Delete("/{player_id}", friendDeleteHandler(d))
 	})
 }
 
@@ -84,10 +84,10 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		return
 	}
 	r.Get("/ws", realtime.ServeWS(realtime.Options{
-		Hub:           d.Hub,
-		Cache:         d.Cache,
-		MaxPerTenant:  d.RealtimeMaxPerTenant,
-		MaxPerEndUser: d.RealtimeMaxPerEndUser,
+		Hub:          d.Hub,
+		Cache:        d.Cache,
+		MaxPerTenant: d.RealtimeMaxPerTenant,
+		MaxPerPlayer: d.RealtimeMaxPerPlayer,
 	}))
 }
 
@@ -100,7 +100,7 @@ func mountFleetHeartbeatRoute(r chi.Router, d Deps) {
 	r.Post("/fleets/heartbeat", fleetHeartbeatHandler(d))
 }
 
-// mountFleetListRoute is end-user tier. Any authenticated session can
+// mountFleetListRoute is player tier. Any authenticated session can
 // browse the live server list for its tenant.
 func mountFleetListRoute(r chi.Router, d Deps) {
 	if d.ServerList == nil {

@@ -128,12 +128,12 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			return berr
 		}
 
-		// Switch into the invite's tenant so RLS admits the end_user work.
+		// Switch into the invite's tenant so RLS admits the player work.
 		if _, err := tx.Exec(r.Context(), "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(row.TenantID, 10)); err != nil {
 			return err
 		}
 		emailPtr := &row.Email
-		existing, eerr := q.GetEndUserForAccountLink(r.Context(), sqlcgen.GetEndUserForAccountLinkParams{
+		existing, eerr := q.GetPlayerForAccountLink(r.Context(), sqlcgen.GetPlayerForAccountLinkParams{
 			ProjectID: projectID, Email: emailPtr,
 		})
 		switch {
@@ -141,7 +141,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			if existing.PlayerAccountID.Valid && existing.PlayerAccountID != accountID {
 				return errInvitePlayerExists
 			}
-			if lerr := q.LinkEndUserToAccount(r.Context(), sqlcgen.LinkEndUserToAccountParams{
+			if lerr := q.LinkPlayerToAccount(r.Context(), sqlcgen.LinkPlayerToAccountParams{
 				ID: existing.ID, PlayerAccountID: accountID,
 			}); lerr != nil {
 				return lerr
@@ -151,7 +151,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			if xerr != nil {
 				return xerr
 			}
-			if _, cerr := q.CreateLinkedEndUser(r.Context(), sqlcgen.CreateLinkedEndUserParams{
+			if _, cerr := q.CreateLinkedPlayer(r.Context(), sqlcgen.CreateLinkedPlayerParams{
 				ProjectID:       projectID,
 				ExternalID:      externalID,
 				Email:           emailPtr,
@@ -165,7 +165,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 			return eerr
 		}
-		return q.MarkEndUserInvitationAccepted(r.Context(), row.ID)
+		return q.MarkPlayerInvitationAccepted(r.Context(), row.ID)
 	})
 	switch {
 	case errors.Is(err, errInviteNotFound), errors.Is(err, errInviteExpired):
@@ -214,7 +214,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 
 var (
 	errInviteNeedsPassword = errors.New("players: invite needs a password to create account")
-	errInvitePlayerExists  = errors.New("players: end_user already linked to another account")
+	errInvitePlayerExists  = errors.New("players: player already linked to another account")
 )
 
 func (h *Handler) lookupPlayerInvite(ctx context.Context, projectID int64, code string) (InviteAcceptView, error) {

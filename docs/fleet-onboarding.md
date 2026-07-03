@@ -17,7 +17,7 @@ applied to a concrete game.
 
 | Concern | ggscale gives you | You don't have to |
 |---|---|---|
-| Player auth | end-user sessions, OAuth/email login, session JWT verification | Build your own login |
+| Player auth | player sessions, OAuth/email login, session JWT verification | Build your own login |
 | Matchmaking | `POST /v1/matchmaker/tickets`, ticket queue, bucket workers, claim/commit semantics | Run your own queue |
 | Server allocation | Agones-backed allocator, region-aware selectors, drain hooks | Touch the Kubernetes API |
 | Server registration | `/v1/fleet/*` for non-Agones servers; transport-agnostic address handoff | Run your own server-directory |

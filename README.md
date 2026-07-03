@@ -31,9 +31,9 @@ If you cloned without submodules, run `git submodule update --init --recursive` 
 
 ## Player and session features
 
-These are the calls a game client makes for a signed-in player: accounts, profiles, friends, presence, saves, leaderboards, game sessions, and invites. Each one needs an end-user session token and is stored in Postgres under a single tenant and project, so a player keeps their data across sessions and devices.
+These are the calls a game client makes for a signed-in player: accounts, profiles, friends, presence, saves, leaderboards, game sessions, and invites. Each one needs a player session token and is stored in Postgres under a single tenant and project, so a player keeps their data across sessions and devices.
 
-Endpoints require an end-user session (`X-Session-Token`), which a player obtains through one of the auth flows; the Go SDK wraps them, and the raw routes live under `/v1/`.
+Endpoints require a player session (`X-Session-Token`), which a player obtains through one of the auth flows; the Go SDK wraps them, and the raw routes live under `/v1/`.
 
 | Feature | Endpoints | What it does |
 |---|---|---|

@@ -11,7 +11,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -42,21 +42,21 @@ func validRemoteAddr(s string) bool {
 func mountRemoteAddrRoutes(r chi.Router, d Deps) {
 	r.Get("/account/remote-addrs", ownerRemoteAddrGetHandler(d))
 	r.Put("/account/remote-addrs", ownerRemoteAddrPutHandler(d))
-	r.Get("/friends/{user_id}/remote-addrs", friendRemoteAddrGetHandler(d))
+	r.Get("/friends/{player_id}/remote-addrs", friendRemoteAddrGetHandler(d))
 }
 
-// resolveCallerAccount returns the caller end_user's linked account, or false
+// resolveCallerAccount returns the caller player's linked account, or false
 // (with a 403 already written) when the player is anonymous / unlinked.
 func resolveCallerAccount(w http.ResponseWriter, r *http.Request, d Deps) (pgtype.UUID, bool) {
-	endUserID, ok := enduser.IDFromContext(r.Context())
+	playerID, ok := playerauth.IDFromContext(r.Context())
 	if !ok {
-		http.Error(w, "no end user", http.StatusUnauthorized)
+		http.Error(w, "no player", http.StatusUnauthorized)
 		return pgtype.UUID{}, false
 	}
 	var acc pgtype.UUID
 	err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
 		var e error
-		acc, e = sqlcgen.New(tx).GetEndUserAccountID(r.Context(), endUserID)
+		acc, e = sqlcgen.New(tx).GetPlayerLinkedAccountID(r.Context(), playerID)
 		return e
 	})
 	if err != nil || !acc.Valid {
@@ -114,15 +114,15 @@ func friendRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		targetEndUser, ok := pathInt64(r, "user_id")
+		targetPlayer, ok := pathInt64(r, "player_id")
 		if !ok {
-			http.Error(w, "user_id required", http.StatusBadRequest)
+			http.Error(w, "player_id required", http.StatusBadRequest)
 			return
 		}
 		var targetAcc pgtype.UUID
 		err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			acc, e := q.GetEndUserAccountID(r.Context(), targetEndUser)
+			acc, e := q.GetPlayerLinkedAccountID(r.Context(), targetPlayer)
 			if e != nil {
 				return e
 			}
@@ -170,15 +170,15 @@ func serverRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "api key has no project pin", http.StatusBadRequest)
 			return
 		}
-		targetEndUser, ok := pathInt64(r, "user_id")
+		targetPlayer, ok := pathInt64(r, "player_id")
 		if !ok {
-			http.Error(w, "user_id required", http.StatusBadRequest)
+			http.Error(w, "player_id required", http.StatusBadRequest)
 			return
 		}
 		var acc pgtype.UUID
 		err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
-			a, e := sqlcgen.New(tx).GetEndUserAccountForProjectRead(r.Context(), sqlcgen.GetEndUserAccountForProjectReadParams{
-				ID: targetEndUser, ProjectID: projectID,
+			a, e := sqlcgen.New(tx).GetPlayerAccountForProjectRead(r.Context(), sqlcgen.GetPlayerAccountForProjectReadParams{
+				ID: targetPlayer, ProjectID: projectID,
 			})
 			if e != nil {
 				return e

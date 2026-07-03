@@ -13,7 +13,7 @@ import (
 
 const countPlayersForProject = `-- name: CountPlayersForProject :one
 SELECT COUNT(*)::bigint
-FROM end_users u
+FROM project_players u
 JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = $1
   AND u.project_id = $2
@@ -48,7 +48,7 @@ SELECT
     a.primary_remote_addr,
     a.secondary_remote_addr,
     (b.id IS NOT NULL)::boolean AS tenant_banned
-FROM end_users u
+FROM project_players u
 JOIN projects p ON p.id = u.project_id
 LEFT JOIN player_accounts a ON a.id = u.player_account_id
 LEFT JOIN tenant_player_bans b
@@ -113,7 +113,7 @@ SELECT
     u.email_verified_at,
     u.disabled_at,
     u.created_at
-FROM end_users u
+FROM project_players u
 JOIN projects p ON p.id = u.project_id
 WHERE p.tenant_id = $1
   AND u.project_id = $2
@@ -177,7 +177,7 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 }
 
 const setPlayerDisabledInProject = `-- name: SetPlayerDisabledInProject :exec
-UPDATE end_users
+UPDATE project_players
 SET disabled_at   = $1,
     session_epoch = session_epoch + 1
 WHERE id = $2

@@ -104,14 +104,14 @@ func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
 	// And no row was inserted.
 	var count int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM end_user_invitations WHERE email = 'player@example.com'`).Scan(&count))
+		`SELECT count(*) FROM player_invitations WHERE email = 'player@example.com'`).Scan(&count))
 	assert.Equal(t, int64(0), count)
 }
 
 // TestPlayerInvite_happy_path_creates_account_and_logs_in covers H6:
 // dashboard admin invites a player; the magic-link URL in the email
 // actually resolves (was a 404 pre-fix); accepting it creates the
-// end_user, marks them verified, and issues a player session.
+// player, marks them verified, and issues a player session.
 func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	c := startCluster(t)
 	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
@@ -188,19 +188,19 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, acceptResp.StatusCode)
 
 	// 5) Player row exists and is verified.
-	var endUserID int64
+	var playerID int64
 	var verifiedAt, disabledAt *string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT id, email_verified_at::text, disabled_at::text FROM end_users WHERE email = 'newplayer@example.com'`).
-		Scan(&endUserID, &verifiedAt, &disabledAt))
-	assert.Greater(t, endUserID, int64(0))
+		`SELECT id, email_verified_at::text, disabled_at::text FROM project_players WHERE email = 'newplayer@example.com'`).
+		Scan(&playerID, &verifiedAt, &disabledAt))
+	assert.Greater(t, playerID, int64(0))
 	assert.NotNil(t, verifiedAt)
 	assert.Nil(t, disabledAt)
 
 	// 6) Invitation row marked accepted.
 	var accepted *string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT accepted_at::text FROM end_user_invitations WHERE email = 'newplayer@example.com'`).Scan(&accepted))
+		`SELECT accepted_at::text FROM player_invitations WHERE email = 'newplayer@example.com'`).Scan(&accepted))
 	assert.NotNil(t, accepted)
 
 	// 7) Global account session cookie was issued (invites now sign the
@@ -213,10 +213,10 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	}
 	assert.True(t, sawSession, "expected ggscale_account_session cookie after accept")
 
-	// 8) The end_user is linked to a verified global account.
+	// 8) The player is linked to a verified global account.
 	var linkedAccount *string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT player_account_id::text FROM end_users WHERE email = 'newplayer@example.com'`).Scan(&linkedAccount))
+		`SELECT player_account_id::text FROM project_players WHERE email = 'newplayer@example.com'`).Scan(&linkedAccount))
 	require.NotNil(t, linkedAccount)
 	var acctVerified *string
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),

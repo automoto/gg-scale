@@ -64,7 +64,7 @@ const (
 	ObjectFriends         = "friends"
 	ObjectLeaderboard     = "leaderboard"
 	ObjectRealtime        = "realtime"
-	ObjectEndUser         = "end_user"
+	ObjectPlayer          = "player"
 	ObjectCustomToken     = "custom_token"
 	ObjectFeatureRequest  = "feature_request"
 	ObjectDashboardUser   = "dashboard_user"
@@ -223,13 +223,13 @@ func (a *Authorizer) CanAPIKey(key tenant.APIKey, obj, act string) (bool, error)
 	return a.enforce(role, dom, obj, act)
 }
 
-// CanEndUser reports whether an end user can perform act on obj.
-func (a *Authorizer) CanEndUser(tenantID, endUserID int64, obj, act string) (bool, error) {
+// CanPlayer reports whether a player can perform act on obj.
+func (a *Authorizer) CanPlayer(tenantID, playerID int64, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
 	dom := TenantDomain(tenantID)
-	allowed, err := a.enforce(EndUserSubject(endUserID), dom, obj, act)
+	allowed, err := a.enforce(PlayerSubject(playerID), dom, obj, act)
 	if err != nil || allowed {
 		return allowed, err
 	}
@@ -341,27 +341,27 @@ func (a *Authorizer) AddAPIKeyRoleTx(ctx context.Context, tx pgx.Tx, keyID, tena
 	return a.setSubjectRoleTx(ctx, tx, APIKeySubject(keyID), role, TenantDomain(tenantID))
 }
 
-// AddEndUserRole grants an explicit tenant role to an end user.
-func (a *Authorizer) AddEndUserRole(endUserID, tenantID int64, role string) error {
+// AddPlayerRole grants an explicit tenant role to a player.
+func (a *Authorizer) AddPlayerRole(playerID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !EndUserRole(role) {
-		return fmt.Errorf("rbac: unknown end-user role %q", role)
+	if !PlayerRole(role) {
+		return fmt.Errorf("rbac: unknown player role %q", role)
 	}
-	_, err := a.enforcer.AddGroupingPolicy(EndUserSubject(endUserID), role, TenantDomain(tenantID))
+	_, err := a.enforcer.AddGroupingPolicy(PlayerSubject(playerID), role, TenantDomain(tenantID))
 	return err
 }
 
-// AddEndUserRoleTx writes an explicit tenant role for an end user in tx.
-func (a *Authorizer) AddEndUserRoleTx(ctx context.Context, tx pgx.Tx, endUserID, tenantID int64, role string) error {
+// AddPlayerRoleTx writes an explicit tenant role for a player in tx.
+func (a *Authorizer) AddPlayerRoleTx(ctx context.Context, tx pgx.Tx, playerID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !EndUserRole(role) {
-		return fmt.Errorf("rbac: unknown end-user role %q", role)
+	if !PlayerRole(role) {
+		return fmt.Errorf("rbac: unknown player role %q", role)
 	}
-	return insertRule(ctx, tx, "g", []string{EndUserSubject(endUserID), role, TenantDomain(tenantID)})
+	return insertRule(ctx, tx, "g", []string{PlayerSubject(playerID), role, TenantDomain(tenantID)})
 }
 
 // RemoveDashboardRoles removes a dashboard user's tenant-scoped roles.
@@ -474,8 +474,8 @@ func APIKeyRole(keyType tenant.KeyType) (string, bool) {
 	}
 }
 
-// EndUserRole reports whether role is safe to grant to an end-user subject.
-func EndUserRole(role string) bool {
+// PlayerRole reports whether role is safe to grant to a player subject.
+func PlayerRole(role string) bool {
 	switch role {
 	case RolePlayerStandard, RolePlayerVerified, RolePlayerHighAccess, RolePlayerBanned:
 		return true
@@ -513,9 +513,9 @@ func APIKeySubject(keyID int64) string {
 	return "api_key:" + strconv.FormatInt(keyID, 10)
 }
 
-// EndUserSubject returns the Casbin subject for an end user.
-func EndUserSubject(endUserID int64) string {
-	return "end_user:" + strconv.FormatInt(endUserID, 10)
+// PlayerSubject returns the Casbin subject for a player.
+func PlayerSubject(playerID int64) string {
+	return "player:" + strconv.FormatInt(playerID, 10)
 }
 
 // ProjectPlayersObject returns the project players object name.

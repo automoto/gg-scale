@@ -193,16 +193,16 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	appPool := db.NewPool(pool)
 
 	ctx := context.Background()
-	var tenantID, projectID, fleetID, endUserID int64
+	var tenantID, projectID, fleetID, playerID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-listen-test') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, 'player-listen') RETURNING id`,
-		tenantID, projectID).Scan(&endUserID))
+		tenantID, projectID).Scan(&playerID))
 	// The matchmaking_tickets.fleet_id FK is RESTRICT — every queued ticket
 	// must reference an existing fleet template, even in tests. Seed one
 	// before enqueuing.
@@ -232,7 +232,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		FleetID:   fleetID,
-		EndUserID: endUserID,
+		PlayerID:  playerID,
 		Region:    "us-east-1",
 		GameMode:  "1v1",
 	})
@@ -252,16 +252,16 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	appPool := db.NewPool(pool)
 	ctx := context.Background()
 
-	var tenantID, projectID, fleetID, endUserID int64
+	var tenantID, projectID, fleetID, playerID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-claim-race') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, 'player-claim') RETURNING id`,
-		tenantID, projectID).Scan(&endUserID))
+		tenantID, projectID).Scan(&playerID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
@@ -271,7 +271,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
-		EndUserID: endUserID, Region: "us-east-1", GameMode: "1v1",
+		PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
 	})
 	require.NoError(t, err)
 
@@ -298,7 +298,7 @@ func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	assert.Equal(t, int64(1), winner.Load(), "exactly one worker should claim+commit")
 	assert.Equal(t, int64(3), loser.Load(), "the other three must observe an empty claim, not a stranded ticket")
 
-	got, err := queue.Get(tenantCtx, ticket.ID, endUserID)
+	got, err := queue.Get(tenantCtx, ticket.ID, playerID)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusMatched, got.Status)
 	assert.Equal(t, "10.0.0.1:7777", got.MatchAddress)
@@ -313,16 +313,16 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	appPool := db.NewPool(pool)
 	ctx := context.Background()
 
-	var tenantID, projectID, fleetID, endUserID int64
+	var tenantID, projectID, fleetID, playerID int64
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('mm-sweep') RETURNING id`).Scan(&tenantID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, 'player-sweep') RETURNING id`,
-		tenantID, projectID).Scan(&endUserID))
+		tenantID, projectID).Scan(&playerID))
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
@@ -332,7 +332,7 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
-		EndUserID: endUserID, Region: "us-east-1", GameMode: "1v1",
+		PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
 	})
 	require.NoError(t, err)
 
@@ -346,16 +346,16 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 
-	got, err := queue.Get(tenantCtx, ticket.ID, endUserID)
+	got, err := queue.Get(tenantCtx, ticket.ID, playerID)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "swept ticket should be available for re-claim")
 }
 
-// TestPGQueueGetAndCancelAreEndUserScoped is the ticket-ownership regression:
+// TestPGQueueGetAndCancelArePlayerScoped is the ticket-ownership regression:
 // a same-tenant, different-user caller must not be able to read or cancel
-// another player's ticket by ID. The SQL WHERE end_user_id filter yields
+// another player's ticket by ID. The SQL WHERE player_id filter yields
 // ErrNotFound (404 at the HTTP layer), never the ticket.
-func TestPGQueueGetAndCancelAreEndUserScoped(t *testing.T) {
+func TestPGQueueGetAndCancelArePlayerScoped(t *testing.T) {
 	pool := startMigratedDB(t)
 	appPool := db.NewPool(pool)
 	ctx := context.Background()
@@ -367,11 +367,11 @@ func TestPGQueueGetAndCancelAreEndUserScoped(t *testing.T) {
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
 		tenantID).Scan(&projectID))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, 'ticket-owner') RETURNING id`,
 		tenantID, projectID).Scan(&ownerID))
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO end_users (tenant_id, project_id, external_id)
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
 		 VALUES ($1, $2, 'ticket-attacker') RETURNING id`,
 		tenantID, projectID).Scan(&otherID))
 	require.NoError(t, pool.QueryRow(ctx,
@@ -383,7 +383,7 @@ func TestPGQueueGetAndCancelAreEndUserScoped(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
-		EndUserID: ownerID, Region: "us-east-1", GameMode: "1v1",
+		PlayerID: ownerID, Region: "us-east-1", GameMode: "1v1",
 	})
 	require.NoError(t, err)
 

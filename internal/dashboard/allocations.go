@@ -522,7 +522,7 @@ func (h *Handler) loadMatchmakerBuckets(ctx context.Context, tenantID, projectID
 
 // writeFleetAudit records a manual fleet action by a dashboard user.
 // platform_audit_log is the correct table here: the actor is a
-// dashboard_user (not an end_user), and the tenant FK on audit_log would
+// dashboard_user (not a player), and the tenant FK on audit_log would
 // reject it. We fold tenant_id + project_id into the payload so the row
 // is still correlatable to a tenant.
 func (h *Handler) writeFleetAudit(ctx context.Context, tenantID, actorUserID int64, action, target string, payload map[string]any) error {

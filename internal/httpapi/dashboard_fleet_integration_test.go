@@ -374,12 +374,12 @@ func TestDashboardMatchmaker_queue_lists_buckets_grouped_by_region(t *testing.T)
 	ownerID := seedDashboardUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
 
-	// Seed an end_user we can foreign-key from the tickets table.
-	var endUserID, fleetID int64
+	// Seed a player we can foreign-key from the tickets table.
+	var playerID, fleetID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`INSERT INTO end_users (tenant_id, project_id, external_id, email, email_verified_at)
+		`INSERT INTO project_players (tenant_id, project_id, external_id, email, email_verified_at)
 		 VALUES ($1, $2, 'ext-1', 'mm-player@example.com', now()) RETURNING id`,
-		tenantID, projectID).Scan(&endUserID))
+		tenantID, projectID).Scan(&playerID))
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'mm-fleet', 'stub', '{}'::jsonb) RETURNING id`,
@@ -389,9 +389,9 @@ func TestDashboardMatchmaker_queue_lists_buckets_grouped_by_region(t *testing.T)
 		{"us-east-1", "ranked"}, {"us-east-1", "ranked"}, {"eu-1", "casual"},
 	} {
 		_, err := c.bootstrapPool.Exec(context.Background(),
-			`INSERT INTO matchmaking_tickets (tenant_id, project_id, fleet_id, end_user_id, region, game_mode)
+			`INSERT INTO matchmaking_tickets (tenant_id, project_id, fleet_id, player_id, region, game_mode)
 			 VALUES ($1, $2, $3, $4, $5, $6)`,
-			tenantID, projectID, fleetID, endUserID, tup.region, tup.mode)
+			tenantID, projectID, fleetID, playerID, tup.region, tup.mode)
 		require.NoError(t, err)
 	}
 

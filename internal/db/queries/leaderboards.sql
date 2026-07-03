@@ -15,7 +15,7 @@ RETURNING id;
 
 -- name: SubmitScore :one
 INSERT INTO leaderboard_entries (
-    tenant_id, leaderboard_id, end_user_id, score, recorded_at
+    tenant_id, leaderboard_id, player_id, score, recorded_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -24,7 +24,7 @@ VALUES (
 RETURNING id, recorded_at;
 
 -- name: TopN :many
-SELECT le.end_user_id,
+SELECT le.player_id,
        CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
        MIN(le.recorded_at)::timestamptz AS first_seen
 FROM leaderboard_entries le
@@ -33,11 +33,11 @@ WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND le.leaderboard_id = $1
   AND l.tenant_id = le.tenant_id
   AND l.deleted_at IS NULL
-GROUP BY le.end_user_id
+GROUP BY le.player_id
 ORDER BY
   CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
   CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-  le.end_user_id ASC
+  le.player_id ASC
 LIMIT $2;
 
 -- name: CountEntries :one
@@ -48,12 +48,12 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 
 -- name: LeaderboardUserRank :one
 WITH ranked AS (
-    SELECT end_user_id,
+    SELECT player_id,
            RANK() OVER (
              ORDER BY
                CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
                CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               end_user_id ASC
+               player_id ASC
            ) AS r
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
@@ -61,21 +61,21 @@ WITH ranked AS (
       AND le.leaderboard_id = $1
       AND l.tenant_id = le.tenant_id
       AND l.deleted_at IS NULL
-    GROUP BY end_user_id
+    GROUP BY player_id
 )
 SELECT r::bigint AS rank
 FROM ranked
-WHERE end_user_id = $2;
+WHERE player_id = $2;
 
 -- name: LeaderboardRangeByRank :many
 WITH ranked AS (
-    SELECT end_user_id,
+    SELECT player_id,
            CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
            RANK() OVER (
              ORDER BY
                CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
                CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               end_user_id ASC
+               player_id ASC
            ) AS r
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
@@ -83,9 +83,9 @@ WITH ranked AS (
       AND le.leaderboard_id = $1
       AND l.tenant_id = le.tenant_id
       AND l.deleted_at IS NULL
-    GROUP BY end_user_id
+    GROUP BY player_id
 )
-SELECT end_user_id, best_score, r::bigint AS rank
+SELECT player_id, best_score, r::bigint AS rank
 FROM ranked
 WHERE r BETWEEN sqlc.arg(rank_low)::bigint AND sqlc.arg(rank_high)::bigint
 ORDER BY r;

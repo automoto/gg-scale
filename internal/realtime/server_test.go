@@ -15,32 +15,32 @@ import (
 
 	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/realtime"
 )
 
-// wrap inserts tenant + end-user ids into the request context, standing in
-// for the production tenant + enduser middlewares without dragging in their
+// wrap inserts tenant + player ids into the request context, standing in
+// for the production tenant + player middlewares without dragging in their
 // auth machinery.
-func wrap(tenantID, endUserID int64, next http.Handler) http.Handler {
+func wrap(tenantID, playerID int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		if tenantID != 0 {
 			ctx = db.WithTenant(ctx, tenantID)
 		}
-		if endUserID != 0 {
-			ctx = enduser.WithID(ctx, endUserID)
+		if playerID != 0 {
+			ctx = playerauth.WithID(ctx, playerID)
 		}
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func newTestServer(t *testing.T, hub *realtime.Hub, opts realtime.Options, tenantID, endUserID int64) (string, func()) {
+func newTestServer(t *testing.T, hub *realtime.Hub, opts realtime.Options, tenantID, playerID int64) (string, func()) {
 	t.Helper()
 	if opts.Hub == nil {
 		opts.Hub = hub
 	}
-	srv := httptest.NewServer(wrap(tenantID, endUserID, realtime.ServeWS(opts)))
+	srv := httptest.NewServer(wrap(tenantID, playerID, realtime.ServeWS(opts)))
 	url := "ws" + strings.TrimPrefix(srv.URL, "http")
 	return url, srv.Close
 }
@@ -59,7 +59,7 @@ func TestServeWSRejectsRequestWithoutTenantContext(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 }
 
-func TestServeWSRejectsRequestWithoutEndUserContext(t *testing.T) {
+func TestServeWSRejectsRequestWithoutPlayerContext(t *testing.T) {
 	hub := realtime.NewHub()
 	srv := httptest.NewServer(wrap(1, 0, realtime.ServeWS(realtime.Options{Hub: hub})))
 	defer srv.Close()

@@ -249,7 +249,7 @@ func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	return srv
 }
 
-func TestAuthAnonymous_creates_end_user_signs_jwt_persists_session(t *testing.T) {
+func TestAuthAnonymous_creates_player_signs_jwt_persists_session(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "test-token")
 	srv := newServerForCluster(t, c)
@@ -267,7 +267,7 @@ func TestAuthAnonymous_creates_end_user_signs_jwt_persists_session(t *testing.T)
 	var body struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
-		EndUserID    int64  `json:"end_user_id"`
+		PlayerID     int64  `json:"player_id"`
 		ExternalID   string `json:"external_id"`
 		ExpiresAt    string `json:"expires_at"`
 	}
@@ -275,7 +275,7 @@ func TestAuthAnonymous_creates_end_user_signs_jwt_persists_session(t *testing.T)
 
 	assert.NotEmpty(t, body.AccessToken)
 	assert.NotEmpty(t, body.RefreshToken)
-	assert.Greater(t, body.EndUserID, int64(0))
+	assert.Greater(t, body.PlayerID, int64(0))
 	assert.Contains(t, body.ExternalID, "anon_")
 
 	// Verify the JWT decodes to the right claims.
@@ -284,14 +284,14 @@ func TestAuthAnonymous_creates_end_user_signs_jwt_persists_session(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, tenantID, claims.TenantID)
 	assert.Equal(t, projectID, claims.ProjectID)
-	assert.Equal(t, body.EndUserID, claims.EndUserID)
+	assert.Equal(t, body.PlayerID, claims.PlayerID)
 
 	// Verify the session row was persisted with the hashed refresh token.
 	sum := sha256.Sum256([]byte(body.RefreshToken))
-	var sessionEndUserID int64
+	var sessionPlayerID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT end_user_id FROM sessions WHERE refresh_hash = $1`, sum[:]).Scan(&sessionEndUserID))
-	assert.Equal(t, body.EndUserID, sessionEndUserID)
+		`SELECT player_id FROM sessions WHERE refresh_hash = $1`, sum[:]).Scan(&sessionPlayerID))
+	assert.Equal(t, body.PlayerID, sessionPlayerID)
 }
 
 func TestAuthAnonymous_returns_401_without_api_key(t *testing.T) {

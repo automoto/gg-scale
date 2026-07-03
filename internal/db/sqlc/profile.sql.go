@@ -13,7 +13,7 @@ import (
 
 const getProfile = `-- name: GetProfile :one
 SELECT id, project_id, external_id, email, xuid, email_verified_at, created_at
-FROM end_users
+FROM project_players
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
@@ -45,7 +45,7 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 }
 
 const updateProfileEmail = `-- name: UpdateProfileEmail :exec
-UPDATE end_users
+UPDATE project_players
 SET email                           = $2,
     email_verified_at               = NULL,
     email_verification_code_hash    = $3,
@@ -81,7 +81,7 @@ func (q *Queries) UpdateProfileEmail(ctx context.Context, arg UpdateProfileEmail
 }
 
 const updateProfileXuid = `-- name: UpdateProfileXuid :exec
-UPDATE end_users
+UPDATE project_players
 SET xuid = $1
 WHERE id = $2
   AND tenant_id = current_setting('app.tenant_id', true)::bigint

@@ -26,7 +26,7 @@ type Allocator interface {
 // Notifier pushes MatchReady envelopes back to matched players. *realtime.Hub
 // is the production implementation.
 type Notifier interface {
-	Send(ctx context.Context, tenantID, endUserID int64, msg realtime.Message) error
+	Send(ctx context.Context, tenantID, playerID int64, msg realtime.Message) error
 }
 
 // Counter is the minimal Prometheus-ish interface the worker uses for the
@@ -337,7 +337,7 @@ func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, address s
 	delivered := 0
 	for _, t := range tickets {
 		p, _ := json.Marshal(map[string]any{"address": address, "ticket_id": t.ID})
-		err := w.hub.Send(ctx, t.TenantID, t.EndUserID, realtime.Message{
+		err := w.hub.Send(ctx, t.TenantID, t.PlayerID, realtime.Message{
 			Type:    "match_ready",
 			Payload: p,
 		})
@@ -346,10 +346,10 @@ func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, address s
 			delivered++
 		case errors.Is(err, realtime.ErrNotConnected):
 			w.log.Info("matchmaker: notify skipped (client not connected)",
-				"tenant_id", t.TenantID, "end_user_id", t.EndUserID)
+				"tenant_id", t.TenantID, "player_id", t.PlayerID)
 		default:
 			w.log.Warn("matchmaker: notify failed",
-				"tenant_id", t.TenantID, "end_user_id", t.EndUserID, "err", err)
+				"tenant_id", t.TenantID, "player_id", t.PlayerID, "err", err)
 		}
 	}
 	return delivered

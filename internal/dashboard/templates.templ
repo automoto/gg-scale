@@ -550,9 +550,9 @@ templ HelpPage(vm HelpView) {
 				<dt>API key</dt>
 				<dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd>
 				<dt>Dashboard user</dt>
-				<dd>You. Humans who log in here to manage tenants, projects, and keys. Dashboard users are separate from end users; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles.</dd>
-				<dt>End user (player)</dt>
-				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. End users never touch this dashboard.</dd>
+				<dd>You. Humans who log in here to manage tenants, projects, and keys. Dashboard users are separate from players; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles.</dd>
+				<dt>Player</dt>
+				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. Players never touch this dashboard.</dd>
 			</dl>
 		</section>
 		<section class="card">
@@ -562,7 +562,7 @@ templ HelpPage(vm HelpView) {
 your game ──► ggscale HTTP API
               │
               ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project)
-              └─ X-Session-Token: &lt;player session&gt;   → resolves to an End user inside that Tenant
+              └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Tenant
               │
               ▼
        Postgres (Row-Level Security)

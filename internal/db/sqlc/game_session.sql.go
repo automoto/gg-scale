@@ -29,7 +29,7 @@ func (q *Queries) CountOpenGameSessionsForProject(ctx context.Context, projectID
 }
 
 const createGameSession = `-- name: CreateGameSession :one
-INSERT INTO game_session (id, join_code, tenant_id, project_id, title_id, host_user_id, props, max_players, private, expires_at)
+INSERT INTO game_session (id, join_code, tenant_id, project_id, title_id, host_player_id, props, max_players, private, expires_at)
 VALUES (
     $1,
     $2,
@@ -46,15 +46,15 @@ RETURNING id, join_code, state, created_at
 `
 
 type CreateGameSessionParams struct {
-	ID         string
-	JoinCode   string
-	ProjectID  int64
-	TitleID    string
-	HostUserID int64
-	Props      []byte
-	MaxPlayers int32
-	Private    bool
-	ExpiresAt  pgtype.Timestamptz
+	ID           string
+	JoinCode     string
+	ProjectID    int64
+	TitleID      string
+	HostPlayerID int64
+	Props        []byte
+	MaxPlayers   int32
+	Private      bool
+	ExpiresAt    pgtype.Timestamptz
 }
 
 type CreateGameSessionRow struct {
@@ -70,7 +70,7 @@ func (q *Queries) CreateGameSession(ctx context.Context, arg CreateGameSessionPa
 		arg.JoinCode,
 		arg.ProjectID,
 		arg.TitleID,
-		arg.HostUserID,
+		arg.HostPlayerID,
 		arg.Props,
 		arg.MaxPlayers,
 		arg.Private,
@@ -114,24 +114,24 @@ func (q *Queries) DeleteGameSession(ctx context.Context, id string) error {
 }
 
 const getGameSession = `-- name: GetGameSession :one
-SELECT id, join_code, project_id, title_id, host_user_id, state, props, max_players, private, created_at, expires_at
+SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
 `
 
 type GetGameSessionRow struct {
-	ID         string
-	JoinCode   string
-	ProjectID  int64
-	TitleID    string
-	HostUserID int64
-	State      string
-	Props      []byte
-	MaxPlayers int32
-	Private    bool
-	CreatedAt  pgtype.Timestamptz
-	ExpiresAt  pgtype.Timestamptz
+	ID           string
+	JoinCode     string
+	ProjectID    int64
+	TitleID      string
+	HostPlayerID int64
+	State        string
+	Props        []byte
+	MaxPlayers   int32
+	Private      bool
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
 }
 
 func (q *Queries) GetGameSession(ctx context.Context, id string) (GetGameSessionRow, error) {
@@ -142,7 +142,7 @@ func (q *Queries) GetGameSession(ctx context.Context, id string) (GetGameSession
 		&i.JoinCode,
 		&i.ProjectID,
 		&i.TitleID,
-		&i.HostUserID,
+		&i.HostPlayerID,
 		&i.State,
 		&i.Props,
 		&i.MaxPlayers,
@@ -178,7 +178,7 @@ func (q *Queries) GetGameSessionByJoinCode(ctx context.Context, joinCode string)
 }
 
 const getGameSessionForUpdate = `-- name: GetGameSessionForUpdate :one
-SELECT id, join_code, project_id, title_id, host_user_id, state, props, max_players, private, created_at, expires_at
+SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -186,17 +186,17 @@ FOR UPDATE
 `
 
 type GetGameSessionForUpdateRow struct {
-	ID         string
-	JoinCode   string
-	ProjectID  int64
-	TitleID    string
-	HostUserID int64
-	State      string
-	Props      []byte
-	MaxPlayers int32
-	Private    bool
-	CreatedAt  pgtype.Timestamptz
-	ExpiresAt  pgtype.Timestamptz
+	ID           string
+	JoinCode     string
+	ProjectID    int64
+	TitleID      string
+	HostPlayerID int64
+	State        string
+	Props        []byte
+	MaxPlayers   int32
+	Private      bool
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
 }
 
 // Row-locking variant used by the join handler so concurrent joins for the
@@ -210,7 +210,7 @@ func (q *Queries) GetGameSessionForUpdate(ctx context.Context, id string) (GetGa
 		&i.JoinCode,
 		&i.ProjectID,
 		&i.TitleID,
-		&i.HostUserID,
+		&i.HostPlayerID,
 		&i.State,
 		&i.Props,
 		&i.MaxPlayers,

@@ -237,42 +237,6 @@ type DashboardUser struct {
 	EmailVerificationLockedUntil      pgtype.Timestamptz
 }
 
-type EndUser struct {
-	ID                                int64
-	TenantID                          int64
-	ProjectID                         int64
-	ExternalID                        string
-	Email                             *string
-	EmailVerifiedAt                   pgtype.Timestamptz
-	PasswordHash                      []byte
-	CreatedAt                         pgtype.Timestamptz
-	DeletedAt                         pgtype.Timestamptz
-	EmailVerificationCodeHash         []byte
-	EmailVerificationExpiresAt        pgtype.Timestamptz
-	EmailVerificationSalt             []byte
-	EmailVerificationAttempts         int32
-	EmailVerificationLastSentAt       pgtype.Timestamptz
-	DisabledAt                        pgtype.Timestamptz
-	EmailVerificationLifetimeAttempts int32
-	EmailVerificationLockedUntil      pgtype.Timestamptz
-	Xuid                              *string
-	PlayerAccountID                   pgtype.UUID
-	SessionEpoch                      int32
-}
-
-type EndUserInvitation struct {
-	ID              int64
-	TenantID        int64
-	ProjectID       int64
-	Email           string
-	CodeHash        []byte
-	ExpiresAt       pgtype.Timestamptz
-	AcceptedAt      pgtype.Timestamptz
-	RevokedAt       pgtype.Timestamptz
-	InvitedByUserID int64
-	CreatedAt       pgtype.Timestamptz
-}
-
 type FeatureGrant struct {
 	ID                        int64
 	TenantID                  int64
@@ -317,15 +281,15 @@ type FriendEdge struct {
 }
 
 type GameInvite struct {
-	ID         int64
-	TenantID   int64
-	ProjectID  int64
-	FromUserID int64
-	ToUserID   int64
-	SessionID  string
-	JoinCode   string
-	CreatedAt  pgtype.Timestamptz
-	ExpiresAt  pgtype.Timestamptz
+	ID           int64
+	TenantID     int64
+	ProjectID    int64
+	FromPlayerID int64
+	ToPlayerID   int64
+	SessionID    string
+	JoinCode     string
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
 }
 
 type GameServerAllocation struct {
@@ -345,24 +309,24 @@ type GameServerAllocation struct {
 }
 
 type GameSession struct {
-	ID         string
-	JoinCode   string
-	TenantID   int64
-	ProjectID  int64
-	TitleID    string
-	HostUserID int64
-	State      string
-	Props      []byte
-	MaxPlayers int32
-	Private    bool
-	CreatedAt  pgtype.Timestamptz
-	ExpiresAt  pgtype.Timestamptz
+	ID           string
+	JoinCode     string
+	TenantID     int64
+	ProjectID    int64
+	TitleID      string
+	HostPlayerID int64
+	State        string
+	Props        []byte
+	MaxPlayers   int32
+	Private      bool
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
 }
 
 type GameSessionPeer struct {
 	TenantID  int64
 	SessionID string
-	EndUserID int64
+	PlayerID  int64
 	Ip        *string
 	Port      *int32
 	Qos       []byte
@@ -383,7 +347,7 @@ type LeaderboardEntry struct {
 	ID            int64
 	TenantID      int64
 	LeaderboardID int64
-	EndUserID     int64
+	PlayerID      int64
 	Score         int64
 	RecordedAt    pgtype.Timestamptz
 }
@@ -392,7 +356,7 @@ type MatchmakingTicket struct {
 	ID                 int64
 	TenantID           int64
 	ProjectID          int64
-	EndUserID          int64
+	PlayerID           int64
 	Region             string
 	GameMode           string
 	Attributes         []byte
@@ -448,9 +412,22 @@ type PlayerAccountSession struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type PlayerInvitation struct {
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	Email           string
+	CodeHash        []byte
+	ExpiresAt       pgtype.Timestamptz
+	AcceptedAt      pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+	InvitedByUserID int64
+	CreatedAt       pgtype.Timestamptz
+}
+
 type Presence struct {
 	TenantID  int64
-	EndUserID int64
+	PlayerID  int64
 	Status    string
 	SessionID *string
 	UpdatedAt pgtype.Timestamptz
@@ -463,6 +440,29 @@ type Project struct {
 	CreatedAt            pgtype.Timestamptz
 	DeletedAt            pgtype.Timestamptz
 	PublicJoiningEnabled bool
+}
+
+type ProjectPlayer struct {
+	ID                                int64
+	TenantID                          int64
+	ProjectID                         int64
+	ExternalID                        string
+	Email                             *string
+	EmailVerifiedAt                   pgtype.Timestamptz
+	PasswordHash                      []byte
+	CreatedAt                         pgtype.Timestamptz
+	DeletedAt                         pgtype.Timestamptz
+	EmailVerificationCodeHash         []byte
+	EmailVerificationExpiresAt        pgtype.Timestamptz
+	EmailVerificationSalt             []byte
+	EmailVerificationAttempts         int32
+	EmailVerificationLastSentAt       pgtype.Timestamptz
+	DisabledAt                        pgtype.Timestamptz
+	EmailVerificationLifetimeAttempts int32
+	EmailVerificationLockedUntil      pgtype.Timestamptz
+	Xuid                              *string
+	PlayerAccountID                   pgtype.UUID
+	SessionEpoch                      int32
 }
 
 type RiverClient struct {
@@ -523,7 +523,7 @@ type RiverQueue struct {
 type Session struct {
 	ID          int64
 	TenantID    int64
-	EndUserID   int64
+	PlayerID    int64
 	RefreshHash []byte
 	ExpiresAt   pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz

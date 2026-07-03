@@ -15,20 +15,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/enduser"
 	"github.com/ggscale/ggscale/internal/matchmaker"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/realtime"
 )
 
-// testInject installs (tenantID, endUserID) on the request context,
-// standing in for the production tenant + enduser middlewares so the
+// testInject installs (tenantID, playerID) on the request context,
+// standing in for the production tenant + player middlewares so the
 // e2e test doesn't need Postgres-backed auth.
-func testInject(tenantID, endUserID, projectID int64, next http.Handler) http.Handler {
+func testInject(tenantID, playerID, projectID int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		ctx = db.WithTenant(ctx, tenantID)
 		ctx = db.WithProject(ctx, projectID)
-		ctx = enduser.WithID(ctx, endUserID)
+		ctx = playerauth.WithID(ctx, playerID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -70,11 +70,11 @@ func TestE2EMatchmakerDeliversMatchReadyOverWebSocket(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		tid, _ := db.TenantFromContext(r.Context())
 		pid, _ := db.ProjectFromContext(r.Context())
-		uid, _ := enduser.IDFromContext(r.Context())
+		uid, _ := playerauth.IDFromContext(r.Context())
 		ticket, err := queue.Enqueue(r.Context(), matchmaker.EnqueueRequest{
 			TenantID:  tid,
 			ProjectID: pid,
-			EndUserID: uid,
+			PlayerID:  uid,
 			Region:    req.Region,
 			GameMode:  req.GameMode,
 		})

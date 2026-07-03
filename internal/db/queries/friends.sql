@@ -95,19 +95,19 @@ FROM player_accounts
 WHERE display_name = sqlc.arg(display_name)
 LIMIT 2;
 
--- name: GetEndUserAccountID :one
--- Tenant-scoped: the global account an end_user is linked to (NULL if the
+-- name: GetPlayerLinkedAccountID :one
+-- Tenant-scoped: the global account a player is linked to (NULL if the
 -- player is anonymous / unlinked).
 SELECT player_account_id
-FROM end_users
+FROM project_players
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
--- name: ResolveEndUsersForAccountsInProject :many
--- Tenant-scoped: maps a set of accounts back to their end_user in a specific
+-- name: ResolvePlayersForAccountsInProject :many
+-- Tenant-scoped: maps a set of accounts back to their player in a specific
 -- project, for presence sharing and JSON-API user_id mapping.
-SELECT id AS end_user_id, player_account_id
-FROM end_users
+SELECT id AS player_id, player_account_id
+FROM project_players
 WHERE project_id = sqlc.arg(project_id)
   AND player_account_id = ANY(sqlc.arg('account_ids')::uuid[])
   AND deleted_at IS NULL;

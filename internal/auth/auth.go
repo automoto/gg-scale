@@ -1,6 +1,6 @@
-// Package auth signs and verifies the short-lived JWT issued to end-users
+// Package auth signs and verifies the short-lived JWT issued to players
 // after login (or anonymous signup). Tokens carry tenant_id, project_id,
-// and end_user_id; the enduser middleware verifies them and asserts the
+// and player_id; the player middleware verifies them and asserts the
 // tenant_id matches the api_key's tenant context to prevent cross-tenant
 // replay.
 //
@@ -28,10 +28,10 @@ const minKeyLen = 32
 // jti claim is filled with a random nonce in Sign so two tokens for the
 // same claims are distinguishable.
 type Claims struct {
-	EndUserID int64
+	PlayerID  int64
 	TenantID  int64
 	ProjectID int64 // 0 when the session has no project pin
-	// SessionEpoch snapshots end_users.session_epoch at issuance. Server-side
+	// SessionEpoch snapshots project_players.session_epoch at issuance. Server-side
 	// verify rejects the token if the DB epoch has moved past it (disable /
 	// tenant ban), so revocation is immediate rather than TTL-bounded.
 	SessionEpoch int64
@@ -40,7 +40,7 @@ type Claims struct {
 
 type registeredClaims struct {
 	jwt.RegisteredClaims
-	EndUserID    int64 `json:"euid"`
+	PlayerID     int64 `json:"puid"`
 	TenantID     int64 `json:"tid"`
 	ProjectID    int64 `json:"pid,omitempty"`
 	SessionEpoch int64 `json:"sepoch,omitempty"`
@@ -100,7 +100,7 @@ func (s *Signer) Sign(c Claims) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(c.ExpiresAt),
 			ID:        hex.EncodeToString(nonce),
 		},
-		EndUserID:    c.EndUserID,
+		PlayerID:     c.PlayerID,
 		TenantID:     c.TenantID,
 		ProjectID:    c.ProjectID,
 		SessionEpoch: c.SessionEpoch,
@@ -134,7 +134,7 @@ func (s *Signer) Verify(token string) (Claims, error) {
 
 	exp, _ := rc.GetExpirationTime()
 	out := Claims{
-		EndUserID:    rc.EndUserID,
+		PlayerID:     rc.PlayerID,
 		TenantID:     rc.TenantID,
 		ProjectID:    rc.ProjectID,
 		SessionEpoch: rc.SessionEpoch,

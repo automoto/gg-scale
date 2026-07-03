@@ -9,13 +9,13 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 )
 
-// endUserTenantBanned reports whether the end_user's linked account is banned
-// in its tenant. Runs in a tenant Pool.Q (end_users RLS-filtered). An
+// playerTenantBanned reports whether the player's linked account is banned
+// in its tenant. Runs in a tenant Pool.Q (project_players RLS-filtered). An
 // anonymous / unlinked player can't be tenant-banned, so it returns false.
-func endUserTenantBanned(ctx context.Context, d Deps, endUserID int64) (bool, error) {
+func playerTenantBanned(ctx context.Context, d Deps, playerID int64) (bool, error) {
 	var banned bool
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-		_, e := sqlcgen.New(tx).IsEndUserBannedByTenant(ctx, endUserID)
+		_, e := sqlcgen.New(tx).IsPlayerBannedByTenant(ctx, playerID)
 		if e == nil {
 			banned = true
 			return nil

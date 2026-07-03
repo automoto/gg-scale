@@ -1,12 +1,12 @@
 -- name: CreateGameSession :one
-INSERT INTO game_session (id, join_code, tenant_id, project_id, title_id, host_user_id, props, max_players, private, expires_at)
+INSERT INTO game_session (id, join_code, tenant_id, project_id, title_id, host_player_id, props, max_players, private, expires_at)
 VALUES (
     sqlc.arg('id'),
     sqlc.arg('join_code'),
     current_setting('app.tenant_id', true)::bigint,
     sqlc.arg('project_id'),
     sqlc.arg('title_id'),
-    sqlc.arg('host_user_id'),
+    sqlc.arg('host_player_id'),
     sqlc.arg('props'),
     sqlc.arg('max_players'),
     sqlc.arg('private'),
@@ -15,7 +15,7 @@ VALUES (
 RETURNING id, join_code, state, created_at;
 
 -- name: GetGameSession :one
-SELECT id, join_code, project_id, title_id, host_user_id, state, props, max_players, private, created_at, expires_at
+SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg('id');
@@ -24,7 +24,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 -- Row-locking variant used by the join handler so concurrent joins for the
 -- same session serialize on the session row and max_players is enforced
 -- without a TOCTOU race.
-SELECT id, join_code, project_id, title_id, host_user_id, state, props, max_players, private, created_at, expires_at
+SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg('id')

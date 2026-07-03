@@ -12,7 +12,7 @@ import (
 )
 
 const createGameInvite = `-- name: CreateGameInvite :one
-INSERT INTO game_invite (tenant_id, project_id, from_user_id, to_user_id, session_id, join_code, expires_at)
+INSERT INTO game_invite (tenant_id, project_id, from_player_id, to_player_id, session_id, join_code, expires_at)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
     $1,
@@ -26,19 +26,19 @@ RETURNING id
 `
 
 type CreateGameInviteParams struct {
-	ProjectID  int64
-	FromUserID int64
-	ToUserID   int64
-	SessionID  string
-	JoinCode   string
-	ExpiresAt  pgtype.Timestamptz
+	ProjectID    int64
+	FromPlayerID int64
+	ToPlayerID   int64
+	SessionID    string
+	JoinCode     string
+	ExpiresAt    pgtype.Timestamptz
 }
 
 func (q *Queries) CreateGameInvite(ctx context.Context, arg CreateGameInviteParams) (int64, error) {
 	row := q.db.QueryRow(ctx, createGameInvite,
 		arg.ProjectID,
-		arg.FromUserID,
-		arg.ToUserID,
+		arg.FromPlayerID,
+		arg.ToPlayerID,
 		arg.SessionID,
 		arg.JoinCode,
 		arg.ExpiresAt,
@@ -68,7 +68,7 @@ const deleteGameInvite = `-- name: DeleteGameInvite :execrows
 DELETE FROM game_invite
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id        = $1
-  AND (from_user_id = $2 OR to_user_id = $2)
+  AND (from_player_id = $2 OR to_player_id = $2)
 `
 
 type DeleteGameInviteParams struct {
@@ -85,22 +85,22 @@ func (q *Queries) DeleteGameInvite(ctx context.Context, arg DeleteGameInvitePara
 	return result.RowsAffected(), nil
 }
 
-const getEndUserIDByEmail = `-- name: GetEndUserIDByEmail :one
-SELECT id FROM end_users
+const getPlayerIDByEmail = `-- name: GetPlayerIDByEmail :one
+SELECT id FROM project_players
 WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND email      = $2
   AND deleted_at IS NULL
 `
 
-type GetEndUserIDByEmailParams struct {
+type GetPlayerIDByEmailParams struct {
 	ProjectID int64
 	Email     *string
 }
 
 // Resolves an invite recipient by email within the caller's project.
-func (q *Queries) GetEndUserIDByEmail(ctx context.Context, arg GetEndUserIDByEmailParams) (int64, error) {
-	row := q.db.QueryRow(ctx, getEndUserIDByEmail, arg.ProjectID, arg.Email)
+func (q *Queries) GetPlayerIDByEmail(ctx context.Context, arg GetPlayerIDByEmailParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getPlayerIDByEmail, arg.ProjectID, arg.Email)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -109,34 +109,34 @@ func (q *Queries) GetEndUserIDByEmail(ctx context.Context, arg GetEndUserIDByEma
 const listPendingGameInvites = `-- name: ListPendingGameInvites :many
 SELECT
     gi.id,
-    gi.from_user_id,
+    gi.from_player_id,
     gi.session_id,
     gi.join_code,
     gi.expires_at,
     COALESCE(u.email::text, '')::text AS from_email,
     u.xuid                            AS from_xuid
 FROM game_invite gi
-LEFT JOIN end_users u ON u.id = gi.from_user_id
+LEFT JOIN project_players u ON u.id = gi.from_player_id
 WHERE gi.tenant_id   = current_setting('app.tenant_id', true)::bigint
-  AND gi.to_user_id  = $1
+  AND gi.to_player_id  = $1
   AND gi.expires_at  > now()
 ORDER BY gi.id ASC
 `
 
 type ListPendingGameInvitesRow struct {
-	ID         int64
-	FromUserID int64
-	SessionID  string
-	JoinCode   string
-	ExpiresAt  pgtype.Timestamptz
-	FromEmail  string
-	FromXuid   *string
+	ID           int64
+	FromPlayerID int64
+	SessionID    string
+	JoinCode     string
+	ExpiresAt    pgtype.Timestamptz
+	FromEmail    string
+	FromXuid     *string
 }
 
 // Returns unexpired invites for the target user, enriched with the sender's
 // email and optional xuid for display.
-func (q *Queries) ListPendingGameInvites(ctx context.Context, toUserID int64) ([]ListPendingGameInvitesRow, error) {
-	rows, err := q.db.Query(ctx, listPendingGameInvites, toUserID)
+func (q *Queries) ListPendingGameInvites(ctx context.Context, toPlayerID int64) ([]ListPendingGameInvitesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingGameInvites, toPlayerID)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (q *Queries) ListPendingGameInvites(ctx context.Context, toUserID int64) ([
 		var i ListPendingGameInvitesRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.FromUserID,
+			&i.FromPlayerID,
 			&i.SessionID,
 			&i.JoinCode,
 			&i.ExpiresAt,

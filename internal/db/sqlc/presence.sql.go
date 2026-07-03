@@ -15,7 +15,7 @@ const getPresence = `-- name: GetPresence :one
 SELECT status, session_id, updated_at
 FROM presence
 WHERE tenant_id   = current_setting('app.tenant_id', true)::bigint
-  AND end_user_id = $1
+  AND player_id = $1
 `
 
 type GetPresenceRow struct {
@@ -24,28 +24,28 @@ type GetPresenceRow struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
-func (q *Queries) GetPresence(ctx context.Context, endUserID int64) (GetPresenceRow, error) {
-	row := q.db.QueryRow(ctx, getPresence, endUserID)
+func (q *Queries) GetPresence(ctx context.Context, playerID int64) (GetPresenceRow, error) {
+	row := q.db.QueryRow(ctx, getPresence, playerID)
 	var i GetPresenceRow
 	err := row.Scan(&i.Status, &i.SessionID, &i.UpdatedAt)
 	return i, err
 }
 
 const listPresenceForUsers = `-- name: ListPresenceForUsers :many
-SELECT end_user_id, status, session_id
+SELECT player_id, status, session_id
 FROM presence
 WHERE tenant_id   = current_setting('app.tenant_id', true)::bigint
-  AND end_user_id = ANY($1::bigint[])
+  AND player_id = ANY($1::bigint[])
 `
 
 type ListPresenceForUsersRow struct {
-	EndUserID int64
+	PlayerID  int64
 	Status    string
 	SessionID *string
 }
 
-func (q *Queries) ListPresenceForUsers(ctx context.Context, endUserIds []int64) ([]ListPresenceForUsersRow, error) {
-	rows, err := q.db.Query(ctx, listPresenceForUsers, endUserIds)
+func (q *Queries) ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error) {
+	rows, err := q.db.Query(ctx, listPresenceForUsers, playerIds)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func (q *Queries) ListPresenceForUsers(ctx context.Context, endUserIds []int64) 
 	var items []ListPresenceForUsersRow
 	for rows.Next() {
 		var i ListPresenceForUsersRow
-		if err := rows.Scan(&i.EndUserID, &i.Status, &i.SessionID); err != nil {
+		if err := rows.Scan(&i.PlayerID, &i.Status, &i.SessionID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -65,7 +65,7 @@ func (q *Queries) ListPresenceForUsers(ctx context.Context, endUserIds []int64) 
 }
 
 const upsertPresence = `-- name: UpsertPresence :exec
-INSERT INTO presence (tenant_id, end_user_id, status, session_id, updated_at)
+INSERT INTO presence (tenant_id, player_id, status, session_id, updated_at)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
     $1,
@@ -73,7 +73,7 @@ VALUES (
     $3,
     now()
 )
-ON CONFLICT (tenant_id, end_user_id)
+ON CONFLICT (tenant_id, player_id)
 DO UPDATE SET
     status     = EXCLUDED.status,
     session_id = EXCLUDED.session_id,
@@ -81,12 +81,12 @@ DO UPDATE SET
 `
 
 type UpsertPresenceParams struct {
-	EndUserID int64
+	PlayerID  int64
 	Status    string
 	SessionID *string
 }
 
 func (q *Queries) UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error {
-	_, err := q.db.Exec(ctx, upsertPresence, arg.EndUserID, arg.Status, arg.SessionID)
+	_, err := q.db.Exec(ctx, upsertPresence, arg.PlayerID, arg.Status, arg.SessionID)
 	return err
 }

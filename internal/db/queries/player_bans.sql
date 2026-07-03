@@ -19,16 +19,16 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND player_account_id = sqlc.arg(player_account_id)
 LIMIT 1;
 
--- name: IsEndUserBannedByTenant :one
--- Enforcement helper: is the given end_user's linked account tenant-banned in
--- the end_user's own tenant? Runs in a tenant Pool.Q (end_users RLS-filtered).
+-- name: IsPlayerBannedByTenant :one
+-- Enforcement helper: is the given player's linked account tenant-banned in
+-- the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
 -- Returns pgx.ErrNoRows when not banned (or the player is unlinked).
 SELECT b.id
-FROM end_users u
+FROM project_players u
 JOIN tenant_player_bans b
   ON b.player_account_id = u.player_account_id
  AND b.tenant_id = u.tenant_id
-WHERE u.id = sqlc.arg(end_user_id)
+WHERE u.id = sqlc.arg(player_id)
   AND u.deleted_at IS NULL
 LIMIT 1;
 
@@ -40,16 +40,16 @@ JOIN player_accounts a ON a.id = b.player_account_id
 WHERE b.tenant_id = sqlc.arg(tenant_id)
 ORDER BY b.created_at DESC;
 
--- name: BumpEndUserSessionEpoch :exec
--- Single end_user (project disable path).
-UPDATE end_users
+-- name: BumpPlayerSessionEpoch :exec
+-- Single player (project disable path).
+UPDATE project_players
 SET session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id);
 
--- name: BumpAccountEndUserEpochsInTenant :exec
--- Bump every end_user of an account within a tenant (tenant-ban path), so all
+-- name: BumpAccountPlayerEpochsInTenant :exec
+-- Bump every player of an account within a tenant (tenant-ban path), so all
 -- their live JWTs are rejected at server-verify immediately.
-UPDATE end_users
+UPDATE project_players
 SET session_epoch = session_epoch + 1
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND player_account_id = sqlc.arg(player_account_id);

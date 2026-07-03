@@ -11,7 +11,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -57,9 +57,9 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "api key has no project pin", http.StatusBadRequest)
 			return
 		}
-		fromUserID, ok := enduser.IDFromContext(ctx)
+		fromUserID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -73,7 +73,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			q := sqlcgen.New(tx)
 
 			// Resolve recipient by email within the project.
-			id, qerr := q.GetEndUserIDByEmail(ctx, sqlcgen.GetEndUserIDByEmailParams{
+			id, qerr := q.GetPlayerIDByEmail(ctx, sqlcgen.GetPlayerIDByEmailParams{
 				ProjectID: projectID,
 				Email:     &req.ToEmail,
 			})
@@ -82,14 +82,14 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			}
 			toUserID = id
 
-			// Friends are account-scoped. Resolve both end_users to their
+			// Friends are account-scoped. Resolve both project_players to their
 			// linked accounts; an anonymous / unlinked player can't be a
 			// friend, so the invite is refused.
-			fromAcc, aerr := q.GetEndUserAccountID(ctx, fromUserID)
+			fromAcc, aerr := q.GetPlayerLinkedAccountID(ctx, fromUserID)
 			if aerr != nil {
 				return aerr
 			}
-			toAcc, aerr := q.GetEndUserAccountID(ctx, toUserID)
+			toAcc, aerr := q.GetPlayerLinkedAccountID(ctx, toUserID)
 			if aerr != nil {
 				return aerr
 			}
@@ -126,10 +126,10 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			}
 			// Sender must be the host or an active member of the session —
 			// players can't leak join codes for sessions they aren't in.
-			if sess.HostUserID != fromUserID {
+			if sess.HostPlayerID != fromUserID {
 				member, merr := q.IsGameSessionMember(ctx, sqlcgen.IsGameSessionMemberParams{
 					SessionID: req.SessionID,
-					EndUserID: fromUserID,
+					PlayerID:  fromUserID,
 				})
 				if merr != nil {
 					return merr
@@ -141,12 +141,12 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			joinCode = sess.JoinCode
 
 			inviteID, qerr = q.CreateGameInvite(ctx, sqlcgen.CreateGameInviteParams{
-				ProjectID:  projectID,
-				FromUserID: fromUserID,
-				ToUserID:   toUserID,
-				SessionID:  req.SessionID,
-				JoinCode:   joinCode,
-				ExpiresAt:  pgtype.Timestamptz{Time: now.Add(gameInviteTTL), Valid: true},
+				ProjectID:    projectID,
+				FromPlayerID: fromUserID,
+				ToPlayerID:   toUserID,
+				SessionID:    req.SessionID,
+				JoinCode:     joinCode,
+				ExpiresAt:    pgtype.Timestamptz{Time: now.Add(gameInviteTTL), Valid: true},
 			})
 			return qerr
 		})
@@ -197,9 +197,9 @@ func gameInviteDeleteHandler(d Deps) http.HandlerFunc {
 			return
 		}
 		ctx := r.Context()
-		callerID, ok := enduser.IDFromContext(ctx)
+		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 		var affected int64
@@ -227,9 +227,9 @@ func gameInviteDeleteHandler(d Deps) http.HandlerFunc {
 func gameInviteListHandler(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		callerID, ok := enduser.IDFromContext(ctx)
+		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 

@@ -223,24 +223,24 @@ func run() error {
 	}
 
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:               "v1",
-		Commit:                commit,
-		Pool:                  appPool,
-		Lookup:                tenant.NewSQLLookup(pool),
-		Limiter:               ratelimit.NewCacheLimiter(store),
-		Signer:                signer,
-		Mailer:                m,
-		MailFrom:              cfg.MailFrom,
-		Cache:                 store,
-		Registry:              registry,
-		RBAC:                  authorizer,
-		Fleet:                 fleetMgr,
-		Hub:                   hub,
-		RealtimeMaxPerTenant:  cfg.RealtimeMaxPerTenant,
-		RealtimeMaxPerEndUser: cfg.RealtimeMaxPerEndUser,
-		Matchmaker:            mmQueue,
-		ServerList:            serverListRegistry,
-		RelayIssuer:           relayIssuer,
+		Version:              "v1",
+		Commit:               commit,
+		Pool:                 appPool,
+		Lookup:               tenant.NewSQLLookup(pool),
+		Limiter:              ratelimit.NewCacheLimiter(store),
+		Signer:               signer,
+		Mailer:               m,
+		MailFrom:             cfg.MailFrom,
+		Cache:                store,
+		Registry:             registry,
+		RBAC:                 authorizer,
+		Fleet:                fleetMgr,
+		Hub:                  hub,
+		RealtimeMaxPerTenant: cfg.RealtimeMaxPerTenant,
+		RealtimeMaxPerPlayer: cfg.RealtimeMaxPerPlayer,
+		Matchmaker:           mmQueue,
+		ServerList:           serverListRegistry,
+		RelayIssuer:          relayIssuer,
 		Dashboard: dashboard.Config{
 			Mount:              cfg.DashboardEnabled,
 			CookieSecure:       cfg.DashboardCookieSecure,
@@ -347,7 +347,7 @@ SELECT current_user,
            JOIN pg_roles r ON r.oid = c.relowner
            WHERE n.nspname = 'public'
              AND c.relkind IN ('r', 'p')
-             AND c.relname IN ('tenants', 'projects', 'api_keys', 'end_users', 'sessions')
+             AND c.relname IN ('tenants', 'projects', 'api_keys', 'project_players', 'sessions')
              AND r.rolname = current_user
        )`).Scan(&currentUser, &ownsTenantTables); err != nil {
 		return fmt.Errorf("db role assertion: %w", err)

@@ -13,7 +13,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/enduser"
+	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -56,9 +56,9 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "no project", http.StatusBadRequest)
 			return
 		}
-		ownerID, ok := enduser.IDFromContext(ctx)
+		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -125,9 +125,9 @@ func storageGetHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "project pin required", http.StatusBadRequest)
 			return
 		}
-		ownerID, ok := enduser.IDFromContext(ctx)
+		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -167,9 +167,9 @@ func storageDeleteHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "project pin required", http.StatusBadRequest)
 			return
 		}
-		ownerID, ok := enduser.IDFromContext(ctx)
+		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
@@ -195,9 +195,9 @@ func storageListHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "project pin required", http.StatusBadRequest)
 			return
 		}
-		ownerID, ok := enduser.IDFromContext(ctx)
+		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no end user", http.StatusUnauthorized)
+			http.Error(w, "no player", http.StatusUnauthorized)
 			return
 		}
 
