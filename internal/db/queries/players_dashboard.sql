@@ -43,8 +43,10 @@ SELECT
     u.tenant_id,
     u.project_id,
     u.player_account_id,
-    a.primary_remote_addr,
-    a.secondary_remote_addr,
+    a.remote_addr_ip_lan,
+    a.remote_addr_ip_public,
+    a.remote_addr_dns,
+    a.remote_addr_iroh,
     (b.id IS NOT NULL)::boolean AS tenant_banned
 FROM project_players u
 JOIN projects p ON p.id = u.project_id

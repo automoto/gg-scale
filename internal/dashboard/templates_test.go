@@ -450,3 +450,30 @@ func TestSetupAdminPage_DoesNotShowTokenFilePath(t *testing.T) {
 	html := renderToString(t, SetupAdminPage(SetupAdminView{Token: "abc"}))
 	assert.NotContains(t, html, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
 }
+
+func TestPlayerDetail_renders_typed_remote_addrs_with_badges(t *testing.T) {
+	html := renderToString(t, PlayerDetailPage(PlayerDetailView{
+		Player: PlayerView{
+			ID:        3,
+			AccountID: "9f1c2d3e-0000-0000-0000-000000000000",
+			RemoteAddrs: []RemoteAddrView{
+				{TypeLabel: "LAN IP", ScopeLabel: "LAN", Address: "192.168.1.4:9000"},
+				{TypeLabel: "DNS name", Address: "example.com:7777"},
+			},
+		},
+	}))
+
+	assert.Contains(t, html, "LAN IP")
+	assert.Contains(t, html, "192.168.1.4:9000")
+	assert.Contains(t, html, `<span class="badge">LAN</span>`)
+	assert.Contains(t, html, "example.com:7777")
+}
+
+func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {
+	html := renderToString(t, PlayerDetailPage(PlayerDetailView{
+		Player: PlayerView{ID: 3, AccountID: "9f1c2d3e-0000-0000-0000-000000000000"},
+	}))
+
+	assert.Contains(t, html, "Remote addresses")
+	assert.Contains(t, html, "—")
+}

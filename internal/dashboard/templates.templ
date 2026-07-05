@@ -1103,22 +1103,19 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 				<dl class="kv">
 					<dt>Account</dt>
 					<dd><code>{ vm.Player.AccountID }</code></dd>
-					<dt>Primary remote address</dt>
-					<dd>
-						if vm.Player.PrimaryAddr != "" {
-							<code>{ vm.Player.PrimaryAddr }</code>
-						} else {
-							<span class="muted">—</span>
-						}
-					</dd>
-					<dt>Secondary remote address</dt>
-					<dd>
-						if vm.Player.SecondaryAddr != "" {
-							<code>{ vm.Player.SecondaryAddr }</code>
-						} else {
-							<span class="muted">—</span>
-						}
-					</dd>
+					if len(vm.Player.RemoteAddrs) == 0 {
+						<dt>Remote addresses</dt>
+						<dd><span class="muted">—</span></dd>
+					}
+					for _, addr := range vm.Player.RemoteAddrs {
+						<dt>{ addr.TypeLabel }</dt>
+						<dd>
+							<code>{ addr.Address }</code>
+							if addr.ScopeLabel != "" {
+								<span class="badge">{ addr.ScopeLabel }</span>
+							}
+						</dd>
+					}
 					<dt>Tenant ban</dt>
 					<dd>
 						if vm.Player.TenantBanned {

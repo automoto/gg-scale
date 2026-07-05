@@ -398,8 +398,10 @@ type PlayerAccount struct {
 	EmailVerificationLastSentAt       pgtype.Timestamptz
 	CreatedAt                         pgtype.Timestamptz
 	UpdatedAt                         pgtype.Timestamptz
-	PrimaryRemoteAddr                 *string
-	SecondaryRemoteAddr               *string
+	RemoteAddrIpLan                   *string
+	RemoteAddrIpPublic                *string
+	RemoteAddrDns                     *string
+	RemoteAddrIroh                    *string
 }
 
 type PlayerAccountSession struct {

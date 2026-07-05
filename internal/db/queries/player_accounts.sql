@@ -205,14 +205,16 @@ VALUES (
 RETURNING id;
 
 -- name: GetPlayerAccountRemoteAddrs :one
-SELECT primary_remote_addr, secondary_remote_addr
+SELECT remote_addr_ip_lan, remote_addr_ip_public, remote_addr_dns, remote_addr_iroh
 FROM player_accounts
 WHERE id = sqlc.arg(id);
 
 -- name: SetPlayerAccountRemoteAddrs :exec
 UPDATE player_accounts
-SET primary_remote_addr   = sqlc.narg(primary_remote_addr),
-    secondary_remote_addr = sqlc.narg(secondary_remote_addr),
+SET remote_addr_ip_lan    = sqlc.narg(remote_addr_ip_lan),
+    remote_addr_ip_public = sqlc.narg(remote_addr_ip_public),
+    remote_addr_dns       = sqlc.narg(remote_addr_dns),
+    remote_addr_iroh      = sqlc.narg(remote_addr_iroh),
     updated_at            = now()
 WHERE id = sqlc.arg(id);
 

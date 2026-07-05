@@ -247,20 +247,27 @@ func (q *Queries) GetPlayerAccountForProjectRead(ctx context.Context, arg GetPla
 }
 
 const getPlayerAccountRemoteAddrs = `-- name: GetPlayerAccountRemoteAddrs :one
-SELECT primary_remote_addr, secondary_remote_addr
+SELECT remote_addr_ip_lan, remote_addr_ip_public, remote_addr_dns, remote_addr_iroh
 FROM player_accounts
 WHERE id = $1
 `
 
 type GetPlayerAccountRemoteAddrsRow struct {
-	PrimaryRemoteAddr   *string
-	SecondaryRemoteAddr *string
+	RemoteAddrIpLan    *string
+	RemoteAddrIpPublic *string
+	RemoteAddrDns      *string
+	RemoteAddrIroh     *string
 }
 
 func (q *Queries) GetPlayerAccountRemoteAddrs(ctx context.Context, id pgtype.UUID) (GetPlayerAccountRemoteAddrsRow, error) {
 	row := q.db.QueryRow(ctx, getPlayerAccountRemoteAddrs, id)
 	var i GetPlayerAccountRemoteAddrsRow
-	err := row.Scan(&i.PrimaryRemoteAddr, &i.SecondaryRemoteAddr)
+	err := row.Scan(
+		&i.RemoteAddrIpLan,
+		&i.RemoteAddrIpPublic,
+		&i.RemoteAddrDns,
+		&i.RemoteAddrIroh,
+	)
 	return i, err
 }
 
@@ -597,20 +604,30 @@ func (q *Queries) SetPlayerAccountPassword(ctx context.Context, arg SetPlayerAcc
 
 const setPlayerAccountRemoteAddrs = `-- name: SetPlayerAccountRemoteAddrs :exec
 UPDATE player_accounts
-SET primary_remote_addr   = $1,
-    secondary_remote_addr = $2,
+SET remote_addr_ip_lan    = $1,
+    remote_addr_ip_public = $2,
+    remote_addr_dns       = $3,
+    remote_addr_iroh      = $4,
     updated_at            = now()
-WHERE id = $3
+WHERE id = $5
 `
 
 type SetPlayerAccountRemoteAddrsParams struct {
-	PrimaryRemoteAddr   *string
-	SecondaryRemoteAddr *string
-	ID                  pgtype.UUID
+	RemoteAddrIpLan    *string
+	RemoteAddrIpPublic *string
+	RemoteAddrDns      *string
+	RemoteAddrIroh     *string
+	ID                 pgtype.UUID
 }
 
 func (q *Queries) SetPlayerAccountRemoteAddrs(ctx context.Context, arg SetPlayerAccountRemoteAddrsParams) error {
-	_, err := q.db.Exec(ctx, setPlayerAccountRemoteAddrs, arg.PrimaryRemoteAddr, arg.SecondaryRemoteAddr, arg.ID)
+	_, err := q.db.Exec(ctx, setPlayerAccountRemoteAddrs,
+		arg.RemoteAddrIpLan,
+		arg.RemoteAddrIpPublic,
+		arg.RemoteAddrDns,
+		arg.RemoteAddrIroh,
+		arg.ID,
+	)
 	return err
 }
 

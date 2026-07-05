@@ -20,6 +20,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/remoteaddr"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -128,10 +129,16 @@ type PlayerView struct {
 	CreatedAt       time.Time
 	// Account link + remote-address / ban fields. AccountID is empty for
 	// anonymous players.
-	AccountID     string
-	PrimaryAddr   string
-	SecondaryAddr string
-	TenantBanned  bool
+	AccountID    string
+	RemoteAddrs  []RemoteAddrView
+	TenantBanned bool
+}
+
+// RemoteAddrView is one typed remote address on the player detail card.
+type RemoteAddrView struct {
+	TypeLabel  string
+	ScopeLabel string
+	Address    string
 }
 
 // PlayersView is the data rendered by the players list page.
@@ -429,13 +436,39 @@ func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
 	if row.PlayerAccountID.Valid {
 		pv.AccountID = uuid.UUID(row.PlayerAccountID.Bytes).String()
 	}
-	if row.PrimaryRemoteAddr != nil {
-		pv.PrimaryAddr = *row.PrimaryRemoteAddr
-	}
-	if row.SecondaryRemoteAddr != nil {
-		pv.SecondaryAddr = *row.SecondaryRemoteAddr
+	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
+	for _, a := range set.List() {
+		pv.RemoteAddrs = append(pv.RemoteAddrs, RemoteAddrView{
+			TypeLabel:  remoteAddrTypeLabel(a),
+			ScopeLabel: remoteAddrScopeLabel(a.Scope),
+			Address:    a.Value,
+		})
 	}
 	return pv
+}
+
+func remoteAddrTypeLabel(a remoteaddr.Address) string {
+	switch a.Slot() {
+	case remoteaddr.SlotIPLAN:
+		return "LAN IP"
+	case remoteaddr.SlotIPPublic:
+		return "Public IP"
+	case remoteaddr.SlotDNS:
+		return "DNS name"
+	default:
+		return "Iroh endpoint"
+	}
+}
+
+func remoteAddrScopeLabel(s remoteaddr.Scope) string {
+	switch s {
+	case remoteaddr.ScopeLAN:
+		return "LAN"
+	case remoteaddr.ScopePublic:
+		return "public"
+	default:
+		return ""
+	}
 }
 
 // playerToggleBanHandler bans / unbans a player's GLOBAL account across the

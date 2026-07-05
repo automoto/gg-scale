@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
-	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -12,31 +12,45 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/remoteaddr"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-// remoteAddrMaxLen caps a remote-address string. These are opaque endpoint
-// strings (IP, Tailscale name, iroh EndpointID, …) — we never parse them.
-const remoteAddrMaxLen = 255
+// maxRemoteAddrs is the slot count: LAN IP, public IP, DNS, iroh.
+const maxRemoteAddrs = 4
 
-type remoteAddrPayload struct {
-	Primary   *string `json:"primary_remote_addr"`
-	Secondary *string `json:"secondary_remote_addr"`
+// remoteAddrEntry is one typed address on the wire. Scope is derived
+// server-side and ignored on input — declared (not dropped) so a GET body
+// round-trips through decodeJSON's DisallowUnknownFields.
+type remoteAddrEntry struct {
+	Type    string `json:"type"`
+	Scope   string `json:"scope,omitempty"`
+	Address string `json:"address"`
 }
 
-// validRemoteAddr enforces length + printable-non-control only (no format
-// guessing), per CLAUDE.md's stdlib-helper preference. Empty is allowed (it
-// clears the field).
-func validRemoteAddr(s string) bool {
-	if len(s) > remoteAddrMaxLen {
-		return false
+type remoteAddrsPayload struct {
+	Addresses []remoteAddrEntry `json:"addresses"`
+}
+
+// parseRemoteAddrSet validates a submitted address list into a slot set.
+// Errors are user-safe and indexed for per-entry failures.
+func parseRemoteAddrSet(entries []remoteAddrEntry) (remoteaddr.Set, error) {
+	if len(entries) > maxRemoteAddrs {
+		return remoteaddr.Set{}, fmt.Errorf("too many addresses (max %d)", maxRemoteAddrs)
 	}
-	for _, r := range s {
-		if unicode.IsControl(r) {
-			return false
+	addrs := make([]remoteaddr.Address, 0, len(entries))
+	for i, e := range entries {
+		t, ok := remoteaddr.ParseType(e.Type)
+		if !ok {
+			return remoteaddr.Set{}, fmt.Errorf("addresses[%d]: unknown address type %q", i, e.Type)
 		}
+		addr, err := remoteaddr.Parse(t, e.Address)
+		if err != nil {
+			return remoteaddr.Set{}, fmt.Errorf("addresses[%d]: %s", i, err)
+		}
+		addrs = append(addrs, addr)
 	}
-	return true
+	return remoteaddr.NewSet(addrs)
 }
 
 func mountRemoteAddrRoutes(r chi.Router, d Deps) {
@@ -82,21 +96,17 @@ func ownerRemoteAddrPutHandler(d Deps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		var req remoteAddrPayload
+		var req remoteAddrsPayload
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		if (req.Primary != nil && !validRemoteAddr(*req.Primary)) ||
-			(req.Secondary != nil && !validRemoteAddr(*req.Secondary)) {
-			http.Error(w, "remote address too long or contains control characters", http.StatusBadRequest)
+		set, perr := parseRemoteAddrSet(req.Addresses)
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusBadRequest)
 			return
 		}
 		err := d.Pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-			return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), sqlcgen.SetPlayerAccountRemoteAddrsParams{
-				ID:                  acc,
-				PrimaryRemoteAddr:   normalizeAddr(req.Primary),
-				SecondaryRemoteAddr: normalizeAddr(req.Secondary),
-			})
+			return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), remoteAddrSetParams(acc, set))
 		})
 		if err != nil {
 			webutil.InternalError(w, "remote-addr put", err)
@@ -211,15 +221,26 @@ func writeRemoteAddrs(w http.ResponseWriter, d Deps, r *http.Request, acc pgtype
 		webutil.InternalError(w, "remote-addr read", err)
 		return
 	}
-	writeJSON(w, remoteAddrPayload{
-		Primary:   row.PrimaryRemoteAddr,
-		Secondary: row.SecondaryRemoteAddr,
-	})
+	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
+	entries := []remoteAddrEntry{}
+	for _, a := range set.List() {
+		entries = append(entries, remoteAddrEntry{Type: string(a.Type), Scope: string(a.Scope), Address: a.Value})
+	}
+	writeJSON(w, remoteAddrsPayload{Addresses: entries})
 }
 
-func normalizeAddr(s *string) *string {
-	if s == nil || *s == "" {
-		return nil
+func remoteAddrSetParams(acc pgtype.UUID, set remoteaddr.Set) sqlcgen.SetPlayerAccountRemoteAddrsParams {
+	value := func(a *remoteaddr.Address) *string {
+		if a == nil {
+			return nil
+		}
+		return &a.Value
 	}
-	return s
+	return sqlcgen.SetPlayerAccountRemoteAddrsParams{
+		ID:                 acc,
+		RemoteAddrIpLan:    value(set.IPLAN),
+		RemoteAddrIpPublic: value(set.IPPublic),
+		RemoteAddrDns:      value(set.DNS),
+		RemoteAddrIroh:     value(set.Iroh),
+	}
 }

@@ -7,15 +7,26 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+type remoteAddrEntry struct {
+	Type    string `json:"type"`
+	Scope   string `json:"scope,omitempty"`
+	Address string `json:"address"`
+}
+
+type remoteAddrsBody struct {
+	Addresses []remoteAddrEntry `json:"addresses"`
+}
+
 // TestRemoteAddr_owner_and_friend_acl exercises the remote-address ACL:
 // owner read/write, accepted-friend read, non-friend denial, and the
-// unlinked-player 403.
+// unlinked-player 403 — plus server-side scope detection.
 func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
@@ -26,18 +37,25 @@ func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 	linkPlayerAccount(t, c, idA)
 	linkPlayerAccount(t, c, idB)
 
-	// Owner writes and reads back.
+	// Owner writes a LAN + a public IP; scopes are detected, slot order fixed.
+	want := []remoteAddrEntry{
+		{Type: "ip", Scope: "lan", Address: "192.168.1.4:9000"},
+		{Type: "ip", Scope: "public", Address: "203.0.113.9:9000"},
+	}
 	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tokA,
-		map[string]any{"primary_remote_addr": "100.64.0.1:9000"})
+		remoteAddrsBody{Addresses: []remoteAddrEntry{
+			{Type: "ip", Address: "203.0.113.9:9000"},
+			{Type: "ip", Address: "192.168.1.4:9000"},
+		}})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var got remoteAddrsBody
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, want, got.Addresses)
+
 	resp, body = authedReq(t, http.MethodGet, srv.URL+"/v1/account/remote-addrs", "k", tokA, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var got struct {
-		Primary *string `json:"primary_remote_addr"`
-	}
 	require.NoError(t, json.Unmarshal(body, &got))
-	require.NotNil(t, got.Primary)
-	assert.Equal(t, "100.64.0.1:9000", *got.Primary)
+	assert.Equal(t, want, got.Addresses)
 
 	// Non-friend B cannot read A's address.
 	resp, _ = authedReq(t, http.MethodGet, fmt.Sprintf("%s/v1/friends/%d/remote-addrs", srv.URL, idA), "k", tokB, nil)
@@ -48,8 +66,7 @@ func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 	resp, body = authedReq(t, http.MethodGet, fmt.Sprintf("%s/v1/friends/%d/remote-addrs", srv.URL, idA), "k", tokB, nil)
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 	require.NoError(t, json.Unmarshal(body, &got))
-	require.NotNil(t, got.Primary)
-	assert.Equal(t, "100.64.0.1:9000", *got.Primary)
+	assert.Equal(t, want, got.Addresses)
 
 	// An unlinked (anonymous) player is told to link an account.
 	tokC, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -58,18 +75,91 @@ func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 	assert.Contains(t, string(body), "link a gg-scale account")
 }
 
-// TestRemoteAddr_rejects_control_chars proves the printable-non-control
-// validation.
-func TestRemoteAddr_rejects_control_chars(t *testing.T) {
+// TestRemoteAddr_rejects_invalid_and_duplicate_slots proves per-type
+// validation and the one-address-per-slot rule.
+func TestRemoteAddr_rejects_invalid_and_duplicate_slots(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
 	srv := newServerForCluster(t, c)
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
 	linkPlayerAccount(t, c, id)
 
-	resp, _ := authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok,
-		map[string]any{"primary_remote_addr": "bad\x00addr"})
+	put := func(entries ...remoteAddrEntry) (*http.Response, []byte) {
+		return authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok,
+			remoteAddrsBody{Addresses: entries})
+	}
+
+	resp, body := put(remoteAddrEntry{Type: "iroh", Address: "not-hex"})
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "addresses[0]")
+
+	resp, body = put(remoteAddrEntry{Type: "dns", Address: "1.2.3.4"})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "IP address type")
+
+	resp, body = put(remoteAddrEntry{Type: "tailscale", Address: "whatever"})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "unknown")
+
+	resp, body = put(
+		remoteAddrEntry{Type: "ip", Address: "203.0.113.9"},
+		remoteAddrEntry{Type: "ip", Address: "198.51.100.7"})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "public IP address is already set")
+
+	many := make([]remoteAddrEntry, 5)
+	for i := range many {
+		many[i] = remoteAddrEntry{Type: "dns", Address: "example.com"}
+	}
+	resp, body = put(many...)
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+	assert.Contains(t, string(body), "too many addresses")
+}
+
+// TestRemoteAddr_put_is_full_replace proves PUT semantics: the submitted
+// list becomes the account's complete address set.
+func TestRemoteAddr_put_is_full_replace(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv := newServerForCluster(t, c)
+	tok, id := anonymousLoginWithID(t, srv.URL, "k")
+	linkPlayerAccount(t, c, id)
+
+	iroh := strings.Repeat("ab", 32)
+	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok,
+		remoteAddrsBody{Addresses: []remoteAddrEntry{
+			{Type: "ip", Address: "192.168.1.4"},
+			{Type: "dns", Address: "example.com:7777"},
+		}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok,
+		remoteAddrsBody{Addresses: []remoteAddrEntry{{Type: "iroh", Address: iroh}}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var got remoteAddrsBody
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, []remoteAddrEntry{{Type: "iroh", Address: iroh}}, got.Addresses)
+}
+
+// TestRemoteAddr_get_scope_field_roundtrips_into_put guards the
+// DisallowUnknownFields trap: PUTting a GET body verbatim (including the
+// server-derived scope field) must succeed.
+func TestRemoteAddr_get_scope_field_roundtrips_into_put(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv := newServerForCluster(t, c)
+	tok, id := anonymousLoginWithID(t, srv.URL, "k")
+	linkPlayerAccount(t, c, id)
+
+	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok,
+		remoteAddrsBody{Addresses: []remoteAddrEntry{{Type: "ip", Address: "192.168.1.4"}}})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var raw map[string]any
+	require.NoError(t, json.Unmarshal(body, &raw))
+	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/account/remote-addrs", "k", tok, raw)
+	assert.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 }
 
 // TestTenantBan_blocks_login is the tenant-ban enforcement at the login point.

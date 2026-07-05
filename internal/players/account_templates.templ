@@ -1,5 +1,7 @@
 package players
 
+import "fmt"
+
 // Global player-account pages (project-agnostic). Kept deliberately minimal,
 // mirroring the per-project player templates in templates.templ.
 
@@ -103,15 +105,22 @@ type LinkedProject struct {
 	ExternalID  string
 }
 
+// RemoteAddrRowView is one typed address row on the account form. ScopeLabel
+// is the server-derived reachability hint ("LAN only", "Public", "LAN").
+type RemoteAddrRowView struct {
+	TypeValue  string
+	Value      string
+	ScopeLabel string
+}
+
 type AccountHomeView struct {
-	Email         string
-	DisplayName   string
-	Projects      []LinkedProject
-	CSRFToken     string
-	Flash         string
-	FlashError    string
-	PrimaryAddr   string
-	SecondaryAddr string
+	Email          string
+	DisplayName    string
+	Projects       []LinkedProject
+	CSRFToken      string
+	Flash          string
+	FlashError     string
+	RemoteAddrRows []RemoteAddrRowView
 }
 
 templ AccountHomePage(vm AccountHomeView) {
@@ -140,15 +149,26 @@ templ AccountHomePage(vm AccountHomeView) {
 		}
 		<p><a href={ templ.URL("/v1/players/account/friends") }>Manage friends</a></p>
 		<h2>Remote addresses</h2>
-		<p class="subtitle">Opaque endpoints (IP, Tailscale, iroh) shared with your accepted friends and the games you play. Never public.</p>
+		<p class="subtitle">Share an IP address, DNS name, or Iroh endpoint with your accepted friends and the games you play. Never public. LAN addresses only work for friends on your network.</p>
 		<form method="post" action={ templ.URL("/v1/players/account/remote-addrs") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Primary
-				<input name="primary_remote_addr" type="text" value={ vm.PrimaryAddr } maxlength="255"/>
-			</label>
-			<label>Secondary
-				<input name="secondary_remote_addr" type="text" value={ vm.SecondaryAddr } maxlength="255"/>
-			</label>
+			for i, row := range vm.RemoteAddrRows {
+				<fieldset>
+					<label>Type
+						<select name={ fmt.Sprintf("addr_type_%d", i+1) }>
+							<option value="ip" selected?={ row.TypeValue == "ip" }>IP address</option>
+							<option value="dns" selected?={ row.TypeValue == "dns" }>DNS name</option>
+							<option value="iroh" selected?={ row.TypeValue == "iroh" }>Iroh Endpoint ID</option>
+						</select>
+					</label>
+					<label>Address
+						<input name={ fmt.Sprintf("addr_value_%d", i+1) } type="text" value={ row.Value } maxlength="255"/>
+					</label>
+					if row.ScopeLabel != "" {
+						<small>{ row.ScopeLabel }</small>
+					}
+				</fieldset>
+			}
 			<button type="submit">Save addresses</button>
 		</form>
 		<h2>Join a game</h2>

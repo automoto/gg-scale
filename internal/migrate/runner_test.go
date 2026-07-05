@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(61), v)
+	assert.Equal(t, uint(62), v)
 	assert.False(t, dirty)
 }
 

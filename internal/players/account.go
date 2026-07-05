@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +24,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/remoteaddr"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -87,24 +87,23 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := AccountHomeView{
-		Email:       sess.Email,
-		DisplayName: sess.DisplayName,
-		Projects:    projects,
-		CSRFToken:   h.csrf(r),
-		Flash:       r.URL.Query().Get("flash"),
-		FlashError:  r.URL.Query().Get("error"),
-	}
-	if addrs.PrimaryRemoteAddr != nil {
-		view.PrimaryAddr = *addrs.PrimaryRemoteAddr
-	}
-	if addrs.SecondaryRemoteAddr != nil {
-		view.SecondaryAddr = *addrs.SecondaryRemoteAddr
+		Email:          sess.Email,
+		DisplayName:    sess.DisplayName,
+		Projects:       projects,
+		CSRFToken:      h.csrf(r),
+		Flash:          r.URL.Query().Get("flash"),
+		FlashError:     r.URL.Query().Get("error"),
+		RemoteAddrRows: remoteAddrRows(addrs),
 	}
 	webutil.Render(r, w, AccountHomePage(view))
 }
 
+// remoteAddrFormRows is the fixed row count on the account form: one input
+// per slot (LAN IP, public IP, DNS, iroh).
+const remoteAddrFormRows = 4
+
 // accountRemoteAddrUpdate is the player-site owner write path for remote
-// addresses. Validation matches the JSON API (length + printable non-control).
+// addresses. Validation matches the JSON API (internal/remoteaddr).
 func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.accountSessionFromRequest(r)
 	if !ok {
@@ -114,17 +113,18 @@ func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	primary := strings.TrimSpace(r.Form.Get("primary_remote_addr"))
-	secondary := strings.TrimSpace(r.Form.Get("secondary_remote_addr"))
-	if !validPlayerRemoteAddr(primary) || !validPlayerRemoteAddr(secondary) {
-		h.redirectAccountHome(w, r, "", "Address too long or contains control characters.")
+	set, err := remoteAddrsFromForm(r.Form)
+	if err != nil {
+		h.redirectAccountHome(w, r, "", err.Error())
 		return
 	}
 	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), sqlcgen.SetPlayerAccountRemoteAddrsParams{
-			ID:                  toPgUUID(sess.AccountID),
-			PrimaryRemoteAddr:   emptyToNil(primary),
-			SecondaryRemoteAddr: emptyToNil(secondary),
+			ID:                 toPgUUID(sess.AccountID),
+			RemoteAddrIpLan:    slotValue(set.IPLAN),
+			RemoteAddrIpPublic: slotValue(set.IPPublic),
+			RemoteAddrDns:      slotValue(set.DNS),
+			RemoteAddrIroh:     slotValue(set.Iroh),
 		})
 	}); err != nil {
 		webutil.InternalError(w, "account remote-addr update", err)
@@ -133,25 +133,63 @@ func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request
 	h.redirectAccountHome(w, r, "Remote addresses saved.", "")
 }
 
-const playerRemoteAddrMaxLen = 255
-
-func validPlayerRemoteAddr(s string) bool {
-	if len(s) > playerRemoteAddrMaxLen {
-		return false
-	}
-	for _, r := range s {
-		if unicode.IsControl(r) {
-			return false
+// remoteAddrsFromForm reads the typed address rows (addr_type_N /
+// addr_value_N); rows with an empty value are ignored.
+func remoteAddrsFromForm(form url.Values) (remoteaddr.Set, error) {
+	var addrs []remoteaddr.Address
+	for i := 1; i <= remoteAddrFormRows; i++ {
+		value := strings.TrimSpace(form.Get(fmt.Sprintf("addr_value_%d", i)))
+		if value == "" {
+			continue
 		}
+		t, ok := remoteaddr.ParseType(form.Get(fmt.Sprintf("addr_type_%d", i)))
+		if !ok {
+			return remoteaddr.Set{}, fmt.Errorf("row %d: pick an address type", i)
+		}
+		a, err := remoteaddr.Parse(t, value)
+		if err != nil {
+			return remoteaddr.Set{}, fmt.Errorf("row %d: %s", i, err)
+		}
+		addrs = append(addrs, a)
 	}
-	return true
+	return remoteaddr.NewSet(addrs)
 }
 
-func emptyToNil(s string) *string {
-	if s == "" {
+// remoteAddrRows maps stored slots to form rows: saved addresses first (slot
+// order), then empty rows defaulting to the IP type.
+func remoteAddrRows(row sqlcgen.GetPlayerAccountRemoteAddrsRow) []RemoteAddrRowView {
+	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
+	rows := make([]RemoteAddrRowView, 0, remoteAddrFormRows)
+	for _, a := range set.List() {
+		rows = append(rows, RemoteAddrRowView{
+			TypeValue:  string(a.Type),
+			Value:      a.Value,
+			ScopeLabel: remoteAddrScopeLabel(a),
+		})
+	}
+	for len(rows) < remoteAddrFormRows {
+		rows = append(rows, RemoteAddrRowView{TypeValue: string(remoteaddr.TypeIP)})
+	}
+	return rows
+}
+
+func remoteAddrScopeLabel(a remoteaddr.Address) string {
+	switch {
+	case a.Type == remoteaddr.TypeIP && a.Scope == remoteaddr.ScopeLAN:
+		return "LAN only"
+	case a.Type == remoteaddr.TypeIP:
+		return "Public"
+	case a.Scope == remoteaddr.ScopeLAN:
+		return "LAN"
+	}
+	return ""
+}
+
+func slotValue(a *remoteaddr.Address) *string {
+	if a == nil {
 		return nil
 	}
-	return &s
+	return &a.Value
 }
 
 var (

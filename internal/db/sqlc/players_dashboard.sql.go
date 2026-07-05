@@ -45,8 +45,10 @@ SELECT
     u.tenant_id,
     u.project_id,
     u.player_account_id,
-    a.primary_remote_addr,
-    a.secondary_remote_addr,
+    a.remote_addr_ip_lan,
+    a.remote_addr_ip_public,
+    a.remote_addr_dns,
+    a.remote_addr_iroh,
     (b.id IS NOT NULL)::boolean AS tenant_banned
 FROM project_players u
 JOIN projects p ON p.id = u.project_id
@@ -66,18 +68,20 @@ type GetPlayerForProjectParams struct {
 }
 
 type GetPlayerForProjectRow struct {
-	ID                  int64
-	ExternalID          string
-	Email               string
-	EmailVerifiedAt     pgtype.Timestamptz
-	DisabledAt          pgtype.Timestamptz
-	CreatedAt           pgtype.Timestamptz
-	TenantID            int64
-	ProjectID           int64
-	PlayerAccountID     pgtype.UUID
-	PrimaryRemoteAddr   *string
-	SecondaryRemoteAddr *string
-	TenantBanned        bool
+	ID                 int64
+	ExternalID         string
+	Email              string
+	EmailVerifiedAt    pgtype.Timestamptz
+	DisabledAt         pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	TenantID           int64
+	ProjectID          int64
+	PlayerAccountID    pgtype.UUID
+	RemoteAddrIpLan    *string
+	RemoteAddrIpPublic *string
+	RemoteAddrDns      *string
+	RemoteAddrIroh     *string
+	TenantBanned       bool
 }
 
 // Enriched with the linked global account: remote addresses (project admins
@@ -97,8 +101,10 @@ func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProje
 		&i.TenantID,
 		&i.ProjectID,
 		&i.PlayerAccountID,
-		&i.PrimaryRemoteAddr,
-		&i.SecondaryRemoteAddr,
+		&i.RemoteAddrIpLan,
+		&i.RemoteAddrIpPublic,
+		&i.RemoteAddrDns,
+		&i.RemoteAddrIroh,
 		&i.TenantBanned,
 	)
 	return i, err
