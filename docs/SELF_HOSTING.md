@@ -2,6 +2,15 @@
 
 ggscale runs on any Linux box with Docker and Postgres. Game server hosting has two paths — start with the simpler one and move up when you outgrow a single host.
 
+> **v1.0 note — fleet hosting is opt-in and off by default.** Everything on this
+> page is gated behind `FEATURE_FLEET_ENABLED` (default `false`); the embedded
+> P2P relay is gated behind `FEATURE_P2P_RELAY_ENABLED` (also `false`). The basic
+> stack (`make up`) serves auth, player accounts, storage, leaderboards, and the
+> social layer without any of this. To run game servers, set
+> `FEATURE_FLEET_ENABLED=true` **and** a `FLEET_BACKEND` (`docker` / `agones` /
+> `plugin:<name>`) — the two are validated together, so setting a backend while
+> the feature is off is rejected at startup.
+
 ## Which path?
 
 ```

@@ -42,6 +42,20 @@ func TestLoginPage_RendersFieldErrors(t *testing.T) {
 	assert.NotContains(t, html, `id="password-error"`, "no error means no field-error element")
 }
 
+func TestVerifyPage_SeparatesPrimaryAndResendActions(t *testing.T) {
+	html := renderToString(t, VerifyPage(VerifyView{Email: "admin@example.com"}))
+
+	// The primary Verify action uses the plain full-width button like the
+	// login page, not the cramped right-aligned .form-actions/.btn-inline
+	// row (which sat the small Verify button flush against the resend form).
+	assert.NotContains(t, html, "form-actions")
+	assert.NotContains(t, html, "btn-inline")
+	// The resend form is clearly separated from the Verify form.
+	assert.Contains(t, html, `class="resend-form"`)
+	assert.Contains(t, html, ">Verify</button>")
+	assert.Contains(t, html, ">Send a new code</button>")
+}
+
 func TestDashboardHeadUsesExternalScriptsAndSafeHTMXConfig(t *testing.T) {
 	html := renderToString(t, LoginPage(LoginView{}))
 

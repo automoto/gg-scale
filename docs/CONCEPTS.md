@@ -53,7 +53,7 @@ Three independent kill switches, from narrowest to broadest:
 | **Tenant ban** | `tenant_player_bans` | one global account across every project a tenant owns | login/refresh/custom-token, session verify, project join/link, invite acceptance, matchmaker tickets, relay credentials — for all of that account's players in the tenant |
 | **Platform disable** | `player_accounts.disabled_at` | the global account everywhere | all account-level auth (player site sign-in, account session) |
 
-Project disable and tenant ban both bump `project_players.session_epoch`, and that epoch is embedded in the player's JWT (`sepoch` claim). Server-side session verification (`POST /v1/server/player-sessions/verify`) rejects a token whose epoch is stale, so a disable or ban takes effect **immediately** rather than waiting out the 15-minute access-token TTL.
+Project disable and tenant ban both bump `project_players.session_epoch`, and that epoch is embedded in the player's JWT (`sepoch` claim). Every player-authed request re-reads the player's current epoch and rejects a token whose epoch snapshot is stale — so does server-side session verification (`POST /v1/server/player-sessions/verify`). A disable or ban therefore takes effect **immediately** on the player's next request to any player route, rather than waiting out the 15-minute access-token TTL.
 
 ## How a request flows
 

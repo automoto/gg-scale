@@ -1,11 +1,14 @@
-.PHONY: build test test-integration test-plugins e2e e2e-docker e2e-agones lint vulncheck sqlc-gen templ-generate \
+.PHONY: help build fmt test test-integration test-plugins e2e e2e-docker e2e-agones \
+	lint vulncheck check sqlc-gen templ-generate \
 	proto build-example-plugin seed \
-        up down logs psql migrate migrate-new \
-        up-fleet-docker down-fleet-docker \
-        up-fleet-agones down-fleet-agones agones-install \
-        up-full down-full \
-        docker-image docker-push \
-        preflight preflight-k8s clean clean-full
+	up down logs psql migrate migrate-new \
+	up-fleet-docker down-fleet-docker \
+	up-fleet-agones down-fleet-agones agones-install \
+	up-full down-full \
+	docker-image docker-push \
+	preflight preflight-k8s clean clean-full
+
+.DEFAULT_GOAL := help
 
 FLEET_DOCKER_STACK := docker compose -f compose/fleet-docker.yml
 FULL_STACK         := docker compose -f compose/full.yml
@@ -18,47 +21,60 @@ DOCKER_IMAGE ?= buildwrangler/ggscale
 TAG          ?= latest
 GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 INTEGRATION_PARALLEL ?= 8
+SQLC_VERSION ?= 1.31.1
+
+help: ## List available targets
+	@grep -hE '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
-build:
+build: ## Compile all packages
 	go build ./...
 
-test:
+fmt: ## go fmt all packages
+	go fmt ./...
+
+test: ## Unit tests with -race
 	go test -race ./...
 
-test-integration:
+test-integration: ## Integration tests (Postgres via testcontainers; needs Docker)
 	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) ./...
 
-# Runs the e2e suite against an already-running compose stack.
-# Use `make up-fleet-agones && make agones-install && make e2e`.
-e2e:
+e2e: ## End-to-end suite; run after the relevant `make up-*`
 	go test -race -tags=e2e -timeout=180s ./tests/e2e/...
 
-# Runs the docker fleet-backend integration test against the local Docker
-# daemon. Requires a reachable daemon and network access to pull
+# Requires a reachable Docker daemon and network access to pull
 # traefik/whoami on first run.
-e2e-docker:
+e2e-docker: ## Docker fleet-backend test against the local daemon
 	go test -race -tags=integration -timeout=180s ./internal/fleet/docker/...
 
-# Runs the agones fleet-backend smoke test against the local K3s+Agones
-# cluster from `make up-fleet-agones && make agones-install`. Set AGONES_E2E=1.
-e2e-agones:
+e2e-agones: ## Agones smoke test; after `make up-fleet-agones agones-install`
 	AGONES_E2E=1 go test -tags=agones_e2e -timeout=180s ./internal/fleet/agones/...
 
-lint:
+# Already included in `make test-integration`; exists so the plugin path can
+# be exercised in isolation while iterating on the supervisor.
+test-plugins: ## Plugin subprocess integration test in isolation
+	go test -race -tags=integration -timeout=60s ./internal/fleet/plugin/...
+
+lint: ## golangci-lint
 	golangci-lint run
 
-vulncheck:
-	govulncheck ./...
+# Wrapper suppresses the accepted-vuln allowlist in scripts/govulncheck.sh.
+# Requires govulncheck and jq on $PATH.
+vulncheck: ## govulncheck with the accepted-vuln allowlist
+	@bash scripts/govulncheck.sh
+
+check: lint test ## Local CI mirror: lint + unit tests
+
+# ─── Codegen ────────────────────────────────────────────────────────────
 
 # Regenerates internal/db/sqlc/ from sqlc.yaml + internal/db/queries/.
-# Uses the official sqlc Docker image so contributors don't need a host install.
-sqlc-gen:
-	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:latest generate
+# Runs sqlc in Docker so contributors don't need a host install.
+sqlc-gen: ## Regenerate sqlc queries (Docker, pinned version)
+	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:$(SQLC_VERSION) generate
 
-templ-generate:
-	GOSUMDB=off go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
+templ-generate: ## Regenerate *_templ.go dashboard templates
+	go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
 
 # Regenerates internal/fleet/plugin/proto/*.pb.go from fleet.proto. The
 # generated files are committed so CI does not need protoc; this target only
@@ -66,103 +82,95 @@ templ-generate:
 # plus protoc-gen-go and protoc-gen-go-grpc on $PATH ($GOPATH/bin after
 # `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest` and
 # `go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`).
-proto:
+proto: ## Regenerate fleet plugin gRPC stubs (needs protoc)
 	PATH="$$PATH:$$(go env GOPATH)/bin" protoc \
 		--go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		internal/fleet/plugin/proto/fleet.proto
 
-# Builds the reference fleet plugin. Drop the result at
-# $$GGSCALE_PLUGIN_DIR/ggscale-fleet-example and run core with
-# FLEET_BACKEND=plugin:example to exercise the plugin path end-to-end.
-build-example-plugin:
+# Drop the result at $$GGSCALE_PLUGIN_DIR/ggscale-fleet-example and run core
+# with FLEET_BACKEND=plugin:example to exercise the plugin path end-to-end.
+build-example-plugin: ## Build the reference fleet plugin
 	go build -o bin/ggscale-fleet-example ./examples/ggscale-fleet-example
 
-seed:
+seed: ## Seed dev data (destructive: -force)
 	go run ./scripts/ggscale-seed -force
-
-# Runs the plugin subprocess integration test (`internal/fleet/plugin/
-# integration_test.go`). Builds the example plugin into a temp dir, then
-# spawns + kills it under Supervisor. Already included in `make
-# test-integration`; this target exists so the plugin path can be exercised
-# in isolation while iterating on the supervisor.
-test-plugins:
-	go test -race -tags=integration -timeout=60s ./internal/fleet/plugin/...
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
-up: preflight
+up: preflight ## Basic stack: server + Postgres + MailHog
 	docker compose up -d --build --wait
 
-down:
+down: ## Stop the basic stack
 	docker compose down --remove-orphans
 
-logs:
+logs: ## Tail ggscale-server logs
 	docker compose logs -f --tail=200 ggscale-server
 
-psql:
+psql: ## psql shell into the dev Postgres
 	docker compose exec postgres psql -U ggscale -d ggscale
 
-migrate:
+migrate: ## Run pending DB migrations
 	docker compose run --rm migrate
 
-migrate-new:
+migrate-new: ## New migration pair: make migrate-new NAME=<descriptor>
 	@test -n "$(NAME)" || (echo "usage: make migrate-new NAME=<descriptor>" && exit 1)
-	@next=$$(printf "%04d" $$(($$(ls db/migrations/*.up.sql 2>/dev/null | wc -l | tr -d ' ') + 1))); \
+	@last=$$(ls db/migrations/*.up.sql | sed -E 's|.*/([0-9]+)_.*|\1|' | sort -n | tail -1); \
+	  next=$$(printf "%04d" $$((10#$$last + 1))); \
 	  touch db/migrations/$${next}_$(NAME).up.sql db/migrations/$${next}_$(NAME).down.sql; \
 	  echo "created db/migrations/$${next}_$(NAME).up.sql"; \
 	  echo "created db/migrations/$${next}_$(NAME).down.sql"
 
-clean:
+clean: ## Stop the basic stack and delete its volumes
 	docker compose down -v --remove-orphans
 
 # ─── Fleet feature: Docker backend ──────────────────────────────────────
 
-up-fleet-docker: preflight
+up-fleet-docker: preflight ## Basic stack + FLEET_BACKEND=docker
 	$(FLEET_DOCKER_STACK) up -d --wait
 
-down-fleet-docker:
+down-fleet-docker: ## Stop the Docker-fleet stack
 	$(FLEET_DOCKER_STACK) down --remove-orphans
 
 # ─── Fleet feature: k3s + Agones backend ────────────────────────────────
 
-up-fleet-agones: preflight-k8s
+up-fleet-agones: preflight-k8s ## Basic stack + k3s (macOS: Colima required)
 	mkdir -p .k3s
 	$(FLEET_AGONES_STACK) up -d --wait k3s
 
-down-fleet-agones:
+down-fleet-agones: ## Stop the Agones stack and delete .k3s state
 	$(FLEET_AGONES_STACK) down --remove-orphans
 	rm -rf .k3s
 
-agones-install:
+agones-install: ## Install the Agones controller into the k3s cluster
 	$(FLEET_AGONES_STACK) run --rm agones-install
 
 # ─── Full dev stack (prometheus + docker fleet) ─────────────────────────
 
-up-full: preflight
+up-full: preflight ## Contributor stack: Docker fleet + Prometheus
 	$(FULL_STACK) up -d --wait
 
-down-full:
+down-full: ## Stop the full stack
 	$(FULL_STACK) down --remove-orphans
 
-clean-full:
+clean-full: ## Stop the full stack and delete its volumes
 	$(FULL_STACK) down -v --remove-orphans
 
 # ─── Docker Hub image (ggscale-server) ──────────────────────────────────
 
-docker-image:
+docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally
 	docker build \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(DOCKER_IMAGE):$(TAG) \
 		.
 
-docker-push: docker-image
+docker-push: docker-image ## Build and push to Docker Hub
 	docker push $(DOCKER_IMAGE):$(TAG)
 
 # ─── Misc ───────────────────────────────────────────────────────────────
 
-preflight:
+preflight: ## Verify docker daemon + .env before `up`
 	@bash scripts/preflight.sh
 
-preflight-k8s:
+preflight-k8s: ## Preflight plus Agones-profile checks (macOS: Colima)
 	@GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) bash scripts/preflight.sh k8s

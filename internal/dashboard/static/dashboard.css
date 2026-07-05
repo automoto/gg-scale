@@ -192,6 +192,9 @@ section.card > .card-subtitle { opacity: 0.55; font-size: 0.875rem; margin: 0 0 
 }
 .form-actions button,
 .form-actions [role="button"] { width: auto; margin: 0; }
+/* Secondary action stacked below a primary form (e.g. the verify page's
+   "Send a new code" under "Verify") — separate it so the two don't crowd. */
+.resend-form { margin-top: 1.5rem; }
 
 /* === Tables =============================================== */
 /* Break out of card's horizontal padding so the table uses the full card width. */

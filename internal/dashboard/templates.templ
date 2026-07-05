@@ -1155,12 +1155,10 @@ templ VerifyPage(vm VerifyView) {
 		<form method="post" action="/v1/dashboard/verify">
 			<label for="code">Verification code</label>
 			<input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus aria-describedby="code-error"/>
-			<div class="form-actions">
-				<button type="submit" class="btn-inline">Verify</button>
-			</div>
+			<button type="submit">Verify</button>
 		</form>
-		<form method="post" action="/v1/dashboard/verify/resend">
-			<button type="submit" class="secondary outline btn-inline">Send a new code</button>
+		<form method="post" action="/v1/dashboard/verify/resend" class="resend-form">
+			<button type="submit" class="secondary outline">Send a new code</button>
 		</form>
 	}
 }

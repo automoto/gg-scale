@@ -23,6 +23,8 @@ Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
 If you cloned without submodules, run `git submodule update --init --recursive` before using the k3s + Agones profile.
 
+Any Docker engine works. If a build fails with `docker-credential-desktop: executable file not found in $PATH`, see [CONTRIBUTING.md § Troubleshooting](CONTRIBUTING.md#troubleshooting).
+
 ### Bootstrap the dashboard
 
 1. Read the one-time token: `cat ./data/bootstrap.token` (also printed in `docker compose logs ggscale-server` at first startup).
@@ -43,12 +45,29 @@ Endpoints require a player session (`X-Session-Token`), which a player obtains t
 | **Presence** | `/v1/presence` | Online state and a short status string, pushed to the player's friends over WebSocket on every update. |
 | **Game sessions** | `/v1/game-session/*` | The room players share before and during a match: create or join by 6-character code, heartbeat to stay in, then leave. |
 | **Invites** | `/v1/invite/*` | Short-lived invites from a session host or member to a friend, delivered over WebSocket when the recipient is online. |
+| **Remote addresses** | `/v1/account/remote-addrs`, `/v1/friends/{id}/remote-addrs` | A player's opaque connect handles (e.g. Steam/console IDs), readable by the owner and their accepted, non-blocked friends. |
 | **Storage** | `/v1/storage/objects/*` | Per-player JSON store for saves and settings, up to 1 MiB per value with `If-Match` optimistic concurrency. |
 | **Leaderboards** | `/v1/leaderboards/*` | Ranked scoreboards with `top` and `around-me` reads and server-authoritative score submission. |
 | **Realtime** | `/v1/ws` | One WebSocket per player that the server uses to push presence, invites, and match-ready events. |
-| **Relay** | `/v1/relay/credentials` | Embedded TURN server (pion/turn) that hands out short-lived credentials for P2P NAT traversal. |
+| **Relay** | `/v1/relay/credentials` | Embedded TURN server (pion/turn) for P2P NAT traversal. **Off by default** — see feature toggles below. |
 
 Friends, presence, game sessions, and invites are the social layer many multiplayer games need.
+
+### Global player accounts
+
+Above the per-project players sits an optional **global account** (`player_accounts`): one platform-wide identity per human across every game on the deployment. Friends, remote addresses, invites, and tenant bans hang off the account, and the hosted player site (`/v1/players/account/*`, toggled by `PLAYERS_ENABLED`, default on) lets players sign up, verify, and manage friends without your game building those screens. A player with no linked account is anonymous; *linking* into a project is what public-join toggles and invites gate. See [`docs/CONCEPTS.md`](docs/CONCEPTS.md) § "Player account (global)".
+
+### Feature toggles (v1.0 defaults)
+
+The basic stack ships the auth, social, storage, and leaderboard surfaces above. The server-hosting and P2P surfaces are opt-in and **disabled by default** in v1.0 — flip an env switch to turn them on:
+
+| Toggle | Default | Gates |
+|---|---|---|
+| `PLAYERS_ENABLED` | `true` | the hosted player-account site (`/v1/players/*`) |
+| `FEATURE_FLEET_ENABLED` | `false` | the fleet allocator, matchmaker, and server-browser routes (`/v1/fleets/*`, `/v1/matchmaker/*`) |
+| `FEATURE_P2P_RELAY_ENABLED` | `false` | the embedded TURN relay (`/v1/relay/credentials`) |
+
+When a feature is off its routes are **unmounted** (a request 404s), not merely forbidden — so the sections below describe features you enable, not ones that are live out of the box.
 
 ## Matchmaking and the server browser
 
@@ -90,9 +109,9 @@ docker compose -f compose/fleet-docker.yml up -d --wait
 
 For the Docker fleet backend, set `GAME_SERVER_PUBLIC_IP` in `.env` to the host IP your clients can reach. Allocations return `{host, port}` and clients connect directly to that address. See [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) for production setup and UDP security.
 
-### k3s + Agones on macOS
+### k3s + Agones on macOS (optional: Colima)
 
-Run Colima first; Docker Desktop's host networking breaks Agones UDP reachability.
+Colima is only needed for this profile — every other target runs on any Docker engine. Docker Desktop's host networking breaks Agones UDP reachability, so run Colima first:
 
 ```bash
 brew install colima
@@ -108,6 +127,8 @@ The client module is published as **`github.com/automoto/ggscale-go`** (sibling 
 
 ## Common commands
 
+Run `make help` for the full list.
+
 | Target | What it does |
 |---|---|
 | `make up` / `make down` / `make clean` | Basic dev stack (server + Postgres + SMTP). |
@@ -118,6 +139,7 @@ The client module is published as **`github.com/automoto/ggscale-go`** (sibling 
 | `make test-integration` | Integration tests (`-tags=integration`, Postgres via testcontainers). |
 | `make e2e` | Live compose checks (`-tags=e2e`); run after the relevant `up-*`. |
 | `make lint` | `golangci-lint`. |
+| `make check` | Lint + unit tests, same gate as CI. |
 
 ## License
 
