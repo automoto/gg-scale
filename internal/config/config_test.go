@@ -175,6 +175,51 @@ func TestLoad_returns_error_when_FILE_path_is_unreadable(t *testing.T) {
 	assert.Contains(t, err.Error(), "DATABASE_URL_FILE")
 }
 
+func TestLoad_accepts_valid_two_factor_key(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	key := strings.Repeat("ab", 32)
+	t.Setenv("TWO_FACTOR_ENC_KEY", key)
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, key, cfg.TwoFactorEncKey)
+}
+
+func TestLoad_defaults_two_factor_key_to_empty(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.TwoFactorEncKey)
+}
+
+func TestLoad_rejects_malformed_two_factor_key(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+	}{
+		{name: "should_reject_non_hex", value: "not-hex-at-all"},
+		{name: "should_reject_short_key", value: "abcd1234"},
+		{name: "should_reject_long_key", value: strings.Repeat("ab", 33)},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv("TWO_FACTOR_ENC_KEY", c.value)
+
+			_, err := config.Load()
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "TWO_FACTOR_ENC_KEY")
+		})
+	}
+}
+
 func TestEnvExample_has_no_drift(t *testing.T) {
 	declared := config.DeclaredVars()
 
@@ -212,6 +257,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{
 		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "LOG_LEVEL", "ENV",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
+		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",
 		"DASHBOARD_DISABLED", "DASHBOARD_BOOTSTRAP_TOKEN_FILE", "DASHBOARD_COOKIE_SECURE",
 		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
 		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",

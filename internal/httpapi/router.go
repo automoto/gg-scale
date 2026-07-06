@@ -34,6 +34,7 @@ import (
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webassets"
 )
 
@@ -59,8 +60,11 @@ type Deps struct {
 	Signer     *auth.Signer
 	Mailer     mailer.Mailer
 	MailFrom   string
-	Cache      cache.Store
-	Registry   *prometheus.Registry
+	// TwoFactor encrypts TOTP secrets and signs 2FA pending cookies for the
+	// dashboard and player surfaces. nil = 2FA enrollment unavailable.
+	TwoFactor *twofactor.Cipher
+	Cache     cache.Store
+	Registry  *prometheus.Registry
 	// Metrics carries the business/health counters. nil is a no-op (unit tests).
 	Metrics *observability.Metrics
 	RBAC    *rbac.Authorizer
@@ -175,6 +179,7 @@ func NewRouter(d Deps) http.Handler {
 				Fleet:              d.Fleet,
 				RBAC:               d.RBAC,
 				PluginInfo:         d.DashboardPluginInfo,
+				TwoFactor:          d.TwoFactor,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {
@@ -187,6 +192,7 @@ func NewRouter(d Deps) http.Handler {
 				ProxyTrust: d.ProxyTrust,
 				Registry:   reg,
 				Metrics:    d.Metrics,
+				TwoFactor:  d.TwoFactor,
 			}))
 		}
 

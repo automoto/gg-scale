@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -104,6 +105,13 @@ type Config struct {
 	LogLevel          string
 	Env               string
 	JWTSigningKey     string
+	// TwoFactorEncKey is an optional 32-byte hex AES key that encrypts TOTP
+	// secrets at rest and derives the 2FA pending-cookie HMAC key. When empty
+	// the server auto-generates and persists a key (zero-config self-host); set
+	// this to pin key material explicitly. Changing or removing it after users
+	// have enrolled locks those logins out (fail closed) until the prior key is
+	// restored as a decrypt fallback.
+	TwoFactorEncKey string
 	// MigrationsDir is the directory ggscale-server reads SQL migrations
 	// from on startup. Default `/migrations` matches the Dockerfile COPY.
 	// In local dev (compose, go run) override with the repo-relative path.
@@ -225,6 +233,20 @@ var declared = []varDecl{
 	{name: "LOG_LEVEL", defval: "info", set: func(c *Config, v string) error { c.LogLevel = v; return nil }},
 	{name: "ENV", defval: "dev", set: func(c *Config, v string) error { c.Env = v; return nil }},
 	{name: "JWT_SIGNING_KEY", fileFallback: true, set: func(c *Config, v string) error { c.JWTSigningKey = v; return nil }},
+	{name: "TWO_FACTOR_ENC_KEY", fileFallback: true, set: func(c *Config, v string) error {
+		if v == "" {
+			return nil
+		}
+		key, err := hex.DecodeString(v)
+		if err != nil {
+			return fmt.Errorf("TWO_FACTOR_ENC_KEY: %w", err)
+		}
+		if len(key) != 32 {
+			return fmt.Errorf("TWO_FACTOR_ENC_KEY: need 32 bytes of hex, got %d", len(key))
+		}
+		c.TwoFactorEncKey = v
+		return nil
+	}},
 	{name: "DASHBOARD_DISABLED", defval: "false", set: func(c *Config, v string) error {
 		disabled, err := strconv.ParseBool(v)
 		if err != nil {

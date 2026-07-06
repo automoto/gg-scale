@@ -454,12 +454,7 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 		return
 	}
-	if err := h.issueAccountSession(r.Context(), w, row.ID, row.SessionEpoch); err != nil {
-		webutil.InternalError(w, "account login: session", err)
-		return
-	}
-	h.metrics.Login(observability.SurfacePlayer, observability.LoginOK)
-	http.Redirect(w, r, accountBasePath+"/", http.StatusSeeOther)
+	h.finishAccountLogin(w, r, row.ID, email, row.SessionEpoch)
 }
 
 func (h *Handler) renderAccountLoginError(w http.ResponseWriter, r *http.Request, email string) {
@@ -532,11 +527,9 @@ func (h *Handler) accountVerify(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account verify: reload", lookupErr)
 		return
 	}
-	if err := h.issueAccountSession(r.Context(), w, toPgUUID(p.AccountID), epoch); err != nil {
-		webutil.InternalError(w, "account verify: session", err)
-		return
-	}
-	http.Redirect(w, r, accountBasePath+"/", http.StatusSeeOther)
+	// Finish through the shared gate so a 2FA-enabled account is still
+	// challenged after email verification.
+	h.finishAccountLogin(w, r, toPgUUID(p.AccountID), p.Email, epoch)
 }
 
 func (h *Handler) accountVerifyResend(w http.ResponseWriter, r *http.Request) {

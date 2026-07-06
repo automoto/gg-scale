@@ -41,10 +41,19 @@ type Querier interface {
 	// won't match the WHERE and are excluded — the caller branches on
 	// rows-affected and deallocates the orphan server when 0.
 	CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error)
+	// last_used_step records the enrollment code's timestep so the same code
+	// cannot be replayed at the first login challenge.
+	ConfirmDashboardTOTP(ctx context.Context, arg ConfirmDashboardTOTPParams) (int64, error)
+	ConfirmPlayerAccountTOTP(ctx context.Context, arg ConfirmPlayerAccountTOTPParams) (int64, error)
+	// Single-use enforced by the used_at IS NULL guard in the same statement
+	// that marks it used. 0 rows = unknown or already-spent code.
+	ConsumeDashboardTOTPBackupCode(ctx context.Context, arg ConsumeDashboardTOTPBackupCodeParams) (int64, error)
+	ConsumePlayerAccountTOTPBackupCode(ctx context.Context, arg ConsumePlayerAccountTOTPBackupCodeParams) (int64, error)
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
 	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
+	CountDashboardTOTPBackupCodesRemaining(ctx context.Context, dashboardUserID int64) (int64, error)
 	CountDashboardUsers(ctx context.Context) (int64, error)
 	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
 	CountEnabledPlatformAdmins(ctx context.Context) (int64, error)
@@ -55,6 +64,7 @@ type Querier interface {
 	// Whether an unexpired invite exists for (session, recipient) in the caller's
 	// tenant. Gates joining/resolving a private session by a non-member.
 	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
+	CountPlayerAccountTOTPBackupCodesRemaining(ctx context.Context, playerAccountID pgtype.UUID) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
@@ -63,6 +73,7 @@ type Querier interface {
 	CreateDashboardInvitation(ctx context.Context, arg CreateDashboardInvitationParams) (CreateDashboardInvitationRow, error)
 	CreateDashboardMembership(ctx context.Context, arg CreateDashboardMembershipParams) (int64, error)
 	CreateDashboardSession(ctx context.Context, arg CreateDashboardSessionParams) (CreateDashboardSessionRow, error)
+	CreateDashboardTrustedDevice(ctx context.Context, arg CreateDashboardTrustedDeviceParams) error
 	CreateDashboardUser(ctx context.Context, arg CreateDashboardUserParams) (CreateDashboardUserRow, error)
 	CreateEmailPlayer(ctx context.Context, arg CreateEmailPlayerParams) (int64, error)
 	CreateFirstDashboardAdmin(ctx context.Context, arg CreateFirstDashboardAdminParams) (CreateFirstDashboardAdminRow, error)
@@ -89,6 +100,7 @@ type Querier interface {
 	// account already exists.
 	CreatePlayerAccount(ctx context.Context, arg CreatePlayerAccountParams) (CreatePlayerAccountRow, error)
 	CreatePlayerAccountSession(ctx context.Context, arg CreatePlayerAccountSessionParams) (int64, error)
+	CreatePlayerAccountTrustedDevice(ctx context.Context, arg CreatePlayerAccountTrustedDeviceParams) error
 	// Player invitations.
 	CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error)
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
@@ -112,12 +124,18 @@ type Querier interface {
 	// previous approach loaded every member to do this check client-side; this
 	// predicate folds it into one statement.
 	DeleteDashboardMembershipUnlessSelf(ctx context.Context, arg DeleteDashboardMembershipUnlessSelfParams) (int64, error)
+	// Backup codes cascade with the credential row.
+	DeleteDashboardTOTP(ctx context.Context, dashboardUserID int64) error
+	DeleteDashboardTOTPBackupCodes(ctx context.Context, dashboardUserID int64) error
+	DeleteDashboardTrustedDevicesForUser(ctx context.Context, dashboardUserID int64) error
+	DeleteExpiredDashboardTrustedDevices(ctx context.Context) (int64, error)
 	// Removes invites past their expiry for the current tenant. Called per
 	// tenant by the GC goroutine.
 	DeleteExpiredGameInvitesForTenant(ctx context.Context) (int64, error)
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
+	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
 	// Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
 	// edge — a block is cleared only via the directed unblock path
 	// (DeleteFriendEdgeDirected), so a blockee cannot delete the blocker's block.
@@ -128,6 +146,9 @@ type Querier interface {
 	DeleteGameInvite(ctx context.Context, arg DeleteGameInviteParams) (int64, error)
 	DeleteGameSession(ctx context.Context, id string) error
 	DeleteGameSessionPeer(ctx context.Context, arg DeleteGameSessionPeerParams) error
+	DeletePlayerAccountTOTP(ctx context.Context, playerAccountID pgtype.UUID) error
+	DeletePlayerAccountTOTPBackupCodes(ctx context.Context, playerAccountID pgtype.UUID) error
+	DeletePlayerAccountTrustedDevicesForAccount(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeleteRateLimitOverride(ctx context.Context, arg DeleteRateLimitOverrideParams) error
 	DeleteTenantPlayerBan(ctx context.Context, arg DeleteTenantPlayerBanParams) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
@@ -154,6 +175,10 @@ type Querier interface {
 	// on every request path. requireSession maps ErrNoRows to a redirect to
 	// /login, which is what we want for disabled accounts.
 	GetDashboardSessionByRefreshHash(ctx context.Context, refreshHash []byte) (GetDashboardSessionByRefreshHashRow, error)
+	GetDashboardTOTP(ctx context.Context, dashboardUserID int64) (GetDashboardTOTPRow, error)
+	// Keyed by user AND token so a token minted for one account can never
+	// satisfy another's challenge.
+	GetDashboardTrustedDevice(ctx context.Context, arg GetDashboardTrustedDeviceParams) (int64, error)
 	// Status-blind variant used ONLY by the invite-accept code path so we
 	// can distinguish "no row" (truly new email — create user) from "row
 	// exists but disabled" (refuse with errInviteForDisabledAccount).
@@ -200,6 +225,8 @@ type Querier interface {
 	// Session lookup joins the account so the caller can enforce epoch match and
 	// the disabled gate in one round-trip.
 	GetPlayerAccountSession(ctx context.Context, refreshHash []byte) (GetPlayerAccountSessionRow, error)
+	GetPlayerAccountTOTP(ctx context.Context, playerAccountID pgtype.UUID) (GetPlayerAccountTOTPRow, error)
+	GetPlayerAccountTrustedDevice(ctx context.Context, arg GetPlayerAccountTrustedDeviceParams) (int64, error)
 	GetPlayerAccountVerificationState(ctx context.Context, id pgtype.UUID) (GetPlayerAccountVerificationStateRow, error)
 	// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
 	// /v1/auth/login behaves identically to an unknown email — same dummy
@@ -243,6 +270,7 @@ type Querier interface {
 	// Project → tenant lookup (privileged; used by the player UI which knows
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
+	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid.
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
@@ -258,7 +286,12 @@ type Querier interface {
 	// Append an event for the watch stream. The trim trigger keeps history
 	// bounded per allocation_id; callers can fire-and-forget.
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
+	InsertDashboardTOTPBackupCode(ctx context.Context, arg InsertDashboardTOTPBackupCodeParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
+	InsertPlayerAccountTOTPBackupCode(ctx context.Context, arg InsertPlayerAccountTOTPBackupCodeParams) error
+	// ON CONFLICT DO NOTHING makes first-boot generation race-safe: concurrent
+	// instances all insert, one wins, and everyone reads the winner back.
+	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
 	IsAccountBannedInTenant(ctx context.Context, arg IsAccountBannedInTenantParams) (int64, error)
 	// Edge id if EITHER account has blocked the other. Defense-in-depth gate on
 	// every interaction path (friend request, game invite, presence).
@@ -379,17 +412,24 @@ type Querier interface {
 	// place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
 	// no-ops); blocked is terminal (WHERE omits it).
 	RequestFriendByAccount(ctx context.Context, arg RequestFriendByAccountParams) (RequestFriendByAccountRow, error)
+	// Atomic check-and-bump, same shape as ReserveDashboardVerifyAttempt: the
+	// cap lives in the WHERE so parallel wrong codes cannot overshoot it.
+	// Returns 0 rows when already at cap (caller treats as locked).
+	ReserveDashboardTOTPAttempt(ctx context.Context, arg ReserveDashboardTOTPAttemptParams) (ReserveDashboardTOTPAttemptRow, error)
 	// Atomic check-and-bump used in place of the previous fetch-then-increment
 	// pattern: two parallel wrong codes used to both pass the cap check before
 	// either incremented, so the lockout could be overshot. The WHERE clause
 	// now folds the bound into the same statement that mutates the counter.
 	// Returns 0 rows when already at cap (caller treats as errVerifyLocked).
 	ReserveDashboardVerifyAttempt(ctx context.Context, arg ReserveDashboardVerifyAttemptParams) (ReserveDashboardVerifyAttemptRow, error)
+	ReservePlayerAccountTOTPAttempt(ctx context.Context, arg ReservePlayerAccountTOTPAttemptParams) (ReservePlayerAccountTOTPAttemptRow, error)
 	// Atomic check-and-bump; returns 0 rows when already at the per-code cap.
 	ReservePlayerAccountVerifyAttempt(ctx context.Context, arg ReservePlayerAccountVerifyAttemptParams) (ReservePlayerAccountVerifyAttemptRow, error)
 	// Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
 	// TOCTOU explanation). Returns 0 rows when already at cap.
 	ReservePlayerVerifyAttempt(ctx context.Context, arg ReservePlayerVerifyAttemptParams) (ReservePlayerVerifyAttemptRow, error)
+	ResetDashboardTOTPAttempts(ctx context.Context, dashboardUserID int64) error
+	ResetPlayerAccountTOTPAttempts(ctx context.Context, playerAccountID pgtype.UUID) error
 	// Tenant-scoped: maps a set of accounts back to their player in a specific
 	// project, for presence sharing and JSON-API user_id mapping.
 	ResolvePlayersForAccountsInProject(ctx context.Context, arg ResolvePlayersForAccountsInProjectParams) ([]ResolvePlayersForAccountsInProjectRow, error)
@@ -401,6 +441,10 @@ type Querier interface {
 	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
 	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
 	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
+	// 2FA enable/disable revokes every session except the one doing the change;
+	// the RevokeAll variant would log the acting user out mid-flow.
+	RevokeOtherDashboardSessionsForUser(ctx context.Context, arg RevokeOtherDashboardSessionsForUserParams) error
+	RevokeOtherPlayerAccountSessions(ctx context.Context, arg RevokeOtherPlayerAccountSessionsParams) error
 	RevokePlayerAccountSession(ctx context.Context, refreshHash []byte) error
 	RevokePlayerInvitation(ctx context.Context, id int64) error
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
@@ -410,6 +454,9 @@ type Querier interface {
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
 	SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
+	// The monotonic guard in the WHERE makes replay detection atomic: 0 rows
+	// means another request already consumed this timestep.
+	SetDashboardTOTPLastUsedStep(ctx context.Context, arg SetDashboardTOTPLastUsedStepParams) (int64, error)
 	// Nullable timestamptz so the same query handles disable (now()) and
 	// enable (NULL).
 	SetDashboardUserDisabled(ctx context.Context, arg SetDashboardUserDisabledParams) error
@@ -422,6 +469,7 @@ type Querier interface {
 	// invalidated on its next request.
 	SetPlayerAccountPassword(ctx context.Context, arg SetPlayerAccountPasswordParams) error
 	SetPlayerAccountRemoteAddrs(ctx context.Context, arg SetPlayerAccountRemoteAddrsParams) error
+	SetPlayerAccountTOTPLastUsedStep(ctx context.Context, arg SetPlayerAccountTOTPLastUsedStepParams) (int64, error)
 	SetPlayerAccountVerificationCode(ctx context.Context, arg SetPlayerAccountVerificationCodeParams) error
 	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
 	// Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
@@ -459,10 +507,17 @@ type Querier interface {
 	// Self-set secondary identifier. NULL clears it. The unique partial index
 	// on (project_id, xuid) rejects collisions with a constraint violation.
 	UpdateProfileXuid(ctx context.Context, arg UpdateProfileXuidParams) error
+	// Starts (or restarts) enrollment. The WHERE guard makes this a no-op for a
+	// confirmed credential — zero rows means "already enabled", so a stray setup
+	// POST can never silently replace a live secret.
+	UpsertDashboardTOTPPending(ctx context.Context, arg UpsertDashboardTOTPPendingParams) (int64, error)
 	// Used for block: create-or-overwrite the directed edge to a terminal status
 	// regardless of the prior state (blocking a stranger, a pending, or a friend).
 	UpsertFriendEdgeStatusByAccount(ctx context.Context, arg UpsertFriendEdgeStatusByAccountParams) error
 	UpsertGameSessionPeer(ctx context.Context, arg UpsertGameSessionPeerParams) error
+	// Player-account mirrors of dashboard_totp.sql; see the comments there for
+	// the atomicity rationale on each statement.
+	UpsertPlayerAccountTOTPPending(ctx context.Context, arg UpsertPlayerAccountTOTPPendingParams) (pgtype.UUID, error)
 	// Custom-token flow: find existing player with this external_id under
 	// (tenant, project) or create one. Idempotent across repeated calls.
 	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error)

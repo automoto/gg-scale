@@ -97,6 +97,151 @@ templ AccountVerifyPage(vm AccountVerifyView) {
 	}
 }
 
+type AccountTwoFactorChallengeView struct {
+	Error     string
+	CSRFToken string
+}
+
+templ AccountTwoFactorChallengePage(vm AccountTwoFactorChallengeView) {
+	@playerAuthLayout("Two-factor check") {
+		<h1>Two-factor check</h1>
+		<p class="subtitle">Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<form method="post" action={ templ.URL("/v1/players/account/login/2fa") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>Code
+				<input name="code" type="text" autocomplete="one-time-code" required autofocus/>
+			</label>
+			<label>
+				<input name="trust_device" type="checkbox" value="1"/>
+				Remember this device for 30 days
+			</label>
+			<button type="submit">Verify</button>
+		</form>
+	}
+}
+
+type AccountTwoFactorView struct {
+	CSRFToken            string
+	Available            bool
+	Enabled              bool
+	BackupCodesRemaining int
+	Message              string
+	Error                string
+	FieldErrors          map[string]string
+}
+
+templ AccountTwoFactorPage(vm AccountTwoFactorView) {
+	@playerLayout("Two-factor authentication") {
+		<h1>Two-factor authentication</h1>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		if !vm.Available {
+			<p class="subtitle">Not available on this server.</p>
+		} else if !vm.Enabled {
+			<p class="subtitle">Add a second sign-in step with an authenticator app such as Google Authenticator.</p>
+			<form method="post" action={ templ.URL("/v1/players/account/2fa/setup") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<button type="submit">Enable two-factor authentication</button>
+			</form>
+		} else {
+			<p class="subtitle">Enabled. Backup codes remaining: { fmt.Sprint(vm.BackupCodesRemaining) }.</p>
+			<h2>Regenerate backup codes</h2>
+			<p class="subtitle">Replaces all remaining backup codes with a fresh set.</p>
+			<form method="post" action={ templ.URL("/v1/players/account/2fa/backup-codes") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>Current password
+					<input name="current_password" type="password" autocomplete="current-password" required/>
+					if msg, ok := vm.FieldErrors["regenerate_password"]; ok {
+						<small class="field-error">{ msg }</small>
+					}
+				</label>
+				<label>Authenticator code
+					<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
+					if msg, ok := vm.FieldErrors["regenerate_code"]; ok {
+						<small class="field-error">{ msg }</small>
+					}
+				</label>
+				<button type="submit">Regenerate backup codes</button>
+			</form>
+			<h2>Disable two-factor authentication</h2>
+			<p class="subtitle">All other sessions and remembered devices will be signed out.</p>
+			<form method="post" action={ templ.URL("/v1/players/account/2fa/disable") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>Current password
+					<input name="current_password" type="password" autocomplete="current-password" required/>
+					if msg, ok := vm.FieldErrors["disable_password"]; ok {
+						<small class="field-error">{ msg }</small>
+					}
+				</label>
+				<label>Authenticator or backup code
+					<input name="code" type="text" autocomplete="one-time-code" required/>
+					if msg, ok := vm.FieldErrors["disable_code"]; ok {
+						<small class="field-error">{ msg }</small>
+					}
+				</label>
+				<button class="secondary" type="submit">Disable</button>
+			</form>
+		}
+		<p><a href={ templ.URL("/v1/players/account/") }>Back to account</a></p>
+	}
+}
+
+type AccountTwoFactorSetupView struct {
+	CSRFToken string
+	QRDataURI string
+	Secret    string
+	Error     string
+}
+
+templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
+	@playerLayout("Set up two-factor") {
+		<h1>Set up two-factor authentication</h1>
+		<p class="subtitle">Scan the QR code with an authenticator app (Google Authenticator, Aegis, 1Password, …), then confirm with the 6-digit code it shows.</p>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		}
+		<img src={ vm.QRDataURI } alt="Authenticator enrollment QR code" width="220" height="220"/>
+		<p>Can&apos;t scan? Enter this key manually:</p>
+		<p><code>{ vm.Secret }</code></p>
+		<form method="post" action={ templ.URL("/v1/players/account/2fa/confirm") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>6-digit code
+				<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
+			</label>
+			<button type="submit">Confirm and enable</button>
+		</form>
+	}
+}
+
+type AccountTwoFactorBackupCodesView struct {
+	CSRFToken string
+	Message   string
+	Codes     []string
+}
+
+templ AccountTwoFactorBackupCodesPage(vm AccountTwoFactorBackupCodesView) {
+	@playerLayout("Backup codes") {
+		<h1>Backup codes</h1>
+		if vm.Message != "" {
+			<p class="flash-success">{ vm.Message }</p>
+		}
+		<p class="subtitle">Each code works once. Store them somewhere safe — they will not be shown again.</p>
+		<ul>
+			for _, code := range vm.Codes {
+				<li><code>{ code }</code></li>
+			}
+		</ul>
+		<p><a href={ templ.URL("/v1/players/account/") }>Back to account</a></p>
+	}
+}
+
 // LinkedProject is one project the account is linked to (via a project_players row).
 type LinkedProject struct {
 	TenantID    int64
@@ -148,6 +293,8 @@ templ AccountHomePage(vm AccountHomeView) {
 			</ul>
 		}
 		<p><a href={ templ.URL("/v1/players/account/friends") }>Manage friends</a></p>
+		<h2>Security</h2>
+		<p><a href={ templ.URL("/v1/players/account/2fa") }>Two-factor authentication</a></p>
 		<h2>Remote addresses</h2>
 		<p class="subtitle">Share an IP address, DNS name, or Iroh endpoint with your accepted friends and the games you play. Never public. LAN addresses only work for friends on your network.</p>
 		<form method="post" action={ templ.URL("/v1/players/account/remote-addrs") }>

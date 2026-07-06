@@ -27,6 +27,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -68,6 +69,9 @@ type Deps struct {
 	Registry   prometheus.Registerer
 	// Metrics carries the business counters. nil is a no-op (unit tests).
 	Metrics *observability.Metrics
+	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
+	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
+	TwoFactor *twofactor.Cipher
 }
 
 // Handler owns player UI HTTP routes.
@@ -83,6 +87,7 @@ type Handler struct {
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
 	// users re-enter from login).
 	verifySigningKey []byte
+	twoFactor        *twofactor.Cipher
 }
 
 // New builds the player UI router.
@@ -91,7 +96,7 @@ func New(d Deps) http.Handler {
 	if _, err := rand.Read(key); err != nil {
 		panic("players: rand: " + err.Error())
 	}
-	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, metrics: d.Metrics, verifySigningKey: key}
+	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, metrics: d.Metrics, verifySigningKey: key, twoFactor: d.TwoFactor}
 
 	r := chi.NewRouter()
 	r.Use(webutil.PlayerSecurityHeaders)
@@ -121,6 +126,13 @@ func New(d Deps) http.Handler {
 		r.Post("/friends/{accountID}/unblock", h.friendAction("unblock"))
 		r.Get("/login", h.accountLoginPage)
 		r.Post("/login", h.accountLogin)
+		r.Get("/login/2fa", h.accountTwoFactorChallengePage)
+		r.Post("/login/2fa", h.accountTwoFactorChallenge)
+		r.Get("/2fa", h.accountTwoFactorPage)
+		r.Post("/2fa/setup", h.accountTwoFactorSetup)
+		r.Post("/2fa/confirm", h.accountTwoFactorConfirm)
+		r.Post("/2fa/disable", h.accountTwoFactorDisable)
+		r.Post("/2fa/backup-codes", h.accountTwoFactorBackupCodes)
 		r.Get("/signup", h.accountSignupPage)
 		r.Post("/signup", h.accountSignup)
 		r.Get("/verify", h.accountVerifyPage)

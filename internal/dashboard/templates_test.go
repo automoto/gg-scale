@@ -38,6 +38,79 @@ func TestPlayersPage_LabelsNonFinalPageAsApproximate(t *testing.T) {
 	assert.Contains(t, html, "Showing 1 of at least 26.")
 }
 
+func TestAccountPage_TwoFactorCardStates(t *testing.T) {
+	tests := []struct {
+		name        string
+		vm          AccountView
+		contains    string
+		notContains string
+	}{
+		{
+			name:        "should_offer_enable_when_available_and_not_enrolled",
+			vm:          AccountView{TwoFactorAvailable: true},
+			contains:    "/v1/dashboard/account/2fa/setup",
+			notContains: "/v1/dashboard/account/2fa/disable",
+		},
+		{
+			name:        "should_offer_disable_and_regenerate_when_enrolled",
+			vm:          AccountView{TwoFactorAvailable: true, TwoFactorEnabled: true, BackupCodesRemaining: 7},
+			contains:    "/v1/dashboard/account/2fa/disable",
+			notContains: "/v1/dashboard/account/2fa/setup",
+		},
+		{
+			name:        "should_explain_when_server_has_no_key",
+			vm:          AccountView{},
+			contains:    "Not available on this server",
+			notContains: "/v1/dashboard/account/2fa/setup",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := renderToString(t, AccountPage(tt.vm))
+
+			assert.Contains(t, html, tt.contains)
+			assert.NotContains(t, html, tt.notContains)
+		})
+	}
+}
+
+func TestAccountPage_ShowsBackupCodesRemaining(t *testing.T) {
+	html := renderToString(t, AccountPage(AccountView{TwoFactorAvailable: true, TwoFactorEnabled: true, BackupCodesRemaining: 7}))
+
+	assert.Contains(t, html, "Backup codes remaining: 7.")
+}
+
+func TestTwoFactorSetupPage_RendersQRAndSecret(t *testing.T) {
+	html := renderToString(t, TwoFactorSetupPage(TwoFactorSetupView{
+		QRDataURI: "data:image/png;base64,AAAA",
+		Secret:    "ABCD EFGH",
+	}))
+
+	assert.Contains(t, html, `src="data:image/png;base64,AAAA"`)
+	assert.Contains(t, html, "ABCD EFGH")
+	assert.Contains(t, html, "/v1/dashboard/account/2fa/confirm")
+}
+
+func TestTwoFactorChallengePage_HasTrustDeviceAndNoCSRF(t *testing.T) {
+	html := renderToString(t, TwoFactorChallengePage(TwoFactorChallengeView{Error: "That code is incorrect."}))
+
+	assert.Contains(t, html, `name="trust_device"`)
+	assert.Contains(t, html, `name="code"`)
+	assert.Contains(t, html, "That code is incorrect.")
+	// Mirrors the login POST: pre-session, no CSRF field.
+	assert.NotContains(t, html, `name="_csrf"`)
+}
+
+func TestTwoFactorBackupCodesPage_ListsCodes(t *testing.T) {
+	html := renderToString(t, TwoFactorBackupCodesPage(TwoFactorBackupCodesView{
+		Codes: []string{"abc23-def45", "ghj67-klm23"},
+	}))
+
+	assert.Contains(t, html, "abc23-def45")
+	assert.Contains(t, html, "ghj67-klm23")
+	assert.Contains(t, html, "shown again")
+}
+
 func TestLoginPage_RendersFieldErrors(t *testing.T) {
 	html := renderToString(t, LoginPage(LoginView{
 		Email:       "bob@example.com",

@@ -217,6 +217,16 @@ type DashboardSession struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type DashboardTrustedDevice struct {
+	ID              int64
+	DashboardUserID int64
+	TokenHash       []byte
+	ExpiresAt       pgtype.Timestamptz
+	Ip              *string
+	UserAgent       *string
+	CreatedAt       pgtype.Timestamptz
+}
+
 type DashboardUser struct {
 	ID                                int64
 	Email                             string
@@ -235,6 +245,24 @@ type DashboardUser struct {
 	DisabledAt                        pgtype.Timestamptz
 	EmailVerificationLifetimeAttempts int32
 	EmailVerificationLockedUntil      pgtype.Timestamptz
+}
+
+type DashboardUserTotp struct {
+	DashboardUserID int64
+	SecretEnc       []byte
+	ConfirmedAt     pgtype.Timestamptz
+	LastUsedStep    int64
+	Attempts        int32
+	LockedUntil     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type DashboardUserTotpBackupCode struct {
+	ID              int64
+	DashboardUserID int64
+	CodeHash        []byte
+	UsedAt          pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
 }
 
 type FeatureGrant struct {
@@ -414,6 +442,32 @@ type PlayerAccountSession struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type PlayerAccountTotp struct {
+	PlayerAccountID pgtype.UUID
+	SecretEnc       []byte
+	ConfirmedAt     pgtype.Timestamptz
+	LastUsedStep    int64
+	Attempts        int32
+	LockedUntil     pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type PlayerAccountTotpBackupCode struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+	CodeHash        []byte
+	UsedAt          pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type PlayerAccountTrustedDevice struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+	TokenHash       []byte
+	ExpiresAt       pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type PlayerInvitation struct {
 	ID              int64
 	TenantID        int64
@@ -531,6 +585,12 @@ type RiverQueue struct {
 	Metadata  []byte
 	PausedAt  pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type ServerSecret struct {
+	Name      string
+	Value     []byte
+	CreatedAt pgtype.Timestamptz
 }
 
 type Session struct {

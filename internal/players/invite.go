@@ -192,7 +192,8 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sign the invitee into their global account.
+	// Sign the invitee into their global account through the shared 2FA gate
+	// so an enrolled account is still challenged for its second factor.
 	var epoch int32
 	if lerr := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		acc, qerr := sqlcgen.New(tx).GetPlayerAccountByID(r.Context(), accountID)
@@ -205,11 +206,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "player invite: reload", lerr)
 		return
 	}
-	if err := h.issueAccountSession(r.Context(), w, accountID, epoch); err != nil {
-		webutil.InternalError(w, "player invite: session", err)
-		return
-	}
-	http.Redirect(w, r, accountBasePath+"/", http.StatusSeeOther)
+	h.finishAccountLogin(w, r, accountID, view.Email, epoch)
 }
 
 var (

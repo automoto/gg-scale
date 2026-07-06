@@ -366,13 +366,9 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if res.IsNewUser {
 		h.metrics.Signup(observability.SignupDashboardUser)
 	}
-	// Auto-login: issue a session and redirect to the dashboard home.
-	if _, err := h.issueSession(r.Context(), w, res.UserID, h.clientIP(r), r.Header.Get("User-Agent")); err != nil {
-		slog.ErrorContext(r.Context(), "accept invite: issue session", "err", err)
-		http.Error(w, "session error", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, "/v1/dashboard?flash="+url.QueryEscape("Welcome to ggscale, "+res.Email+"!"), http.StatusSeeOther)
+	// Auto-login through the shared 2FA gate so an enrolled account is still
+	// challenged for its second factor before a session is minted.
+	h.finishLogin(w, r, dashboardUser{ID: res.UserID, Email: res.Email})
 }
 
 // requireInviteBelongsToTenant is a small access check: the invite must be

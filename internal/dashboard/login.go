@@ -145,20 +145,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
 		return
 	}
-	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		return auditlog.WritePlatform(r.Context(), tx, user.ID, "dashboard.login", user.Email, nil)
-	}); err != nil {
-		http.Error(w, "audit log failed", http.StatusInternalServerError)
-		return
-	}
-	session, err := h.issueSession(r.Context(), w, user.ID, h.clientIP(r), r.UserAgent())
-	if err != nil {
-		http.Error(w, "session create failed", http.StatusInternalServerError)
-		return
-	}
-	session.User = user
-	h.metrics.Login(observability.SurfaceDashboard, observability.LoginOK)
-	htmxRedirect(w, r, pathDashboard)
+	h.finishLogin(w, r, user)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {

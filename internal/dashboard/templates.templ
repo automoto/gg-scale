@@ -721,11 +721,11 @@ templ AccountPage(vm AccountView) {
 				<p class="subtitle">Signed in as { vm.UserEmail }</p>
 			</div>
 		</div>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
 		<section class="card">
 			<h2>Change password</h2>
 			<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
-			@flashSuccess(vm.Message)
-			@errorAlert(vm.Error)
 			<form method="post" action="/v1/dashboard/account/password">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label for="current_password">Current password</label>
@@ -738,6 +738,110 @@ templ AccountPage(vm AccountView) {
 					<button type="submit" class="btn-inline">Update password</button>
 				</div>
 			</form>
+		</section>
+		@twoFactorCard(vm)
+	}
+}
+
+templ twoFactorCard(vm AccountView) {
+	<section class="card">
+		<h2>Two-factor authentication</h2>
+		if !vm.TwoFactorAvailable {
+			<p class="card-subtitle">Not available on this server. Ask your operator to configure a two-factor encryption key.</p>
+		} else if !vm.TwoFactorEnabled {
+			<p class="card-subtitle">Add a second sign-in step with an authenticator app such as Google Authenticator.</p>
+			<form method="post" action="/v1/dashboard/account/2fa/setup">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Enable two-factor authentication</button>
+				</div>
+			</form>
+		} else {
+			<p class="card-subtitle">Enabled. Backup codes remaining: { stringFromInt(int64(vm.BackupCodesRemaining)) }.</p>
+			<h3>Regenerate backup codes</h3>
+			<p class="card-subtitle">Replaces all remaining backup codes with a fresh set.</p>
+			<form method="post" action="/v1/dashboard/account/2fa/backup-codes">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="regenerate_password">Current password</label>
+				<input id="regenerate_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="regenerate_password-error"/>
+				@fieldError(vm.FieldErrors, "regenerate_password")
+				<label for="regenerate_code">Authenticator code</label>
+				<input id="regenerate_code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required aria-describedby="regenerate_code-error"/>
+				@fieldError(vm.FieldErrors, "regenerate_code")
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Regenerate backup codes</button>
+				</div>
+			</form>
+			<h3>Disable two-factor authentication</h3>
+			<p class="card-subtitle">All other sessions and remembered devices will be signed out.</p>
+			<form method="post" action="/v1/dashboard/account/2fa/disable">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="disable_password">Current password</label>
+				<input id="disable_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="disable_password-error"/>
+				@fieldError(vm.FieldErrors, "disable_password")
+				<label for="disable_code">Authenticator or backup code</label>
+				<input id="disable_code" name="code" type="text" autocomplete="one-time-code" required aria-describedby="disable_code-error"/>
+				@fieldError(vm.FieldErrors, "disable_code")
+				<div class="form-actions">
+					<button type="submit" class="secondary btn-inline">Disable</button>
+				</div>
+			</form>
+		}
+	</section>
+}
+
+templ TwoFactorChallengePage(vm TwoFactorChallengeView) {
+	@authLayout("Two-factor check — ggscale") {
+		<h1>Two-factor check</h1>
+		<p class="subtitle">Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/dashboard/login/2fa">
+			<label for="code">Code</label>
+			<input id="code" name="code" type="text" autocomplete="one-time-code" autofocus required/>
+			<label for="trust_device">
+				<input id="trust_device" name="trust_device" type="checkbox" value="1"/>
+				Remember this device for 30 days
+			</label>
+			<button type="submit">Verify</button>
+		</form>
+	}
+}
+
+templ TwoFactorSetupPage(vm TwoFactorSetupView) {
+	@appLayout("Set up two-factor — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Dashboard</a> / <a href="/v1/dashboard/account/password">Account</a> / Two-factor</div>
+		<section class="card">
+			<h2>Set up two-factor authentication</h2>
+			<p class="card-subtitle">Scan the QR code with an authenticator app (Google Authenticator, Aegis, 1Password, …), then confirm with the 6-digit code it shows.</p>
+			@errorAlert(vm.Error)
+			<img src={ vm.QRDataURI } alt="Authenticator enrollment QR code" width="220" height="220"/>
+			<p>Can&apos;t scan? Enter this key manually:</p>
+			<p><code>{ vm.Secret }</code></p>
+			<form method="post" action="/v1/dashboard/account/2fa/confirm">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="code">6-digit code</label>
+				<input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Confirm and enable</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ TwoFactorBackupCodesPage(vm TwoFactorBackupCodesView) {
+	@appLayout("Backup codes — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Dashboard</a> / <a href="/v1/dashboard/account/password">Account</a> / Backup codes</div>
+		<section class="card">
+			<h2>Backup codes</h2>
+			@flashSuccess(vm.Message)
+			<p class="card-subtitle">Each code works once. Store them somewhere safe — they will not be shown again.</p>
+			<ul class="backup-codes">
+				for _, code := range vm.Codes {
+					<li><code>{ code }</code></li>
+				}
+			</ul>
+			<p><a href="/v1/dashboard/account/password">Back to account</a></p>
 		</section>
 	}
 }

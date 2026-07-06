@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webassets"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -61,6 +62,9 @@ type Deps struct {
 	// backend is a plugin). nil when not a plugin backend; the admin
 	// plugins page renders "no plugin backend" in that case.
 	PluginInfo func() *PluginSnapshot
+	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
+	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
+	TwoFactor *twofactor.Cipher
 }
 
 // PluginSnapshot is the read-only view the admin/plugins page renders.
@@ -97,6 +101,7 @@ type Handler struct {
 	// secret; restarts invalidate in-flight verify cookies (acceptable —
 	// users re-enter from login).
 	verifySigningKey []byte
+	twoFactor        *twofactor.Cipher
 }
 
 // New builds the dashboard router. Callers should only mount it when
@@ -128,6 +133,7 @@ func New(d Deps) http.Handler {
 		proxyTrust:       d.ProxyTrust,
 		metrics:          d.Metrics,
 		verifySigningKey: key,
+		twoFactor:        d.TwoFactor,
 	}
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
@@ -146,6 +152,8 @@ func New(d Deps) http.Handler {
 		r.Post("/setup", h.completeSetup)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
+		r.Get("/login/2fa", h.twoFactorChallengePage)
+		r.Post("/login/2fa", h.twoFactorChallenge)
 		r.Get("/verify", h.verifyPage)
 		r.Post("/verify", h.verifyHandler)
 		r.Post("/verify/resend", h.verifyResendHandler)
@@ -161,6 +169,10 @@ func New(d Deps) http.Handler {
 		r.Get("/tenants", h.openTenant)
 		r.Get("/account/password", h.accountPage)
 		r.Post("/account/password", h.updatePassword)
+		r.Post("/account/2fa/setup", h.twoFactorSetup)
+		r.Post("/account/2fa/confirm", h.twoFactorConfirm)
+		r.Post("/account/2fa/disable", h.twoFactorDisable)
+		r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
 			r.Use(h.requireTenantAccess(roleAdmin))
 			r.Get("/projects", h.projectsPage)

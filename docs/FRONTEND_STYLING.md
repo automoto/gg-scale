@@ -17,15 +17,21 @@ the templ/HTMX **behavior** review checklist. Read both before changing UI.
 
 | Asset | Version | File (embedded) | Upstream docs |
 |---|---|---|---|
-| Pico CSS | **2.1.1** | `internal/dashboard/static/pico.min.css` | <https://picocss.com/docs> |
+| Pico CSS | **2.1.1** | `internal/webassets/static/pico.min.css` | <https://picocss.com/docs> |
 | htmx | **2.0.10** | `internal/dashboard/static/htmx.min.js` | <https://htmx.org/docs/> |
-| dashboard theme | — | `internal/dashboard/static/dashboard.css` | this doc |
+| shared theme | — | `internal/webassets/static/app.css` | this doc |
 | dashboard JS | — | `internal/dashboard/static/dashboard.js` | this doc |
-| fonts | — | `internal/dashboard/static/fonts/` (Inter Variable, JetBrains Mono) | self-hosted `woff2` |
+| fonts | — | `internal/webassets/static/fonts/` (Inter Variable, JetBrains Mono) | self-hosted `woff2` |
 
-- Assets are compiled into the binary via `//go:embed static` (`handler.go`)
-  and served at `/v1/dashboard/assets/*` with
-  `Cache-Control: public, max-age=31536000, immutable`.
+- Shared assets (Pico, `app.css`, fonts) live in `internal/webassets`, are
+  compiled in via `//go:embed static`, and are served at `/v1/assets/*` so
+  both the dashboard and the player site use them. Dashboard-only JS stays in
+  `internal/dashboard/static` at `/v1/dashboard/assets/*`.
+- All assets are served with
+  `Cache-Control: public, max-age=31536000, immutable`. Stylesheet links must
+  therefore go through `webassets.URL("app.css")`, which appends a content-hash
+  query (`?v=…`) so an edited file gets a new URL — never hardcode
+  `/v1/assets/...` in templates.
 - **We self-host on purpose — do not switch to a CDN.** Reasons: keeps the CSP
   `'self'`-only, works in air-gapped/self-hosted deployments, leaks no operator
   IP to a third party, and removes a supply-chain vector. (Browser cache
@@ -47,8 +53,11 @@ style-src 'self'; style-src-attr 'none'; img-src 'self' data:;
 connect-src 'self'; base-uri 'none'; form-action 'self';
 frame-ancestors 'none'; object-src 'none'
 ```
-**Player site** (`PlayerSecurityHeaders`) is stricter — `default-src 'none'`,
-no script, no stylesheet. Player pages render unstyled, semantic HTML by design.
+**Player site** (`PlayerSecurityHeaders`) is stricter — `default-src 'none'`
+with only `style-src`/`font-src`/`img-src 'self'` (plus `data:` images for
+Pico's inline SVGs) opened up. Player pages load the shared stylesheets from
+`/v1/assets` but run **no script at all** (`script-src 'none'`); everything
+else — frames, media, connections — stays blocked.
 
 Hard rules this imposes (a reviewer should block on any of these):
 
@@ -56,7 +65,7 @@ Hard rules this imposes (a reviewer should block on any of these):
   Consequently templ script templates / `templ.WithNonce` are unnecessary —
   don't introduce them.
 - **No inline `<style>` and no `style="…"` attributes.** Style via classes and
-  CSS variables in `dashboard.css` only. (`style-src-attr 'none'` will silently
+  CSS variables in `app.css` only. (`style-src-attr 'none'` will silently
   drop inline styles.)
 - **No `hx-on:*` / inline event handlers.** `script-src-attr 'none'` blocks
   them. Use a delegated listener in `dashboard.js` instead — see the
@@ -80,12 +89,12 @@ Pico v2 is a **classless-first** framework: semantic elements (`<button>`,
 theme layers on top via **CSS-variable rebinds**, not a parallel class system.
 
 - **Lean on Pico defaults; override only when strictly needed.** Match the
-  palette/tokens in `dashboard.css`; accept minor deviation elsewhere rather
+  palette/tokens in `app.css`; accept minor deviation elsewhere rather
   than fighting the framework.
 - **Dark mode is fixed:** `<html data-theme="dark">` in both layouts and
   `<meta name="color-scheme" content="dark">` in `baseHead`. Do not add light
   mode paths; Pico's dark defaults handle everything not explicitly overridden.
-- **Minimal `--pico-*` overrides:** `dashboard.css` rebinds only fonts (Inter
+- **Minimal `--pico-*` overrides:** `app.css` rebinds only fonts (Inter
   Variable, JetBrains Mono) and the primary accent (indigo `#6366f1` family).
   Everything else — backgrounds, borders, card surfaces, text colour — comes
   from Pico's built-in dark theme. Do **not** add new `--pico-*` rebinds unless
@@ -95,9 +104,9 @@ theme layers on top via **CSS-variable rebinds**, not a parallel class system.
   a button; `secondary`, `outline`, `contrast` button variants; `grid` for
   multi-column form rows.
 - **Pill buttons via element selector:** `button, [role="button"], input[type="submit"]`
-  get `border-radius: 50px` in `dashboard.css`, which wins the cascade because
-  `dashboard.css` loads after `pico.min.css`. Do not set `border-radius` inline.
-- Keep custom CSS minimal. Watch `dashboard.css` for override sprawl — the file
+  get `border-radius: 50px` in `app.css`, which wins the cascade because
+  `app.css` loads after `pico.min.css`. Do not set `border-radius` inline.
+- Keep custom CSS minimal. Watch `app.css` for override sprawl — the file
   is intentionally ~350 lines; if you need many overrides for one component,
   reconsider the approach.
 
@@ -105,7 +114,7 @@ theme layers on top via **CSS-variable rebinds**, not a parallel class system.
 
 ## 4. Custom classes
 
-`dashboard.css` defines a small set of **layout/semantic classes** on top of
+`app.css` defines a small set of **layout/semantic classes** on top of
 Pico's dark defaults. Reuse these; don't invent near-duplicates.
 
 | Class | Purpose |
@@ -184,4 +193,4 @@ duplicating whole `<option>`/`<input>` branches in an `if/else`.
   <https://templ.guide/security/content-security-policy/>
 - **In-repo** — behavior checklist `docs/FRONTEND_GUIDELINES.md`; brand/design
   intent `docs/ggscale-design.md`; CSP source `internal/webutil/webutil.go`;
-  theme `internal/dashboard/static/dashboard.css`.
+  theme `internal/webassets/static/app.css`.

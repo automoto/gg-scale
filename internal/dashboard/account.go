@@ -13,7 +13,7 @@ import (
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	webutil.Render(r, w, AccountPage(AccountView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
+	h.renderAccount(w, r, session, http.StatusOK, nil)
 }
 
 func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
@@ -24,33 +24,21 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 	current := r.Form.Get("current_password")
 	next := r.Form.Get("new_password")
 	if len(next) < minDashboardPassLen {
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		webutil.Render(r, w, AccountPage(AccountView{
-			UserEmail:   session.User.Email,
-			CSRFToken:   session.CSRFToken,
-			FieldErrors: map[string]string{"new_password": "Password must be at least 12 characters"},
-		}))
-
+		h.renderAccount(w, r, session, http.StatusUnprocessableEntity, func(vm *AccountView) {
+			vm.FieldErrors = map[string]string{"new_password": "Password must be at least 12 characters"}
+		})
 		return
 	}
 
-	var row sqlcgen.GetDashboardUserByEmailRow
-	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		var err error
-		row, err = sqlcgen.New(tx).GetDashboardUserByEmail(r.Context(), session.User.Email)
-		return err
-	}); err != nil {
+	passwordOK, err := h.checkAccountPassword(r.Context(), session.User.Email, current)
+	if err != nil {
 		http.Error(w, "account lookup failed", http.StatusInternalServerError)
 		return
 	}
-	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(current)) != nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		webutil.Render(r, w, AccountPage(AccountView{
-			UserEmail:   session.User.Email,
-			CSRFToken:   session.CSRFToken,
-			FieldErrors: map[string]string{"current_password": "Current password is incorrect"},
-		}))
-
+	if !passwordOK {
+		h.renderAccount(w, r, session, http.StatusUnauthorized, func(vm *AccountView) {
+			vm.FieldErrors = map[string]string{"current_password": "Current password is incorrect"}
+		})
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(next), bcryptCost)
@@ -67,6 +55,11 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := q.RevokeAllDashboardSessionsForUser(r.Context(), session.User.ID); err != nil {
+			return err
+		}
+		// A password change is exactly when remembered devices should stop
+		// skipping the 2FA challenge.
+		if err := h.deleteTrustedDevices(r.Context(), tx, session.User.ID); err != nil {
 			return err
 		}
 		return auditlog.WritePlatform(r.Context(), tx, session.User.ID, "dashboard.password_change", "", nil)

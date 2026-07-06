@@ -333,14 +333,10 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verified — issue a session and clear the verify-pending cookie.
+	// Verified — clear the verify-pending cookie and finish the login
+	// through the shared gate so a 2FA-enabled account is still challenged.
 	h.clearVerifyPendingCookie(w)
-	if _, err := h.issueSession(r.Context(), w, p.UserID, h.clientIP(r), r.UserAgent()); err != nil {
-		slog.ErrorContext(r.Context(), "dashboard verify session", "err", err)
-		http.Error(w, "session error", http.StatusInternalServerError)
-		return
-	}
-	http.Redirect(w, r, pathDashboard, http.StatusSeeOther)
+	h.finishLogin(w, r, dashboardUser{ID: p.UserID, Email: p.Email})
 }
 
 func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {

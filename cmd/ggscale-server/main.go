@@ -44,6 +44,7 @@ import (
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/ggscale/ggscale/internal/twofactor"
 )
 
 // commit is overridden at build time via -ldflags.
@@ -146,6 +147,12 @@ func run() error {
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
 	observability.RegisterPoolStats(registry, appPool.Stat)
+	// After migrations and pool setup: resolves TWO_FACTOR_ENC_KEY or the
+	// auto-generated database key, so 2FA works with zero configuration.
+	tfCipher, err := twofactor.Load(ctx, appPool, cfg.TwoFactorEncKey)
+	if err != nil {
+		return err
+	}
 	authorizer, err := rbac.NewAuthorizer(appPool)
 	if err != nil {
 		return fmt.Errorf("rbac: %w", err)
@@ -248,6 +255,7 @@ func run() error {
 		Signer:               signer,
 		Mailer:               m,
 		MailFrom:             cfg.MailFrom,
+		TwoFactor:            tfCipher,
 		Cache:                store,
 		Registry:             registry,
 		Metrics:              metrics,
@@ -352,6 +360,7 @@ func (c matchCounter) Inc() { c.m.MatchmakerMatch() }
 func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, logger *slog.Logger) func() {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,
@@ -363,6 +372,11 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, l
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) { return jobs.GameSessionGCArgs{}, nil },
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(24*time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) { return jobs.TrustedDeviceGCArgs{}, nil },
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 		},

@@ -49,6 +49,9 @@ const (
 	LoginInvalid    = "invalid"
 	LoginLocked     = "locked"
 	LoginUnverified = "unverified"
+	// LoginTwoFactorRequired counts password-valid logins parked at the
+	// TOTP challenge; the eventual outcome lands as ok/invalid/locked.
+	LoginTwoFactorRequired = "2fa_required"
 )
 
 // Invite kinds.

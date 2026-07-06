@@ -21,9 +21,11 @@ require (
 	github.com/olric-data/olric v0.7.3
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/pion/turn/v3 v3.0.3
+	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/riverqueue/river v0.39.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.39.0
+	github.com/riverqueue/river/rivertype v0.39.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
 	golang.org/x/crypto v0.52.0
@@ -43,6 +45,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/buraksezer/consistent v0.10.0 // indirect
 	github.com/casbin/govaluate v1.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
@@ -130,7 +133,6 @@ require (
 	github.com/redis/go-redis/v9 v9.18.0 // indirect
 	github.com/riverqueue/river/riverdriver v0.39.0 // indirect
 	github.com/riverqueue/river/rivershared v0.39.0 // indirect
-	github.com/riverqueue/river/rivertype v0.39.0 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sean-/seed v0.0.0-20170313163322-e2103e2c3529 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect

@@ -350,6 +350,36 @@ type AccountView struct {
 	Message     string
 	Error       string
 	FieldErrors map[string]string
+	// TwoFactorAvailable is false when the server has no TWO_FACTOR_ENC_KEY;
+	// the 2FA card then explains enrollment is off instead of offering it.
+	TwoFactorAvailable   bool
+	TwoFactorEnabled     bool
+	BackupCodesRemaining int
+}
+
+// TwoFactorChallengeView is the data rendered by the login TOTP challenge.
+type TwoFactorChallengeView struct {
+	Error string
+}
+
+// TwoFactorSetupView is the data rendered by the 2FA enrollment page.
+type TwoFactorSetupView struct {
+	UserEmail string
+	CSRFToken string
+	// QRDataURI is a server-generated PNG data URI; both CSPs allow
+	// img-src data:.
+	QRDataURI string
+	// Secret is the base32 secret in display grouping for manual entry.
+	Secret string
+	Error  string
+}
+
+// TwoFactorBackupCodesView shows freshly generated backup codes, once.
+type TwoFactorBackupCodesView struct {
+	UserEmail string
+	CSRFToken string
+	Message   string
+	Codes     []string
 }
 
 // TeamMemberView is one row of the tenant team table.
