@@ -268,6 +268,30 @@ func run() error {
 			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
 			FleetEnabled:       cfg.FeatureFleetEnabled,
 			RelayEnabled:       cfg.FeatureP2PRelayEnabled,
+			// Redacted read-only snapshot for the server settings page.
+			// Secrets are reduced to booleans here so raw values never
+			// cross into the dashboard package.
+			ServerSettings: dashboard.ServerSettingsSnapshot{
+				Env:                    cfg.Env,
+				LogLevel:               cfg.LogLevel,
+				HTTPAddr:               cfg.HTTPAddr,
+				DashboardEnabled:       cfg.DashboardEnabled,
+				PlayersEnabled:         cfg.PlayersEnabled,
+				FeatureFleetEnabled:    cfg.FeatureFleetEnabled,
+				FeatureP2PRelayEnabled: cfg.FeatureP2PRelayEnabled,
+				FleetBackend:           cfg.FleetBackend,
+				FleetRegion:            cfg.FleetRegion,
+				MailProvider:           cfg.MailProvider,
+				SMTPAddr:               cfg.SMTPAddr,
+				SMTPUser:               cfg.SMTPUser,
+				SMTPTLS:                cfg.SMTPTLS,
+				MailFrom:               cfg.MailFrom,
+				SMTPPasswordSet:        cfg.SMTPPassword != "",
+				CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
+				JWTConfigured:          cfg.JWTSigningKey != "",
+				RelaySecretSet:         cfg.RelaySharedSecret != "",
+				DatabaseConfigured:     cfg.DatabaseURL != "",
+			},
 		},
 		Players: players.Config{
 			Mount:        cfg.PlayersEnabled,

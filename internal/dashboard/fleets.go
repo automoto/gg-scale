@@ -154,7 +154,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.template.create", strconv.FormatInt(f.ID, 10), map[string]any{
+	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.create", strconv.FormatInt(f.ID, 10), map[string]any{
 		"project_id": projectID,
 		"fleet_name": f.Name,
 		"backend":    f.Backend,
@@ -279,7 +279,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.template.update", strconv.FormatInt(fleetID, 10), map[string]any{
+	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.update", strconv.FormatInt(fleetID, 10), map[string]any{
 		"project_id": projectID,
 		"fleet_name": name,
 	}); auditErr != nil {
@@ -328,7 +328,7 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.template.delete", strconv.FormatInt(fleetID, 10), map[string]any{
+	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.delete", strconv.FormatInt(fleetID, 10), map[string]any{
 		"project_id": projectID,
 	}); auditErr != nil {
 		slog.WarnContext(r.Context(), "audit log: fleet.template.delete", "err", auditErr)

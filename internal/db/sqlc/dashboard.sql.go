@@ -81,18 +81,24 @@ func (q *Queries) DashboardCreateTenant(ctx context.Context, arg DashboardCreate
 	return i, err
 }
 
-const getTenantPublicJoining = `-- name: GetTenantPublicJoining :one
-SELECT public_joining_enabled
+const getTenantFacts = `-- name: GetTenantFacts :one
+SELECT name, tier, public_joining_enabled
 FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
+WHERE id = $1
   AND deleted_at IS NULL
 `
 
-func (q *Queries) GetTenantPublicJoining(ctx context.Context) (bool, error) {
-	row := q.db.QueryRow(ctx, getTenantPublicJoining)
-	var public_joining_enabled bool
-	err := row.Scan(&public_joining_enabled)
-	return public_joining_enabled, err
+type GetTenantFactsRow struct {
+	Name                 string
+	Tier                 string
+	PublicJoiningEnabled bool
+}
+
+func (q *Queries) GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error) {
+	row := q.db.QueryRow(ctx, getTenantFacts, id)
+	var i GetTenantFactsRow
+	err := row.Scan(&i.Name, &i.Tier, &i.PublicJoiningEnabled)
+	return i, err
 }
 
 const listProjectsForTenant = `-- name: ListProjectsForTenant :many

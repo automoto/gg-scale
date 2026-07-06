@@ -32,6 +32,42 @@ type Config struct {
 	// RelayEnabled mirrors the FEATURE_P2P_RELAY_ENABLED startup switch. Gates
 	// whether the p2p_relay per-key scope can be granted from the dashboard.
 	RelayEnabled bool
+	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
+	// configuration shown on the platform-admin server settings page. Built in
+	// main.go so raw secrets are reduced to booleans before crossing into this
+	// package.
+	ServerSettings ServerSettingsSnapshot
+}
+
+// ServerSettingsSnapshot is the read-only view of server-wide configuration
+// rendered on the platform-admin server settings page. Secrets are represented
+// as "configured" booleans only — never their values.
+type ServerSettingsSnapshot struct {
+	Env      string
+	LogLevel string
+	HTTPAddr string
+
+	DashboardEnabled       bool
+	PlayersEnabled         bool
+	FeatureFleetEnabled    bool
+	FeatureP2PRelayEnabled bool
+
+	FleetBackend string
+	FleetRegion  string
+
+	MailProvider    string
+	SMTPAddr        string
+	SMTPUser        string
+	SMTPTLS         string
+	MailFrom        string
+	SMTPPasswordSet bool
+
+	CORSAllowedOrigins []string
+
+	// Secrets — presence only, never the value.
+	JWTConfigured      bool
+	RelaySecretSet     bool
+	DatabaseConfigured bool
 }
 
 // Enabled reports whether the dashboard should be mounted.
@@ -137,9 +173,6 @@ type ProjectsView struct {
 	CSRFToken string
 	Projects  []ProjectOption
 	Message   string
-	// TenantPublicJoining is the tenant master switch. Effective per-project
-	// join = TenantPublicJoining AND project.PublicJoiningEnabled.
-	TenantPublicJoining bool
 	// FleetEnabled hides the per-project Fleets/Allocations actions when the
 	// FEATURE_FLEET_ENABLED kill switch is off.
 	FleetEnabled bool
@@ -209,10 +242,105 @@ type ProjectInviteLimitView struct {
 	DomainPerDay   float64
 }
 
+// APILimitCardView is the tenant HTTP API limit card shared by the
+// rate-limits and tenant-settings pages. RedirectTo, when non-empty, is
+// posted as redirect_to so the save returns to the embedding page.
+type APILimitCardView struct {
+	TenantID        int64
+	CSRFToken       string
+	RedirectTo      string
+	IsPlatformAdmin bool
+	Overridden      bool
+	Rate            float64
+	Burst           float64
+	DefaultRate     float64
+	DefaultBurst    float64
+}
+
+// apiLimitCardView adapts the rate-limits view to the shared card.
+func (v RateLimitsView) apiLimitCardView() APILimitCardView {
+	return APILimitCardView{
+		TenantID:        v.TenantID,
+		CSRFToken:       v.CSRFToken,
+		IsPlatformAdmin: v.IsPlatformAdmin,
+		Overridden:      v.APIOverridden,
+		Rate:            v.APIRate,
+		Burst:           v.APIBurst,
+		DefaultRate:     v.APIDefaultRate,
+		DefaultBurst:    v.APIDefaultBurst,
+	}
+}
+
+// apiLimitCardView adapts the tenant-settings view to the shared card,
+// returning the save to the settings page.
+func (v TenantSettingsView) apiLimitCardView() APILimitCardView {
+	return APILimitCardView{
+		TenantID:        v.TenantID,
+		CSRFToken:       v.CSRFToken,
+		RedirectTo:      tenantSettingsPathTpl(v.TenantID),
+		IsPlatformAdmin: v.IsPlatformAdmin,
+		Overridden:      v.APIOverridden,
+		Rate:            v.APIRate,
+		Burst:           v.APIBurst,
+		DefaultRate:     v.APIDefaultRate,
+		DefaultBurst:    v.APIDefaultBurst,
+	}
+}
+
 // HelpView is the data rendered by the in-app concepts page.
 type HelpView struct {
 	UserEmail string
 	CSRFToken string
+}
+
+// TenantSettingsView consolidates tenant-scoped configuration on one page.
+type TenantSettingsView struct {
+	UserEmail       string
+	CSRFToken       string
+	TenantID        int64
+	TenantName      string
+	Tier            string
+	IsPlatformAdmin bool
+	Message         string
+	// Public-joining master switch (editable).
+	PublicJoining bool
+	// Tenant HTTP API limit (editable by platform admins, read-only otherwise).
+	APIOverridden   bool
+	APIRate         float64
+	APIBurst        float64
+	APIDefaultRate  float64
+	APIDefaultBurst float64
+}
+
+// ProjectSettingsView consolidates project-scoped configuration on one page.
+type ProjectSettingsView struct {
+	UserEmail   string
+	CSRFToken   string
+	TenantID    int64
+	ProjectID   int64
+	ProjectName string
+	CreatedAt   time.Time
+	Message     string
+	// Effective join = tenant master AND project toggle.
+	TenantPublicJoining  bool
+	ProjectPublicJoining bool
+	// Per-project invite quotas (editable, 0 = default).
+	InviterPerHour     float64
+	DomainPerDay       float64
+	DefaultInviterHour float64
+	DefaultDomainDay   float64
+}
+
+// EffectiveJoin reports whether players can currently self-join this project.
+func (v ProjectSettingsView) EffectiveJoin() bool {
+	return v.TenantPublicJoining && v.ProjectPublicJoining
+}
+
+// ServerSettingsView renders the read-only server settings page.
+type ServerSettingsView struct {
+	UserEmail string
+	CSRFToken string
+	Snapshot  ServerSettingsSnapshot
 }
 
 // AccountView is the data rendered by the dashboard account page.
@@ -632,6 +760,38 @@ func fleetsBasePathTpl(tenantID, projectID int64) string {
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
 }
 
+// LeaderboardsListView renders a project's leaderboard list page.
+type LeaderboardsListView struct {
+	UserEmail    string
+	CSRFToken    string
+	TenantID     int64
+	ProjectID    int64
+	Leaderboards []LeaderboardRowView
+	Message      string
+}
+
+// LeaderboardRowView is one leaderboard row in the list.
+type LeaderboardRowView struct {
+	ID        int64
+	Name      string
+	SortOrder string
+	CreatedAt time.Time
+}
+
+// LeaderboardFormView renders the create- and edit-leaderboard forms.
+// LeaderboardID is zero on create.
+type LeaderboardFormView struct {
+	UserEmail     string
+	CSRFToken     string
+	TenantID      int64
+	ProjectID     int64
+	LeaderboardID int64
+	Name          string
+	SortOrder     string
+	Error         string
+	FieldErrors   map[string]string
+}
+
 // fleetQuery preserves the include-terminal toggle + current page across
 // the polled fragment URL so the timer-driven refresh doesn't reset filters.
 func fleetQuery(vm FleetView) string {
@@ -659,7 +819,33 @@ func timeString(t time.Time) string {
 	if t.IsZero() {
 		return "-"
 	}
-	return t.UTC().Format(time.RFC3339)
+	// The explicit suffix keeps operators in other timezones from reading
+	// the value as local time.
+	return t.UTC().Format("15:04 2006/01/02") + " UTC"
+}
+
+// orDash renders an em dash for empty config values on the read-only server
+// settings page.
+func orDash(s string) string {
+	if s == "" {
+		return "—"
+	}
+	return s
+}
+
+func joinComma(s []string) string {
+	return strings.Join(s, ", ")
+}
+
+// settingsPathTpl / projectSettingsPathTpl build the redirect_to targets so a
+// reused public-joining/rate-limit POST returns to the settings page.
+func tenantSettingsPathTpl(tenantID int64) string {
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/settings"
+}
+
+func projectSettingsPathTpl(tenantID, projectID int64) string {
+	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/settings"
 }
 
 func csrfHeaders(token string) string {

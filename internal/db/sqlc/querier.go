@@ -188,6 +188,7 @@ type Querier interface {
 	// same kind. Used by the invite throttle.
 	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
+	GetLeaderboardForDashboard(ctx context.Context, arg GetLeaderboardForDashboardParams) (GetLeaderboardForDashboardRow, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
 	GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (GetPlayerAccountByIDRow, error)
@@ -247,7 +248,7 @@ type Querier interface {
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
-	GetTenantPublicJoining(ctx context.Context) (bool, error)
+	GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error)
 	// The tenant's billing tier, used to show the correct compiled default on the
 	// rate-limits page (enforcement keys off the same tier via the API key).
 	GetTenantTier(ctx context.Context, id int64) (string, error)
@@ -310,6 +311,7 @@ type Querier interface {
 	// Returns active peers (last_seen within 30 s) with each peer's optional
 	// xuid. RLS on game_session_peer scopes rows to the current tenant.
 	ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error)
+	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
 	// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
 	// the current tenant's project, plus oldest queued ticket so operators can
 	// spot stuck buckets at a glance.
@@ -431,6 +433,7 @@ type Querier interface {
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
 	SetTenantPublicJoining(ctx context.Context, enabled bool) error
 	SoftDeleteFleet(ctx context.Context, id int64) error
+	SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error)
 	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	// Release every claim whose lease has expired. Same accounting as
@@ -448,6 +451,7 @@ type Querier interface {
 	UpdateDashboardPassword(ctx context.Context, arg UpdateDashboardPasswordParams) error
 	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error
 	UpdateGameSessionState(ctx context.Context, arg UpdateGameSessionStateParams) error
+	UpdateLeaderboard(ctx context.Context, arg UpdateLeaderboardParams) (int64, error)
 	// Profile updates are deliberately narrow — only fields explicitly
 	// enumerated server-side may change. PATCHing email re-triggers the
 	// verify flow (handler clears email_verified_at).

@@ -5,10 +5,10 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 ORDER BY name;
 
--- name: GetTenantPublicJoining :one
-SELECT public_joining_enabled
+-- name: GetTenantFacts :one
+SELECT name, tier, public_joining_enabled
 FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
+WHERE id = $1
   AND deleted_at IS NULL;
 
 -- name: SetTenantPublicJoining :exec

@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/fleet"
@@ -240,7 +239,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
-	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.allocate.manual", strconv.FormatInt(int64(alloc.ID), 10), map[string]any{
+	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.allocate.manual", strconv.FormatInt(int64(alloc.ID), 10), map[string]any{
 		"project_id": projectID,
 		"fleet_id":   f.ID,
 		"fleet_name": f.Name,
@@ -353,7 +352,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writeFleetAudit(r.Context(), tenantID, session.User.ID, "fleet.deallocate.manual",
+	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.deallocate.manual",
 		strconv.FormatInt(allocID, 10), map[string]any{"project_id": projectID}); auditErr != nil {
 		slog.WarnContext(r.Context(), "audit log: fleet.deallocate.manual", "err", auditErr)
 	}
@@ -518,21 +517,6 @@ func (h *Handler) loadMatchmakerBuckets(ctx context.Context, tenantID, projectID
 		return nil
 	})
 	return out, err
-}
-
-// writeFleetAudit records a manual fleet action by a dashboard user.
-// platform_audit_log is the correct table here: the actor is a
-// dashboard_user (not a player), and the tenant FK on audit_log would
-// reject it. We fold tenant_id + project_id into the payload so the row
-// is still correlatable to a tenant.
-func (h *Handler) writeFleetAudit(ctx context.Context, tenantID, actorUserID int64, action, target string, payload map[string]any) error {
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	payload["tenant_id"] = tenantID
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return auditlog.WritePlatform(ctx, tx, actorUserID, action, target, payload)
-	})
 }
 
 // fleetBackendName returns the backend display name, or "" if no manager.

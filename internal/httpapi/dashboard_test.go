@@ -58,6 +58,22 @@ func TestDashboard_setup_page_renders_when_bootstrap_pending(t *testing.T) {
 	assert.NotContains(t, string(body), `value="setup-token"`)
 }
 
+func TestSharedAssets_served_under_v1(t *testing.T) {
+	srv := newDashboardServer(t)
+
+	for _, name := range []string{"pico.min.css", "app.css"} {
+		resp, err := http.Get(srv.URL + "/v1/assets/" + name)
+		require.NoError(t, err)
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode, name)
+		assert.Contains(t, resp.Header.Get("Content-Type"), "text/css", name)
+		assert.NotZero(t, len(body), name)
+	}
+}
+
 func TestDashboard_routes_outside_v1_return_404(t *testing.T) {
 	srv := newDashboardServer(t)
 

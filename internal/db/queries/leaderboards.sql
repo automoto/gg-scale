@@ -89,3 +89,36 @@ SELECT player_id, best_score, r::bigint AS rank
 FROM ranked
 WHERE r BETWEEN sqlc.arg(rank_low)::bigint AND sqlc.arg(rank_high)::bigint
 ORDER BY r;
+
+-- name: ListLeaderboardsForProject :many
+SELECT id, name, sort_order, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
+ORDER BY name;
+
+-- name: GetLeaderboardForDashboard :one
+SELECT id, project_id, name, sort_order, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NULL;
+
+-- name: UpdateLeaderboard :execrows
+UPDATE leaderboards
+SET name = sqlc.arg(name),
+    sort_order = sqlc.arg(sort_order)
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NULL;
+
+-- name: SoftDeleteLeaderboard :execrows
+UPDATE leaderboards
+SET deleted_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NULL;

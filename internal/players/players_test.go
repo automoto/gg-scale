@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ggscale/ggscale/internal/webassets"
 )
 
 func TestValidEmail(t *testing.T) {
@@ -57,7 +59,7 @@ func TestDecodeVerifyCookie_rejects_garbage(t *testing.T) {
 	}
 }
 
-func TestPlayerPagesUseStrictSecurityHeaders(t *testing.T) {
+func TestPlayerPagesAllowFirstPartyStylesButNoScripts(t *testing.T) {
 	h := New(Deps{Config: Config{Mount: true}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
@@ -67,12 +69,14 @@ func TestPlayerPagesUseStrictSecurityHeaders(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	csp := rec.Header().Get("Content-Security-Policy")
 	assert.Contains(t, csp, "default-src 'none'")
+	assert.Contains(t, csp, "style-src 'self'")
+	assert.Contains(t, csp, "font-src 'self'")
+	assert.Contains(t, csp, "img-src 'self' data:")
 	assert.Contains(t, csp, "script-src 'none'")
-	assert.Contains(t, csp, "style-src 'none'")
 	assert.NotContains(t, csp, "unsafe-inline")
 }
 
-func TestPlayerPagesDoNotRequestStylesheetsOrScripts(t *testing.T) {
+func TestPlayerPagesLinkSharedStylesheetsAndRunNoScript(t *testing.T) {
 	h := New(Deps{Config: Config{Mount: true}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
@@ -81,7 +85,11 @@ func TestPlayerPagesDoNotRequestStylesheetsOrScripts(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	html := rec.Body.String()
-	assert.NotContains(t, html, "<style")
+	assert.Contains(t, html, `data-theme="dark"`)
+	// Stylesheet links carry the cache-busting content version.
+	assert.Contains(t, html, `href="`+webassets.URL("pico.min.css")+`"`)
+	assert.Contains(t, html, `href="`+webassets.URL("app.css")+`"`)
+	// Player pages remain script-free.
 	assert.NotContains(t, html, "<script")
-	assert.NotContains(t, html, `rel="stylesheet"`)
+	assert.NotContains(t, html, "<style")
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,12 @@ func renderToString(t *testing.T, c templ.Component) string {
 	var buf bytes.Buffer
 	require.NoError(t, c.Render(context.Background(), &buf))
 	return buf.String()
+}
+
+func TestTimeString_marks_values_as_utc(t *testing.T) {
+	at := time.Date(2026, 7, 6, 14, 30, 0, 0, time.FixedZone("CEST", 2*3600))
+	assert.Equal(t, "12:30 2026/07/06 UTC", timeString(at))
+	assert.Equal(t, "-", timeString(time.Time{}))
 }
 
 func TestPlayersPage_LabelsNonFinalPageAsApproximate(t *testing.T) {

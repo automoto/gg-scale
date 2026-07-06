@@ -628,6 +628,13 @@ func ProjectDedicatedMatchmakingObject(projectID int64) string {
 	return projectObject(projectID, "matchmaking:dedicated")
 }
 
+// ProjectLeaderboardObject returns the project leaderboard object name used to
+// gate dashboard leaderboard management (distinct from the bare "leaderboard"
+// object the player/secret-key APIs read and submit against).
+func ProjectLeaderboardObject(projectID int64) string {
+	return projectObject(projectID, "leaderboard")
+}
+
 func projectObject(projectID int64, suffix string) string {
 	return "project:" + strconv.FormatInt(projectID, 10) + ":" + suffix
 }

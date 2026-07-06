@@ -12,11 +12,11 @@ type AccountLoginView struct {
 }
 
 templ AccountLoginPage(vm AccountLoginView) {
-	@playerLayout("Sign in") {
+	@playerAuthLayout("Sign in") {
 		<h1>Sign in to gg-scale</h1>
 		<p class="subtitle">One account across every game.</p>
 		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
+			<p role="alert">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/login") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
@@ -41,18 +41,18 @@ type AccountSignupView struct {
 }
 
 templ AccountSignupPage(vm AccountSignupView) {
-	@playerLayout("Sign up") {
+	@playerAuthLayout("Sign up") {
 		<h1>Create your gg-scale account</h1>
 		<p class="subtitle">We'll send a 6-digit code to verify your email.</p>
 		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
+			<p role="alert">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/signup") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<label>Email
 				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
 				if msg, ok := vm.FieldErrors["email"]; ok {
-					<small class="error">{ msg }</small>
+					<small class="field-error">{ msg }</small>
 				}
 			</label>
 			<label>Display name (optional)
@@ -61,7 +61,7 @@ templ AccountSignupPage(vm AccountSignupView) {
 			<label>Password (≥ 8 chars)
 				<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
 				if msg, ok := vm.FieldErrors["password"]; ok {
-					<small class="error">{ msg }</small>
+					<small class="field-error">{ msg }</small>
 				}
 			</label>
 			<button type="submit">Create account</button>
@@ -77,11 +77,11 @@ type AccountVerifyView struct {
 }
 
 templ AccountVerifyPage(vm AccountVerifyView) {
-	@playerLayout("Verify email") {
+	@playerAuthLayout("Verify email") {
 		<h1>Verify your email</h1>
 		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>.</p>
 		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
+			<p role="alert">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/verify") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
@@ -132,10 +132,10 @@ templ AccountHomePage(vm AccountHomeView) {
 			<p class="subtitle">Signed in as <code>{ vm.Email }</code>.</p>
 		}
 		if vm.Flash != "" {
-			<p class="flash">{ vm.Flash }</p>
+			<p class="flash-success">{ vm.Flash }</p>
 		}
 		if vm.FlashError != "" {
-			<p class="error">{ vm.FlashError }</p>
+			<p role="alert">{ vm.FlashError }</p>
 		}
 		<h2>Linked games</h2>
 		if len(vm.Projects) == 0 {

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"errors"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
@@ -21,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/ggscale/ggscale/internal/webassets"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -185,6 +189,18 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/players/{playerID}/ban", h.playerToggleBanHandler)
 			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
 			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
+			// Leaderboard CRUD. Always-on (no feature gate); mutations are
+			// gated per-handler on project:*:leaderboard, manage.
+			r.Get("/projects/{projectID}/leaderboards", h.leaderboardsListPage)
+			r.Get("/projects/{projectID}/leaderboards/new", h.leaderboardsNewPage)
+			r.Post("/projects/{projectID}/leaderboards", h.leaderboardsCreateHandler)
+			r.Get("/projects/{projectID}/leaderboards/{leaderboardID}", h.leaderboardsEditPage)
+			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}", h.leaderboardsUpdateHandler)
+			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/delete", h.leaderboardsDeleteHandler)
+			// Consolidated settings pages (writes reuse the handlers above via
+			// a sanitized redirect_to).
+			r.Get("/settings", h.tenantSettingsPage)
+			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
 			// switch hides these routes entirely (404) when off, so operators
@@ -224,6 +240,7 @@ func New(d Deps) http.Handler {
 			r.Post("/player-accounts/{accountID}/disable", h.disablePlayerAccountHandler)
 			r.Post("/player-accounts/{accountID}/enable", h.enablePlayerAccountHandler)
 			r.Get("/plugins", h.platformPluginsPage)
+			r.Get("/settings", h.serverSettingsPage)
 		})
 		r.Post("/logout", h.logout)
 	})
@@ -247,13 +264,21 @@ func New(d Deps) http.Handler {
 }
 
 func (h *Handler) assetHandler(w http.ResponseWriter, r *http.Request) {
-	name := chi.URLParam(r, "*")
-	if name == "" || strings.Contains(name, "..") {
-		http.NotFound(w, r)
-		return
+	webassets.Serve(w, r, staticFS, "static")
+}
+
+// writePlatformAudit records a dashboard-user action in platform_audit_log —
+// the correct table when the actor is a dashboard_user (not a player); the
+// tenant FK on audit_log would reject it. tenant_id is folded into the
+// payload so the row is still correlatable to a tenant.
+func (h *Handler) writePlatformAudit(ctx context.Context, tenantID, actorUserID int64, action, target string, payload map[string]any) error {
+	if payload == nil {
+		payload = map[string]any{}
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	http.ServeFileFS(w, r, staticFS, "static/"+name)
+	payload["tenant_id"] = tenantID
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		return auditlog.WritePlatform(ctx, tx, actorUserID, action, target, payload)
+	})
 }
 
 func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
@@ -292,24 +317,18 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
 		return
 	}
-	tenantJoining, err := h.getTenantPublicJoining(r.Context(), tenantID)
-	if err != nil {
-		http.Error(w, msgProjectListFailed, http.StatusInternalServerError)
-		return
-	}
 	session, _ := sessionFromContext(r.Context())
 	message := r.URL.Query().Get("created")
 	if flash := r.URL.Query().Get("flash"); flash != "" {
 		message = flash
 	}
 	webutil.Render(r, w, ProjectsPage(ProjectsView{
-		UserEmail:           session.User.Email,
-		TenantID:            tenantID,
-		CSRFToken:           session.CSRFToken,
-		Projects:            projects,
-		Message:             message,
-		TenantPublicJoining: tenantJoining,
-		FleetEnabled:        h.cfg.FleetEnabled,
+		UserEmail:    session.User.Email,
+		TenantID:     tenantID,
+		CSRFToken:    session.CSRFToken,
+		Projects:     projects,
+		Message:      message,
+		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
 }

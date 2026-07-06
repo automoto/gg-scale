@@ -1,5 +1,7 @@
 package dashboard
 
+import "github.com/ggscale/ggscale/internal/webassets"
+
 templ baseHead(title string) {
 	<head>
 		<meta charset="utf-8"/>
@@ -7,8 +9,8 @@ templ baseHead(title string) {
 		<meta name="color-scheme" content="dark"/>
 		<title>{ title }</title>
 		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true}'/>
-		<link rel="stylesheet" href="/v1/dashboard/assets/pico.min.css"/>
-		<link rel="stylesheet" href="/v1/dashboard/assets/dashboard.css"/>
+		<link rel="stylesheet" href={ webassets.URL("pico.min.css") }/>
+		<link rel="stylesheet" href={ webassets.URL("app.css") }/>
 		<script src="/v1/dashboard/assets/htmx.min.js" defer></script>
 		<script src="/v1/dashboard/assets/dashboard.js" defer></script>
 	</head>
@@ -149,9 +151,10 @@ templ HomePage(vm HomeView) {
 			</div>
 			<div class="actions-cell">
 				if vm.IsPlatformAdmin {
-					<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Platform users</a>
+					<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Dashboard Users</a>
 					<a href="/v1/dashboard/admin/player-accounts" role="button" class="secondary outline btn-inline">Player accounts</a>
 					<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
+					<a href="/v1/dashboard/admin/settings" role="button" class="secondary outline btn-inline">Server settings</a>
 				}
 				<a href="/v1/dashboard/tenants/new" role="button" class="btn-inline">+ New tenant</a>
 			</div>
@@ -241,32 +244,12 @@ templ ProjectsPage(vm ProjectsView) {
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 			<div class="header-actions">
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/settings") } role="button" class="secondary outline btn-inline">Settings</a>
 				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") } role="button" class="secondary outline btn-inline">Rate limits</a>
 				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
-		<section class="card">
-			<h2>Public joining</h2>
-			<p class="subtitle">
-				Master switch for this tenant. A player can publicly join a project only when BOTH this and the project's toggle are on. Disabling makes every project invite-only. Admin invites always bypass these switches.
-			</p>
-			if vm.TenantPublicJoining {
-				<p>Status: <span class="badge badge-active">enabled</span></p>
-				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") } data-confirm="Disable public joining for the whole tenant? Every project becomes invite-only.">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<input type="hidden" name="public_joining_enabled" value=""/>
-					<button type="submit" class="contrast outline btn-inline">Disable tenant-wide</button>
-				</form>
-			} else {
-				<p>Status: <span class="badge badge-revoked">disabled — invite only</span></p>
-				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") }>
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<input type="hidden" name="public_joining_enabled" value="on"/>
-					<button type="submit" class="btn-inline">Enable tenant-wide</button>
-				</form>
-			}
-		</section>
 		<section class="card">
 			if len(vm.Projects) == 0 {
 				<div class="empty-state">
@@ -290,28 +273,21 @@ templ ProjectsPage(vm ProjectsView) {
 								<td class="actions-cell">
 									if p.PublicJoiningEnabled {
 										<span class="badge badge-active">on</span>
-										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/public-joining") }>
-											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-											<input type="hidden" name="public_joining_enabled" value=""/>
-											<button type="submit" class="contrast outline btn-inline">Set invite-only</button>
-										</form>
 									} else {
 										<span class="badge badge-revoked">invite only</span>
-										<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/public-joining") }>
-											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-											<input type="hidden" name="public_joining_enabled" value="on"/>
-											<button type="submit" class="btn-inline">Allow public joining</button>
-										</form>
 									}
+									@projectJoiningToggleForm(vm.TenantID, p.ID, vm.CSRFToken, "", p.PublicJoiningEnabled)
 								</td>
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/leaderboards") } role="button" class="secondary outline">Leaderboards</a>
 									if vm.FleetEnabled {
 										<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") } role="button" class="secondary outline">Fleets</a>
 										<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") } role="button" class="secondary outline">Allocations</a>
 									}
 									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
+									<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/settings") } role="button" class="secondary outline">Settings</a>
 								</td>
 							</tr>
 						}
@@ -583,6 +559,59 @@ templ fleetOperatorToggle(tenantID int64, csrf string, m TeamMemberView) {
 	}
 }
 
+// apiLimitCard is the tenant HTTP API limit card shared by the rate-limits
+// and tenant-settings pages.
+templ apiLimitCard(vm APILimitCardView) {
+	<section class="card">
+		<h2>HTTP API limit</h2>
+		<p class="card-subtitle">
+			Per-second rate and burst applied to this tenant's API keys. Blank
+			restores the tier default ({ rlNum(vm.DefaultRate) }/s, burst { rlNum(vm.DefaultBurst) }).
+		</p>
+		if vm.IsPlatformAdmin {
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				if vm.RedirectTo != "" {
+					<input type="hidden" name="redirect_to" value={ vm.RedirectTo }/>
+				}
+				<label>Rate (requests/second)
+					<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.Rate) } placeholder={ rlNum(vm.DefaultRate) }/>
+				</label>
+				<label>Burst
+					<input name="burst" type="number" step="any" min="0" value={ rlValue(vm.Burst) } placeholder={ rlNum(vm.DefaultBurst) }/>
+				</label>
+				<button type="submit">Save API limit</button>
+			</form>
+		} else {
+			if vm.Overridden {
+				<p>Override active: <strong>{ rlNum(vm.Rate) }</strong>/s, burst <strong>{ rlNum(vm.Burst) }</strong>.</p>
+			} else {
+				<p>Using the tier default.</p>
+			}
+			<p class="muted">Only platform admins can change the API ceiling.</p>
+		}
+	</section>
+}
+
+// projectJoiningToggleForm posts the per-project public-joining toggle,
+// shared by the projects list and the project settings page. redirectTo,
+// when non-empty, returns the post to the embedding page.
+templ projectJoiningToggleForm(tenantID, projectID int64, csrfToken, redirectTo string, enabled bool) {
+	<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(tenantID) + "/projects/" + stringFromInt(projectID) + "/public-joining") }>
+		<input type="hidden" name="_csrf" value={ csrfToken }/>
+		if redirectTo != "" {
+			<input type="hidden" name="redirect_to" value={ redirectTo }/>
+		}
+		if enabled {
+			<input type="hidden" name="public_joining_enabled" value=""/>
+			<button type="submit" class="contrast outline btn-inline">Set invite-only</button>
+		} else {
+			<input type="hidden" name="public_joining_enabled" value="on"/>
+			<button type="submit" class="btn-inline">Allow public joining</button>
+		}
+	</form>
+}
+
 templ RateLimitsPage(vm RateLimitsView) {
 	@appLayout("Rate limits — ggscale", vm.UserEmail, vm.CSRFToken) {
 		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Rate limits</div>
@@ -595,32 +624,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 		</div>
 		@flashSuccess(vm.Message)
 		@errorAlert(vm.Error)
-		<section class="card">
-			<h2>HTTP API limit</h2>
-			<p class="card-subtitle">
-				Per-second rate and burst applied to this tenant's API keys. Blank
-				restores the tier default ({ rlNum(vm.APIDefaultRate) }/s, burst { rlNum(vm.APIDefaultBurst) }).
-			</p>
-			if vm.IsPlatformAdmin {
-				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") }>
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<label>Rate (requests/second)
-						<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.APIRate) } placeholder={ rlNum(vm.APIDefaultRate) }/>
-					</label>
-					<label>Burst
-						<input name="burst" type="number" step="any" min="0" value={ rlValue(vm.APIBurst) } placeholder={ rlNum(vm.APIDefaultBurst) }/>
-					</label>
-					<button type="submit">Save API limit</button>
-				</form>
-			} else {
-				if vm.APIOverridden {
-					<p>Override active: <strong>{ rlNum(vm.APIRate) }</strong>/s, burst <strong>{ rlNum(vm.APIBurst) }</strong>.</p>
-				} else {
-					<p>Using the tier default. </p>
-				}
-				<p class="muted">Only platform admins can change the API ceiling.</p>
-			}
-		</section>
+		@apiLimitCard(vm.apiLimitCardView())
 		<section class="card">
 			<h2>Invite quotas</h2>
 			<p class="card-subtitle">
@@ -879,7 +883,8 @@ templ PlatformTeamPage(vm PlatformTeamView) {
 				<p class="subtitle">Users with full administrative access to every tenant.</p>
 			</div>
 			<div class="actions-cell">
-				<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Platform users</a>
+				<a href="/v1/dashboard/admin/users" role="button" class="secondary outline btn-inline">Dashboard Users</a>
+				<a href="/v1/dashboard/admin/settings" role="button" class="secondary outline btn-inline">Server settings</a>
 				<a href="/v1/dashboard/admin/team/invite" role="button" class="btn-inline">+ Invite platform admin</a>
 			</div>
 		</div>
@@ -1584,12 +1589,12 @@ templ PlatformPluginsPage(vm PlatformPluginsView) {
 }
 
 templ PlatformUsersPage(vm PlatformUsersView) {
-	@appLayout("Platform users — ggscale", vm.UserEmail, vm.CSRFToken) {
-		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Platform users</div>
+	@appLayout("Dashboard Users — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Dashboard Users</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Platform users</p>
-				<h1>Platform users</h1>
+				<p class="eyebrow">Dashboard Users</p>
+				<h1>Dashboard Users</h1>
 				<p class="subtitle">Every dashboard user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
 			</div>
 			<a href="/v1/dashboard/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
@@ -2041,5 +2046,350 @@ templ EditFleetPage(vm EditFleetView) {
 				<button type="submit" class="btn-inline contrast outline">Delete</button>
 			</form>
 		</section>
+	}
+}
+
+templ LeaderboardsListPage(vm LeaderboardsListView) {
+	@appLayout("Leaderboards — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Leaderboards
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboards</p>
+				<h1>Leaderboards</h1>
+				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New leaderboard</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			if len(vm.Leaderboards) == 0 {
+				<div class="empty-state">
+					<p>No leaderboards yet.</p>
+					<p><a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">Create your first leaderboard</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Sort order</th>
+							<th>Created</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, lb := range vm.Leaderboards {
+							<tr>
+								<td>{ lb.Name }</td>
+								<td>
+									if lb.SortOrder == "asc" {
+										<span class="badge">Low score first</span>
+									} else {
+										<span class="badge badge-active">High score first</span>
+									}
+								</td>
+								<td>{ timeString(lb.CreatedAt) }</td>
+								<td class="actions-cell">
+									<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(lb.ID)) } role="button" class="secondary outline btn-inline">Edit</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewLeaderboardPage(vm LeaderboardFormView) {
+	@appLayout("New leaderboard — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboard</p>
+				<h1>New leaderboard</h1>
+				<p class="subtitle">Names must be unique within the project.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required autofocus placeholder="e.g. weekly-high-scores" aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				<div class="form-actions">
+					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create leaderboard</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ EditLeaderboardPage(vm LeaderboardFormView) {
+	@appLayout("Edit leaderboard — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / Edit
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboard</p>
+				<h1>Edit leaderboard</h1>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				<div class="form-actions">
+					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Save changes</button>
+				</div>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Delete leaderboard</h2>
+			<p class="muted">Soft-deletes the leaderboard. Existing score entries are retained but the leaderboard is hidden from players and the API.</p>
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID) + "/delete") } data-confirm="Delete this leaderboard?">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<button type="submit" class="btn-inline contrast outline">Delete</button>
+			</form>
+		</section>
+	}
+}
+
+templ leaderboardSortOrderField(sortOrder string, fieldErrors map[string]string) {
+	<label>
+		Sort order
+		<select name="sort_order">
+			<option value="desc" selected?={ sortOrder != "asc" }>High score ranks first (default)</option>
+			<option value="asc" selected?={ sortOrder == "asc" }>Low score ranks first</option>
+		</select>
+		@fieldError(fieldErrors, "sort_order")
+	</label>
+}
+
+templ TenantSettingsPage(vm TenantSettingsView) {
+	@appLayout("Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Settings</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Tenant settings</p>
+				<h1>Settings</h1>
+				<p class="subtitle">{ vm.TenantName } — tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">Projects</a>
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/team") } role="button" class="secondary outline btn-inline">Team</a>
+				<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline btn-inline">API keys</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Public joining</h2>
+			<p class="card-subtitle">
+				Master switch for this tenant. A player can publicly join a project only when BOTH this and the project's toggle are on. Disabling makes every project invite-only. Admin invites always bypass these switches.
+			</p>
+			if vm.PublicJoining {
+				<p>Status: <span class="badge badge-active">enabled</span></p>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") } data-confirm="Disable public joining for the whole tenant? Every project becomes invite-only.">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value=""/>
+					<input type="hidden" name="redirect_to" value={ tenantSettingsPathTpl(vm.TenantID) }/>
+					<button type="submit" class="contrast outline btn-inline">Disable for all projects</button>
+				</form>
+			} else {
+				<p>Status: <span class="badge badge-revoked">disabled — invite only</span></p>
+				<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value="on"/>
+					<input type="hidden" name="redirect_to" value={ tenantSettingsPathTpl(vm.TenantID) }/>
+					<button type="submit" class="btn-inline">Enable for all projects</button>
+				</form>
+			}
+		</section>
+		@apiLimitCard(vm.apiLimitCardView())
+		<section class="card">
+			<h2>Tenant</h2>
+			<dl class="kv">
+				<dt>Tenant ID</dt>
+				<dd>{ stringFromInt(vm.TenantID) }</dd>
+				<dt>Name</dt>
+				<dd>{ vm.TenantName }</dd>
+				<dt>Tier</dt>
+				<dd>{ vm.Tier }</dd>
+			</dl>
+			<p><a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
+		</section>
+	}
+}
+
+templ ProjectSettingsPage(vm ProjectSettingsView) {
+	@appLayout("Project settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/dashboard">Tenants</a> /
+			<a href={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Settings
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Project settings</p>
+				<h1>{ vm.ProjectName }</h1>
+				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) }</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Public joining</h2>
+			<p class="card-subtitle">Effective join policy = tenant master switch AND this project's toggle.</p>
+			<p>
+				Effective:
+				if vm.EffectiveJoin() {
+					<span class="badge badge-active">players can self-join</span>
+				} else {
+					<span class="badge badge-revoked">invite only</span>
+				}
+			</p>
+			@projectJoiningToggleForm(vm.TenantID, vm.ProjectID, vm.CSRFToken, projectSettingsPathTpl(vm.TenantID, vm.ProjectID), vm.ProjectPublicJoining)
+			if !vm.TenantPublicJoining {
+				<p class="muted">The tenant master switch is off, so this project stays invite-only regardless of the toggle above.</p>
+			}
+		</section>
+		<section class="card">
+			<h2>Invite quotas</h2>
+			<p class="card-subtitle">
+				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour, { rlNum(vm.DefaultDomainDay) }/project/day).
+			</p>
+			<form method="post" action={ templ.URL("/v1/dashboard/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(vm.ProjectID) + "/invites") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<input type="hidden" name="redirect_to" value={ projectSettingsPathTpl(vm.TenantID, vm.ProjectID) }/>
+				<label>Invites / inviter / hour
+					<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(vm.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
+				</label>
+				<label>Invites / project / day
+					<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(vm.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
+				</label>
+				<button type="submit" class="btn-inline">Save quotas</button>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Project</h2>
+			<dl class="kv">
+				<dt>Project ID</dt>
+				<dd>{ stringFromInt(vm.ProjectID) }</dd>
+				<dt>Name</dt>
+				<dd>{ vm.ProjectName }</dd>
+				<dt>Created</dt>
+				<dd>{ timeString(vm.CreatedAt) }</dd>
+			</dl>
+		</section>
+	}
+}
+
+templ ServerSettingsPage(vm ServerSettingsView) {
+	@appLayout("Server settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/dashboard">Tenants</a> / Server settings</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Server settings</p>
+				<h1>Server settings</h1>
+				<p class="subtitle">Read-only view of server-wide configuration. Set via environment variables; secrets show only whether they are configured.</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>Runtime</h2>
+			<dl class="kv">
+				<dt>Environment</dt>
+				<dd>{ orDash(vm.Snapshot.Env) }</dd>
+				<dt>Log level</dt>
+				<dd>{ orDash(vm.Snapshot.LogLevel) }</dd>
+				<dt>HTTP address</dt>
+				<dd>{ orDash(vm.Snapshot.HTTPAddr) }</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Features</h2>
+			<dl class="kv">
+				<dt>Dashboard</dt>
+				<dd>@boolBadge(vm.Snapshot.DashboardEnabled)</dd>
+				<dt>Players</dt>
+				<dd>@boolBadge(vm.Snapshot.PlayersEnabled)</dd>
+				<dt>Fleet</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureFleetEnabled)</dd>
+				<dt>P2P relay</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureP2PRelayEnabled)</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Fleet</h2>
+			<dl class="kv">
+				<dt>Backend</dt>
+				<dd>{ orDash(vm.Snapshot.FleetBackend) }</dd>
+				<dt>Region</dt>
+				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Mail</h2>
+			<dl class="kv">
+				<dt>Provider</dt>
+				<dd>{ orDash(vm.Snapshot.MailProvider) }</dd>
+				<dt>SMTP address</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPAddr) }</dd>
+				<dt>SMTP user</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPUser) }</dd>
+				<dt>SMTP TLS</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPTLS) }</dd>
+				<dt>From</dt>
+				<dd>{ orDash(vm.Snapshot.MailFrom) }</dd>
+				<dt>SMTP password</dt>
+				<dd>@configuredBadge(vm.Snapshot.SMTPPasswordSet)</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Network &amp; secrets</h2>
+			<dl class="kv">
+				<dt>CORS origins</dt>
+				<dd>{ orDash(joinComma(vm.Snapshot.CORSAllowedOrigins)) }</dd>
+				<dt>JWT signing key</dt>
+				<dd>@configuredBadge(vm.Snapshot.JWTConfigured)</dd>
+				<dt>Relay shared secret</dt>
+				<dd>@configuredBadge(vm.Snapshot.RelaySecretSet)</dd>
+				<dt>Database</dt>
+				<dd>@configuredBadge(vm.Snapshot.DatabaseConfigured)</dd>
+			</dl>
+		</section>
+	}
+}
+
+templ boolBadge(on bool) {
+	if on {
+		<span class="badge badge-active">on</span>
+	} else {
+		<span class="badge badge-revoked">off</span>
+	}
+}
+
+templ configuredBadge(set bool) {
+	if set {
+		<span class="badge badge-active">configured</span>
+	} else {
+		<span class="badge badge-revoked">not set</span>
 	}
 }

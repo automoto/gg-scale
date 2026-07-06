@@ -32,7 +32,7 @@ func TestSecurityHeadersDisallowInlineDashboardAssets(t *testing.T) {
 	assert.NotContains(t, csp, "unsafe-inline")
 }
 
-func TestPlayerSecurityHeadersDisallowScriptsAndStyles(t *testing.T) {
+func TestPlayerSecurityHeadersAllowFirstPartyStylesBlockScripts(t *testing.T) {
 	h := webutil.PlayerSecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -42,9 +42,16 @@ func TestPlayerSecurityHeadersDisallowScriptsAndStyles(t *testing.T) {
 	h.ServeHTTP(w, r)
 
 	csp := w.Header().Get("Content-Security-Policy")
+	// Everything not explicitly allowed (frames, media, manifests, ...) stays
+	// blocked, so an HTML-injection bug can't embed same-origin content.
 	assert.Contains(t, csp, "default-src 'none'")
-	assert.Contains(t, csp, "style-src 'none'")
+	// Player pages load first-party stylesheets (Pico + the shared sheet),
+	// which need fonts and data: SVG backgrounds...
+	assert.Contains(t, csp, "style-src 'self'")
 	assert.Contains(t, csp, "style-src-attr 'none'")
+	assert.Contains(t, csp, "font-src 'self'")
+	assert.Contains(t, csp, "img-src 'self' data:")
+	// ...but run no script at all.
 	assert.Contains(t, csp, "script-src 'none'")
 	assert.Contains(t, csp, "script-src-attr 'none'")
 	assert.Contains(t, csp, "form-action 'self'")

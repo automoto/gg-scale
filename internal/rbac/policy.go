@@ -18,12 +18,14 @@ p, role:tenant_owner, *, project:*:allocation, *
 p, role:tenant_owner, *, project:*:matchmaker, *
 p, role:tenant_owner, *, project:*:relay, *
 p, role:tenant_owner, *, project:*:matchmaking:dedicated, *
+p, role:tenant_owner, *, project:*:leaderboard, manage
 p, role:tenant_owner, *, api_key, manage
 p, role:tenant_owner, *, team, manage
 p, role:tenant_owner, *, audit, read
 
 p, role:tenant_admin, *, project, manage
 p, role:tenant_admin, *, project:*:players, manage
+p, role:tenant_admin, *, project:*:leaderboard, manage
 p, role:tenant_admin, *, api_key:publishable, manage
 p, role:tenant_admin, *, audit, read
 

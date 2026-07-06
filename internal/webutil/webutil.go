@@ -28,7 +28,7 @@ const (
 	MaxFormBodyBytes = 1 << 20
 
 	dashboardCSP = "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
-	playerCSP    = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'none'; style-src-attr 'none'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+	playerCSP    = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
 
 // SecurityHeaders sets browser-protection headers for the authenticated
@@ -37,8 +37,10 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	return securityHeadersWithCSP(dashboardCSP, next)
 }
 
-// PlayerSecurityHeaders sets a stricter policy for player-facing forms. Those
-// pages intentionally run without script or stylesheet execution.
+// PlayerSecurityHeaders sets a stricter policy for player-facing forms. They
+// load first-party stylesheets (Pico + the shared sheet from /v1/assets, with
+// their fonts and data: SVG backgrounds) but everything else — script, frames,
+// media, connections — stays blocked by default-src 'none'.
 func PlayerSecurityHeaders(next http.Handler) http.Handler {
 	return securityHeadersWithCSP(playerCSP, next)
 }

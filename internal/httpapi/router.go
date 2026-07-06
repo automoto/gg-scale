@@ -34,6 +34,7 @@ import (
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/ggscale/ggscale/internal/webassets"
 )
 
 // Deps carries values the router needs but doesn't construct.
@@ -155,6 +156,10 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewVersion(d.Version, reg))
 		r.Use(middleware.NewObservability(reg))
 		r.Get("/healthz", healthzHandler(d))
+		// Shared front-end assets (Pico, stylesheet, fonts) for both the
+		// dashboard and player surfaces. Mounted unconditionally so player
+		// pages stay styled even when the dashboard is disabled.
+		r.Mount("/assets", webassets.Handler())
 		if d.Dashboard.Enabled() {
 			r.Mount("/dashboard", dashboard.New(dashboard.Deps{
 				Pool:               d.Pool,

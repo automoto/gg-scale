@@ -17,6 +17,7 @@ func TestDefaultPolicyProjectObjectsHaveHelpers(t *testing.T) {
 		toPolicyProjectObject(ProjectMatchmakerObject(projectID)):           {},
 		toPolicyProjectObject(ProjectRelayObject(projectID)):                {},
 		toPolicyProjectObject(ProjectDedicatedMatchmakingObject(projectID)): {},
+		toPolicyProjectObject(ProjectLeaderboardObject(projectID)):          {},
 	}
 
 	for _, line := range strings.Split(defaultPolicyCSV, "\n") {

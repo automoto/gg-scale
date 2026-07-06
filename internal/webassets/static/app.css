@@ -8,21 +8,21 @@
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
-  src: url("/v1/dashboard/assets/fonts/inter-variable.woff2") format("woff2-variations");
+  src: url("/v1/assets/fonts/inter-variable.woff2") format("woff2-variations");
 }
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/v1/dashboard/assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
+  src: url("/v1/assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
 }
 
 /* === Tokens =============================================== */
 :root {
   --font-sans: "Inter Variable", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --content-max: 1280px;
+  --content-max: min(1280px, 92vw);
 }
 
 /* === Pico dark overrides ==================================

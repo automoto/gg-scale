@@ -78,6 +78,34 @@ func TestDefaultPolicy_allows_tenant_owner_to_allocate_project_fleet(t *testing.
 	assert.True(t, allowed)
 }
 
+func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *testing.T) {
+	for _, role := range []string{"admin", "owner"} {
+		t.Run(role, func(t *testing.T) {
+			a := newAuthorizer(t)
+			require.NoError(t, a.SetDashboardMembershipRole(42, 7, role))
+
+			allowed, err := a.CanDashboard(rbac.DashboardUser{
+				ID: 42,
+			}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
+
+			require.NoError(t, err)
+			assert.True(t, allowed)
+		})
+	}
+}
+
+func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
+
+	allowed, err := a.CanDashboard(rbac.DashboardUser{
+		ID: 42,
+	}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
+
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
 func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	a := newAuthorizer(t)
 

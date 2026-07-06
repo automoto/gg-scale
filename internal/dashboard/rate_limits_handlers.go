@@ -98,6 +98,6 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 }
 
 func (h *Handler) redirectRateLimits(w http.ResponseWriter, r *http.Request, tenantID int64, flash string) {
-	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/rate-limits?flash=" + url.QueryEscape(flash)
-	htmxRedirect(w, r, target)
+	base := safeReturnPath(r.Form.Get("redirect_to"), pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/rate-limits")
+	htmxRedirect(w, r, base+queryFlash+url.QueryEscape(flash))
 }

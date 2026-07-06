@@ -67,6 +67,41 @@ func (q *Queries) GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardR
 	return i, err
 }
 
+const getLeaderboardForDashboard = `-- name: GetLeaderboardForDashboard :one
+SELECT id, project_id, name, sort_order, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+  AND deleted_at IS NULL
+`
+
+type GetLeaderboardForDashboardParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+type GetLeaderboardForDashboardRow struct {
+	ID        int64
+	ProjectID int64
+	Name      string
+	SortOrder string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetLeaderboardForDashboard(ctx context.Context, arg GetLeaderboardForDashboardParams) (GetLeaderboardForDashboardRow, error) {
+	row := q.db.QueryRow(ctx, getLeaderboardForDashboard, arg.ProjectID, arg.ID)
+	var i GetLeaderboardForDashboardRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.SortOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const leaderboardRangeByRank = `-- name: LeaderboardRangeByRank :many
 WITH ranked AS (
     SELECT player_id,
@@ -157,6 +192,69 @@ func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRa
 	return rank, err
 }
 
+const listLeaderboardsForProject = `-- name: ListLeaderboardsForProject :many
+SELECT id, name, sort_order, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND deleted_at IS NULL
+ORDER BY name
+`
+
+type ListLeaderboardsForProjectRow struct {
+	ID        int64
+	Name      string
+	SortOrder string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listLeaderboardsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaderboardsForProjectRow
+	for rows.Next() {
+		var i ListLeaderboardsForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SortOrder,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const softDeleteLeaderboard = `-- name: SoftDeleteLeaderboard :execrows
+UPDATE leaderboards
+SET deleted_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+  AND deleted_at IS NULL
+`
+
+type SoftDeleteLeaderboardParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+func (q *Queries) SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteLeaderboard, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const submitScore = `-- name: SubmitScore :one
 INSERT INTO leaderboard_entries (
     tenant_id, leaderboard_id, player_id, score, recorded_at
@@ -233,4 +331,34 @@ func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateLeaderboard = `-- name: UpdateLeaderboard :execrows
+UPDATE leaderboards
+SET name = $1,
+    sort_order = $2
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $3
+  AND id = $4
+  AND deleted_at IS NULL
+`
+
+type UpdateLeaderboardParams struct {
+	Name      string
+	SortOrder string
+	ProjectID int64
+	ID        int64
+}
+
+func (q *Queries) UpdateLeaderboard(ctx context.Context, arg UpdateLeaderboardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateLeaderboard,
+		arg.Name,
+		arg.SortOrder,
+		arg.ProjectID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

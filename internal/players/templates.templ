@@ -2,28 +2,56 @@ package players
 
 import "strconv"
 
+import "github.com/ggscale/ggscale/internal/webassets"
+
 func pid(n int64) string { return strconv.FormatInt(n, 10) }
 
+templ playerHead(title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<meta name="color-scheme" content="dark"/>
+		<title>{ title }</title>
+		<link rel="stylesheet" href={ webassets.URL("pico.min.css") }/>
+		<link rel="stylesheet" href={ webassets.URL("app.css") }/>
+	</head>
+}
+
+// playerLayout is the wide content shell for signed-in account pages
+// (account home, friends). Auth forms use playerAuthLayout instead.
 templ playerLayout(title string) {
 	<!doctype html>
-	<html lang="en">
-		<head>
-			<meta charset="utf-8"/>
-			<meta name="viewport" content="width=device-width, initial-scale=1"/>
-			<meta name="color-scheme" content="light dark"/>
-			<title>{ title }</title>
-		</head>
+	<html lang="en" data-theme="dark">
+		@playerHead(title)
 		<body>
-			{ children... }
+			<main class="app-main">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+// playerAuthLayout centers a single card, mirroring the dashboard's
+// authLayout — used for signup / login / verify / invite-accept.
+templ playerAuthLayout(title string) {
+	<!doctype html>
+	<html lang="en" data-theme="dark">
+		@playerHead(title)
+		<body>
+			<main class="auth-shell">
+				<article>
+					{ children... }
+				</article>
+			</main>
 		</body>
 	</html>
 }
 
 templ InviteAcceptPage(vm InviteAcceptView) {
-	@playerLayout("Accept invite") {
+	@playerAuthLayout("Accept invite") {
 		<h1>Accept invite</h1>
 		if vm.Error != "" {
-			<p class="error">{ vm.Error }</p>
+			<p role="alert">{ vm.Error }</p>
 		} else {
 			<p class="subtitle">You've been invited to <strong>{ vm.ProjectName }</strong>.</p>
 			<p>Email: <code>{ vm.Email }</code></p>
@@ -39,7 +67,7 @@ templ InviteAcceptPage(vm InviteAcceptView) {
 					<label>Set a password (≥ 8 chars)
 						<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
 						if msg, ok := vm.FieldErrors["password"]; ok {
-							<small class="error">{ msg }</small>
+							<small class="field-error">{ msg }</small>
 						}
 					</label>
 				}

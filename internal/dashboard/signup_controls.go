@@ -5,7 +5,6 @@ package dashboard
 // tenant-admin gated at the router (requireTenantAccess(roleAdmin)).
 
 import (
-	"context"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -17,17 +16,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
-
-func (h *Handler) getTenantPublicJoining(ctx context.Context, tenantID int64) (bool, error) {
-	var enabled bool
-	ctx = db.WithTenant(ctx, tenantID)
-	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		var qerr error
-		enabled, qerr = sqlcgen.New(tx).GetTenantPublicJoining(ctx)
-		return qerr
-	})
-	return enabled, err
-}
 
 // formBool reads an HTML checkbox: present ("on"/"true"/"1") means enabled.
 func formBool(r *http.Request, field string) bool {
@@ -64,7 +52,8 @@ func (h *Handler) setTenantPublicJoiningHandler(w http.ResponseWriter, r *http.R
 	if !enabled {
 		msg = "Tenant public joining disabled — projects are invite-only."
 	}
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects"+queryFlash+url.QueryEscape(msg))
+	base := safeReturnPath(r.Form.Get("redirect_to"), pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects")
+	htmxRedirect(w, r, base+queryFlash+url.QueryEscape(msg))
 }
 
 func (h *Handler) setProjectPublicJoiningHandler(w http.ResponseWriter, r *http.Request) {
@@ -99,5 +88,6 @@ func (h *Handler) setProjectPublicJoiningHandler(w http.ResponseWriter, r *http.
 	if !enabled {
 		msg = "Project public joining disabled — invite-only."
 	}
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects"+queryFlash+url.QueryEscape(msg))
+	base := safeReturnPath(r.Form.Get("redirect_to"), pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects")
+	htmxRedirect(w, r, base+queryFlash+url.QueryEscape(msg))
 }

@@ -32,10 +32,10 @@ templ FriendsPage(vm FriendsView) {
 		<h1>Friends</h1>
 		<p><a href={ templ.URL("/v1/players/account/") }>← Back to account</a></p>
 		if vm.Flash != "" {
-			<p class="flash">{ vm.Flash }</p>
+			<p class="flash-success">{ vm.Flash }</p>
 		}
 		if vm.FlashError != "" {
-			<p class="error">{ vm.FlashError }</p>
+			<p role="alert">{ vm.FlashError }</p>
 		}
 		<h2>Add a friend</h2>
 		<form method="post" action={ templ.URL("/v1/players/account/friends/request") }>
