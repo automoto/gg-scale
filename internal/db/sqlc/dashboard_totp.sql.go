@@ -198,19 +198,9 @@ func (q *Queries) GetDashboardTrustedDevice(ctx context.Context, arg GetDashboar
 	return id, err
 }
 
-const insertDashboardTOTPBackupCode = `-- name: InsertDashboardTOTPBackupCode :exec
-INSERT INTO dashboard_user_totp_backup_codes (dashboard_user_id, code_hash)
-VALUES ($1, $2)
-`
-
-type InsertDashboardTOTPBackupCodeParams struct {
+type InsertDashboardTOTPBackupCodesParams struct {
 	DashboardUserID int64
 	CodeHash        []byte
-}
-
-func (q *Queries) InsertDashboardTOTPBackupCode(ctx context.Context, arg InsertDashboardTOTPBackupCodeParams) error {
-	_, err := q.db.Exec(ctx, insertDashboardTOTPBackupCode, arg.DashboardUserID, arg.CodeHash)
-	return err
 }
 
 const reserveDashboardTOTPAttempt = `-- name: ReserveDashboardTOTPAttempt :one

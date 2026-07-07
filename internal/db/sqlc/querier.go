@@ -286,9 +286,11 @@ type Querier interface {
 	// Append an event for the watch stream. The trim trigger keeps history
 	// bounded per allocation_id; callers can fire-and-forget.
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
-	InsertDashboardTOTPBackupCode(ctx context.Context, arg InsertDashboardTOTPBackupCodeParams) error
+	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
+	InsertDashboardTOTPBackupCodes(ctx context.Context, arg []InsertDashboardTOTPBackupCodesParams) (int64, error)
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
-	InsertPlayerAccountTOTPBackupCode(ctx context.Context, arg InsertPlayerAccountTOTPBackupCodeParams) error
+	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
+	InsertPlayerAccountTOTPBackupCodes(ctx context.Context, arg []InsertPlayerAccountTOTPBackupCodesParams) (int64, error)
 	// ON CONFLICT DO NOTHING makes first-boot generation race-safe: concurrent
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)

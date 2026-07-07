@@ -2,10 +2,7 @@ package dashboard
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,6 +18,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/signedcookie"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -112,28 +110,12 @@ func (h *Handler) verifyCookieKey() []byte {
 
 func encodeVerifyCookie(p verifyPendingPayload, key []byte) string {
 	payload := fmt.Sprintf("%d:%d:%s", p.UserID, p.ExpiresAt, p.Email)
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(payload))
-	sig := mac.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(sig)
+	return signedcookie.Sign(key, []byte(payload))
 }
 
 func decodeVerifyCookie(raw string, key []byte) (verifyPendingPayload, bool) {
-	encPayload, encSig, ok := strings.Cut(raw, ".")
+	payload, ok := signedcookie.Open(key, raw)
 	if !ok {
-		return verifyPendingPayload{}, false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(encPayload)
-	if err != nil {
-		return verifyPendingPayload{}, false
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(encSig)
-	if err != nil {
-		return verifyPendingPayload{}, false
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(payload)
-	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return verifyPendingPayload{}, false
 	}
 	// payload layout: userID:expiresAtUnix:email

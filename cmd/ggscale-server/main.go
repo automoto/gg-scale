@@ -308,6 +308,7 @@ func run() error {
 		DashboardBootstrap:  dashboardBootstrap,
 		DashboardPluginInfo: pluginInfo,
 		CORSAllowedOrigins:  cfg.CORSAllowedOrigins,
+		MetricsAuthToken:    cfg.MetricsAuthToken,
 	})
 
 	srv := &http.Server{

@@ -5,10 +5,13 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -105,6 +108,10 @@ type Deps struct {
 	// from. Empty in dev falls back to "*"; config.Validate refuses an
 	// empty list in production.
 	CORSAllowedOrigins []string
+
+	// MetricsAuthToken, when non-empty, gates /metrics behind a bearer token.
+	// Empty leaves /metrics open (dev / explicitly-unauthenticated deployments).
+	MetricsAuthToken string
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -127,6 +134,40 @@ func panicRecover() func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// requireMetricsToken gates a handler behind a static bearer token. This is a
+// shared-secret guard for Prometheus scraping — deliberately separate from the
+// DB-backed tenant API keys (internal/tenant), since a scraper is not a tenant.
+//
+// Both sides are SHA-256'd before the constant-time compare so the comparison
+// always runs over equal-length (32-byte) digests: subtle.ConstantTimeCompare
+// short-circuits on a length mismatch, which would otherwise leak the token
+// length via timing. Same idiom as tenant key hashing.
+func requireMetricsToken(token string, next http.Handler) http.Handler {
+	want := sha256.Sum256([]byte(token))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		presented, ok := bearerCredential(r.Header.Get("Authorization"))
+		got := sha256.Sum256([]byte(presented))
+		if !ok || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bearerCredential extracts the token from an "Authorization: Bearer <token>"
+// header. The scheme match is case-insensitive (RFC 7235) and the token is
+// whitespace-trimmed — matching the tenant middleware's parser and Prometheus,
+// which trims the credentials_file it sends.
+func bearerCredential(header string) (string, bool) {
+	const prefix = "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(header[len(prefix):]), true
 }
 
 // NewRouter builds the ggscale-server HTTP handler.
@@ -153,7 +194,11 @@ func NewRouter(d Deps) http.Handler {
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
-	r.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
+	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
+	if d.MetricsAuthToken != "" {
+		metricsHandler = requireMetricsToken(d.MetricsAuthToken, metricsHandler)
+	}
+	r.Handle("/metrics", metricsHandler)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.NewRequestID())

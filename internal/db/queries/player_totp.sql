@@ -59,9 +59,10 @@ WHERE player_account_id = sqlc.arg(player_account_id)
 DELETE FROM player_account_totp_backup_codes
 WHERE player_account_id = sqlc.arg(player_account_id);
 
--- name: InsertPlayerAccountTOTPBackupCode :exec
+-- name: InsertPlayerAccountTOTPBackupCodes :copyfrom
+-- Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
 INSERT INTO player_account_totp_backup_codes (player_account_id, code_hash)
-VALUES (sqlc.arg(player_account_id), sqlc.arg(code_hash));
+VALUES ($1, $2);
 
 -- name: ConsumePlayerAccountTOTPBackupCode :one
 UPDATE player_account_totp_backup_codes

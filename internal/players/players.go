@@ -7,16 +7,11 @@
 package players
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +22,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/signedcookie"
 	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -201,28 +197,12 @@ func encodeVerifyCookie(p verifyCookiePayload, key []byte) string {
 	if err != nil {
 		return ""
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(payload)
-	sig := mac.Sum(nil)
-	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(sig)
+	return signedcookie.Sign(key, payload)
 }
 
 func decodeVerifyCookie(raw string, key []byte) (verifyCookiePayload, bool) {
-	encPayload, encSig, ok := strings.Cut(raw, ".")
+	payload, ok := signedcookie.Open(key, raw)
 	if !ok {
-		return verifyCookiePayload{}, false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(encPayload)
-	if err != nil {
-		return verifyCookiePayload{}, false
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(encSig)
-	if err != nil {
-		return verifyCookiePayload{}, false
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(payload)
-	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return verifyCookiePayload{}, false
 	}
 	var out verifyCookiePayload

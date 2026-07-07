@@ -177,19 +177,9 @@ func (q *Queries) GetPlayerAccountTrustedDevice(ctx context.Context, arg GetPlay
 	return id, err
 }
 
-const insertPlayerAccountTOTPBackupCode = `-- name: InsertPlayerAccountTOTPBackupCode :exec
-INSERT INTO player_account_totp_backup_codes (player_account_id, code_hash)
-VALUES ($1, $2)
-`
-
-type InsertPlayerAccountTOTPBackupCodeParams struct {
+type InsertPlayerAccountTOTPBackupCodesParams struct {
 	PlayerAccountID pgtype.UUID
 	CodeHash        []byte
-}
-
-func (q *Queries) InsertPlayerAccountTOTPBackupCode(ctx context.Context, arg InsertPlayerAccountTOTPBackupCodeParams) error {
-	_, err := q.db.Exec(ctx, insertPlayerAccountTOTPBackupCode, arg.PlayerAccountID, arg.CodeHash)
-	return err
 }
 
 const reservePlayerAccountTOTPAttempt = `-- name: ReservePlayerAccountTOTPAttempt :one

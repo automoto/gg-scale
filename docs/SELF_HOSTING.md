@@ -136,6 +136,10 @@ For titles with a large player base, put a scrubbing service in front at the net
 
 `FLEET_SECRET` authenticates the game server container to ggscale's internal fleet API (Phase 2). Players authenticate via the session token from the allocation response — `FLEET_SECRET` never touches that flow. Treat it like a service account password and don't share it with players.
 
+### Protect the `/metrics` endpoint
+
+Prometheus `/metrics` is served on the **same port as the API**, so exposing the API also exposes `/metrics` unless you gate it — it leaks internal traffic shape and is a scrape-amplification target. Set `METRICS_AUTH_TOKEN` (or `METRICS_AUTH_TOKEN_FILE`) to a random value (`openssl rand -hex 32`); your Prometheus then scrapes with `Authorization: Bearer <token>` and everyone else gets `401`. With `ENV=production` the server refuses to start unless a token is set, or you knowingly opt out with `METRICS_AUTH_DISABLED=true`. See `docs/DEPLOYMENT.md` §6.
+
 ---
 
 ## Migration path

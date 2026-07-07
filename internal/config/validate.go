@@ -33,6 +33,10 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("RELAY_SHARED_SECRET must be >= 32 bytes when set (got %d)", len(c.RelaySharedSecret))
 	}
 
+	if c.MetricsAuthToken != "" && len(c.MetricsAuthToken) < 32 {
+		return fmt.Errorf("METRICS_AUTH_TOKEN must be >= 32 bytes when set (got %d)", len(c.MetricsAuthToken))
+	}
+
 	// Feature kill switches default off. Configuring a feature while its switch
 	// is off is a contradiction we refuse to boot with, rather than silently
 	// leaving the feature dark.
@@ -79,6 +83,9 @@ func (c *Config) Validate() error {
 		}
 		if c.JWTSigningKey == "" {
 			return fmt.Errorf("JWT_SIGNING_KEY must be set in production")
+		}
+		if !c.MetricsAuthDisabled && c.MetricsAuthToken == "" {
+			return fmt.Errorf("METRICS_AUTH_TOKEN (or _FILE) must be set in production; set METRICS_AUTH_DISABLED=true to explicitly serve /metrics unauthenticated")
 		}
 		if c.FleetBackend == "docker" && !c.DockerRequireDigest {
 			return fmt.Errorf("DOCKER_REQUIRE_DIGEST must be true in production when FLEET_BACKEND=docker")

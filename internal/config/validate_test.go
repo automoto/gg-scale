@@ -23,6 +23,7 @@ func baseProd() *config.Config {
 		DashboardCookieSecure:       true,
 		DashboardBaseURL:            "https://dashboard.example.com",
 		JWTSigningKey:               "1234567890abcdef1234567890abcdef",
+		MetricsAuthToken:            "1234567890abcdef1234567890abcdef",
 		FleetBackend:                "agones",
 		FeatureFleetEnabled:         true,
 	}
@@ -79,6 +80,27 @@ func TestValidateRequiresBootstrapTokenFileInProd(t *testing.T) {
 	c.DashboardBootstrapTokenFile = ""
 	err := c.Validate()
 	assert.ErrorContains(t, err, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
+}
+
+func TestValidateRequiresMetricsTokenInProd(t *testing.T) {
+	c := baseProd()
+	c.MetricsAuthToken = ""
+	err := c.Validate()
+	assert.ErrorContains(t, err, "METRICS_AUTH_TOKEN")
+}
+
+func TestValidateAcceptsDisabledMetricsAuthInProd(t *testing.T) {
+	c := baseProd()
+	c.MetricsAuthToken = ""
+	c.MetricsAuthDisabled = true
+	require.NoError(t, c.Validate())
+}
+
+func TestValidateRejectsShortMetricsToken(t *testing.T) {
+	c := baseProd()
+	c.MetricsAuthToken = "short"
+	err := c.Validate()
+	assert.ErrorContains(t, err, "METRICS_AUTH_TOKEN must be >= 32 bytes")
 }
 
 func TestValidateRequiresDigestPinForDockerProd(t *testing.T) {

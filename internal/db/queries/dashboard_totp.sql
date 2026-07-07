@@ -67,9 +67,10 @@ WHERE dashboard_user_id = sqlc.arg(dashboard_user_id)
 DELETE FROM dashboard_user_totp_backup_codes
 WHERE dashboard_user_id = sqlc.arg(dashboard_user_id);
 
--- name: InsertDashboardTOTPBackupCode :exec
+-- name: InsertDashboardTOTPBackupCodes :copyfrom
+-- Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
 INSERT INTO dashboard_user_totp_backup_codes (dashboard_user_id, code_hash)
-VALUES (sqlc.arg(dashboard_user_id), sqlc.arg(code_hash));
+VALUES ($1, $2);
 
 -- name: ConsumeDashboardTOTPBackupCode :one
 -- Single-use enforced by the used_at IS NULL guard in the same statement

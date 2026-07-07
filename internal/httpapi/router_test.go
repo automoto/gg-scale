@@ -106,3 +106,54 @@ func TestRouter_metrics_endpoint_returns_200(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
+
+const testMetricsToken = "0123456789abcdef0123456789abcdef"
+
+func newServerWithMetricsToken(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
+		Version:          "v1",
+		Commit:           "test",
+		MetricsAuthToken: testMetricsToken,
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func getMetrics(t *testing.T, url, authHeader string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url+"/metrics", nil)
+	require.NoError(t, err)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestRouter_metrics_gated_rejects_missing_token(t *testing.T) {
+	srv := newServerWithMetricsToken(t)
+	assert.Equal(t, http.StatusUnauthorized, getMetrics(t, srv.URL, ""))
+}
+
+func TestRouter_metrics_gated_rejects_wrong_token(t *testing.T) {
+	srv := newServerWithMetricsToken(t)
+	assert.Equal(t, http.StatusUnauthorized, getMetrics(t, srv.URL, "Bearer wrong-token"))
+}
+
+func TestRouter_metrics_gated_accepts_valid_token(t *testing.T) {
+	srv := newServerWithMetricsToken(t)
+	assert.Equal(t, http.StatusOK, getMetrics(t, srv.URL, "Bearer "+testMetricsToken))
+}
+
+func TestRouter_metrics_gated_accepts_case_insensitive_scheme(t *testing.T) {
+	srv := newServerWithMetricsToken(t)
+	assert.Equal(t, http.StatusOK, getMetrics(t, srv.URL, "bearer "+testMetricsToken))
+}
+
+func TestRouter_metrics_gated_tolerates_surrounding_whitespace(t *testing.T) {
+	srv := newServerWithMetricsToken(t)
+	assert.Equal(t, http.StatusOK, getMetrics(t, srv.URL, "Bearer  "+testMetricsToken+" "))
+}

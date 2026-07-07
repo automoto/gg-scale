@@ -16,6 +16,15 @@ import (
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
 	HTTPAddr string
+
+	// MetricsAuthToken, when set, gates the /metrics endpoint behind a bearer
+	// token (Authorization: Bearer <token>); empty leaves /metrics open.
+	// Supports the _FILE convention. config.Validate requires it in production
+	// unless MetricsAuthDisabled is set.
+	MetricsAuthToken string
+	// MetricsAuthDisabled explicitly serves /metrics unauthenticated in
+	// production; without it, an empty MetricsAuthToken refuses to boot.
+	MetricsAuthDisabled bool
 	// GameServerPublicIP is the public IP or hostname returned to game clients
 	// so they can connect directly to a game server container. Required when
 	// FLEET_BACKEND=docker. Empty is fine for local dev.
@@ -226,6 +235,15 @@ type varDecl struct {
 var declared = []varDecl{
 	{name: "DATABASE_URL", required: true, fileFallback: true, set: func(c *Config, v string) error { c.DatabaseURL = v; return nil }},
 	{name: "HTTP_ADDR", defval: ":8080", set: func(c *Config, v string) error { c.HTTPAddr = v; return nil }},
+	{name: "METRICS_AUTH_TOKEN", fileFallback: true, set: func(c *Config, v string) error { c.MetricsAuthToken = strings.TrimSpace(v); return nil }},
+	{name: "METRICS_AUTH_DISABLED", defval: "false", set: func(c *Config, v string) error {
+		disabled, err := strconv.ParseBool(v)
+		if err != nil {
+			return fmt.Errorf("METRICS_AUTH_DISABLED %q: %w", v, err)
+		}
+		c.MetricsAuthDisabled = disabled
+		return nil
+	}},
 	{name: "GAME_SERVER_PUBLIC_IP", defval: "", set: func(c *Config, v string) error {
 		c.GameServerPublicIP = v
 		return nil

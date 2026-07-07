@@ -10,7 +10,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hkdf"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -27,6 +26,8 @@ import (
 
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
+
+	"github.com/ggscale/ggscale/internal/signedcookie"
 )
 
 const (
@@ -315,29 +316,14 @@ func encodePendingRaw(key []byte, p Pending) string {
 	if err != nil {
 		return ""
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(payload)
-	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return signedcookie.Sign(key, payload)
 }
 
 // DecodePending verifies the signature, purpose tag, and server-side expiry.
 // The cookie's own MaxAge is client-controlled and not trusted.
 func DecodePending(key []byte, raw string, now time.Time) (Pending, bool) {
-	encPayload, encSig, ok := strings.Cut(raw, ".")
+	payload, ok := signedcookie.Open(key, raw)
 	if !ok {
-		return Pending{}, false
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(encPayload)
-	if err != nil {
-		return Pending{}, false
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(encSig)
-	if err != nil {
-		return Pending{}, false
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(payload)
-	if subtle.ConstantTimeCompare(mac.Sum(nil), sig) != 1 {
 		return Pending{}, false
 	}
 	var p Pending

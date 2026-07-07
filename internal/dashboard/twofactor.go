@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -39,13 +38,13 @@ const (
 	msgTwoFactorBroken = "Two-factor authentication is temporarily unavailable. Contact your operator."
 )
 
+// These alias the shared twofactor verify sentinels so the challenge and
+// account-page error mapping stays unchanged while the security-sensitive
+// verify logic itself lives once in the twofactor package.
 var (
-	errTwoFactorBadCode = errors.New("dashboard: bad two-factor code")
-	errTwoFactorLocked  = errors.New("dashboard: two-factor attempts exhausted")
-	// errTwoFactorUnavailable marks a credential this server cannot verify
-	// (secret undecryptable). Distinct from a bad code so users aren't told
-	// to retry codes that can never validate.
-	errTwoFactorUnavailable = errors.New("dashboard: two-factor unavailable")
+	errTwoFactorBadCode     = twofactor.ErrBadCode
+	errTwoFactorLocked      = twofactor.ErrLocked
+	errTwoFactorUnavailable = twofactor.ErrUnavailable
 )
 
 // finishLogin is the single post-password gate. Both the login POST and the
@@ -233,84 +232,61 @@ func (h *Handler) resetTOTPAttempts(ctx context.Context, userID int64) error {
 	})
 }
 
-// verifyTwoFactorCode validates a TOTP or backup code against a confirmed
-// credential under the shared attempt cap. Returns the method used
-// ("totp" | "backup_code").
+// verifyTwoFactorCode validates a TOTP or backup code against the confirmed
+// credential under the shared attempt cap, returning the method used
+// ("totp" | "backup_code"). The security-sensitive flow (lockout, replay,
+// attempt accounting) lives in twofactor.Verify; this binds it to the
+// dashboard user's persistence.
 func (h *Handler) verifyTwoFactorCode(ctx context.Context, userID int64, code string, allowBackup bool) (string, error) {
-	if h.twoFactor == nil {
-		return "", errTwoFactorBadCode
-	}
-	row, found, err := h.getTOTP(ctx, userID)
-	if err != nil {
-		return "", err
-	}
-	if !found || !row.ConfirmedAt.Valid {
-		return "", errTwoFactorBadCode
-	}
-	now := h.now()
-	if row.LockedUntil.Valid {
-		if now.Before(row.LockedUntil.Time) {
-			return "", errTwoFactorLocked
-		}
-		// Lockout has lapsed: clear it so the attempt budget starts fresh.
-		if err := h.resetTOTPAttempts(ctx, userID); err != nil {
-			return "", err
-		}
-	}
-	if err := h.reserveTOTPAttempt(ctx, userID); err != nil {
-		return "", err
-	}
-	if twofactor.IsTOTPCode(code) {
-		return h.verifyTOTPCode(ctx, userID, row, code, now)
-	}
-	if !allowBackup {
-		return "", errTwoFactorBadCode
-	}
-	return h.consumeBackupCode(ctx, userID, code)
+	return twofactor.Verify(ctx, h.twoFactor, dashboardTOTPStore{h: h, userID: userID}, code, h.now(), allowBackup)
 }
 
-func (h *Handler) verifyTOTPCode(ctx context.Context, userID int64, row sqlcgen.GetDashboardTOTPRow, code string, now time.Time) (string, error) {
-	secret, err := h.twoFactor.Decrypt(row.SecretEnc)
-	if err != nil {
-		slog.ErrorContext(ctx, "two-factor secret decrypt; key material changed?", "err", err, "dashboard_user_id", userID)
-		return "", errTwoFactorUnavailable
+// dashboardTOTPStore adapts one dashboard user's TOTP persistence to
+// twofactor.Store.
+type dashboardTOTPStore struct {
+	h      *Handler
+	userID int64
+}
+
+func (s dashboardTOTPStore) Credential(ctx context.Context) (twofactor.Credential, bool, error) {
+	row, found, err := s.h.getTOTP(ctx, s.userID)
+	if err != nil || !found {
+		return twofactor.Credential{}, found, err
 	}
-	step, ok := twofactor.ValidateCode(string(secret), code, now)
-	if !ok {
-		return "", errTwoFactorBadCode
-	}
+	return twofactor.Credential{
+		SecretEnc:   row.SecretEnc,
+		Confirmed:   row.ConfirmedAt.Valid,
+		Locked:      row.LockedUntil.Valid,
+		LockedUntil: row.LockedUntil.Time,
+	}, true, nil
+}
+
+func (s dashboardTOTPStore) ReserveAttempt(ctx context.Context) error {
+	return s.h.reserveTOTPAttempt(ctx, s.userID)
+}
+
+func (s dashboardTOTPStore) ResetAttempts(ctx context.Context) error {
+	return s.h.resetTOTPAttempts(ctx, s.userID)
+}
+
+func (s dashboardTOTPStore) SetLastUsedStep(ctx context.Context, step int64) (int64, error) {
 	var rows int64
-	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	err := s.h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var qerr error
 		rows, qerr = sqlcgen.New(tx).SetDashboardTOTPLastUsedStep(ctx, sqlcgen.SetDashboardTOTPLastUsedStepParams{
-			DashboardUserID: userID,
+			DashboardUserID: s.userID,
 			LastUsedStep:    step,
 		})
 		return qerr
-	}); err != nil {
-		return "", err
-	}
-	if rows == 0 {
-		// The code was valid but its timestep is already consumed (a replay of
-		// an accepted code). Since it validated, release the reserved attempt
-		// so retries don't drive the account into lockout, then reject reuse.
-		if err := h.resetTOTPAttempts(ctx, userID); err != nil {
-			return "", err
-		}
-		return "", errTwoFactorBadCode
-	}
-	if err := h.resetTOTPAttempts(ctx, userID); err != nil {
-		return "", err
-	}
-	return "totp", nil
+	})
+	return rows, err
 }
 
-func (h *Handler) consumeBackupCode(ctx context.Context, userID int64, code string) (string, error) {
-	hash := twofactor.HashBackupCode(code)
+func (s dashboardTOTPStore) ConsumeBackupCode(ctx context.Context, hash []byte) (bool, error) {
 	consumed := false
-	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	err := s.h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		_, qerr := sqlcgen.New(tx).ConsumeDashboardTOTPBackupCode(ctx, sqlcgen.ConsumeDashboardTOTPBackupCodeParams{
-			DashboardUserID: userID,
+			DashboardUserID: s.userID,
 			CodeHash:        hash,
 		})
 		if errors.Is(qerr, pgx.ErrNoRows) {
@@ -318,16 +294,8 @@ func (h *Handler) consumeBackupCode(ctx context.Context, userID int64, code stri
 		}
 		consumed = qerr == nil
 		return qerr
-	}); err != nil {
-		return "", err
-	}
-	if !consumed {
-		return "", errTwoFactorBadCode
-	}
-	if err := h.resetTOTPAttempts(ctx, userID); err != nil {
-		return "", err
-	}
-	return "backup_code", nil
+	})
+	return consumed, err
 }
 
 func (h *Handler) twoFactorChallengePage(w http.ResponseWriter, r *http.Request) {
@@ -573,15 +541,15 @@ func (h *Handler) replaceBackupCodes(ctx context.Context, q *sqlcgen.Queries, us
 	if err := q.DeleteDashboardTOTPBackupCodes(ctx, userID); err != nil {
 		return err
 	}
-	for _, code := range codes {
-		if err := q.InsertDashboardTOTPBackupCode(ctx, sqlcgen.InsertDashboardTOTPBackupCodeParams{
+	rows := make([]sqlcgen.InsertDashboardTOTPBackupCodesParams, len(codes))
+	for i, code := range codes {
+		rows[i] = sqlcgen.InsertDashboardTOTPBackupCodesParams{
 			DashboardUserID: userID,
 			CodeHash:        twofactor.HashBackupCode(code),
-		}); err != nil {
-			return err
 		}
 	}
-	return nil
+	_, err := q.InsertDashboardTOTPBackupCodes(ctx, rows)
+	return err
 }
 
 // checkAccountPassword verifies the acting user's current password for the
