@@ -5,34 +5,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
-
-func mountStorageRoutes(r chi.Router, d Deps) {
-	r.Route("/storage", func(r chi.Router) {
-		r.Get("/objects", storageListHandler(d))
-		r.Put("/objects/{key}", storagePutHandler(d))
-		r.Get("/objects/{key}", storageGetHandler(d))
-		r.Delete("/objects/{key}", storageDeleteHandler(d))
-	})
-}
-
-func mountLeaderboardRoutes(r chi.Router, d Deps) {
-	r.Route("/leaderboards", func(r chi.Router) {
-		// Score submission is server-authoritative: only callers with a
-		// secret key (game server / tenant backend) may submit scores.
-		// The player session in X-Session-Token still identifies the
-		// subject — the secret key authorises the proxying caller.
-		r.Group(func(r chi.Router) {
-			r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
-			r.Post("/{id}/scores", leaderboardSubmitHandler(d))
-		})
-		r.Get("/{id}/top", leaderboardTopHandler(d))
-		r.Get("/{id}/around-me", leaderboardAroundMeHandler(d))
-	})
-}
 
 func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

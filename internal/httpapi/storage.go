@@ -1,20 +1,19 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const storageListMaxLimit = 100
@@ -26,56 +25,106 @@ type storageObjectResponse struct {
 	UpdatedAt string          `json:"updated_at"`
 }
 
-// PUT /v1/storage/objects/{key}
-func storagePutHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := chi.URLParam(r, "key")
-		if key == "" {
-			http.Error(w, "key required", http.StatusBadRequest)
-			return
-		}
+type storageObjectOutput struct {
+	Body storageObjectResponse
+}
 
-		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-		if err != nil {
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, "unreadable body", http.StatusBadRequest)
-			return
+type storagePutInput struct {
+	Key     string `path:"key"`
+	IfMatch string `header:"If-Match"`
+	RawBody []byte
+}
+
+type storageKeyInput struct {
+	Key string `path:"key"`
+}
+
+type storageListInput struct {
+	KeyPrefix string `query:"key_prefix"`
+	Limit     string `query:"limit"`
+	Cursor    string `query:"cursor"`
+}
+
+type storageListResult struct {
+	Items      []storageObjectResponse `json:"items"`
+	NextCursor string                  `json:"next_cursor"`
+}
+
+type storageListOutput struct {
+	Body storageListResult
+}
+
+func registerStorageRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "listStorageObjects",
+		Method:      http.MethodGet,
+		Path:        "/v1/storage/objects",
+		Summary:     "List the caller's storage objects",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, storageList(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "putStorageObject",
+		Method:      http.MethodPut,
+		Path:        "/v1/storage/objects/{key}",
+		Summary:     "Create or replace a storage object",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, storagePut(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "getStorageObject",
+		Method:      http.MethodGet,
+		Path:        "/v1/storage/objects/{key}",
+		Summary:     "Get a storage object",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, storageGet(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "deleteStorageObject",
+		Method:        http.MethodDelete,
+		Path:          "/v1/storage/objects/{key}",
+		Summary:       "Delete a storage object",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, storageDelete(d))
+}
+
+func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectOutput, error) {
+	return func(ctx context.Context, in *storagePutInput) (*storageObjectOutput, error) {
+		if in.Key == "" {
+			return nil, huma.Error400BadRequest("key required")
 		}
+		raw := in.RawBody
 		if !json.Valid(raw) {
-			http.Error(w, "value must be valid JSON", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("value must be valid JSON")
 		}
 
-		ctx := r.Context()
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "no project", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("no project")
 		}
 		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		ifMatch := r.Header.Get("If-Match")
 		var (
 			version   int64
 			updatedAt time.Time
 		)
-		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if ifMatch != "" {
-				expected, perr := strconv.ParseInt(ifMatch, 10, 64)
+			if in.IfMatch != "" {
+				expected, perr := strconv.ParseInt(in.IfMatch, 10, 64)
 				if perr != nil {
 					return errIfMatchInvalid
 				}
 				row, qerr := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
-					ProjectID: projectID, OwnerUserID: ownerID, Key: key,
+					ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
 					Version: expected, Value: raw,
 				})
 				if qerr != nil {
@@ -86,7 +135,7 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 				return nil
 			}
 			row, qerr := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: key, Value: raw,
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: raw,
 			})
 			if qerr != nil {
 				return qerr
@@ -96,121 +145,100 @@ func storagePutHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if errors.Is(err, errIfMatchInvalid) {
-			http.Error(w, "If-Match must be an integer version", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("If-Match must be an integer version")
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "version mismatch", http.StatusPreconditionFailed)
-			return
+			return nil, huma.Error412PreconditionFailed("version mismatch")
 		}
 		if err != nil {
-			webutil.InternalError(w, "storage put: tx", err)
-			return
+			return nil, serverError(ctx, "storage put: tx", err)
 		}
 
-		writeJSON(w, storageObjectResponse{
-			Key: key, Value: raw, Version: version,
+		return &storageObjectOutput{Body: storageObjectResponse{
+			Key: in.Key, Value: raw, Version: version,
 			UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
-		})
+		}}, nil
 	}
 }
 
-// GET /v1/storage/objects/{key}
-func storageGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := chi.URLParam(r, "key")
-		ctx := r.Context()
+func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectOutput, error) {
+	return func(ctx context.Context, in *storageKeyInput) (*storageObjectOutput, error) {
 		projectID, projectOK := db.ProjectFromContext(ctx)
 		if !projectOK {
-			http.Error(w, "project pin required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("project pin required")
 		}
 		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		var resp storageObjectResponse
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			row, qerr := sqlcgen.New(tx).GetStorageObject(ctx, sqlcgen.GetStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: key,
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
 			})
 			if qerr != nil {
 				return qerr
 			}
 			resp = storageObjectResponse{
-				Key: key, Value: row.Value, Version: row.Version,
+				Key: in.Key, Value: row.Value, Version: row.Version,
 				UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 			}
 			return nil
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
 		if err != nil {
-			webutil.InternalError(w, "storage get: tx", err)
-			return
+			return nil, serverError(ctx, "storage get: tx", err)
 		}
-		writeJSON(w, resp)
+		return &storageObjectOutput{Body: resp}, nil
 	}
 }
 
-// DELETE /v1/storage/objects/{key}
-func storageDeleteHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		key := chi.URLParam(r, "key")
-		ctx := r.Context()
+func storageDelete(d Deps) func(context.Context, *storageKeyInput) (*struct{}, error) {
+	return func(ctx context.Context, in *storageKeyInput) (*struct{}, error) {
 		projectID, projectOK := db.ProjectFromContext(ctx)
 		if !projectOK {
-			http.Error(w, "project pin required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("project pin required")
 		}
 		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			return sqlcgen.New(tx).SoftDeleteStorageObject(ctx, sqlcgen.SoftDeleteStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: key,
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
 			})
 		})
 		if err != nil {
-			webutil.InternalError(w, "storage delete: tx", err)
-			return
+			return nil, serverError(ctx, "storage delete: tx", err)
 		}
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }
 
-// GET /v1/storage/objects (cursor pagination).
-func storageListHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func storageList(d Deps) func(context.Context, *storageListInput) (*storageListOutput, error) {
+	return func(ctx context.Context, in *storageListInput) (*storageListOutput, error) {
 		projectID, projectOK := db.ProjectFromContext(ctx)
 		if !projectOK {
-			http.Error(w, "project pin required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("project pin required")
 		}
 		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		prefix := r.URL.Query().Get("key_prefix")
-		limit := parseLimit(r.URL.Query().Get("limit"), 50, storageListMaxLimit)
-		cursor := parseCursor(r.URL.Query().Get("cursor"))
+		limit := parseLimit(in.Limit, 50, storageListMaxLimit)
+		cursor := parseCursor(in.Cursor)
 
 		var items []storageObjectResponse
 		var lastID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			rows, qerr := sqlcgen.New(tx).ListStorageObjects(ctx, sqlcgen.ListStorageObjectsParams{
 				ProjectID: projectID, OwnerUserID: ownerID,
-				Column3: prefix, ID: cursor, Limit: limit,
+				Column3: in.KeyPrefix, ID: cursor, Limit: limit,
 			})
 			if qerr != nil {
 				return qerr
@@ -225,17 +253,13 @@ func storageListHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			webutil.InternalError(w, "storage list: tx", err)
-			return
+			return nil, serverError(ctx, "storage list: tx", err)
 		}
 		var next string
 		if len(items) == int(limit) {
 			next = strconv.FormatInt(lastID, 10)
 		}
-		writeJSON(w, map[string]any{
-			"items":       items,
-			"next_cursor": next,
-		})
+		return &storageListOutput{Body: storageListResult{Items: items, NextCursor: next}}, nil
 	}
 }
 

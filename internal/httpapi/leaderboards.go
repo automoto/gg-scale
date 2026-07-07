@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 // leaderboardTopTTL bounds how stale a memoised top-N reply may be. Short
@@ -30,7 +30,9 @@ const leaderboardTopTTL = 10 * time.Second
 const leaderboardTopCachedLimit int32 = 10
 
 type submitScoreRequest struct {
-	Score int64 `json:"score"`
+	// Optional so an omitted score defaults to 0 (matches the pre-migration
+	// wire); a present score of any int64 is accepted.
+	Score int64 `json:"score,omitempty"`
 }
 
 type leaderboardEntry struct {
@@ -39,127 +41,161 @@ type leaderboardEntry struct {
 	Rank     int64 `json:"rank"`
 }
 
+type leaderboardSubmitInput struct {
+	ID   int64 `path:"id" minimum:"1"`
+	Body submitScoreRequest
+}
+
+type leaderboardTopInput struct {
+	ID    int64  `path:"id" minimum:"1"`
+	Limit string `query:"limit"`
+}
+
+type leaderboardTopResult struct {
+	Entries []leaderboardEntry `json:"entries"`
+}
+
+type leaderboardTopOutput struct {
+	Body leaderboardTopResult
+}
+
+type leaderboardAroundMeInput struct {
+	ID     int64  `path:"id" minimum:"1"`
+	Radius string `query:"radius"`
+}
+
+type leaderboardAroundMeResult struct {
+	Entries  []leaderboardEntry `json:"entries"`
+	SelfRank int64              `json:"self_rank"`
+}
+
+type leaderboardAroundMeOutput struct {
+	Body leaderboardAroundMeResult
+}
+
 func leaderboardTopCacheKey(tenantID, leaderboardID int64, limit int32) string {
 	return fmt.Sprintf("leaderboard:top:%d:%d:%d", tenantID, leaderboardID, limit)
 }
 
-// POST /v1/leaderboards/{id}/scores
-func leaderboardSubmitHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		leaderboardID, ok := pathInt64(r, "id")
-		if !ok {
-			http.Error(w, "leaderboard id required", http.StatusBadRequest)
-			return
-		}
-		var req submitScoreRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
+// registerLeaderboardReadRoutes registers the player-readable top/around-me
+// operations. Submit is registered separately (secret-key gated) via
+// registerLeaderboardSubmit.
+func registerLeaderboardReadRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "leaderboardTop",
+		Method:      http.MethodGet,
+		Path:        "/v1/leaderboards/{id}/top",
+		Summary:     "Top scores for a leaderboard",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, leaderboardTop(d))
 
-		ctx := r.Context()
+	huma.Register(api, huma.Operation{
+		OperationID: "leaderboardAroundMe",
+		Method:      http.MethodGet,
+		Path:        "/v1/leaderboards/{id}/around-me",
+		Summary:     "Scores around the caller's rank",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, leaderboardAroundMe(d))
+}
+
+// registerLeaderboardSubmit registers score submission. Score writes are
+// server-authoritative: the caller must hold a secret key (enforced by the
+// requireAPIKeyPermission middleware the adapter is bound behind).
+func registerLeaderboardSubmit(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID:   "submitScore",
+		Method:        http.MethodPost,
+		Path:          "/v1/leaderboards/{id}/scores",
+		Summary:       "Submit a score to a leaderboard",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusCreated,
+	}, leaderboardSubmit(d))
+}
+
+func leaderboardSubmit(d Deps) func(context.Context, *leaderboardSubmitInput) (*struct{}, error) {
+	return func(ctx context.Context, in *leaderboardSubmitInput) (*struct{}, error) {
 		tenantID, _ := db.TenantFromContext(ctx)
 		userID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if _, err := q.GetLeaderboard(ctx, leaderboardID); err != nil {
+			if _, err := q.GetLeaderboard(ctx, in.ID); err != nil {
 				return err
 			}
 			_, err := q.SubmitScore(ctx, sqlcgen.SubmitScoreParams{
-				LeaderboardID: leaderboardID, PlayerID: userID, Score: req.Score,
+				LeaderboardID: in.ID, PlayerID: userID, Score: in.Body.Score,
 			})
 			return err
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "leaderboard not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("leaderboard not found")
 		}
 		if err != nil {
-			webutil.InternalError(w, "leaderboard submit: tx", err)
-			return
+			return nil, serverError(ctx, "leaderboard submit: tx", err)
 		}
 
 		// Invalidate the memoised top-N so the next reader pays the
 		// fresh-query cost rather than serving a stale snapshot.
 		// Best-effort: on Delete failure the TTL still bounds staleness.
 		if d.Cache != nil {
-			_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, leaderboardID, leaderboardTopCachedLimit))
+			_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, in.ID, leaderboardTopCachedLimit))
 		}
 
-		w.WriteHeader(http.StatusCreated)
+		return nil, nil
 	}
 }
 
-// GET /v1/leaderboards/{id}/top?limit=N
-func leaderboardTopHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		leaderboardID, ok := pathInt64(r, "id")
-		if !ok {
-			http.Error(w, "leaderboard id required", http.StatusBadRequest)
-			return
-		}
-		limit := parseLimit(r.URL.Query().Get("limit"), leaderboardTopCachedLimit, 100)
-		ctx := r.Context()
+func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leaderboardTopOutput, error) {
+	return func(ctx context.Context, in *leaderboardTopInput) (*leaderboardTopOutput, error) {
+		limit := parseLimit(in.Limit, leaderboardTopCachedLimit, 100)
 		tenantID, _ := db.TenantFromContext(ctx)
 
 		cacheable := d.Cache != nil && limit == leaderboardTopCachedLimit
-		cacheKey := leaderboardTopCacheKey(tenantID, leaderboardID, limit)
+		cacheKey := leaderboardTopCacheKey(tenantID, in.ID, limit)
 		if cacheable {
 			if raw, err := d.Cache.Get(ctx, cacheKey); err == nil {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write(raw)
-				return
+				var cached leaderboardTopResult
+				if json.Unmarshal(raw, &cached) == nil {
+					return &leaderboardTopOutput{Body: cached}, nil
+				}
 			}
 		}
 
-		entries, err := topFromPostgres(ctx, d, leaderboardID, limit)
+		entries, err := topFromPostgres(ctx, d, in.ID, limit)
 		if err != nil {
-			webutil.InternalError(w, "leaderboard top: postgres", err)
-			return
-		}
-
-		payload, err := json.Marshal(map[string]any{"entries": entries})
-		if err != nil {
-			webutil.InternalError(w, "leaderboard top: marshal", err)
-			return
+			return nil, serverError(ctx, "leaderboard top: postgres", err)
 		}
 
 		if cacheable {
-			// Best-effort: a Set failure just costs a re-query next call.
-			_ = d.Cache.Set(ctx, cacheKey, payload, leaderboardTopTTL)
+			// Best-effort: a Set (or marshal) failure just costs a re-query.
+			if payload, merr := json.Marshal(leaderboardTopResult{Entries: entries}); merr == nil {
+				_ = d.Cache.Set(ctx, cacheKey, payload, leaderboardTopTTL)
+			}
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(payload)
+		return &leaderboardTopOutput{Body: leaderboardTopResult{Entries: entries}}, nil
 	}
 }
 
-// GET /v1/leaderboards/{id}/around-me?radius=N
-func leaderboardAroundMeHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		leaderboardID, ok := pathInt64(r, "id")
-		if !ok {
-			http.Error(w, "leaderboard id required", http.StatusBadRequest)
-			return
-		}
-		radius := parseLimit(r.URL.Query().Get("radius"), 5, 50)
-		ctx := r.Context()
+func leaderboardAroundMe(d Deps) func(context.Context, *leaderboardAroundMeInput) (*leaderboardAroundMeOutput, error) {
+	return func(ctx context.Context, in *leaderboardAroundMeInput) (*leaderboardAroundMeOutput, error) {
+		radius := parseLimit(in.Radius, 5, 50)
 		userID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		entries, selfRank, err := aroundMeFromPostgres(ctx, d, leaderboardID, userID, int64(radius))
+		entries, selfRank, err := aroundMeFromPostgres(ctx, d, in.ID, userID, int64(radius))
 		if err != nil {
-			webutil.InternalError(w, "leaderboard around-me", err)
-			return
+			return nil, serverError(ctx, "leaderboard around-me", err)
 		}
-		writeJSON(w, map[string]any{"entries": entries, "self_rank": selfRank})
+		return &leaderboardAroundMeOutput{Body: leaderboardAroundMeResult{Entries: entries, SelfRank: selfRank}}, nil
 	}
 }
 

@@ -302,8 +302,6 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
-					mountStorageRoutes(r, d)
-					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)
 					mountRemoteAddrRoutes(r, d)
 					mountRealtimeRoutes(r, d)
@@ -320,6 +318,17 @@ func NewRouter(d Deps) http.Handler {
 					registerPresence(papi, d)
 					registerGameInvites(papi, d)
 					registerProfileRoutes(papi, d)
+					registerStorageRoutes(papi, d)
+					registerLeaderboardReadRoutes(papi, d)
+
+					// Score submission is server-authoritative: only
+					// callers with a secret key (game server / tenant
+					// backend) may submit. The player session in
+					// X-Session-Token still identifies the subject.
+					r.Group(func(r chi.Router) {
+						r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
+						registerLeaderboardSubmit(groupAPI(r, humaCfg), d)
+					})
 				})
 			})
 		}
