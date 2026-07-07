@@ -234,3 +234,13 @@ func TestBackendFeature_maps_backend_names(t *testing.T) {
 		})
 	}
 }
+
+func TestFeatureEnabled_matchmaker_defaults_on(t *testing.T) {
+	// Matchmaker is not a high-risk feature: it works with zero config on a
+	// fresh install. Only an explicit enabled=false feature_grants row (or a
+	// DB-backed disable) turns it off.
+	a := newAuthorizer(t)
+	enabled, err := a.FeatureEnabled(t.Context(), 7, 99, rbac.FeatureMatchmaker)
+	require.NoError(t, err)
+	assert.True(t, enabled, "matchmaker must be enabled with no feature_grants row")
+}

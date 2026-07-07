@@ -25,6 +25,7 @@ import (
 	"github.com/ggscale/ggscale/internal/dashboard"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
@@ -85,6 +86,16 @@ type Deps struct {
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
+	// MatchmakerMaxTicketsPerPlayer caps a player's concurrently queued
+	// tickets per project. 0 disables the cap.
+	MatchmakerMaxTicketsPerPlayer int
+	// MatchmakerTicketTTL bounds how long a queued ticket lives. 0
+	// disables expiry.
+	MatchmakerTicketTTL time.Duration
+
+	// GameSessions creates game sessions (shared with the matchmaker
+	// worker's game_session mode).
+	GameSessions *gamesession.Service
 
 	// ServerList is the in-memory game-server heartbeat registry that
 	// backs the server-browser endpoint. nil disables /v1/fleets/*.
@@ -177,6 +188,12 @@ func NewRouter(d Deps) http.Handler {
 		reg = prometheus.NewRegistry()
 		reg.MustRegister(collectors.NewGoCollector())
 		reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	}
+	// The session service is a stateless pool wrapper; default it so
+	// callers (and test fixtures) only override when sharing an instance
+	// with the matchmaker worker matters.
+	if d.GameSessions == nil && d.Pool != nil {
+		d.GameSessions = gamesession.NewService(d.Pool)
 	}
 
 	r := chi.NewRouter()

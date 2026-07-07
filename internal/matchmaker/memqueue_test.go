@@ -72,10 +72,10 @@ func TestMemQueueCancelRejectsTerminal(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	require.NoError(t, err)
-	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
+	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
-	_, err = q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "")
+	_, err = q.CommitTickets(context.Background(), claim, []int64{t1.ID}, "", "10.0.0.1:7777", "")
 	require.NoError(t, err)
 
 	err = q.Cancel(tenantCtx(1), t1.ID, 0)
@@ -83,41 +83,45 @@ func TestMemQueueCancelRejectsTerminal(t *testing.T) {
 	assert.ErrorIs(t, err, matchmaker.ErrAlreadyTerminal)
 }
 
-func TestMemQueueListReadyBucketsRespectsMinCount(t *testing.T) {
+func TestMemQueueListReadyBucketsMergesRegionsForMatchOnly(t *testing.T) {
 	q := matchmaker.NewMemQueue()
-	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "x", GameMode: "g"})
 
-	buckets, err := q.ListReadyBuckets(context.Background(), 2)
+	buckets, err := q.ListReadyBuckets(context.Background())
 	require.NoError(t, err)
 
+	// Region is a bucket dimension only for fleet_allocation; match_only
+	// tickets share one bucket and the worker applies the soft-region rules.
 	require.Len(t, buckets, 1)
-	assert.Equal(t, "r", buckets[0].Region)
+	assert.Equal(t, "", buckets[0].Region)
 }
 
 func TestMemQueueListReadyBucketsSkipsClaimed(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
-	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}
+	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}
 	_, err := q.ClaimBucket(context.Background(), bucket, 2, time.Minute)
 	require.NoError(t, err)
 
-	buckets, err := q.ListReadyBuckets(context.Background(), 1)
+	buckets, err := q.ListReadyBuckets(context.Background())
 	require.NoError(t, err)
 
 	assert.Empty(t, buckets, "claimed tickets should not surface as ready")
 }
 
-func TestMemQueueClaimBucketReturnsNilWhenShort(t *testing.T) {
+func TestMemQueueClaimBucketClaimsUpToMax(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	_, _ = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 
-	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 2, time.Minute)
+	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 2, time.Minute)
 	require.NoError(t, err)
 
-	assert.Nil(t, claim)
+	// max is a cap, not a requirement: the worker forms groups from
+	// whatever was claimable.
+	require.NotNil(t, claim)
+	assert.Len(t, claim.Tickets, 1)
 }
 
 func TestMemQueueClaimBucketReturnsOldestFirst(t *testing.T) {
@@ -125,7 +129,7 @@ func TestMemQueueClaimBucketReturnsOldestFirst(t *testing.T) {
 	first, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	second, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 
-	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 2, time.Minute)
+	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 2, time.Minute)
 
 	require.NoError(t, err)
 	require.NotNil(t, claim)
@@ -137,22 +141,22 @@ func TestMemQueueClaimBucketReturnsOldestFirst(t *testing.T) {
 func TestMemQueueClaimBucketKeepsStatusQueued(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
-	_, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
+	_, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, err)
 
 	got, err := q.Get(tenantCtx(1), t1.ID, 0)
 
 	require.NoError(t, err)
-	assert.Equal(t, matchmaker.StatusQueued, got.Status, "claimed tickets stay 'queued' until CommitClaim")
+	assert.Equal(t, matchmaker.StatusQueued, got.Status, "claimed tickets stay 'queued' until CommitTickets")
 }
 
 func TestMemQueueCommitClaimSetsAddress(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
-	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
+	claim, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, err)
 
-	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "tcp")
+	n, err := q.CommitTickets(context.Background(), claim, []int64{t1.ID}, "", "10.0.0.1:7777", "tcp")
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), n)
 
@@ -166,10 +170,10 @@ func TestMemQueueCommitClaimSetsAddress(t *testing.T) {
 func TestMemQueueCommitClaimZeroAfterCancel(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
-	claim, _ := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, time.Minute)
+	claim, _ := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 1, time.Minute)
 	require.NoError(t, q.Cancel(tenantCtx(1), t1.ID, 0))
 
-	n, err := q.CommitClaim(context.Background(), claim, "10.0.0.1:7777", "tcp")
+	n, err := q.CommitTickets(context.Background(), claim, []int64{t1.ID}, "", "10.0.0.1:7777", "tcp")
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(0), n, "commit must return 0 when the claim's tickets were cancelled mid-flight")
@@ -178,17 +182,17 @@ func TestMemQueueCommitClaimZeroAfterCancel(t *testing.T) {
 func TestMemQueueReleaseClaimBumpsAttemptsAndFailsAtCap(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
-	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}
+	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}
 
 	// First release with maxAttempts=2 -> attempts becomes 1, still queued.
 	claim, _ := q.ClaimBucket(context.Background(), bucket, 1, time.Minute)
-	require.NoError(t, q.ReleaseClaim(context.Background(), claim, 2))
+	require.NoError(t, q.ReleaseTickets(context.Background(), claim, []int64{t1.ID}, 2))
 	got, _ := q.Get(tenantCtx(1), t1.ID, 0)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status)
 
 	// Second release -> attempts becomes 2 == cap, flips to failed.
 	claim, _ = q.ClaimBucket(context.Background(), bucket, 1, time.Minute)
-	require.NoError(t, q.ReleaseClaim(context.Background(), claim, 2))
+	require.NoError(t, q.ReleaseTickets(context.Background(), claim, []int64{t1.ID}, 2))
 	got, _ = q.Get(tenantCtx(1), t1.ID, 0)
 	assert.Equal(t, matchmaker.StatusFailed, got.Status)
 }
@@ -197,7 +201,7 @@ func TestMemQueueSweepStaleClaimsReleasesExpired(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	t1, _ := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"})
 	// Zero TTL → claim is immediately expired.
-	_, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Region: "r", GameMode: "g"}, 1, 0)
+	_, err := q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, Region: "", GameMode: "g"}, 1, 0)
 	require.NoError(t, err)
 	time.Sleep(2 * time.Millisecond)
 

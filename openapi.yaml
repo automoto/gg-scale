@@ -979,6 +979,12 @@ paths:
             text/plain; charset=utf-8:
               schema:
                 type: string
+        "503":
+          description: Service Unavailable
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
       security:
         - ApiKeyAuth: []
           PlayerSession: []
@@ -1495,8 +1501,8 @@ paths:
             schema:
               $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketRequest'
       responses:
-        "201":
-          description: Created
+        "200":
+          description: OK
           content:
             application/json:
               schema:
@@ -1528,11 +1534,9 @@ paths:
         "429":
           description: Too Many Requests
           content:
-            application/json:
+            text/plain; charset=utf-8:
               schema:
-                type: object
-                additionalProperties:
-                  type: object
+                type: string
         "500":
           description: Internal Server Error
           content:
@@ -2179,37 +2183,89 @@ components:
     github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketRequest:
       type: object
       properties:
+        allow_cross_region:
+          type: boolean
         attributes:
           type: string
           description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        count_multiple:
+          type: integer
         fleet:
           type: string
         game_mode:
           type: string
+        max_count:
+          type: integer
+        min_count:
+          type: integer
+        mode:
+          type: string
+        numeric_properties:
+          type: object
+          additionalProperties:
+            type: number
+        query:
+          type: string
         region:
           type: string
+        string_properties:
+          type: object
+          additionalProperties:
+            type: string
     github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketResponse:
       type: object
       properties:
+        allow_cross_region:
+          type: boolean
         attributes:
           type: string
           description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        count_multiple:
+          type: integer
         created_at:
+          type: string
+        expires_at:
           type: string
         game_mode:
           type: string
         id:
           type: integer
+        join_code:
+          type: string
         match_address:
+          type: string
+        match_id:
           type: string
         matched_at:
           type: string
+        max_count:
+          type: integer
+        min_count:
+          type: integer
+        mode:
+          type: string
+        numeric_properties:
+          type: object
+          additionalProperties:
+            type: number
         protocol_hint:
+          type: string
+        query:
           type: string
         region:
           type: string
+        session_id:
+          type: string
         status:
           type: string
+        string_properties:
+          type: object
+          additionalProperties:
+            type: string
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_matchmaker_RosterEntry'
     github_com_ggscale_ggscale_internal_httpapi_peerEntry:
       type: object
       properties:
@@ -2324,6 +2380,21 @@ components:
           type: string
         email:
           type: string
+    github_com_ggscale_ggscale_internal_matchmaker_RosterEntry:
+      type: object
+      properties:
+        numeric_properties:
+          type: object
+          additionalProperties:
+            type: number
+        player_id:
+          type: integer
+        region:
+          type: string
+        string_properties:
+          type: object
+          additionalProperties:
+            type: string
     github_com_ggscale_ggscale_internal_relay_Credentials:
       type: object
       properties:

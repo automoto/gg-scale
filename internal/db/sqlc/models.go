@@ -380,6 +380,21 @@ type LeaderboardEntry struct {
 	RecordedAt    pgtype.Timestamptz
 }
 
+type MatchmakerMatch struct {
+	ID        string
+	TenantID  int64
+	ProjectID int64
+	Mode      string
+	FleetID   *int64
+	Address   string
+	Protocol  string
+	SessionID string
+	JoinCode  string
+	Roster    []byte
+	CreatedAt pgtype.Timestamptz
+	ExpiresAt pgtype.Timestamptz
+}
+
 type MatchmakingTicket struct {
 	ID                 int64
 	TenantID           int64
@@ -398,6 +413,16 @@ type MatchmakingTicket struct {
 	ClaimExpiresAt     pgtype.Timestamptz
 	AllocationAttempts int32
 	MatchProtocol      string
+	Mode               string
+	MatchID            string
+	MinCount           int32
+	MaxCount           int32
+	CountMultiple      int32
+	AllowCrossRegion   bool
+	Query              string
+	StringProperties   []byte
+	NumericProperties  []byte
+	ExpiresAt          pgtype.Timestamptz
 }
 
 type PlatformAuditLog struct {

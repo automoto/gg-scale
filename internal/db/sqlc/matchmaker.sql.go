@@ -44,51 +44,64 @@ WITH candidates AS (
     FROM matchmaking_tickets mt
     WHERE mt.status = 'queued'
       AND mt.claim_id IS NULL
-      AND mt.tenant_id  = $1
-      AND mt.project_id = $2
-      AND mt.fleet_id   = $3
-      AND mt.region     = $4
-      AND mt.game_mode  = $5
+      AND (mt.expires_at IS NULL OR mt.expires_at > now())
+      AND mt.tenant_id  = $3
+      AND mt.project_id = $4
+      AND mt.mode       = $5
+      AND mt.fleet_id IS NOT DISTINCT FROM $6::bigint
+      AND (mt.mode <> 'fleet_allocation' OR mt.region = $7)
+      AND mt.game_mode  = $8
     ORDER BY mt.created_at, mt.id
-    LIMIT $8::int
+    LIMIT $9::int
     FOR UPDATE SKIP LOCKED
 )
 UPDATE matchmaking_tickets t
-SET claim_id         = $6::uuid,
+SET claim_id         = $1::uuid,
     claimed_at       = now(),
-    claim_expires_at = now() + $7::interval
+    claim_expires_at = now() + $2::interval
 FROM candidates c
 WHERE t.id = c.id
 RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
-          t.match_address, t.match_protocol, t.created_at, t.matched_at
+          t.match_address, t.match_protocol, t.mode, t.min_count, t.max_count,
+          t.count_multiple, t.allow_cross_region, t.query,
+          t.string_properties, t.numeric_properties, t.created_at, t.matched_at
 `
 
 type ClaimMatchmakerBucketParams struct {
+	ClaimID   pgtype.UUID
+	Ttl       pgtype.Interval
 	TenantID  int64
 	ProjectID int64
+	Mode      string
 	FleetID   *int64
 	Region    string
 	GameMode  string
-	ClaimID   pgtype.UUID
-	Ttl       pgtype.Interval
 	Limit     int32
 }
 
 type ClaimMatchmakerBucketRow struct {
-	ID            int64
-	TenantID      int64
-	ProjectID     int64
-	FleetID       *int64
-	PlayerID      int64
-	Region        string
-	GameMode      string
-	Attributes    []byte
-	Status        string
-	MatchAddress  string
-	MatchProtocol string
-	CreatedAt     pgtype.Timestamptz
-	MatchedAt     pgtype.Timestamptz
+	ID                int64
+	TenantID          int64
+	ProjectID         int64
+	FleetID           *int64
+	PlayerID          int64
+	Region            string
+	GameMode          string
+	Attributes        []byte
+	Status            string
+	MatchAddress      string
+	MatchProtocol     string
+	Mode              string
+	MinCount          int32
+	MaxCount          int32
+	CountMultiple     int32
+	AllowCrossRegion  bool
+	Query             string
+	StringProperties  []byte
+	NumericProperties []byte
+	CreatedAt         pgtype.Timestamptz
+	MatchedAt         pgtype.Timestamptz
 }
 
 // Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
@@ -96,16 +109,18 @@ type ClaimMatchmakerBucketRow struct {
 // subsequent ClaimBucket (different worker) skips them. The caller commits
 // via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
 // a crashed caller's claim is released by the sweeper once
-// claim_expires_at < now().
+// claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
+// IS NOT DISTINCT FROM.
 func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmakerBucketParams) ([]ClaimMatchmakerBucketRow, error) {
 	rows, err := q.db.Query(ctx, claimMatchmakerBucket,
+		arg.ClaimID,
+		arg.Ttl,
 		arg.TenantID,
 		arg.ProjectID,
+		arg.Mode,
 		arg.FleetID,
 		arg.Region,
 		arg.GameMode,
-		arg.ClaimID,
-		arg.Ttl,
 		arg.Limit,
 	)
 	if err != nil {
@@ -127,6 +142,14 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 			&i.Status,
 			&i.MatchAddress,
 			&i.MatchProtocol,
+			&i.Mode,
+			&i.MinCount,
+			&i.MaxCount,
+			&i.CountMultiple,
+			&i.AllowCrossRegion,
+			&i.Query,
+			&i.StringProperties,
+			&i.NumericProperties,
 			&i.CreatedAt,
 			&i.MatchedAt,
 		); err != nil {
@@ -140,41 +163,195 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 	return items, nil
 }
 
-const commitMatchmakerClaim = `-- name: CommitMatchmakerClaim :execrows
+const commitMatchmakerTickets = `-- name: CommitMatchmakerTickets :execrows
 UPDATE matchmaking_tickets
 SET status           = 'matched',
-    match_address    = $1,
-    match_protocol   = $2,
+    match_id         = $1,
+    match_address    = $2,
+    match_protocol   = $3,
     matched_at       = now(),
     claim_id         = NULL,
     claimed_at       = NULL,
     claim_expires_at = NULL
-WHERE claim_id = $3::uuid
+WHERE claim_id = $4::uuid
+  AND id = ANY ($5::bigint[])
   AND status = 'queued'
 `
 
-type CommitMatchmakerClaimParams struct {
+type CommitMatchmakerTicketsParams struct {
+	MatchID       string
 	MatchAddress  string
 	MatchProtocol string
 	ClaimID       pgtype.UUID
+	TicketIds     []int64
 }
 
-// Flip every still-queued ticket holding this claim_id to 'matched' and
-// stamp the address + protocol. Rows that drifted (cancelled, swept)
-// won't match the WHERE and are excluded — the caller branches on
+// Flip the given still-queued tickets holding this claim_id to 'matched'
+// and stamp the match id, address + protocol. Rows that drifted (cancelled,
+// swept) won't match the WHERE and are excluded — the caller compares
 // rows-affected and deallocates the orphan server when 0.
-func (q *Queries) CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, commitMatchmakerClaim, arg.MatchAddress, arg.MatchProtocol, arg.ClaimID)
+func (q *Queries) CommitMatchmakerTickets(ctx context.Context, arg CommitMatchmakerTicketsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, commitMatchmakerTickets,
+		arg.MatchID,
+		arg.MatchAddress,
+		arg.MatchProtocol,
+		arg.ClaimID,
+		arg.TicketIds,
+	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
+const countMatchmakerMatchesByMode = `-- name: CountMatchmakerMatchesByMode :many
+SELECT mode, count(*)::bigint AS match_count
+FROM matchmaker_matches
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+GROUP BY mode
+ORDER BY mode
+`
+
+type CountMatchmakerMatchesByModeRow struct {
+	Mode       string
+	MatchCount int64
+}
+
+// Dashboard matchmaker page: matches formed per mode within the retention
+// window (rows are GC'd after MatchTTL, so this reads as "recent matches").
+func (q *Queries) CountMatchmakerMatchesByMode(ctx context.Context, projectID int64) ([]CountMatchmakerMatchesByModeRow, error) {
+	rows, err := q.db.Query(ctx, countMatchmakerMatchesByMode, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountMatchmakerMatchesByModeRow
+	for rows.Next() {
+		var i CountMatchmakerMatchesByModeRow
+		if err := rows.Scan(&i.Mode, &i.MatchCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countQueuedTicketsForPlayer = `-- name: CountQueuedTicketsForPlayer :one
+SELECT count(*)
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND player_id = $2
+  AND status = 'queued'
+  AND (expires_at IS NULL OR expires_at > now())
+`
+
+type CountQueuedTicketsForPlayerParams struct {
+	ProjectID int64
+	PlayerID  int64
+}
+
+// Concurrent-ticket cap: how many live queued tickets the player already has
+// in the project. Expired-but-unswept tickets don't count against the cap.
+func (q *Queries) CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueuedTicketsForPlayerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTicketsForPlayer, arg.ProjectID, arg.PlayerID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
+DELETE FROM matchmaker_matches
+WHERE expires_at < now()
+`
+
+// GC (River job, leader-elected): drop match rows past their retention
+// window. Privileged — runs without a tenant GUC.
+func (q *Queries) DeleteExpiredMatchmakerMatches(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredMatchmakerMatches)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteTerminalMatchmakerTickets = `-- name: DeleteTerminalMatchmakerTickets :execrows
+DELETE FROM matchmaking_tickets
+WHERE status <> 'queued'
+  AND COALESCE(matched_at, created_at) < now() - $1::interval
+`
+
+// GC (River job, leader-elected): drop matched/cancelled/failed tickets
+// older than the retention interval. Privileged — runs without a tenant GUC.
+// Anchored on when the ticket became terminal (matched_at for matched
+// tickets, created_at otherwise) so a matched ticket isn't purged before its
+// paired match row's retention window — otherwise a poll would 404 while the
+// match is still recoverable.
+func (q *Queries) DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTerminalMatchmakerTickets, retention)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const expireMatchmakerTickets = `-- name: ExpireMatchmakerTickets :execrows
+UPDATE matchmaking_tickets
+SET status = 'failed'
+WHERE status = 'queued'
+  AND claim_id IS NULL
+  AND expires_at IS NOT NULL
+  AND expires_at < now()
+`
+
+// TTL enforcement: unclaimed queued tickets past expires_at flip to
+// 'failed'. Claimed tickets are left alone — the claim path settles them.
+func (q *Queries) ExpireMatchmakerTickets(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, expireMatchmakerTickets)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getMatchmakerMatch = `-- name: GetMatchmakerMatch :one
+SELECT id, tenant_id, project_id, mode, fleet_id, address, protocol,
+       session_id, join_code, roster, created_at, expires_at
+FROM matchmaker_matches
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+`
+
+func (q *Queries) GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error) {
+	row := q.db.QueryRow(ctx, getMatchmakerMatch, id)
+	var i MatchmakerMatch
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Mode,
+		&i.FleetID,
+		&i.Address,
+		&i.Protocol,
+		&i.SessionID,
+		&i.JoinCode,
+		&i.Roster,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
 SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
-       created_at, matched_at
+       mode, match_id, min_count, max_count, count_multiple,
+       allow_cross_region, query, string_properties, numeric_properties,
+       created_at, matched_at, expires_at
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -187,19 +364,29 @@ type GetMatchmakingTicketParams struct {
 }
 
 type GetMatchmakingTicketRow struct {
-	ID            int64
-	TenantID      int64
-	ProjectID     int64
-	FleetID       *int64
-	PlayerID      int64
-	Region        string
-	GameMode      string
-	Attributes    []byte
-	Status        string
-	MatchAddress  string
-	MatchProtocol string
-	CreatedAt     pgtype.Timestamptz
-	MatchedAt     pgtype.Timestamptz
+	ID                int64
+	TenantID          int64
+	ProjectID         int64
+	FleetID           *int64
+	PlayerID          int64
+	Region            string
+	GameMode          string
+	Attributes        []byte
+	Status            string
+	MatchAddress      string
+	MatchProtocol     string
+	Mode              string
+	MatchID           string
+	MinCount          int32
+	MaxCount          int32
+	CountMultiple     int32
+	AllowCrossRegion  bool
+	Query             string
+	StringProperties  []byte
+	NumericProperties []byte
+	CreatedAt         pgtype.Timestamptz
+	MatchedAt         pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
 }
 
 func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error) {
@@ -217,30 +404,94 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 		&i.Status,
 		&i.MatchAddress,
 		&i.MatchProtocol,
+		&i.Mode,
+		&i.MatchID,
+		&i.MinCount,
+		&i.MaxCount,
+		&i.CountMultiple,
+		&i.AllowCrossRegion,
+		&i.Query,
+		&i.StringProperties,
+		&i.NumericProperties,
 		&i.CreatedAt,
 		&i.MatchedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
 
+const insertMatchmakerMatch = `-- name: InsertMatchmakerMatch :exec
+INSERT INTO matchmaker_matches (
+    id, tenant_id, project_id, mode, fleet_id, address, protocol,
+    session_id, join_code, roster, expires_at
+)
+VALUES (
+    $1,
+    current_setting('app.tenant_id', true)::bigint,
+    $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, $10
+)
+`
+
+type InsertMatchmakerMatchParams struct {
+	ID        string
+	ProjectID int64
+	Mode      string
+	FleetID   *int64
+	Address   string
+	Protocol  string
+	SessionID string
+	JoinCode  string
+	Roster    []byte
+	ExpiresAt pgtype.Timestamptz
+}
+
+func (q *Queries) InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmakerMatchParams) error {
+	_, err := q.db.Exec(ctx, insertMatchmakerMatch,
+		arg.ID,
+		arg.ProjectID,
+		arg.Mode,
+		arg.FleetID,
+		arg.Address,
+		arg.Protocol,
+		arg.SessionID,
+		arg.JoinCode,
+		arg.Roster,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const insertMatchmakingTicket = `-- name: InsertMatchmakingTicket :one
 INSERT INTO matchmaking_tickets (
-    tenant_id, project_id, fleet_id, player_id, region, game_mode, attributes
+    tenant_id, project_id, fleet_id, player_id, region, game_mode, attributes,
+    mode, min_count, max_count, count_multiple, allow_cross_region,
+    query, string_properties, numeric_properties, expires_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
 RETURNING id, status::text AS status, created_at
 `
 
 type InsertMatchmakingTicketParams struct {
-	ProjectID  int64
-	FleetID    *int64
-	PlayerID   int64
-	Region     string
-	GameMode   string
-	Attributes []byte
+	ProjectID         int64
+	FleetID           *int64
+	PlayerID          int64
+	Region            string
+	GameMode          string
+	Attributes        []byte
+	Mode              string
+	MinCount          int32
+	MaxCount          int32
+	CountMultiple     int32
+	AllowCrossRegion  bool
+	Query             string
+	StringProperties  []byte
+	NumericProperties []byte
+	ExpiresAt         pgtype.Timestamptz
 }
 
 type InsertMatchmakingTicketRow struct {
@@ -257,6 +508,15 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 		arg.Region,
 		arg.GameMode,
 		arg.Attributes,
+		arg.Mode,
+		arg.MinCount,
+		arg.MaxCount,
+		arg.CountMultiple,
+		arg.AllowCrossRegion,
+		arg.Query,
+		arg.StringProperties,
+		arg.NumericProperties,
+		arg.ExpiresAt,
 	)
 	var i InsertMatchmakingTicketRow
 	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
@@ -264,29 +524,35 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 }
 
 const listMatchmakerBucketsForProject = `-- name: ListMatchmakerBucketsForProject :many
-SELECT region,
+SELECT mode,
+       region,
        game_mode,
        status::text AS status,
        count(*)::bigint AS ticket_count,
-       min(created_at)::timestamptz AS oldest
+       min(created_at)::timestamptz AS oldest,
+       min(min_count)::int AS min_count_low,
+       max(max_count)::int AS max_count_high
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
-GROUP BY region, game_mode, status
-ORDER BY region, game_mode, status
+GROUP BY mode, region, game_mode, status
+ORDER BY mode, region, game_mode, status
 `
 
 type ListMatchmakerBucketsForProjectRow struct {
-	Region      string
-	GameMode    string
-	Status      string
-	TicketCount int64
-	Oldest      pgtype.Timestamptz
+	Mode         string
+	Region       string
+	GameMode     string
+	Status       string
+	TicketCount  int64
+	Oldest       pgtype.Timestamptz
+	MinCountLow  int32
+	MaxCountHigh int32
 }
 
-// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
-// the current tenant's project, plus oldest queued ticket so operators can
-// spot stuck buckets at a glance.
+// Dashboard matchmaker page: queue depth per (mode, region, game_mode)
+// bucket for the current tenant's project, plus oldest queued ticket and
+// the min/max count spread so operators can spot stuck buckets at a glance.
 func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error) {
 	rows, err := q.db.Query(ctx, listMatchmakerBucketsForProject, projectID)
 	if err != nil {
@@ -297,11 +563,14 @@ func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID
 	for rows.Next() {
 		var i ListMatchmakerBucketsForProjectRow
 		if err := rows.Scan(
+			&i.Mode,
 			&i.Region,
 			&i.GameMode,
 			&i.Status,
 			&i.TicketCount,
 			&i.Oldest,
+			&i.MinCountLow,
+			&i.MaxCountHigh,
 		); err != nil {
 			return nil, err
 		}
@@ -314,27 +583,34 @@ func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID
 }
 
 const listReadyMatchmakerBuckets = `-- name: ListReadyMatchmakerBuckets :many
-SELECT tenant_id, project_id, fleet_id, region, game_mode, count(*) AS ticket_count
+SELECT tenant_id, project_id, mode, fleet_id,
+       (CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END)::text AS region,
+       game_mode, count(*) AS ticket_count
 FROM matchmaking_tickets
 WHERE status = 'queued'
   AND claim_id IS NULL
-  AND fleet_id IS NOT NULL
-GROUP BY tenant_id, project_id, fleet_id, region, game_mode
-HAVING count(*) >= $1::int
-ORDER BY tenant_id, project_id, fleet_id, region, game_mode
+  AND (expires_at IS NULL OR expires_at > now())
+GROUP BY tenant_id, project_id, mode, fleet_id,
+         CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END,
+         game_mode
+ORDER BY tenant_id, project_id, mode, fleet_id, region, game_mode
 `
 
 type ListReadyMatchmakerBucketsRow struct {
 	TenantID    int64
 	ProjectID   int64
+	Mode        string
 	FleetID     *int64
 	Region      string
 	GameMode    string
 	TicketCount int64
 }
 
-func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error) {
-	rows, err := q.db.Query(ctx, listReadyMatchmakerBuckets, dollar_1)
+// Region is a bucket dimension only for fleet_allocation (the server must
+// be placed in a concrete region); non-fleet modes mix regions inside one
+// bucket and the worker applies the soft-region grouping rules in Go.
+func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error) {
+	rows, err := q.db.Query(ctx, listReadyMatchmakerBuckets)
 	if err != nil {
 		return nil, err
 	}
@@ -345,6 +621,7 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32
 		if err := rows.Scan(
 			&i.TenantID,
 			&i.ProjectID,
+			&i.Mode,
 			&i.FleetID,
 			&i.Region,
 			&i.GameMode,
@@ -360,7 +637,7 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32
 	return items, nil
 }
 
-const releaseMatchmakerClaim = `-- name: ReleaseMatchmakerClaim :execrows
+const releaseMatchmakerTickets = `-- name: ReleaseMatchmakerTickets :execrows
 UPDATE matchmaking_tickets
 SET claim_id            = NULL,
     claimed_at          = NULL,
@@ -372,18 +649,40 @@ SET claim_id            = NULL,
         ELSE status
     END
 WHERE claim_id = $2::uuid
+  AND id = ANY ($3::bigint[])
   AND status = 'queued'
 `
 
-type ReleaseMatchmakerClaimParams struct {
+type ReleaseMatchmakerTicketsParams struct {
 	MaxAttempts int32
 	ClaimID     pgtype.UUID
+	TicketIds   []int64
 }
 
-// Worker-driven release: allocator failed (or the worker is giving up).
-// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
-func (q *Queries) ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseMatchmakerClaim, arg.MaxAttempts, arg.ClaimID)
+// Worker-driven release of one failed group: the resolver (allocator,
+// session creator) failed. Bump allocation_attempts; flip to 'failed' on
+// the Nth attempt.
+func (q *Queries) ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseMatchmakerTickets, arg.MaxAttempts, arg.ClaimID, arg.TicketIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const returnMatchmakerClaim = `-- name: ReturnMatchmakerClaim :execrows
+UPDATE matchmaking_tickets
+SET claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
+WHERE claim_id = $1::uuid
+  AND status = 'queued'
+`
+
+// Un-claim whatever the claim still holds without penalty: tickets that
+// didn't fit a group this pass simply go back to waiting.
+func (q *Queries) ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, returnMatchmakerClaim, claimID)
 	if err != nil {
 		return 0, err
 	}

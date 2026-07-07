@@ -78,10 +78,14 @@ type Config struct {
 	// budget. 0 disables. Default 4.
 	RealtimeMaxPerPlayer int64
 
-	// MatchmakerBucketSize is the number of queued tickets that must
-	// accumulate in a (tenant, project, region, game_mode) bucket before
-	// the worker calls fleet.Manager.Allocate. Default 1.
-	MatchmakerBucketSize int
+	// MatchmakerRelaxAfter is how long the oldest member of a below-max
+	// group waits before the group commits at a smaller (still valid)
+	// size. Default 30s.
+	MatchmakerRelaxAfter time.Duration
+	// MatchmakerRegionRelaxAfter is how long a bucket's oldest
+	// widen-eligible ticket waits before cross-region grouping unlocks.
+	// 0 disables widening. Default 60s.
+	MatchmakerRegionRelaxAfter time.Duration
 	// MatchmakerInterval is the fallback scan cadence for the worker.
 	// The hot path is Postgres LISTEN/NOTIFY, which wakes the worker in
 	// milliseconds; this ticker only catches tickets queued during a
@@ -101,6 +105,12 @@ type Config struct {
 	// MatchmakerSweepInterval is how often the cleanup goroutine releases
 	// claims whose lease has expired. Default 60s.
 	MatchmakerSweepInterval time.Duration
+	// MatchmakerMaxTicketsPerPlayer caps a player's concurrently queued
+	// tickets per project. 0 disables the cap. Default 3.
+	MatchmakerMaxTicketsPerPlayer int
+	// MatchmakerTicketTTL is how long a queued ticket lives before the
+	// sweeper fails it. 0 disables expiry. Default 10m.
+	MatchmakerTicketTTL time.Duration
 
 	// TURN relay tunables. The relay is disabled unless RelayPublicIP and
 	// RelaySharedSecret are both set.
@@ -374,12 +384,20 @@ var declared = []varDecl{
 		return nil
 	}},
 
-	{name: "MATCHMAKER_BUCKET_SIZE", defval: "1", set: func(c *Config, v string) error {
-		n, err := strconv.Atoi(v)
-		if err != nil || n <= 0 {
-			return fmt.Errorf("MATCHMAKER_BUCKET_SIZE %q: must be a positive integer", v)
+	{name: "MATCHMAKER_RELAX_AFTER", defval: "30s", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("MATCHMAKER_RELAX_AFTER %q: must be a non-negative duration", v)
 		}
-		c.MatchmakerBucketSize = n
+		c.MatchmakerRelaxAfter = d
+		return nil
+	}},
+	{name: "MATCHMAKER_REGION_RELAX_AFTER", defval: "60s", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("MATCHMAKER_REGION_RELAX_AFTER %q: must be a non-negative duration (0 disables cross-region widening)", v)
+		}
+		c.MatchmakerRegionRelaxAfter = d
 		return nil
 	}},
 	{name: "MATCHMAKER_INTERVAL", defval: "5s", set: func(c *Config, v string) error {
@@ -420,6 +438,22 @@ var declared = []varDecl{
 			return fmt.Errorf("MATCHMAKER_SWEEP_INTERVAL %q: must be a positive duration", v)
 		}
 		c.MatchmakerSweepInterval = d
+		return nil
+	}},
+	{name: "MATCHMAKER_MAX_TICKETS_PER_PLAYER", defval: "3", set: func(c *Config, v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("MATCHMAKER_MAX_TICKETS_PER_PLAYER %q: must be a non-negative integer (0 disables the cap)", v)
+		}
+		c.MatchmakerMaxTicketsPerPlayer = n
+		return nil
+	}},
+	{name: "MATCHMAKER_TICKET_TTL", defval: "10m", set: func(c *Config, v string) error {
+		d, err := time.ParseDuration(v)
+		if err != nil || d < 0 {
+			return fmt.Errorf("MATCHMAKER_TICKET_TTL %q: must be a non-negative duration (0 disables expiry)", v)
+		}
+		c.MatchmakerTicketTTL = d
 		return nil
 	}},
 

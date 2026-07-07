@@ -104,7 +104,15 @@ const (
 	FeatureFleetDockerBackend Feature = "fleet_docker_backend"
 	FeatureFleetAgonesBackend Feature = "fleet_agones_backend"
 	FeatureFleetPluginBackend Feature = "fleet_plugin_backend"
+	FeatureMatchmaker         Feature = "matchmaker"
 )
+
+// featureDefault is the answer when no feature_grants row exists. High-risk
+// features are deny-by-default; matchmaker works out of the box and needs an
+// explicit enabled=false row to turn off.
+func featureDefault(feature Feature) bool {
+	return feature == FeatureMatchmaker
+}
 
 // DashboardUser is the authorization-relevant view of a dashboard user.
 type DashboardUser struct {
@@ -235,10 +243,11 @@ func (a *Authorizer) CanPlayer(tenantID, playerID int64, obj, act string) (bool,
 	return a.enforce(RolePlayerStandard, dom, obj, act)
 }
 
-// FeatureEnabled reports whether a high-risk feature is enabled.
+// FeatureEnabled reports whether a feature is enabled for the tenant/project,
+// falling back to the feature's default when no feature_grants row exists.
 func (a *Authorizer) FeatureEnabled(ctx context.Context, tenantID, projectID int64, feature Feature) (bool, error) {
 	if a == nil || a.pool == nil {
-		return false, nil
+		return featureDefault(feature), nil
 	}
 	key := featureCacheKey{tenantID: tenantID, projectID: projectID, feature: feature}
 	now := time.Now()
@@ -272,8 +281,9 @@ LIMIT 1`
 		return enabled, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
-		a.storeFeatureCache(key, false, now)
-		return false, nil
+		def := featureDefault(feature)
+		a.storeFeatureCache(key, def, now)
+		return def, nil
 	}
 	return false, err
 }

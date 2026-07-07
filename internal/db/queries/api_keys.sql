@@ -39,8 +39,10 @@ project_ctx AS (
     FROM projects p, tenant_ctx t, args
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
+-- New keys start with the matchmaker scope: matchmaking is a zero-config
+-- feature. Fleet/relay scopes stay opt-in via the dashboard toggles.
 INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
-SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{}'::text[]
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{matchmaker}'::text[]
 FROM tenant_ctx t
 CROSS JOIN project_ctx p
 CROSS JOIN args

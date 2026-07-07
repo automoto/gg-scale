@@ -32,15 +32,16 @@ type Querier interface {
 	// subsequent ClaimBucket (different worker) skips them. The caller commits
 	// via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
 	// a crashed caller's claim is released by the sweeper once
-	// claim_expires_at < now().
+	// claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
+	// IS NOT DISTINCT FROM.
 	ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmakerBucketParams) ([]ClaimMatchmakerBucketRow, error)
 	ClearDashboardVerificationCode(ctx context.Context, id int64) error
 	ClearPlayerVerificationCode(ctx context.Context, id int64) error
-	// Flip every still-queued ticket holding this claim_id to 'matched' and
-	// stamp the address + protocol. Rows that drifted (cancelled, swept)
-	// won't match the WHERE and are excluded — the caller branches on
+	// Flip the given still-queued tickets holding this claim_id to 'matched'
+	// and stamp the match id, address + protocol. Rows that drifted (cancelled,
+	// swept) won't match the WHERE and are excluded — the caller compares
 	// rows-affected and deallocates the orphan server when 0.
-	CommitMatchmakerClaim(ctx context.Context, arg CommitMatchmakerClaimParams) (int64, error)
+	CommitMatchmakerTickets(ctx context.Context, arg CommitMatchmakerTicketsParams) (int64, error)
 	// last_used_step records the enrollment code's timestep so the same code
 	// cannot be replayed at the first login challenge.
 	ConfirmDashboardTOTP(ctx context.Context, arg ConfirmDashboardTOTPParams) (int64, error)
@@ -58,6 +59,9 @@ type Querier interface {
 	CountDashboardUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
 	CountEnabledPlatformAdmins(ctx context.Context) (int64, error)
 	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
+	// Dashboard matchmaker page: matches formed per mode within the retention
+	// window (rows are GC'd after MatchTTL, so this reads as "recent matches").
+	CountMatchmakerMatchesByMode(ctx context.Context, projectID int64) ([]CountMatchmakerMatchesByModeRow, error)
 	// Counts non-ended, non-expired sessions for the project. Used in the
 	// create handler to enforce a per-project session cap.
 	CountOpenGameSessionsForProject(ctx context.Context, projectID int64) (int64, error)
@@ -66,8 +70,13 @@ type Querier interface {
 	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
 	CountPlayerAccountTOTPBackupCodesRemaining(ctx context.Context, playerAccountID pgtype.UUID) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
+	// Concurrent-ticket cap: how many live queued tickets the player already has
+	// in the project. Expired-but-unswept tickets don't count against the cap.
+	CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueuedTicketsForPlayerParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
+	// New keys start with the matchmaker scope: matchmaking is a zero-config
+	// feature. Fleet/relay scopes stay opt-in via the dashboard toggles.
 	CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error)
 	// Dashboard team invitations (operator-side: platform / tenant admins).
 	CreateDashboardInvitation(ctx context.Context, arg CreateDashboardInvitationParams) (CreateDashboardInvitationRow, error)
@@ -135,6 +144,9 @@ type Querier interface {
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
+	// GC (River job, leader-elected): drop match rows past their retention
+	// window. Privileged — runs without a tenant GUC.
+	DeleteExpiredMatchmakerMatches(ctx context.Context) (int64, error)
 	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
 	// Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
 	// edge — a block is cleared only via the directed unblock path
@@ -151,6 +163,12 @@ type Querier interface {
 	DeletePlayerAccountTrustedDevicesForAccount(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeleteRateLimitOverride(ctx context.Context, arg DeleteRateLimitOverrideParams) error
 	DeleteTenantPlayerBan(ctx context.Context, arg DeleteTenantPlayerBanParams) (int64, error)
+	// GC (River job, leader-elected): drop matched/cancelled/failed tickets
+	// older than the retention interval. Privileged — runs without a tenant GUC.
+	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
+	// TTL enforcement: unclaimed queued tickets past expires_at flip to
+	// 'failed'. Claimed tickets are left alone — the claim path settles them.
+	ExpireMatchmakerTickets(ctx context.Context) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
@@ -214,6 +232,7 @@ type Querier interface {
 	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)
 	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
 	GetLeaderboardForDashboard(ctx context.Context, arg GetLeaderboardForDashboardParams) (GetLeaderboardForDashboardRow, error)
+	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
 	GetPlayerAccountByID(ctx context.Context, id pgtype.UUID) (GetPlayerAccountByIDRow, error)
@@ -288,6 +307,7 @@ type Querier interface {
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
 	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
 	InsertDashboardTOTPBackupCodes(ctx context.Context, arg []InsertDashboardTOTPBackupCodesParams) (int64, error)
+	InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmakerMatchParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
 	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
 	InsertPlayerAccountTOTPBackupCodes(ctx context.Context, arg []InsertPlayerAccountTOTPBackupCodesParams) (int64, error)
@@ -347,9 +367,9 @@ type Querier interface {
 	// xuid. RLS on game_session_peer scopes rows to the current tenant.
 	ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
-	// Dashboard matchmaker page: queue depth per (region, game_mode) bucket for
-	// the current tenant's project, plus oldest queued ticket so operators can
-	// spot stuck buckets at a glance.
+	// Dashboard matchmaker page: queue depth per (mode, region, game_mode)
+	// bucket for the current tenant's project, plus oldest queued ticket and
+	// the min/max count spread so operators can spot stuck buckets at a glance.
 	ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error)
 	// Returns unexpired invites for the target user, enriched with the sender's
 	// email and optional xuid for display.
@@ -363,7 +383,10 @@ type Querier interface {
 	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
 	ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
-	ListReadyMatchmakerBuckets(ctx context.Context, dollar_1 int32) ([]ListReadyMatchmakerBucketsRow, error)
+	// Region is a bucket dimension only for fleet_allocation (the server must
+	// be placed in a concrete region); non-fleet modes mix regions inside one
+	// bucket and the worker applies the soft-region grouping rules in Go.
+	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Dashboard list for a tenant, enriched with the banned account's email.
 	ListTenantPlayerBans(ctx context.Context, tenantID int64) ([]ListTenantPlayerBansRow, error)
@@ -404,9 +427,10 @@ type Querier interface {
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordDashboardLoginSuccess(ctx context.Context, id int64) error
 	ReleaseAllocation(ctx context.Context, id int64) error
-	// Worker-driven release: allocator failed (or the worker is giving up).
-	// Bump allocation_attempts; flip to 'failed' on the Nth attempt.
-	ReleaseMatchmakerClaim(ctx context.Context, arg ReleaseMatchmakerClaimParams) (int64, error)
+	// Worker-driven release of one failed group: the resolver (allocator,
+	// session creator) failed. Bump allocation_attempts; flip to 'failed' on
+	// the Nth attempt.
+	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
 	// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
 	// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
 	// transaction. Account ids are UUIDs.
@@ -435,6 +459,9 @@ type Querier interface {
 	// Tenant-scoped: maps a set of accounts back to their player in a specific
 	// project, for presence sharing and JSON-API user_id mapping.
 	ResolvePlayersForAccountsInProject(ctx context.Context, arg ResolvePlayersForAccountsInProjectParams) ([]ResolvePlayersForAccountsInProjectRow, error)
+	// Un-claim whatever the claim still holds without penalty: tickets that
+	// didn't fit a group this pass simply go back to waiting.
+	ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	RevokeAllDashboardSessionsForUser(ctx context.Context, dashboardUserID int64) error
 	RevokeAllPlayerAccountSessions(ctx context.Context, playerAccountID pgtype.UUID) error

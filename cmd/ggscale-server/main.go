@@ -28,6 +28,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
 	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
+	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/jobs"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -224,49 +225,60 @@ func run() error {
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
+	// The matchmaker worker always runs: match-only tickets need no fleet.
+	// Without a fleet backend the allocator stays nil and fleet buckets
+	// fail through the attempt counter.
+	var mmAlloc matchmaker.Allocator
 	if fleetMgr != nil {
-		worker := matchmaker.NewWorker(mmQueue, fleetMgr, hub, matchmaker.WorkerConfig{
-			BucketSize:    cfg.MatchmakerBucketSize,
-			Interval:      cfg.MatchmakerInterval,
-			ClaimTTL:      cfg.MatchmakerClaimTTL,
-			MaxAttempts:   cfg.MatchmakerMaxAttempts,
-			WorkerCount:   cfg.MatchmakerWorkerCount,
-			SweepInterval: cfg.MatchmakerSweepInterval,
-			MatchCounter:  matchCounter{metrics},
-			Logger:        logger,
-		})
-		go func() {
-			defer close(workerDone)
-			worker.Run(workerCtx)
-		}()
+		mmAlloc = fleetMgr
 	} else {
-		close(workerDone)
-		logger.Warn("matchmaker worker disabled: no fleet backend configured")
+		logger.Warn("matchmaker fleet allocation disabled: no fleet backend configured")
 	}
+	gameSessions := gamesession.NewService(appPool)
+	worker := matchmaker.NewWorker(mmQueue, mmAlloc, hub, matchmaker.WorkerConfig{
+		RelaxAfter:         cfg.MatchmakerRelaxAfter,
+		RegionRelaxAfter:   cfg.MatchmakerRegionRelaxAfter,
+		Interval:           cfg.MatchmakerInterval,
+		ClaimTTL:           cfg.MatchmakerClaimTTL,
+		MaxAttempts:        cfg.MatchmakerMaxAttempts,
+		WorkerCount:        cfg.MatchmakerWorkerCount,
+		SweepInterval:      cfg.MatchmakerSweepInterval,
+		MatchCounter:       matchCounter{metrics},
+		Sessions:           gamesession.NewMatchAdapter(gameSessions),
+		QueryRejectCounter: queryRejectCounter{metrics},
+		Logger:             logger,
+	})
+	go func() {
+		defer close(workerDone)
+		worker.Run(workerCtx)
+	}()
 
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:              "v1",
-		Commit:               commit,
-		Pool:                 appPool,
-		Lookup:               tenant.NewSQLLookup(pool),
-		Limiter:              ratelimit.NewCacheLimiter(store),
-		RateLimitOverrides:   ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
-		ProxyTrust:           ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
-		Signer:               signer,
-		Mailer:               m,
-		MailFrom:             cfg.MailFrom,
-		TwoFactor:            tfCipher,
-		Cache:                store,
-		Registry:             registry,
-		Metrics:              metrics,
-		RBAC:                 authorizer,
-		Fleet:                fleetMgr,
-		Hub:                  hub,
-		RealtimeMaxPerTenant: cfg.RealtimeMaxPerTenant,
-		RealtimeMaxPerPlayer: cfg.RealtimeMaxPerPlayer,
-		Matchmaker:           mmQueue,
-		ServerList:           serverListRegistry,
-		RelayIssuer:          relayIssuer,
+		Version:                       "v1",
+		Commit:                        commit,
+		Pool:                          appPool,
+		Lookup:                        tenant.NewSQLLookup(pool),
+		Limiter:                       ratelimit.NewCacheLimiter(store),
+		RateLimitOverrides:            ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
+		ProxyTrust:                    ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
+		Signer:                        signer,
+		Mailer:                        m,
+		MailFrom:                      cfg.MailFrom,
+		TwoFactor:                     tfCipher,
+		Cache:                         store,
+		Registry:                      registry,
+		Metrics:                       metrics,
+		RBAC:                          authorizer,
+		Fleet:                         fleetMgr,
+		Hub:                           hub,
+		RealtimeMaxPerTenant:          cfg.RealtimeMaxPerTenant,
+		RealtimeMaxPerPlayer:          cfg.RealtimeMaxPerPlayer,
+		Matchmaker:                    mmQueue,
+		MatchmakerMaxTicketsPerPlayer: cfg.MatchmakerMaxTicketsPerPlayer,
+		MatchmakerTicketTTL:           cfg.MatchmakerTicketTTL,
+		GameSessions:                  gameSessions,
+		ServerList:                    serverListRegistry,
+		RelayIssuer:                   relayIssuer,
 		Dashboard: dashboard.Config{
 			Mount:              cfg.DashboardEnabled,
 			CookieSecure:       cfg.DashboardCookieSecure,
@@ -354,6 +366,10 @@ type matchCounter struct{ m *observability.Metrics }
 
 func (c matchCounter) Inc() { c.m.MatchmakerMatch() }
 
+type queryRejectCounter struct{ m *observability.Metrics }
+
+func (c queryRejectCounter) Inc() { c.m.MatchmakerQueryReject() }
+
 // startRiverJobs boots the River client (periodic game-session/invite GC) and
 // returns a stop function, or nil if River couldn't start. River runs under
 // the app DB role via the pool's SET ROLE; its tables are granted in migration
@@ -362,6 +378,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, l
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,
@@ -378,6 +395,11 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, l
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) { return jobs.TrustedDeviceGCArgs{}, nil },
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) { return jobs.MatchmakerGCArgs{}, nil },
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 		},

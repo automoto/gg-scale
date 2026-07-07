@@ -183,7 +183,7 @@ func updateXUID(ctx context.Context, d Deps, me int64, raw string) (int, error) 
 		return sqlcgen.New(tx).UpdateProfileXuid(ctx, sqlcgen.UpdateProfileXuidParams{ID: me, Xuid: xuid})
 	})
 	switch {
-	case isUniqueViolation(err):
+	case webutil.IsUniqueViolation(err):
 		return http.StatusConflict, errors.New("xuid already in use")
 	case err != nil:
 		return http.StatusInternalServerError, errors.New("profile patch: xuid")

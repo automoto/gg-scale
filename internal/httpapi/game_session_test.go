@@ -28,15 +28,6 @@ func TestValidateXUID(t *testing.T) {
 	}
 }
 
-func TestJoinCode_is_alphabet_and_six_chars(t *testing.T) {
-	code, err := newJoinCode()
-	assert.NoError(t, err)
-	assert.Len(t, code, joinCodeLen)
-	for _, c := range code {
-		assert.Contains(t, joinCodeAlphabet, string(c), "unexpected char %q in join code", c)
-	}
-}
-
 func TestPresenceStatus_validation_counts_runes_not_bytes(t *testing.T) {
 	tests := []struct {
 		name   string

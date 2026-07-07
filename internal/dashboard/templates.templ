@@ -485,6 +485,7 @@ templ APIKeysPage(vm APIKeysView) {
 									if key.RevokedAt != nil {
 										<span class="muted">—</span>
 									} else {
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "matchmaker", "Matchmaker", key.MatchmakerGrantable)
 										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "fleet", "Fleet", key.FleetGrantable)
 										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "p2p_relay", "Relay", key.RelayGrantable)
 									}
@@ -1638,20 +1639,33 @@ templ MatchmakerQueuePage(vm MatchmakerQueueView) {
 }
 
 templ MatchmakerTableFragment(vm MatchmakerQueueView) {
+	if len(vm.Matches) > 0 {
+		<p class="subtitle">
+			Recent matches:
+			for i, m := range vm.Matches {
+				if i > 0 {
+					{ " · " }
+				}
+				{ m.Mode } { stringFromInt(m.Count) }
+			}
+		</p>
+	}
 	if len(vm.Buckets) == 0 {
 		<div class="empty-state"><p>No tickets in flight.</p></div>
 	} else {
 		<table class="data-table">
 			<thead>
-				<tr><th>Region</th><th>Game mode</th><th>Status</th><th>Tickets</th><th>Oldest</th></tr>
+				<tr><th>Mode</th><th>Region</th><th>Game mode</th><th>Status</th><th>Tickets</th><th>Size</th><th>Oldest</th></tr>
 			</thead>
 			<tbody>
 				for _, b := range vm.Buckets {
 					<tr>
+						<td>{ b.Mode }</td>
 						<td>{ b.Region }</td>
 						<td>{ b.GameMode }</td>
 						<td><span class="badge">{ b.Status }</span></td>
 						<td>{ stringFromInt(b.Count) }</td>
+						<td>{ stringFromInt(int64(b.MinCount)) }–{ stringFromInt(int64(b.MaxCount)) }</td>
 						<td>{ timeString(b.Oldest) }</td>
 					</tr>
 				}

@@ -121,3 +121,17 @@ func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {
 		})
 	}
 }
+
+func TestScopeGrantable_matchmaker_defaults_on(t *testing.T) {
+	auth, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+	h := &Handler{cfg: Config{}, rbac: auth}
+	assert.True(t, h.scopeGrantable(t.Context(), 7, nil, tenant.ScopeMatchmaker),
+		"matchmaker scope is grantable with zero config")
+}
+
+func TestScopeFeature_maps_matchmaker(t *testing.T) {
+	f, ok := scopeFeature(tenant.ScopeMatchmaker)
+	require.True(t, ok)
+	assert.Equal(t, rbac.FeatureMatchmaker, f)
+}

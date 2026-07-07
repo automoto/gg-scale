@@ -114,7 +114,7 @@ func mountMatchmakerRoutes(r chi.Router, d Deps) {
 		return
 	}
 	r.Route("/matchmaker/tickets", func(r chi.Router) {
-		r.Use(tenant.RequireKeyScope(tenant.ScopeFleet))
+		r.Use(tenant.RequireKeyScope(tenant.ScopeMatchmaker))
 		r.Post("/", matchmakerCreateTicketHandler(d))
 		r.Get("/{id}", matchmakerGetTicketHandler(d))
 		r.Delete("/{id}", matchmakerCancelTicketHandler(d))

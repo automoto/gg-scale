@@ -132,12 +132,14 @@ type APIKeyView struct {
 	// Scopes are the per-key feature grants currently set (e.g. "fleet",
 	// "p2p_relay").
 	Scopes []string
-	// FleetGrantable / RelayGrantable report whether the matching feature is
-	// enabled (env kill switch on AND a feature_grant row exists) for this
-	// key's tenant/project, so the UI can offer a grant toggle instead of
-	// "no access".
-	FleetGrantable bool
-	RelayGrantable bool
+	// FleetGrantable / RelayGrantable / MatchmakerGrantable report whether
+	// the matching feature is enabled for this key's tenant/project, so the
+	// UI can offer a grant toggle instead of "no access". Fleet/relay need
+	// their env kill switch on AND a feature_grant row; matchmaker defaults
+	// to enabled.
+	FleetGrantable      bool
+	RelayGrantable      bool
+	MatchmakerGrantable bool
 }
 
 // HasScope reports whether the key currently holds scope.
@@ -699,13 +701,24 @@ type FleetBackendsView struct {
 	Backends       []BackendRowView
 }
 
-// MatchmakerBucketView is one (region, game_mode, status) bucket row.
+// MatchmakerBucketView is one (mode, region, game_mode, status) bucket row.
+// MinCount/MaxCount are the spread across the bucket's tickets.
 type MatchmakerBucketView struct {
+	Mode     string
 	Region   string
 	GameMode string
 	Status   string
 	Count    int64
 	Oldest   time.Time
+	MinCount int
+	MaxCount int
+}
+
+// MatchmakerMatchCountView is the matches-formed count for one mode within
+// the match retention window.
+type MatchmakerMatchCountView struct {
+	Mode  string
+	Count int64
 }
 
 // MatchmakerQueueView is the data rendered by the matchmaker queue page.
@@ -715,6 +728,7 @@ type MatchmakerQueueView struct {
 	TenantID  int64
 	ProjectID int64
 	Buckets   []MatchmakerBucketView
+	Matches   []MatchmakerMatchCountView
 }
 
 // PlatformPluginsView is the data rendered by /admin/plugins.

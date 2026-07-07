@@ -78,6 +78,7 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 			}
 			key.FleetGrantable = h.scopeGrantable(ctx, tenantID, row.ProjectID, tenant.ScopeFleet)
 			key.RelayGrantable = h.scopeGrantable(ctx, tenantID, row.ProjectID, tenant.ScopeP2PRelay)
+			key.MatchmakerGrantable = h.scopeGrantable(ctx, tenantID, row.ProjectID, tenant.ScopeMatchmaker)
 			out = append(out, key)
 		}
 		return nil
@@ -103,6 +104,8 @@ func (h *Handler) scopeGrantable(ctx context.Context, tenantID int64, projectID 
 		if !h.cfg.RelayEnabled {
 			return false
 		}
+	case tenant.ScopeMatchmaker:
+		// No env kill switch: matchmaker is zero-config.
 	}
 	if h.rbac == nil {
 		return false
@@ -122,6 +125,8 @@ func scopeFeature(scope string) (rbac.Feature, bool) {
 		return rbac.FeatureDedicatedServers, true
 	case tenant.ScopeP2PRelay:
 		return rbac.FeatureP2PRelay, true
+	case tenant.ScopeMatchmaker:
+		return rbac.FeatureMatchmaker, true
 	default:
 		return "", false
 	}

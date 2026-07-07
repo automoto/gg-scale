@@ -401,7 +401,7 @@ func (h *Handler) matchmakerQueuePage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	buckets, err := h.loadMatchmakerBuckets(r.Context(), tenantID, projectID)
+	buckets, matches, err := h.loadMatchmakerBuckets(r.Context(), tenantID, projectID)
 	if err != nil {
 		http.Error(w, "matchmaker queue failed", http.StatusInternalServerError)
 		return
@@ -413,6 +413,7 @@ func (h *Handler) matchmakerQueuePage(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Buckets:   buckets,
+		Matches:   matches,
 	}))
 }
 
@@ -421,13 +422,13 @@ func (h *Handler) matchmakerQueueFragment(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	buckets, err := h.loadMatchmakerBuckets(r.Context(), tenantID, projectID)
+	buckets, matches, err := h.loadMatchmakerBuckets(r.Context(), tenantID, projectID)
 	if err != nil {
 		http.Error(w, "matchmaker queue failed", http.StatusInternalServerError)
 		return
 	}
 	webutil.Render(r, w, MatchmakerTableFragment(MatchmakerQueueView{
-		TenantID: tenantID, ProjectID: projectID, Buckets: buckets,
+		TenantID: tenantID, ProjectID: projectID, Buckets: buckets, Matches: matches,
 	}))
 }
 
@@ -494,29 +495,41 @@ func (h *Handler) loadAllocationDetail(ctx context.Context, tenantID, projectID,
 	return alloc, views, nil
 }
 
-func (h *Handler) loadMatchmakerBuckets(ctx context.Context, tenantID, projectID int64) ([]MatchmakerBucketView, error) {
+func (h *Handler) loadMatchmakerBuckets(ctx context.Context, tenantID, projectID int64) ([]MatchmakerBucketView, []MatchmakerMatchCountView, error) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	var out []MatchmakerBucketView
+	var matches []MatchmakerMatchCountView
 	err := h.pool.Q(tenantCtx, func(tx pgx.Tx) error {
-		rows, qerr := sqlcgen.New(tx).ListMatchmakerBucketsForProject(ctx, projectID)
+		q := sqlcgen.New(tx)
+		rows, qerr := q.ListMatchmakerBucketsForProject(ctx, projectID)
 		if qerr != nil {
 			return qerr
 		}
 		for _, row := range rows {
 			out = append(out, MatchmakerBucketView{
+				Mode:     row.Mode,
 				Region:   row.Region,
 				GameMode: row.GameMode,
 				Status:   row.Status,
 				Count:    row.TicketCount,
 				Oldest:   row.Oldest.Time,
+				MinCount: int(row.MinCountLow),
+				MaxCount: int(row.MaxCountHigh),
 			})
 			if len(out) >= matchmakerMaxRows {
 				break
 			}
 		}
+		counts, qerr := q.CountMatchmakerMatchesByMode(ctx, projectID)
+		if qerr != nil {
+			return qerr
+		}
+		for _, c := range counts {
+			matches = append(matches, MatchmakerMatchCountView{Mode: c.Mode, Count: c.MatchCount})
+		}
 		return nil
 	})
-	return out, err
+	return out, matches, err
 }
 
 // fleetBackendName returns the backend display name, or "" if no manager.

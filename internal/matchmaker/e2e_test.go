@@ -33,22 +33,17 @@ func testInject(tenantID, playerID, projectID int64, next http.Handler) http.Han
 	})
 }
 
-// TestE2E_MatchmakerDeliversMatchReadyOverWebSocket exercises the realtime
-// + matchmaker integration without Postgres: a client opens /v1/ws, POSTs a
-// ticket to /v1/matchmaker/tickets, and asserts the worker fans a
-// MatchReady envelope back to the WS connection.
-//
-// This is the M6/M7 acceptance shape — Postgres-backed and Docker-backed
-// versions live in build-tagged integration tests (matchmaker_integration_test.go,
-// to be added when CI provisions Postgres for matchmaker).
-func TestE2EMatchmakerDeliversMatchReadyOverWebSocket(t *testing.T) {
+// TestE2EMatchmakerDeliversMatchedOverWebSocket exercises the realtime +
+// matchmaker integration without Postgres or any fleet backend: a client
+// opens /v1/ws, POSTs a match_only ticket to /v1/matchmaker/tickets, and
+// asserts the worker fans a matchmaker_matched envelope back to the WS
+// connection — no allocator involved.
+func TestE2EMatchmakerDeliversMatchedOverWebSocket(t *testing.T) {
 	hub := realtime.NewHub()
 	queue := matchmaker.NewMemQueue()
-	alloc := &fakeAllocator{address: "10.42.0.7:7777"}
 
-	worker := matchmaker.NewWorker(queue, alloc, hub, matchmaker.WorkerConfig{
-		BucketSize: 1,
-		Interval:   10 * time.Millisecond,
+	worker := matchmaker.NewWorker(queue, nil, hub, matchmaker.WorkerConfig{
+		Interval: 10 * time.Millisecond,
 	})
 	workerCtx, cancelWorker := context.WithCancel(context.Background())
 	defer cancelWorker()
@@ -103,27 +98,29 @@ func TestE2EMatchmakerDeliversMatchReadyOverWebSocket(t *testing.T) {
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
-	// Worker should pick the ticket, allocate via fakeAllocator, and push
-	// MatchReady over WS within a couple of ticks.
+	// Worker should pick the ticket, mint a match, and push
+	// matchmaker_matched over WS within a couple of ticks.
 	mt, data, err := conn.Read(ctx)
 	require.NoError(t, err)
 	require.Equal(t, websocket.MessageText, mt)
 	var msg realtime.Message
 	require.NoError(t, json.Unmarshal(data, &msg))
-	assert.Equal(t, "match_ready", msg.Type)
+	assert.Equal(t, "matchmaker_matched", msg.Type)
 
 	var payload struct {
-		Address  string `json:"address"`
 		TicketID int64  `json:"ticket_id"`
+		MatchID  string `json:"match_id"`
+		Mode     string `json:"mode"`
+		Address  string `json:"address"`
+		Users    []struct {
+			PlayerID int64 `json:"player_id"`
+		} `json:"users"`
 	}
 	require.NoError(t, json.Unmarshal(msg.Payload, &payload))
-	assert.Equal(t, "10.42.0.7:7777", payload.Address)
 	assert.NotZero(t, payload.TicketID)
-
-	// fakeAllocator should have been called with the right tenant + region.
-	require.Equal(t, int64(1), alloc.Called())
-	require.Len(t, alloc.gotReqs, 1)
-	assert.Equal(t, tenantID, alloc.gotReqs[0].TenantID)
-	assert.Equal(t, projectID, alloc.gotReqs[0].ProjectID)
-	assert.Equal(t, "us-east-1", alloc.gotReqs[0].Region)
+	assert.True(t, strings.HasPrefix(payload.MatchID, "mm_"), "match_id=%q", payload.MatchID)
+	assert.Equal(t, "match_only", payload.Mode)
+	assert.Empty(t, payload.Address, "match_only carries no server address")
+	require.Len(t, payload.Users, 1)
+	assert.Equal(t, userID, payload.Users[0].PlayerID)
 }

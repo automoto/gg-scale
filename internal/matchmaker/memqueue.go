@@ -15,6 +15,7 @@ type MemQueue struct {
 	mu      sync.Mutex
 	nextID  int64
 	tickets map[int64]*memTicket
+	matches map[string]*Match
 }
 
 // memTicket is the internal storage row. The exported Ticket is constructed
@@ -28,30 +29,84 @@ type memTicket struct {
 
 // NewMemQueue returns an empty in-memory queue.
 func NewMemQueue() *MemQueue {
-	return &MemQueue{tickets: make(map[int64]*memTicket)}
+	return &MemQueue{tickets: make(map[int64]*memTicket), matches: make(map[string]*Match)}
 }
 
-// Enqueue inserts a queued ticket and returns the persisted view.
-func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, error) {
+// CreateMatch stores a committed match result.
+func (q *MemQueue) CreateMatch(_ context.Context, m *Match) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	dup := *m
+	dup.Roster = append([]RosterEntry(nil), m.Roster...)
+	q.matches[m.ID] = &dup
+	return nil
+}
+
+// GetMatch returns the match by id for the tenant on ctx.
+func (q *MemQueue) GetMatch(ctx context.Context, id string) (*Match, error) {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	m, ok := q.matches[id]
+	if !ok || m.TenantID != tenantID {
+		return nil, ErrNotFound
+	}
+	dup := *m
+	dup.Roster = append([]RosterEntry(nil), m.Roster...)
+	return &dup, nil
+}
+
+// Enqueue inserts a queued ticket and returns the persisted view. The
+// MaxActive cap is enforced under the queue lock.
+func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, error) {
+	req.normalize()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if req.MaxActive > 0 {
+		active := 0
+		for _, t := range q.tickets {
+			if t.Status == StatusQueued && t.ProjectID == req.ProjectID && t.PlayerID == req.PlayerID && !expired(&t.Ticket) {
+				active++
+			}
+		}
+		if active >= req.MaxActive {
+			return nil, ErrTicketLimit
+		}
+	}
 	q.nextID++
 	t := &memTicket{
 		Ticket: Ticket{
-			ID:         q.nextID,
-			TenantID:   req.TenantID,
-			ProjectID:  req.ProjectID,
-			FleetID:    req.FleetID,
-			PlayerID:   req.PlayerID,
-			Region:     req.Region,
-			GameMode:   req.GameMode,
-			Attributes: req.Attributes,
-			Status:     StatusQueued,
-			CreatedAt:  time.Now().UTC(),
+			ID:                q.nextID,
+			TenantID:          req.TenantID,
+			ProjectID:         req.ProjectID,
+			FleetID:           req.FleetID,
+			PlayerID:          req.PlayerID,
+			Mode:              req.Mode,
+			Region:            req.Region,
+			GameMode:          req.GameMode,
+			Attributes:        req.Attributes,
+			MinCount:          req.MinCount,
+			MaxCount:          req.MaxCount,
+			CountMultiple:     req.CountMultiple,
+			AllowCrossRegion:  req.AllowCrossRegion,
+			Query:             req.Query,
+			StringProperties:  req.StringProperties,
+			NumericProperties: req.NumericProperties,
+			Status:            StatusQueued,
+			CreatedAt:         time.Now().UTC(),
+			ExpiresAt:         req.ExpiresAt,
 		},
 	}
 	q.tickets[t.ID] = t
 	return cloneTicket(&t.Ticket), nil
+}
+
+// expired reports whether the ticket's TTL has lapsed.
+func expired(t *Ticket) bool {
+	return t.ExpiresAt != nil && t.ExpiresAt.Before(time.Now().UTC())
 }
 
 // Get returns a tenant-scoped view of the ticket. The tenant id is read
@@ -94,23 +149,23 @@ func (q *MemQueue) Cancel(ctx context.Context, id, playerID int64) error {
 	return nil
 }
 
-// ListReadyBuckets returns every (tenant, project, fleet, region, game_mode)
-// bucket that currently holds at least minTickets unclaimed queued entries.
-func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket, error) {
+// ListReadyBuckets returns every bucket that currently holds unclaimed
+// queued tickets. Region is a bucket dimension only for fleet_allocation;
+// non-fleet buckets mix regions and the worker applies the soft-region
+// rules in Go.
+func (q *MemQueue) ListReadyBuckets(_ context.Context) ([]Bucket, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	counts := make(map[Bucket]int)
 	for _, t := range q.tickets {
-		if t.Status != StatusQueued || t.claimID != "" {
+		if t.Status != StatusQueued || t.claimID != "" || expired(&t.Ticket) {
 			continue
 		}
-		counts[Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, FleetID: t.FleetID, Region: t.Region, GameMode: t.GameMode}]++
+		counts[bucketKey(&t.Ticket)]++
 	}
 	out := make([]Bucket, 0, len(counts))
-	for b, c := range counts {
-		if c >= minTickets {
-			out = append(out, b)
-		}
+	for b := range counts {
+		out = append(out, b)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].TenantID != out[j].TenantID {
@@ -118,6 +173,9 @@ func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket
 		}
 		if out[i].ProjectID != out[j].ProjectID {
 			return out[i].ProjectID < out[j].ProjectID
+		}
+		if out[i].Mode != out[j].Mode {
+			return out[i].Mode < out[j].Mode
 		}
 		if out[i].FleetID != out[j].FleetID {
 			return out[i].FleetID < out[j].FleetID
@@ -130,23 +188,27 @@ func (q *MemQueue) ListReadyBuckets(_ context.Context, minTickets int) ([]Bucket
 	return out, nil
 }
 
-// ClaimBucket stakes a claim on up to n unclaimed queued tickets. Returns
-// nil on short count.
-func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, n int, ttl time.Duration) (*Claim, error) {
+// bucketKey maps a ticket to its bucket, blanking region for non-fleet
+// modes (soft-region grouping happens in the worker).
+func bucketKey(t *Ticket) Bucket {
+	region := t.Region
+	if t.Mode != ModeFleetAllocation {
+		region = ""
+	}
+	return Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, Mode: t.Mode, FleetID: t.FleetID, Region: region, GameMode: t.GameMode}
+}
+
+// ClaimBucket stakes a claim on up to max unclaimed queued tickets, oldest
+// first. Returns nil when nothing was claimable.
+func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, max int, ttl time.Duration) (*Claim, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	candidates := make([]*memTicket, 0)
 	for _, t := range q.tickets {
-		if t.Status != StatusQueued || t.claimID != "" {
+		if t.Status != StatusQueued || t.claimID != "" || expired(&t.Ticket) {
 			continue
 		}
-		if t.TenantID != bucket.TenantID || t.ProjectID != bucket.ProjectID {
-			continue
-		}
-		if t.FleetID != bucket.FleetID {
-			continue
-		}
-		if t.Region != bucket.Region || t.GameMode != bucket.GameMode {
+		if bucketKey(&t.Ticket) != bucket {
 			continue
 		}
 		candidates = append(candidates, t)
@@ -157,13 +219,13 @@ func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, n int, ttl time
 		}
 		return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
 	})
-	if len(candidates) < n {
+	if len(candidates) == 0 {
 		return nil, nil
 	}
-	taken := candidates[:n]
+	taken := candidates[:min(max, len(candidates))]
 	claimID := uuid.NewString()
 	expires := time.Now().UTC().Add(ttl)
-	out := make([]*Ticket, 0, n)
+	out := make([]*Ticket, 0, len(taken))
 	for _, t := range taken {
 		t.claimID = claimID
 		t.claimExpiresAt = expires
@@ -172,22 +234,24 @@ func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, n int, ttl time
 	return &Claim{ID: claimID, Tickets: out}, nil
 }
 
-// CommitClaim flips every still-queued row with the given claim id to
-// 'matched' with the address + protocol hint. Returns rows-affected
+// CommitTickets flips the given still-queued claim tickets to 'matched'
+// with the match id, address + protocol hint. Returns rows-affected
 // (0 if the claim drifted).
-func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress, matchProtocol string) (int64, error) {
-	if claim == nil || claim.ID == "" {
+func (q *MemQueue) CommitTickets(_ context.Context, claim *Claim, ticketIDs []int64, matchID, matchAddress, matchProtocol string) (int64, error) {
+	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
 		return 0, nil
 	}
 	now := time.Now().UTC()
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	var affected int64
-	for _, t := range q.tickets {
-		if t.claimID != claim.ID || t.Status != StatusQueued {
+	for _, id := range ticketIDs {
+		t, ok := q.tickets[id]
+		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
 			continue
 		}
 		t.Status = StatusMatched
+		t.MatchID = matchID
 		t.MatchAddress = matchAddress
 		t.MatchProtocol = matchProtocol
 		t.MatchedAt = &now
@@ -198,16 +262,17 @@ func (q *MemQueue) CommitClaim(_ context.Context, claim *Claim, matchAddress, ma
 	return affected, nil
 }
 
-// ReleaseClaim clears the claim, bumps attempts, and flips to 'failed' at
-// the cap.
-func (q *MemQueue) ReleaseClaim(_ context.Context, claim *Claim, maxAttempts int) error {
-	if claim == nil || claim.ID == "" {
+// ReleaseTickets clears the claim on the given tickets, bumps attempts, and
+// flips to 'failed' at the cap.
+func (q *MemQueue) ReleaseTickets(_ context.Context, claim *Claim, ticketIDs []int64, maxAttempts int) error {
+	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
 		return nil
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for _, t := range q.tickets {
-		if t.claimID != claim.ID || t.Status != StatusQueued {
+	for _, id := range ticketIDs {
+		t, ok := q.tickets[id]
+		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
 			continue
 		}
 		t.allocationAttempts++
@@ -220,6 +285,23 @@ func (q *MemQueue) ReleaseClaim(_ context.Context, claim *Claim, maxAttempts int
 	return nil
 }
 
+// ReturnUnmatched un-claims whatever the claim still holds without penalty.
+func (q *MemQueue) ReturnUnmatched(_ context.Context, claim *Claim) error {
+	if claim == nil || claim.ID == "" {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, t := range q.tickets {
+		if t.claimID != claim.ID || t.Status != StatusQueued {
+			continue
+		}
+		t.claimID = ""
+		t.claimExpiresAt = time.Time{}
+	}
+	return nil
+}
+
 // SweepStaleClaims releases every expired claim. MemQueue implements Sweeper
 // for symmetry with PGQueue and for cleanup tests.
 func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, error) {
@@ -228,7 +310,15 @@ func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, 
 	defer q.mu.Unlock()
 	var released int64
 	for _, t := range q.tickets {
-		if t.claimID == "" || t.Status != StatusQueued || !t.claimExpiresAt.Before(now) {
+		if t.Status != StatusQueued {
+			continue
+		}
+		if t.claimID == "" && expired(&t.Ticket) {
+			t.Status = StatusFailed
+			released++
+			continue
+		}
+		if t.claimID == "" || !t.claimExpiresAt.Before(now) {
 			continue
 		}
 		t.allocationAttempts++
@@ -247,9 +337,25 @@ func cloneTicket(t *Ticket) *Ticket {
 	if t.Attributes != nil {
 		dup.Attributes = append([]byte(nil), t.Attributes...)
 	}
+	if t.StringProperties != nil {
+		dup.StringProperties = make(map[string]string, len(t.StringProperties))
+		for k, v := range t.StringProperties {
+			dup.StringProperties[k] = v
+		}
+	}
+	if t.NumericProperties != nil {
+		dup.NumericProperties = make(map[string]float64, len(t.NumericProperties))
+		for k, v := range t.NumericProperties {
+			dup.NumericProperties[k] = v
+		}
+	}
 	if t.MatchedAt != nil {
 		v := *t.MatchedAt
 		dup.MatchedAt = &v
+	}
+	if t.ExpiresAt != nil {
+		v := *t.ExpiresAt
+		dup.ExpiresAt = &v
 	}
 	return &dup
 }

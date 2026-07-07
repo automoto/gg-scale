@@ -68,8 +68,9 @@ type APIKey struct {
 // Feature scopes carried in api_keys.scopes. A key must hold the matching
 // scope to reach the corresponding feature-gated route.
 const (
-	ScopeFleet    = "fleet"
-	ScopeP2PRelay = "p2p_relay"
+	ScopeFleet      = "fleet"
+	ScopeP2PRelay   = "p2p_relay"
+	ScopeMatchmaker = "matchmaker"
 )
 
 // HasScope reports whether the key carries scope.

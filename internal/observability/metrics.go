@@ -11,17 +11,18 @@ import "github.com/prometheus/client_golang/prometheus"
 // low-cardinality — no tenant/project/user IDs — so the series count stays
 // bounded no matter how many tenants exist.
 type Metrics struct {
-	signups          *prometheus.CounterVec
-	verifications    *prometheus.CounterVec
-	logins           *prometheus.CounterVec
-	invitesSent      *prometheus.CounterVec
-	friendRequests   *prometheus.CounterVec
-	bansIssued       *prometheus.CounterVec
-	playerSessions   *prometheus.CounterVec
-	matchmakerTicket prometheus.Counter
-	matchmakerMatch  prometheus.Counter
-	relayCreds       prometheus.Counter
-	mailSends        *prometheus.CounterVec
+	signups               *prometheus.CounterVec
+	verifications         *prometheus.CounterVec
+	logins                *prometheus.CounterVec
+	invitesSent           *prometheus.CounterVec
+	friendRequests        *prometheus.CounterVec
+	bansIssued            *prometheus.CounterVec
+	playerSessions        *prometheus.CounterVec
+	matchmakerTicket      prometheus.Counter
+	matchmakerMatch       prometheus.Counter
+	matchmakerQueryReject prometheus.Counter
+	relayCreds            prometheus.Counter
+	mailSends             *prometheus.CounterVec
 }
 
 // Signup kinds.
@@ -129,6 +130,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_matchmaker_matches_total",
 			Help: "Matchmaker matches formed.",
 		}),
+		matchmakerQueryReject: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_matchmaker_query_rejections_total",
+			Help: "Candidate pairings rejected by mutual query acceptance; high values point at overly strict ticket queries.",
+		}),
 		relayCreds: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "ggscale_relay_credentials_issued_total",
 			Help: "Relay (TURN) credential sets issued.",
@@ -141,7 +146,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
-		m.relayCreds, m.mailSends,
+		m.matchmakerQueryReject, m.relayCreds, m.mailSends,
 	)
 	return m
 }
@@ -224,6 +229,15 @@ func (m *Metrics) MatchmakerMatch() {
 		return
 	}
 	m.matchmakerMatch.Inc()
+}
+
+// MatchmakerQueryReject counts a candidate pairing rejected by mutual
+// query acceptance.
+func (m *Metrics) MatchmakerQueryReject() {
+	if m == nil {
+		return
+	}
+	m.matchmakerQueryReject.Inc()
 }
 
 // RelayCredentialIssued counts one issued relay credential set.

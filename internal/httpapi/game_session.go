@@ -2,57 +2,27 @@ package httpapi
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/webutil"
-)
-
-const (
-	gameSessionTTL            = 4 * time.Hour
-	joinCodeAlphabet          = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no I O 0 1 (ambiguous)
-	joinCodeLen               = 6
-	joinCodeMaxAttempts       = 5
-	maxOpenSessionsPerProject = 100
-	maxPlayersLimit           = 64
 )
 
 var (
 	errGameSessionEnded     = errors.New("game session: ended")
 	errGameSessionExpired   = errors.New("game session: expired")
 	errGameSessionFull      = errors.New("game session: full")
-	errGameSessionCapped    = errors.New("game session: project cap reached")
 	errGameSessionForbidden = errors.New("game session: caller not a member")
 )
-
-func newJoinCode() (string, error) {
-	b := make([]byte, joinCodeLen)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(joinCodeAlphabet))))
-		if err != nil {
-			return "", err
-		}
-		b[i] = joinCodeAlphabet[n.Int64()]
-	}
-	return string(b), nil
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
-}
 
 type gameSessionAddr struct {
 	IP   string `json:"ip"`
@@ -134,98 +104,44 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 			http.Error(w, "public_addr.port out of range", http.StatusBadRequest)
 			return
 		}
-		maxPlayers := req.MaxPlayers
-		if maxPlayers <= 0 {
-			maxPlayers = 2
-		}
-		if maxPlayers > maxPlayersLimit {
+		if req.MaxPlayers > gamesession.MaxPlayersLimit {
 			http.Error(w, "max_players exceeds limit", http.StatusBadRequest)
 			return
 		}
-		props := req.Props
-		if len(props) == 0 {
-			props = json.RawMessage("{}")
-		}
-
-		sessionID, err := webutil.RandomHex("gs_", 16)
-		if err != nil {
-			webutil.InternalError(w, "game session create: rand id", err)
+		if d.GameSessions == nil {
+			http.Error(w, "game sessions unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		now := time.Now()
-		ip := req.PublicAddr.IP
-		port := int32(req.PublicAddr.Port) //nolint:gosec // validated: 1–65535
 
-		var (
-			sess  sqlcgen.CreateGameSessionRow
-			peers []sqlcgen.ListGameSessionPeersRow
-		)
-		// Retry on the (astronomically rare) join-code unique collision.
-		for attempt := 0; ; attempt++ {
-			joinCode, jerr := newJoinCode()
-			if jerr != nil {
-				webutil.InternalError(w, "game session create: join code", jerr)
-				return
-			}
-			err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
-				q := sqlcgen.New(tx)
-				// Serialize creation per project so the open-session cap can't
-				// be raced past, then count + insert in the same transaction.
-				if qerr := q.LockProjectForGameSessionCreate(ctx, projectID); qerr != nil {
-					return qerr
-				}
-				openCount, qerr := q.CountOpenGameSessionsForProject(ctx, projectID)
-				if qerr != nil {
-					return qerr
-				}
-				if openCount >= maxOpenSessionsPerProject {
-					return errGameSessionCapped
-				}
-				sess, qerr = q.CreateGameSession(ctx, sqlcgen.CreateGameSessionParams{
-					ID:           sessionID,
-					JoinCode:     joinCode,
-					ProjectID:    projectID,
-					TitleID:      req.TitleID,
-					HostPlayerID: hostUserID,
-					Props:        []byte(props),
-					MaxPlayers:   int32(maxPlayers), //nolint:gosec // validated: ≤64
-					Private:      req.Private,
-					ExpiresAt:    pgtype.Timestamptz{Time: now.Add(gameSessionTTL), Valid: true},
-				})
-				if qerr != nil {
-					return qerr
-				}
-				if qerr := q.UpsertGameSessionPeer(ctx, sqlcgen.UpsertGameSessionPeerParams{
-					SessionID: sessionID,
-					PlayerID:  hostUserID,
-					Ip:        &ip,
-					Port:      &port,
-					Qos:       []byte("{}"),
-				}); qerr != nil {
-					return qerr
-				}
-				peers, qerr = q.ListGameSessionPeers(ctx, sessionID)
-				return qerr
-			})
-			if err != nil && isUniqueViolation(err) && attempt < joinCodeMaxAttempts {
-				continue
-			}
-			break
-		}
+		created, err := d.GameSessions.Create(ctx, gamesession.CreateParams{
+			ProjectID:    projectID,
+			HostPlayerID: hostUserID,
+			TitleID:      req.TitleID,
+			Props:        req.Props,
+			MaxPlayers:   req.MaxPlayers,
+			Private:      req.Private,
+			Members: []gamesession.Member{{
+				PlayerID: hostUserID,
+				Addr: &gamesession.Addr{
+					IP:   req.PublicAddr.IP,
+					Port: int32(req.PublicAddr.Port), //nolint:gosec // validated: 1–65535
+				},
+			}},
+		})
 		switch {
-		case errors.Is(err, errGameSessionCapped):
+		case errors.Is(err, gamesession.ErrProjectCapped):
 			http.Error(w, "session limit reached for this project", http.StatusTooManyRequests)
 			return
 		case err != nil:
-			webutil.InternalError(w, "game session create: tx", err)
+			webutil.InternalError(w, "game session create", err)
 			return
 		}
 
 		writeJSONStatus(w, http.StatusCreated, gameSessionResponse{
-			SessionID: sess.ID,
-			JoinCode:  sess.JoinCode,
-			State:     sess.State,
-			Peers:     buildPeerEntries(peers),
+			SessionID: created.SessionID,
+			JoinCode:  created.JoinCode,
+			State:     created.State,
+			Peers:     buildPeerEntries(created.Peers),
 		})
 	}
 }
