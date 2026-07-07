@@ -14,7 +14,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/remoteaddr"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 // maxRemoteAddrs is the slot count: LAN IP, public IP, DNS, iroh.
@@ -204,25 +203,34 @@ func friendRemoteAddrGet(d Deps) func(context.Context, *friendRemoteAddrInput) (
 	}
 }
 
-// serverRemoteAddrGetHandler is the secret-key server-tier read: a game server
-// reads a player's remote addresses for a player linked to the key's project.
-// Mounted only under RequireKeyType(secret), so publishable keys never reach it.
-func serverRemoteAddrGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		projectID, ok := db.ProjectFromContext(r.Context())
+type serverRemoteAddrInput struct {
+	PlayerID int64 `path:"player_id" minimum:"1"`
+}
+
+func registerServerRemoteAddr(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "serverGetPlayerRemoteAddrs",
+		Method:      http.MethodGet,
+		Path:        "/v1/server/players/{player_id}/remote-addrs",
+		Summary:     "Server-tier: read a player's remote addresses",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, serverRemoteAddrGet(d))
+}
+
+// serverRemoteAddrGet is the secret-key server-tier read: a game server reads a
+// player's remote addresses for a player linked to the key's project. Bound
+// under RequireKeyType(secret), so publishable keys never reach it.
+func serverRemoteAddrGet(d Deps) func(context.Context, *serverRemoteAddrInput) (*remoteAddrsOutput, error) {
+	return func(ctx context.Context, in *serverRemoteAddrInput) (*remoteAddrsOutput, error) {
+		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
-		}
-		targetPlayer, ok := pathInt64(r, "player_id")
-		if !ok {
-			http.Error(w, "player_id required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		var acc pgtype.UUID
-		err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
-			a, e := sqlcgen.New(tx).GetPlayerAccountForProjectRead(r.Context(), sqlcgen.GetPlayerAccountForProjectReadParams{
-				ID: targetPlayer, ProjectID: projectID,
+		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+			a, e := sqlcgen.New(tx).GetPlayerAccountForProjectRead(ctx, sqlcgen.GetPlayerAccountForProjectReadParams{
+				ID: in.PlayerID, ProjectID: projectID,
 			})
 			if e != nil {
 				return e
@@ -234,14 +242,16 @@ func serverRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errTargetNoAccount) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
 		if err != nil {
-			webutil.InternalError(w, "server remote-addr", err)
-			return
+			return nil, serverError(ctx, "server remote-addr", err)
 		}
-		writeRemoteAddrs(w, d, r, acc)
+		payload, rerr := readRemoteAddrs(ctx, d, acc)
+		if rerr != nil {
+			return nil, serverError(ctx, "remote-addr read", rerr)
+		}
+		return &remoteAddrsOutput{Body: payload}, nil
 	}
 }
 
@@ -261,17 +271,6 @@ func readRemoteAddrs(ctx context.Context, d Deps, acc pgtype.UUID) (remoteAddrsP
 		entries = append(entries, remoteAddrEntry{Type: string(a.Type), Scope: string(a.Scope), Address: a.Value})
 	}
 	return remoteAddrsPayload{Addresses: entries}, nil
-}
-
-// writeRemoteAddrs serves an account's addresses over the still-chi server-tier
-// route.
-func writeRemoteAddrs(w http.ResponseWriter, d Deps, r *http.Request, acc pgtype.UUID) {
-	payload, err := readRemoteAddrs(r.Context(), d, acc)
-	if err != nil {
-		webutil.InternalError(w, "remote-addr read", err)
-		return
-	}
-	writeJSON(w, payload)
 }
 
 func remoteAddrSetParams(acc pgtype.UUID, set remoteaddr.Set) sqlcgen.SetPlayerAccountRemoteAddrsParams {

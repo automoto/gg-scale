@@ -1,68 +1,94 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/serverlist"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
+// heartbeatRequest fields are schema-optional so the handler owns the
+// (cross-field) validation → 400, matching the pre-migration wire.
 type heartbeatRequest struct {
-	AgonesName     string `json:"agones_name"`
-	Fleet          string `json:"fleet"`
-	Address        string `json:"address"`
-	Region         string `json:"region"`
-	Name           string `json:"name"`
-	CurrentPlayers int    `json:"current_players"`
-	MaxPlayers     int    `json:"max_players"`
-	GameMode       string `json:"game_mode"`
-	Level          string `json:"level"`
-	Version        string `json:"version"`
+	AgonesName     string `json:"agones_name,omitempty"`
+	Fleet          string `json:"fleet,omitempty"`
+	Address        string `json:"address,omitempty"`
+	Region         string `json:"region,omitempty"`
+	Name           string `json:"name,omitempty"`
+	CurrentPlayers int    `json:"current_players,omitempty"`
+	MaxPlayers     int    `json:"max_players,omitempty"`
+	GameMode       string `json:"game_mode,omitempty"`
+	Level          string `json:"level,omitempty"`
+	Version        string `json:"version,omitempty"`
 }
 
 type listServersResponse struct {
 	Servers []serverlist.Server `json:"servers"`
 }
 
-// fleetHeartbeatHandler accepts a heartbeat from a game-server. The
-// tenant is taken from the authenticated context, not the request body,
-// so a tenant can't spoof another tenant's fleet.
-func fleetHeartbeatHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+type heartbeatInput struct {
+	Body heartbeatRequest
+}
+
+type fleetServersInput struct {
+	Fleet string `path:"fleet"`
+}
+
+type fleetServersOutput struct {
+	Body listServersResponse
+}
+
+// registerFleetHeartbeat registers the server-tier heartbeat. Body is capped
+// at 8 KiB (oversize → 413).
+func registerFleetHeartbeat(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID:   "fleetHeartbeat",
+		Method:        http.MethodPost,
+		Path:          "/v1/fleets/heartbeat",
+		Summary:       "Game-server liveness heartbeat",
+		Tags:          []string{"/v1"},
+		Security:      apiKeySecurity,
+		DefaultStatus: http.StatusNoContent,
+		MaxBodyBytes:  8 << 10,
+	}, fleetHeartbeat(d))
+}
+
+func registerFleetServersList(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "fleetServersList",
+		Method:      http.MethodGet,
+		Path:        "/v1/fleets/{fleet}/servers",
+		Summary:     "List live servers in a fleet",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, fleetServersList(d))
+}
+
+// fleetHeartbeat accepts a heartbeat from a game-server. The tenant is taken
+// from the authenticated context, not the request body, so a tenant can't
+// spoof another tenant's fleet.
+func fleetHeartbeat(d Deps) func(context.Context, *heartbeatInput) (*struct{}, error) {
+	return func(ctx context.Context, in *heartbeatInput) (*struct{}, error) {
 		if d.ServerList == nil {
-			http.Error(w, "server list not configured", http.StatusServiceUnavailable)
-			return
+			return nil, huma.Error503ServiceUnavailable("server list not configured")
 		}
-		tenantID, err := db.TenantFromContext(r.Context())
+		tenantID, err := db.TenantFromContext(ctx)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
-		req, err := webutil.DecodeJSON[heartbeatRequest](w, r, 8<<10)
-		if err != nil {
-			if errors.Is(err, webutil.ErrBodyTooLarge) {
-				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
+		req := in.Body
 		if req.AgonesName == "" || req.Fleet == "" || req.Address == "" {
-			http.Error(w, "agones_name, fleet, and address are required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("agones_name, fleet, and address are required")
 		}
 		if req.MaxPlayers <= 0 {
-			http.Error(w, "max_players must be > 0", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("max_players must be > 0")
 		}
 		if req.CurrentPlayers < 0 || req.CurrentPlayers > req.MaxPlayers {
-			http.Error(w, "current_players must be in [0, max_players]", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("current_players must be in [0, max_players]")
 		}
 		err = d.ServerList.Submit(serverlist.Heartbeat{
 			AgonesName:     req.AgonesName,
@@ -78,37 +104,29 @@ func fleetHeartbeatHandler(d Deps) http.HandlerFunc {
 			TenantID:       tenantID,
 		})
 		if errors.Is(err, serverlist.ErrTenantLimitExceeded) {
-			http.Error(w, "server list limit exceeded", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("server list limit exceeded")
 		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }
 
-// fleetServersListHandler returns the live servers for a fleet, scoped
-// to the authenticated tenant.
-func fleetServersListHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+// fleetServersList returns the live servers for a fleet, scoped to the
+// authenticated tenant.
+func fleetServersList(d Deps) func(context.Context, *fleetServersInput) (*fleetServersOutput, error) {
+	return func(ctx context.Context, in *fleetServersInput) (*fleetServersOutput, error) {
 		if d.ServerList == nil {
-			http.Error(w, "server list not configured", http.StatusServiceUnavailable)
-			return
+			return nil, huma.Error503ServiceUnavailable("server list not configured")
 		}
-		tenantID, err := db.TenantFromContext(r.Context())
+		tenantID, err := db.TenantFromContext(ctx)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
-		fleet := chi.URLParam(r, "fleet")
-		if fleet == "" {
-			http.Error(w, "fleet is required", http.StatusBadRequest)
-			return
+		if in.Fleet == "" {
+			return nil, huma.Error400BadRequest("fleet is required")
 		}
-		out := listServersResponse{Servers: d.ServerList.List(tenantID, fleet)}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(out)
+		return &fleetServersOutput{Body: listServersResponse{Servers: d.ServerList.List(tenantID, in.Fleet)}}, nil
 	}
 }

@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/db"
@@ -267,13 +265,4 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, ra
 		selfRank--
 	}
 	return entries, selfRank, nil
-}
-
-func pathInt64(r *http.Request, name string) (int64, bool) {
-	raw := chi.URLParam(r, name)
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || n <= 0 {
-		return 0, false
-	}
-	return n, true
 }

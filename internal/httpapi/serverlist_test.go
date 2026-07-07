@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -22,10 +21,38 @@ func newServerListTestDeps() Deps {
 	return Deps{ServerList: serverlist.New(30 * time.Second)}
 }
 
-func TestFleetHeartbeatHandler_StoresHeartbeat(t *testing.T) {
-	d := newServerListTestDeps()
-	h := fleetHeartbeatHandler(d)
+// fleetTestRouter mounts the fleet heartbeat + servers-list huma operations on
+// a bare /v1 router so the unit tests can drive them over HTTP.
+func fleetTestRouter(d Deps) http.Handler {
+	r := chi.NewRouter()
+	r.Route("/v1", func(r chi.Router) {
+		api := groupAPI(r, newHumaConfig("test"))
+		registerFleetHeartbeat(api, d)
+		registerFleetServersList(api, d)
+	})
+	return r
+}
 
+func fleetRequest(t *testing.T, h http.Handler, method, target, body string, tenantID int64) *httptest.ResponseRecorder {
+	t.Helper()
+	var rdr *strings.Reader
+	if body != "" {
+		rdr = strings.NewReader(body)
+	} else {
+		rdr = strings.NewReader("")
+	}
+	req := httptest.NewRequest(method, target, rdr)
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req = req.WithContext(db.WithTenant(context.Background(), tenantID))
+	rw := httptest.NewRecorder()
+	h.ServeHTTP(rw, req)
+	return rw
+}
+
+func TestFleetHeartbeat_StoresHeartbeat(t *testing.T) {
+	d := newServerListTestDeps()
 	body := `{
 		"agones_name": "gs-1",
 		"fleet": "doomerang-east",
@@ -38,10 +65,7 @@ func TestFleetHeartbeatHandler_StoresHeartbeat(t *testing.T) {
 		"level": "arena_battle_starter",
 		"version": "v0.2.0"
 	}`
-	req := httptest.NewRequest(http.MethodPost, "/v1/fleets/heartbeat", strings.NewReader(body))
-	req = req.WithContext(db.WithTenant(context.Background(), 1))
-	rw := httptest.NewRecorder()
-	h(rw, req)
+	rw := fleetRequest(t, fleetTestRouter(d), http.MethodPost, "/v1/fleets/heartbeat", body, 1)
 
 	require.Equal(t, http.StatusNoContent, rw.Code, "expected 204; body=%s", rw.Body.String())
 	got := d.ServerList.List(1, "doomerang-east")
@@ -50,26 +74,19 @@ func TestFleetHeartbeatHandler_StoresHeartbeat(t *testing.T) {
 	assert.Equal(t, 2, got[0].CurrentPlayers)
 }
 
-// Regression: the heartbeat body cannot override the authenticated
-// tenant. Without this, a tenant-1 server could pose as tenant-2's fleet.
-func TestFleetHeartbeatHandler_TenantFromContextNotBody(t *testing.T) {
+// Regression: the heartbeat body cannot override the authenticated tenant.
+// Without this, a tenant-1 server could pose as tenant-2's fleet.
+func TestFleetHeartbeat_TenantFromContextNotBody(t *testing.T) {
 	d := newServerListTestDeps()
-	h := fleetHeartbeatHandler(d)
-
-	// Body has no tenant_id field — but even if a client tried to
-	// inject one, the handler ignores it.
 	body := `{"agones_name":"gs-1","fleet":"f","address":"a","name":"n","max_players":4}`
-	req := httptest.NewRequest(http.MethodPost, "/h", strings.NewReader(body))
-	req = req.WithContext(db.WithTenant(context.Background(), 7))
-	rw := httptest.NewRecorder()
-	h(rw, req)
+	rw := fleetRequest(t, fleetTestRouter(d), http.MethodPost, "/v1/fleets/heartbeat", body, 7)
 
 	require.Equal(t, http.StatusNoContent, rw.Code)
 	assert.Empty(t, d.ServerList.List(1, "f"), "must not appear under tenant 1")
 	assert.Len(t, d.ServerList.List(7, "f"), 1, "must appear under tenant 7 (from ctx)")
 }
 
-func TestFleetHeartbeatHandler_RejectsInvalid(t *testing.T) {
+func TestFleetHeartbeat_RejectsInvalid(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -86,16 +103,13 @@ func TestFleetHeartbeatHandler_RejectsInvalid(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			d := newServerListTestDeps()
-			req := httptest.NewRequest(http.MethodPost, "/h", strings.NewReader(tc.body))
-			req = req.WithContext(db.WithTenant(context.Background(), 1))
-			rw := httptest.NewRecorder()
-			fleetHeartbeatHandler(d)(rw, req)
-			assert.Equal(t, tc.code, rw.Code)
+			rw := fleetRequest(t, fleetTestRouter(d), http.MethodPost, "/v1/fleets/heartbeat", tc.body, 1)
+			assert.Equal(t, tc.code, rw.Code, rw.Body.String())
 		})
 	}
 }
 
-func TestFleetServersListHandler_ReturnsLiveServers(t *testing.T) {
+func TestFleetServersList_ReturnsLiveServers(t *testing.T) {
 	d := newServerListTestDeps()
 	d.ServerList.Submit(serverlist.Heartbeat{
 		AgonesName: "gs-1", Fleet: "doomerang-east", Address: "10.0.0.1:7777",
@@ -106,13 +120,7 @@ func TestFleetServersListHandler_ReturnsLiveServers(t *testing.T) {
 		Region: "us-east", Name: "B", CurrentPlayers: 3, MaxPlayers: 4, TenantID: 1,
 	})
 
-	r := chi.NewRouter()
-	r.Get("/v1/fleets/{fleet}/servers", fleetServersListHandler(d))
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/fleets/doomerang-east/servers", nil)
-	req = req.WithContext(db.WithTenant(context.Background(), 1))
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
+	rw := fleetRequest(t, fleetTestRouter(d), http.MethodGet, "/v1/fleets/doomerang-east/servers", "", 1)
 
 	require.Equal(t, http.StatusOK, rw.Code)
 	var resp listServersResponse
@@ -122,7 +130,7 @@ func TestFleetServersListHandler_ReturnsLiveServers(t *testing.T) {
 	assert.Equal(t, "B", resp.Servers[1].Name)
 }
 
-func TestFleetServersListHandler_TenantIsolation(t *testing.T) {
+func TestFleetServersList_TenantIsolation(t *testing.T) {
 	d := newServerListTestDeps()
 	d.ServerList.Submit(serverlist.Heartbeat{
 		AgonesName: "gs-1", Fleet: "f", Address: "a", Name: "tenant-1-server", MaxPlayers: 4, TenantID: 1,
@@ -131,13 +139,7 @@ func TestFleetServersListHandler_TenantIsolation(t *testing.T) {
 		AgonesName: "gs-1", Fleet: "f", Address: "a", Name: "tenant-2-server", MaxPlayers: 4, TenantID: 2,
 	})
 
-	r := chi.NewRouter()
-	r.Get("/v1/fleets/{fleet}/servers", fleetServersListHandler(d))
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/fleets/f/servers", nil)
-	req = req.WithContext(db.WithTenant(context.Background(), 1))
-	rw := httptest.NewRecorder()
-	r.ServeHTTP(rw, req)
+	rw := fleetRequest(t, fleetTestRouter(d), http.MethodGet, "/v1/fleets/f/servers", "", 1)
 
 	var resp listServersResponse
 	require.NoError(t, json.NewDecoder(rw.Body).Decode(&resp))
@@ -148,17 +150,14 @@ func TestFleetServersListHandler_TenantIsolation(t *testing.T) {
 
 // When ServerList is nil (operator-disabled), both endpoints return 503
 // instead of nil-dereferencing.
-func TestServerListHandlers_503WhenNotConfigured(t *testing.T) {
+func TestServerList_503WhenNotConfigured(t *testing.T) {
 	d := Deps{ServerList: nil}
+	h := fleetTestRouter(d)
 
-	for _, h := range []http.HandlerFunc{
-		fleetHeartbeatHandler(d),
-		fleetServersListHandler(d),
-	} {
-		req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(nil))
-		req = req.WithContext(db.WithTenant(context.Background(), 1))
-		rw := httptest.NewRecorder()
-		h(rw, req)
-		assert.Equal(t, http.StatusServiceUnavailable, rw.Code)
-	}
+	hb := fleetRequest(t, h, http.MethodPost, "/v1/fleets/heartbeat",
+		`{"agones_name":"g","fleet":"f","address":"a","max_players":4}`, 1)
+	assert.Equal(t, http.StatusServiceUnavailable, hb.Code, hb.Body.String())
+
+	list := fleetRequest(t, h, http.MethodGet, "/v1/fleets/f/servers", "", 1)
+	assert.Equal(t, http.StatusServiceUnavailable, list.Code, list.Body.String())
 }

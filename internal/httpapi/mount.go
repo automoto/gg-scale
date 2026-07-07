@@ -47,24 +47,6 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 	}))
 }
 
-// mountFleetHeartbeatRoute is server-tier (secret api_key). Game-servers
-// authenticate with their secret key and POST liveness + player count.
-func mountFleetHeartbeatRoute(r chi.Router, d Deps) {
-	if d.ServerList == nil {
-		return
-	}
-	r.With(tenant.RequireKeyScope(tenant.ScopeFleet)).Post("/fleets/heartbeat", fleetHeartbeatHandler(d))
-}
-
-// mountFleetListRoute is player tier. Any authenticated session can
-// browse the live server list for its tenant.
-func mountFleetListRoute(r chi.Router, d Deps) {
-	if d.ServerList == nil {
-		return
-	}
-	r.With(tenant.RequireKeyScope(tenant.ScopeFleet)).Get("/fleets/{fleet}/servers", fleetServersListHandler(d))
-}
-
 func mountMatchmakerRoutes(r chi.Router, d Deps) {
 	if d.Matchmaker == nil {
 		return
@@ -75,13 +57,6 @@ func mountMatchmakerRoutes(r chi.Router, d Deps) {
 		r.Get("/{id}", matchmakerGetTicketHandler(d))
 		r.Delete("/{id}", matchmakerCancelTicketHandler(d))
 	})
-}
-
-func mountRelayRoutes(r chi.Router, d Deps) {
-	if d.RelayIssuer == nil {
-		return
-	}
-	r.With(tenant.RequireKeyScope(tenant.ScopeP2PRelay)).Post("/relay/credentials", relayCredentialsHandler(d))
 }
 
 func mountGameSessionRoutes(r chi.Router, d Deps) {

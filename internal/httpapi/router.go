@@ -226,7 +226,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewRequestID())
 		r.Use(middleware.NewVersion(d.Version, reg))
 		r.Use(middleware.NewObservability(reg))
-		r.Get("/healthz", healthzHandler(d))
+		registerHealthz(groupAPI(r, humaCfg), d)
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
 		// dashboard and player surfaces. Mounted unconditionally so player
 		// pages stay styled even when the dashboard is disabled.
@@ -286,16 +286,21 @@ func NewRouter(d Deps) http.Handler {
 				// be used as a session-validity oracle.
 				r.Group(func(r chi.Router) {
 					r.Use(requireAPIKeyPermission(d, rbac.ObjectPlayer, rbac.ActionVerify))
-					r.Post("/server/player-sessions/verify", playerSessionVerifyHandler(d))
+					registerPlayerSessionVerify(groupAPI(r, humaCfg), d)
 				})
 
 				r.Group(func(r chi.Router) {
 					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
-					mountFleetHeartbeatRoute(r, d)
 					// Server-tier remote-address read: a game server reads a
 					// linked player's opaque endpoint for that project. Secret
 					// keys only — publishable keys never reach this group.
-					r.Get("/server/players/{player_id}/remote-addrs", serverRemoteAddrGetHandler(d))
+					registerServerRemoteAddr(groupAPI(r, humaCfg), d)
+					if d.ServerList != nil {
+						r.Group(func(r chi.Router) {
+							r.Use(tenant.RequireKeyScope(tenant.ScopeFleet))
+							registerFleetHeartbeat(groupAPI(r, humaCfg), d)
+						})
+					}
 				})
 
 				// Player authenticated: requires X-Session-Token JWT.
@@ -304,9 +309,20 @@ func NewRouter(d Deps) http.Handler {
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 					mountRealtimeRoutes(r, d)
 					mountMatchmakerRoutes(r, d)
-					mountFleetListRoute(r, d)
-					mountRelayRoutes(r, d)
 					mountGameSessionRoutes(r, d)
+
+					if d.ServerList != nil {
+						r.Group(func(r chi.Router) {
+							r.Use(tenant.RequireKeyScope(tenant.ScopeFleet))
+							registerFleetServersList(groupAPI(r, humaCfg), d)
+						})
+					}
+					if d.RelayIssuer != nil {
+						r.Group(func(r chi.Router) {
+							r.Use(tenant.RequireKeyScope(tenant.ScopeP2PRelay))
+							registerRelay(groupAPI(r, humaCfg), d)
+						})
+					}
 
 					// Typed huma operations. The adapter binds to this
 					// same player-authenticated chi group, so

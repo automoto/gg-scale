@@ -1,17 +1,33 @@
 package httpapi
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
-func healthzHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
-			"status":  "ok",
-			"version": d.Version,
-			"commit":  d.Commit,
-		})
-	}
+type healthzResult struct {
+	Status  string `json:"status"`
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+}
+
+type healthzOutput struct {
+	Body healthzResult
+}
+
+// registerHealthz registers the public liveness probe. No auth.
+func registerHealthz(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "healthz",
+		Method:      http.MethodGet,
+		Path:        "/v1/healthz",
+		Summary:     "Liveness probe",
+		Tags:        []string{"/v1"},
+	}, func(_ context.Context, _ *struct{}) (*healthzOutput, error) {
+		return &healthzOutput{Body: healthzResult{
+			Status: "ok", Version: d.Version, Commit: d.Commit,
+		}}, nil
+	})
 }
