@@ -1,9 +1,10 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -28,24 +29,23 @@ func TestValidateXUID(t *testing.T) {
 	}
 }
 
-func TestPresenceStatus_validation_counts_runes_not_bytes(t *testing.T) {
-	tests := []struct {
-		name   string
-		status string
-		valid  bool
-	}{
-		{"simple", "in_match", true},
-		{"custom", "watching_replay", true},
-		{"empty", "", false},
-		{"33 ascii", strings.Repeat("a", 33), false},
-		{"32 multibyte", strings.Repeat("あ", 32), true},  // 96 bytes, 32 runes
-		{"33 multibyte", strings.Repeat("あ", 33), false}, // 99 bytes, 33 runes
+// The 1..32-rune bound is enforced by the presence schema (huma counts runes).
+// These are the rejection cases (→ 422). The accepted 32-rune multibyte case —
+// the one that proves runes, not bytes — is asserted end-to-end in the
+// integration suite (TestPresence_accepts_custom_status_rejects_empty), where a
+// real DB backs the write.
+func TestPresenceStatus_schema_rejects_out_of_range(t *testing.T) {
+	cases := map[string]string{
+		"empty":        "",
+		"33 ascii":     strings.Repeat("a", 33),
+		"33 multibyte": strings.Repeat("あ", 33), // 99 bytes, 33 runes
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			n := utf8.RuneCountInString(tt.status)
-			got := n >= 1 && n <= presenceStatusMaxChars
-			assert.Equal(t, tt.valid, got)
+	for name, status := range cases {
+		t.Run(name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"status": status})
+			assert.NoError(t, err)
+			rec := postEnvelope(t, registerPresence, http.MethodPut, "/v1/presence", string(body))
+			assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
 		})
 	}
 }

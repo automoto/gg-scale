@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,53 +63,164 @@ type sessionResponse struct {
 	ExpiresAt    string `json:"expires_at"`
 }
 
+// signup/login fields stay schema-optional: signup enforces password byte
+// length (bcrypt's 72-byte limit — a rune-counting schema would be wrong) and a
+// deliberately-vague combined 400; login funnels every malformed/mismatched
+// input to a uniform 401 so the request shape reveals nothing. Both own their
+// validation in the handler.
 type signupRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type verifyRequest struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
+	Email string `json:"email" minLength:"1"`
+	Code  string `json:"code" minLength:"1"`
 }
 
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"refresh_token" minLength:"1"`
 }
 
 type logoutRequest struct {
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"refresh_token" minLength:"1"`
 }
 
 type customTokenRequest struct {
-	Token string `json:"token"`
+	Token string `json:"token" minLength:"1"`
 }
 
-// anonymousHandler
-func anonymousHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+type anonymousOutput struct {
+	Body anonymousResponse
+}
+
+type signupInput struct {
+	Body signupRequest
+}
+
+type verifyInput struct {
+	Body verifyRequest
+}
+
+type verifyResult struct {
+	PlayerID int64 `json:"player_id"`
+	Verified bool  `json:"verified"`
+}
+
+type verifyOutput struct {
+	Body verifyResult
+}
+
+type loginInput struct {
+	Body loginRequest
+}
+
+type sessionOutput struct {
+	Body sessionResponse
+}
+
+type refreshInput struct {
+	Body refreshRequest
+}
+
+type logoutInput struct {
+	Body logoutRequest
+}
+
+type customTokenInput struct {
+	Body customTokenRequest
+}
+
+// registerAuthRoutes registers the tenant-scoped, player-anonymous
+// /v1/auth/* operations. They share the per-IP rate-limiter group the adapter
+// binds to.
+func registerAuthRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "authAnonymous",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/anonymous",
+		Summary:     "Create an anonymous player session",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authAnonymous(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "authSignup",
+		Method:        http.MethodPost,
+		Path:          "/v1/auth/signup",
+		Summary:       "Sign up with email and password",
+		Tags:          []string{"/v1"},
+		Security:      apiKeySecurity,
+		DefaultStatus: http.StatusAccepted,
+	}, authSignup(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authVerify",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/verify",
+		Summary:     "Verify an email address with a code",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authVerify(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authLogin",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/login",
+		Summary:     "Log in with email and password",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authLogin(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authRefresh",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/refresh",
+		Summary:     "Rotate a refresh token",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authRefresh(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "authLogout",
+		Method:        http.MethodPost,
+		Path:          "/v1/auth/logout",
+		Summary:       "Revoke a refresh token",
+		Tags:          []string{"/v1"},
+		Security:      apiKeySecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, authLogout(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authCustomToken",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/custom-token",
+		Summary:     "Exchange a tenant-signed token for a session",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authCustomToken(d))
+}
+
+func authAnonymous(d Deps) func(context.Context, *struct{}) (*anonymousOutput, error) {
+	return func(ctx context.Context, _ *struct{}) (*anonymousOutput, error) {
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 
 		externalID, err := webutil.RandomHex("anon_", 16)
 		if err != nil {
-			webutil.InternalError(w, "anonymous: external_id rand", err)
-			return
+			return nil, serverError(ctx, "anonymous: external_id rand", err)
 		}
 		refreshToken, err := webutil.RandomHex("", 32)
 		if err != nil {
-			webutil.InternalError(w, "anonymous: refresh rand", err)
-			return
+			return nil, serverError(ctx, "anonymous: refresh rand", err)
 		}
 
 		now := apiNow(d)
@@ -130,8 +242,7 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID})
 		})
 		if err != nil {
-			webutil.InternalError(w, "anonymous: tx", err)
-			return
+			return nil, serverError(ctx, "anonymous: tx", err)
 		}
 
 		accessToken, err := d.Signer.Sign(auth.Claims{
@@ -139,63 +250,50 @@ func anonymousHandler(d Deps) http.HandlerFunc {
 			ExpiresAt: accessExpiresAt,
 		})
 		if err != nil {
-			webutil.InternalError(w, "anonymous: sign", err)
-			return
+			return nil, serverError(ctx, "anonymous: sign", err)
 		}
 
-		writeJSON(w, anonymousResponse{
+		return &anonymousOutput{Body: anonymousResponse{
 			AccessToken: accessToken, RefreshToken: refreshToken,
 			PlayerID: playerID, ExternalID: externalID,
 			ExpiresAt: accessExpiresAt.UTC().Format(time.RFC3339),
-		})
+		}}, nil
 	}
 }
 
-// signupHandler
-func signupHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req signupRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if !validateEmail(req.Email) || !validPassword(req.Password) {
-			http.Error(w, "email or password invalid", http.StatusBadRequest)
-			return
+func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
+	return func(ctx context.Context, in *signupInput) (*struct{}, error) {
+		if !validateEmail(in.Body.Email) || !validPassword(in.Body.Password) {
+			return nil, huma.Error400BadRequest("email or password invalid")
 		}
 
-		ctx := r.Context()
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(in.Body.Password), bcryptCost)
 		if err != nil {
-			webutil.InternalError(w, "signup: bcrypt", err)
-			return
+			return nil, serverError(ctx, "signup: bcrypt", err)
 		}
 		code, err := verifycode.GenerateCode()
 		if err != nil {
-			webutil.InternalError(w, "signup: code", err)
-			return
+			return nil, serverError(ctx, "signup: code", err)
 		}
 		salt, err := verifycode.NewSalt()
 		if err != nil {
-			webutil.InternalError(w, "signup: salt", err)
-			return
+			return nil, serverError(ctx, "signup: salt", err)
 		}
 		codeHash := verifycode.Hash(salt, code)
 		externalID, err := webutil.RandomHex("user_", 16)
 		if err != nil {
-			webutil.InternalError(w, "signup: ext_id rand", err)
-			return
+			return nil, serverError(ctx, "signup: ext_id rand", err)
 		}
 		now := apiNow(d)
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			email := req.Email
+			email := in.Body.Email
 			expires := pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true}
 			id, err := q.CreateEmailPlayer(ctx, sqlcgen.CreateEmailPlayerParams{
 				ProjectID:                  projectID,
@@ -220,7 +318,7 @@ func signupHandler(d Deps) http.HandlerFunc {
 				// only the legitimate owner can read.
 				if d.Mailer != nil {
 					existing := mailer.Message{
-						From: d.MailFrom, To: []string{req.Email},
+						From: d.MailFrom, To: []string{in.Body.Email},
 						Subject: "Your ggscale account",
 						Body:    "Someone tried to sign up using this email. If that was you, sign in directly — your account already exists.",
 					}
@@ -228,17 +326,15 @@ func signupHandler(d Deps) http.HandlerFunc {
 						slog.Error("signup: existing-account mailer", "error", err)
 					}
 				}
-				w.WriteHeader(http.StatusAccepted)
-				return
+				return nil, nil
 			}
-			webutil.InternalError(w, "signup: tx", err)
-			return
+			return nil, serverError(ctx, "signup: tx", err)
 		}
 		d.Metrics.Signup(observability.SignupPlayer)
 
 		if d.Mailer != nil {
 			msg := mailer.Message{
-				From: d.MailFrom, To: []string{req.Email},
+				From: d.MailFrom, To: []string{in.Body.Email},
 				Subject: mailerVerifySubject,
 				Body:    fmt.Sprintf(mailerVerifyBodyTmpl, code),
 			}
@@ -247,28 +343,17 @@ func signupHandler(d Deps) http.HandlerFunc {
 			}
 		}
 
-		w.WriteHeader(http.StatusAccepted)
+		return nil, nil
 	}
 }
 
-// verifyHandler accepts {email, code}; matches by salt+hash
-// after looking up the row; enforces a 5-attempt cap before clearing.
-func verifyHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req verifyRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if req.Email == "" || req.Code == "" {
-			http.Error(w, "email and code required", http.StatusBadRequest)
-			return
-		}
-
-		ctx := r.Context()
+// authVerify accepts {email, code}; matches by salt+hash after looking up the
+// row; enforces a 5-attempt cap before clearing.
+func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, error) {
+	return func(ctx context.Context, in *verifyInput) (*verifyOutput, error) {
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		now := apiNow(d)
 
@@ -278,7 +363,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 		)
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			email := req.Email
+			email := in.Body.Email
 			row, err := q.GetPlayerVerificationState(ctx, sqlcgen.GetPlayerVerificationStateParams{
 				ProjectID: projectID,
 				Email:     &email,
@@ -326,7 +411,7 @@ func verifyHandler(d Deps) http.HandlerFunc {
 				lockedAfterAttempt = true
 				return nil
 			}
-			expected := verifycode.Hash(row.EmailVerificationSalt, req.Code)
+			expected := verifycode.Hash(row.EmailVerificationSalt, in.Body.Code)
 			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) == 1 {
 				if err := q.MarkPlayerVerified(ctx, row.ID); err != nil {
 					return err
@@ -339,61 +424,47 @@ func verifyHandler(d Deps) http.HandlerFunc {
 		switch {
 		case errors.Is(err, pgx.ErrNoRows), errors.Is(err, errVerifyBadCode), errors.Is(err, errVerifyExpired):
 			d.Metrics.Verification(observability.VerifyInvalid)
-			http.Error(w, "invalid email or code", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("invalid email or code")
 		case errors.Is(err, errVerifyExhausted):
 			d.Metrics.Verification(observability.VerifyThrottled)
-			http.Error(w, "too many attempts", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("too many attempts")
 		case errors.Is(err, errVerifyAccountLocked):
 			d.Metrics.Verification(observability.VerifyThrottled)
-			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("account locked, contact support")
 		case err != nil:
-			webutil.InternalError(w, "verify: tx", err)
-			return
+			return nil, serverError(ctx, "verify: tx", err)
 		}
 		if lockedAfterAttempt {
 			d.Metrics.Verification(observability.VerifyThrottled)
-			http.Error(w, "account locked, contact support", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("account locked, contact support")
 		}
 
 		d.Metrics.Verification(observability.VerifyOK)
-		writeJSON(w, map[string]any{"player_id": playerID, "verified": true})
+		return &verifyOutput{Body: verifyResult{PlayerID: playerID, Verified: true}}, nil
 	}
 }
 
-// loginHandler
-func loginHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req loginRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if !validPassword(req.Password) {
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
-			return
+func authLogin(d Deps) func(context.Context, *loginInput) (*sessionOutput, error) {
+	return func(ctx context.Context, in *loginInput) (*sessionOutput, error) {
+		if !validPassword(in.Body.Password) {
+			return nil, huma.Error401Unauthorized("invalid credentials")
 		}
 
-		ctx := r.Context()
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 
 		refreshToken, err := webutil.RandomHex("", 32)
 		if err != nil {
-			webutil.InternalError(w, "login: refresh rand", err)
-			return
+			return nil, serverError(ctx, "login: refresh rand", err)
 		}
 		now := apiNow(d)
 		var playerID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			email := req.Email
+			email := in.Body.Email
 			row, err := q.GetPlayerByEmail(ctx, sqlcgen.GetPlayerByEmailParams{
 				ProjectID: projectID,
 				Email:     &email,
@@ -401,7 +472,7 @@ func loginHandler(d Deps) http.HandlerFunc {
 			if err != nil {
 				return err
 			}
-			if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(req.Password)) != nil {
+			if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(in.Body.Password)) != nil {
 				return errBadCredentials
 			}
 			// Tenant-ban enforcement: a banned account cannot log in.
@@ -419,27 +490,23 @@ func loginHandler(d Deps) http.HandlerFunc {
 			if err := insertSession(ctx, tx, projectID, row.ID, refreshToken, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, row.ID, "auth.login", req.Email, nil)
+			return auditlog.Write(ctx, tx, row.ID, "auth.login", in.Body.Email, nil)
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(req.Password))
+			_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(in.Body.Password))
 			d.Metrics.Login(observability.SurfaceAPI, observability.LoginInvalid)
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("invalid credentials")
 		}
 		if errors.Is(err, errBadCredentials) {
 			d.Metrics.Login(observability.SurfaceAPI, observability.LoginInvalid)
-			http.Error(w, "invalid credentials", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("invalid credentials")
 		}
 		if errors.Is(err, errPlayerBanned) {
 			d.Metrics.Login(observability.SurfaceAPI, observability.LoginLocked)
-			http.Error(w, "account banned", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("account banned")
 		}
 		if err != nil {
-			webutil.InternalError(w, "login: tx", err)
-			return
+			return nil, serverError(ctx, "login: tx", err)
 		}
 		d.Metrics.Login(observability.SurfaceAPI, observability.LoginOK)
 
@@ -450,40 +517,27 @@ func loginHandler(d Deps) http.HandlerFunc {
 			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
-			webutil.InternalError(w, "login: sign", err)
-			return
+			return nil, serverError(ctx, "login: sign", err)
 		}
-		writeJSON(w, sessionResponse{
+		return &sessionOutput{Body: sessionResponse{
 			AccessToken: accessToken, RefreshToken: refreshToken,
 			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
-		})
+		}}, nil
 	}
 }
 
-// refreshHandler rotates the refresh token and issues a new access token.
-func refreshHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req refreshRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if req.RefreshToken == "" {
-			http.Error(w, "refresh_token required", http.StatusBadRequest)
-			return
-		}
-
-		ctx := r.Context()
+// authRefresh rotates the refresh token and issues a new access token.
+func authRefresh(d Deps) func(context.Context, *refreshInput) (*sessionOutput, error) {
+	return func(ctx context.Context, in *refreshInput) (*sessionOutput, error) {
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
-		oldHash := sha256.Sum256([]byte(req.RefreshToken))
+		oldHash := sha256.Sum256([]byte(in.Body.RefreshToken))
 		newRefresh, err := webutil.RandomHex("", 32)
 		if err != nil {
-			webutil.InternalError(w, "refresh: rand", err)
-			return
+			return nil, serverError(ctx, "refresh: rand", err)
 		}
 		now := apiNow(d)
 
@@ -521,16 +575,13 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, row.PlayerID, "auth.refresh", "", nil)
 		})
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errSessionRevoked) {
-			http.Error(w, "invalid refresh", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("invalid refresh")
 		}
 		if errors.Is(err, errPlayerBanned) {
-			http.Error(w, "account banned", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("account banned")
 		}
 		if err != nil {
-			webutil.InternalError(w, "refresh: tx", err)
-			return
+			return nil, serverError(ctx, "refresh: tx", err)
 		}
 
 		expiresAt := now.Add(accessTokenTTL)
@@ -540,30 +591,18 @@ func refreshHandler(d Deps) http.HandlerFunc {
 			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
-			webutil.InternalError(w, "refresh: sign", err)
-			return
+			return nil, serverError(ctx, "refresh: sign", err)
 		}
-		writeJSON(w, sessionResponse{
+		return &sessionOutput{Body: sessionResponse{
 			AccessToken: accessToken, RefreshToken: newRefresh,
 			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
-		})
+		}}, nil
 	}
 }
 
-// logoutHandler
-func logoutHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req logoutRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if req.RefreshToken == "" {
-			http.Error(w, "refresh_token required", http.StatusBadRequest)
-			return
-		}
-
-		ctx := r.Context()
-		hash := sha256.Sum256([]byte(req.RefreshToken))
+func authLogout(d Deps) func(context.Context, *logoutInput) (*struct{}, error) {
+	return func(ctx context.Context, in *logoutInput) (*struct{}, error) {
+		hash := sha256.Sum256([]byte(in.Body.RefreshToken))
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			playerID, err := q.RevokeSessionByRefreshHash(ctx, hash[:])
@@ -579,31 +618,19 @@ func logoutHandler(d Deps) http.HandlerFunc {
 			return auditlog.Write(ctx, tx, playerID, "auth.logout", "", nil)
 		})
 		if err != nil {
-			webutil.InternalError(w, "logout: tx", err)
-			return
+			return nil, serverError(ctx, "logout: tx", err)
 		}
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }
 
-// customTokenHandler accepts a tenant-signed JWT carrying an
-// external_id; ggscale verifies and mints a session for that user.
-func customTokenHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req customTokenRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if req.Token == "" {
-			http.Error(w, "token required", http.StatusBadRequest)
-			return
-		}
-
-		ctx := r.Context()
+// authCustomToken accepts a tenant-signed JWT carrying an external_id; ggscale
+// verifies and mints a session for that user.
+func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionOutput, error) {
+	return func(ctx context.Context, in *customTokenInput) (*sessionOutput, error) {
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		tenantID, _ := db.TenantFromContext(ctx)
 
@@ -617,8 +644,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		var err error
 		refreshTok, err = webutil.RandomHex("", 32)
 		if err != nil {
-			webutil.InternalError(w, "custom-token: rand", err)
-			return
+			return nil, serverError(ctx, "custom-token: rand", err)
 		}
 		now := apiNow(d)
 
@@ -640,7 +666,7 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 				jwt.WithAudience(customTokenAudience),
 				jwt.WithLeeway(30*time.Second),
 			)
-			if _, err := parser.ParseWithClaims(req.Token, parsed, func(_ *jwt.Token) (any, error) {
+			if _, err := parser.ParseWithClaims(in.Body.Token, parsed, func(_ *jwt.Token) (any, error) {
 				return secret, nil
 			}); err != nil {
 				return errCustomTokenInvalid
@@ -681,17 +707,13 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, errCustomTokenNotConfigured):
-			http.Error(w, "custom-token not configured for this tenant", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("custom-token not configured for this tenant")
 		case errors.Is(err, errCustomTokenInvalid):
-			http.Error(w, "invalid custom token", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("invalid custom token")
 		case errors.Is(err, errPlayerBanned):
-			http.Error(w, "account banned", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("account banned")
 		case err != nil:
-			webutil.InternalError(w, "custom-token: tx", err)
-			return
+			return nil, serverError(ctx, "custom-token: tx", err)
 		}
 
 		expiresAt := now.Add(accessTokenTTL)
@@ -701,13 +723,12 @@ func customTokenHandler(d Deps) http.HandlerFunc {
 			ExpiresAt:    expiresAt,
 		})
 		if err != nil {
-			webutil.InternalError(w, "custom-token: sign", err)
-			return
+			return nil, serverError(ctx, "custom-token: sign", err)
 		}
-		writeJSON(w, sessionResponse{
+		return &sessionOutput{Body: sessionResponse{
 			AccessToken: accessToken, RefreshToken: refreshTok,
 			PlayerID: playerID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
-		})
+		}}, nil
 	}
 }
 

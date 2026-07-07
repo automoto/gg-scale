@@ -196,6 +196,11 @@ func NewRouter(d Deps) http.Handler {
 		d.GameSessions = gamesession.NewService(d.Pool)
 	}
 
+	// humaCfg carries the single OpenAPI document every migrated /v1 group
+	// accumulates operations into (see humaapi.go). Groups bind their own
+	// humachi adapter to it via groupAPI.
+	humaCfg := newHumaConfig(d.Version)
+
 	r := chi.NewRouter()
 	r.Use(panicRecover())
 	allowedOrigins := d.CORSAllowedOrigins
@@ -270,13 +275,7 @@ func NewRouter(d Deps) http.Handler {
 				// api_key holder must not be able to burn shared CPU.
 				r.Group(func(r chi.Router) {
 					r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, reg))
-					r.Post("/auth/signup", signupHandler(d))
-					r.Post("/auth/verify", verifyHandler(d))
-					r.Post("/auth/login", loginHandler(d))
-					r.Post("/auth/refresh", refreshHandler(d))
-					r.Post("/auth/logout", logoutHandler(d))
-					r.Post("/auth/anonymous", anonymousHandler(d))
-					r.Post("/auth/custom-token", customTokenHandler(d))
+					registerAuthRoutes(groupAPI(r, humaCfg), d)
 				})
 
 				// /v1/server/player-sessions/verify — server-tier endpoint used by
@@ -306,15 +305,21 @@ func NewRouter(d Deps) http.Handler {
 					mountStorageRoutes(r, d)
 					mountLeaderboardRoutes(r, d)
 					mountFriendRoutes(r, d)
-					mountProfileRoutes(r, d)
 					mountRemoteAddrRoutes(r, d)
 					mountRealtimeRoutes(r, d)
 					mountMatchmakerRoutes(r, d)
 					mountFleetListRoute(r, d)
 					mountRelayRoutes(r, d)
 					mountGameSessionRoutes(r, d)
-					mountPresenceRoutes(r, d)
-					mountGameInviteRoutes(r, d)
+
+					// Typed huma operations. The adapter binds to this
+					// same player-authenticated chi group, so
+					// tenant/session/rate-limit middleware still runs
+					// ahead of every handler.
+					papi := groupAPI(r, humaCfg)
+					registerPresence(papi, d)
+					registerGameInvites(papi, d)
+					registerProfileRoutes(papi, d)
 				})
 			})
 		}

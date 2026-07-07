@@ -72,13 +72,6 @@ func mountFriendRoutes(r chi.Router, d Deps) {
 	})
 }
 
-func mountProfileRoutes(r chi.Router, d Deps) {
-	r.Route("/profile", func(r chi.Router) {
-		r.Get("/", profileGetHandler(d))
-		r.Patch("/", profilePatchHandler(d))
-	})
-}
-
 func mountRealtimeRoutes(r chi.Router, d Deps) {
 	if d.Hub == nil {
 		return
@@ -138,17 +131,5 @@ func mountGameSessionRoutes(r chi.Router, d Deps) {
 			r.Post("/heartbeat", gameSessionHeartbeatHandler(d))
 			r.Delete("/", gameSessionLeaveHandler(d))
 		})
-	})
-}
-
-func mountPresenceRoutes(r chi.Router, d Deps) {
-	r.Put("/presence", presenceUpdateHandler(d))
-}
-
-func mountGameInviteRoutes(r chi.Router, d Deps) {
-	r.Route("/invite", func(r chi.Router) {
-		r.Post("/", gameInviteCreateHandler(d))
-		r.Get("/", gameInviteListHandler(d))
-		r.Delete("/{id}", gameInviteDeleteHandler(d))
 	})
 }

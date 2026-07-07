@@ -1,11 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -13,7 +15,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/realtime"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const gameInviteTTL = 5 * time.Minute
@@ -25,9 +26,12 @@ var (
 	errWrongProject  = errors.New("invite: session belongs to another project")
 )
 
+// Both fields are required and non-empty at the schema level → a missing or
+// blank field is a 422. Recipient resolution (unknown email → 404) and
+// session state remain handler/DB concerns.
 type gameInviteCreateRequest struct {
-	ToEmail   string `json:"to_email"`
-	SessionID string `json:"session_id"`
+	ToEmail   string `json:"to_email" minLength:"1"`
+	SessionID string `json:"session_id" minLength:"1"`
 }
 
 type gameInviteEntry struct {
@@ -39,28 +43,67 @@ type gameInviteEntry struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// POST /v1/invite
-func gameInviteCreateHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req gameInviteCreateRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		if req.ToEmail == "" || req.SessionID == "" {
-			http.Error(w, "to_email and session_id required", http.StatusBadRequest)
-			return
-		}
+type gameInviteCreateInput struct {
+	Body gameInviteCreateRequest
+}
 
-		ctx := r.Context()
+type gameInviteCreateOutput struct {
+	Body struct {
+		InviteID int64 `json:"invite_id"`
+	}
+}
+
+type gameInviteListOutput struct {
+	Body struct {
+		Invites []gameInviteEntry `json:"invites"`
+	}
+}
+
+type gameInviteDeleteInput struct {
+	ID int64 `path:"id"`
+}
+
+// registerGameInvites registers POST/GET/DELETE /v1/invite.
+func registerGameInvites(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID:   "createGameInvite",
+		Method:        http.MethodPost,
+		Path:          "/v1/invite",
+		Summary:       "Invite a friend to a game session",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusCreated,
+	}, gameInviteCreate(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "listGameInvites",
+		Method:      http.MethodGet,
+		Path:        "/v1/invite",
+		Summary:     "List the caller's pending game invites",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, gameInviteList(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "deleteGameInvite",
+		Method:        http.MethodDelete,
+		Path:          "/v1/invite/{id}",
+		Summary:       "Cancel or dismiss a game invite",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, gameInviteDelete(d))
+}
+
+func gameInviteCreate(d Deps) func(context.Context, *gameInviteCreateInput) (*gameInviteCreateOutput, error) {
+	return func(ctx context.Context, in *gameInviteCreateInput) (*gameInviteCreateOutput, error) {
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		fromUserID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		now := time.Now()
@@ -75,7 +118,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			// Resolve recipient by email within the project.
 			id, qerr := q.GetPlayerIDByEmail(ctx, sqlcgen.GetPlayerIDByEmailParams{
 				ProjectID: projectID,
-				Email:     &req.ToEmail,
+				Email:     &in.Body.ToEmail,
 			})
 			if qerr != nil {
 				return qerr
@@ -114,7 +157,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 				return qerr
 			}
 
-			sess, qerr := q.GetGameSession(ctx, sqlcgen.GetGameSessionParams{ProjectID: projectID, ID: req.SessionID})
+			sess, qerr := q.GetGameSession(ctx, sqlcgen.GetGameSessionParams{ProjectID: projectID, ID: in.Body.SessionID})
 			if qerr != nil {
 				return qerr
 			}
@@ -128,7 +171,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			// players can't leak join codes for sessions they aren't in.
 			if sess.HostPlayerID != fromUserID {
 				member, merr := q.IsGameSessionMember(ctx, sqlcgen.IsGameSessionMemberParams{
-					SessionID: req.SessionID,
+					SessionID: in.Body.SessionID,
 					PlayerID:  fromUserID,
 				})
 				if merr != nil {
@@ -144,7 +187,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 				ProjectID:    projectID,
 				FromPlayerID: fromUserID,
 				ToPlayerID:   toUserID,
-				SessionID:    req.SessionID,
+				SessionID:    in.Body.SessionID,
 				JoinCode:     joinCode,
 				ExpiresAt:    pgtype.Timestamptz{Time: now.Add(gameInviteTTL), Valid: true},
 			})
@@ -152,20 +195,15 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			http.Error(w, "to_email or session_id not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("to_email or session_id not found")
 		case errors.Is(err, errNotFriends):
-			http.Error(w, "players are not friends", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("players are not friends")
 		case errors.Is(err, errNotMember):
-			http.Error(w, "sender is not in the session", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("sender is not in the session")
 		case errors.Is(err, errSessionClosed), errors.Is(err, errWrongProject):
-			http.Error(w, "session is not joinable", http.StatusConflict)
-			return
+			return nil, huma.Error409Conflict("session is not joinable")
 		case err != nil:
-			webutil.InternalError(w, "game invite create: tx", err)
-			return
+			return nil, serverError(ctx, "game invite create: tx", err)
 		}
 
 		// Best-effort WS push to recipient if connected.
@@ -173,7 +211,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			tenantID, _ := db.TenantFromContext(ctx)
 			payload, _ := json.Marshal(map[string]any{
 				"invite_id":  inviteID,
-				"session_id": req.SessionID,
+				"session_id": in.Body.SessionID,
 				"join_code":  joinCode,
 			})
 			_ = d.Hub.Send(ctx, tenantID, toUserID, realtime.Message{
@@ -182,57 +220,47 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			})
 		}
 
-		writeJSONStatus(w, http.StatusCreated, map[string]int64{"invite_id": inviteID})
+		out := &gameInviteCreateOutput{}
+		out.Body.InviteID = inviteID
+		return out, nil
 	}
 }
 
-// DELETE /v1/invite/{id}
-// Either the sender (cancel) or recipient (decline/dismiss) may delete an invite.
-func gameInviteDeleteHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		inviteID, ok := pathInt64(r, "id")
-		if !ok {
-			http.Error(w, "invalid invite id", http.StatusBadRequest)
-			return
-		}
-		ctx := r.Context()
+// gameInviteDelete lets either the sender (cancel) or recipient
+// (decline/dismiss) delete an invite.
+func gameInviteDelete(d Deps) func(context.Context, *gameInviteDeleteInput) (*struct{}, error) {
+	return func(ctx context.Context, in *gameInviteDeleteInput) (*struct{}, error) {
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		var affected int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			var qerr error
 			affected, qerr = sqlcgen.New(tx).DeleteGameInvite(ctx, sqlcgen.DeleteGameInviteParams{
-				ID:       inviteID,
+				ID:       in.ID,
 				CallerID: callerID,
 			})
 			return qerr
 		})
 		if err != nil {
-			webutil.InternalError(w, "invite delete: tx", err)
-			return
+			return nil, serverError(ctx, "invite delete: tx", err)
 		}
 		if affected == 0 {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }
 
-// GET /v1/invite
-func gameInviteListHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func gameInviteList(d Deps) func(context.Context, *struct{}) (*gameInviteListOutput, error) {
+	return func(ctx context.Context, _ *struct{}) (*gameInviteListOutput, error) {
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		var invites []gameInviteEntry
+		invites := []gameInviteEntry{}
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			rows, qerr := sqlcgen.New(tx).ListPendingGameInvites(ctx, callerID)
 			if qerr != nil {
@@ -254,13 +282,11 @@ func gameInviteListHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if err != nil {
-			webutil.InternalError(w, "game invite list: tx", err)
-			return
+			return nil, serverError(ctx, "game invite list: tx", err)
 		}
 
-		if invites == nil {
-			invites = []gameInviteEntry{}
-		}
-		writeJSON(w, map[string]any{"invites": invites})
+		out := &gameInviteListOutput{}
+		out.Body.Invites = invites
+		return out, nil
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -50,14 +51,46 @@ type profilePatchRequest struct {
 	XUID  *string `json:"xuid,omitempty"`
 }
 
-// GET /v1/profile
-func profileGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+type profileGetOutput struct {
+	Body profileResponse
+}
+
+type profilePatchInput struct {
+	Body profilePatchRequest
+}
+
+// profilePatchOutput carries no body; huma reads the Status field to pick 202
+// (email change → verification round-trip) vs 204 (xuid-only change).
+type profilePatchOutput struct {
+	Status int
+}
+
+func registerProfileRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "getProfile",
+		Method:      http.MethodGet,
+		Path:        "/v1/profile",
+		Summary:     "Get the caller's profile",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, profileGet(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "patchProfile",
+		Method:        http.MethodPatch,
+		Path:          "/v1/profile",
+		Summary:       "Update the caller's email or xuid",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusAccepted,
+	}, profilePatch(d))
+}
+
+func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, error) {
+	return func(ctx context.Context, _ *struct{}) (*profileGetOutput, error) {
 		me, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		var resp profileResponse
@@ -82,65 +115,51 @@ func profileGetHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
 		if err != nil {
-			webutil.InternalError(w, "profile get: tx", err)
-			return
+			return nil, serverError(ctx, "profile get: tx", err)
 		}
-		writeJSON(w, resp)
+		return &profileGetOutput{Body: resp}, nil
 	}
 }
 
-// PATCH /v1/profile. Editable fields: email and xuid. A new
-// email triggers a verification round-trip (clears email_verified_at, mints a
-// new verification token, sends mail) and returns 202; an xuid-only change
-// returns 204.
-func profilePatchHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req profilePatchRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
+// profilePatch edits email and/or xuid. A new email triggers a verification
+// round-trip (clears email_verified_at, mints a new verification token, sends
+// mail) and returns 202; an xuid-only change returns 204.
+func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePatchOutput, error) {
+	return func(ctx context.Context, in *profilePatchInput) (*profilePatchOutput, error) {
+		req := in.Body
 		if req.Email == nil && req.XUID == nil {
-			http.Error(w, "no editable fields supplied", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("no editable fields supplied")
 		}
 
-		ctx := r.Context()
 		me, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		if req.XUID != nil {
-			if status, err := updateXUID(ctx, d, me, *req.XUID); err != nil {
-				http.Error(w, err.Error(), status)
-				return
+			if err := updateXUID(ctx, d, me, *req.XUID); err != nil {
+				return nil, err
 			}
 			if req.Email == nil {
-				w.WriteHeader(http.StatusNoContent)
-				return
+				return &profilePatchOutput{Status: http.StatusNoContent}, nil
 			}
 		}
 
 		newEmail := *req.Email
 		if !validateEmail(newEmail) {
-			http.Error(w, "email invalid", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("email invalid")
 		}
 
 		code, err := verifycode.GenerateCode()
 		if err != nil {
-			webutil.InternalError(w, "profile patch: code", err)
-			return
+			return nil, serverError(ctx, "profile patch: code", err)
 		}
 		salt, err := verifycode.NewSalt()
 		if err != nil {
-			webutil.InternalError(w, "profile patch: salt", err)
-			return
+			return nil, serverError(ctx, "profile patch: salt", err)
 		}
 		codeHash := verifycode.Hash(salt, code)
 
@@ -154,8 +173,7 @@ func profilePatchHandler(d Deps) http.HandlerFunc {
 			})
 		})
 		if err != nil {
-			webutil.InternalError(w, "profile patch: tx", err)
-			return
+			return nil, serverError(ctx, "profile patch: tx", err)
 		}
 
 		if d.Mailer != nil {
@@ -165,17 +183,17 @@ func profilePatchHandler(d Deps) http.HandlerFunc {
 				Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
 			})
 		}
-		w.WriteHeader(http.StatusAccepted)
+		return &profilePatchOutput{Status: http.StatusAccepted}, nil
 	}
 }
 
-// updateXUID sets (or, for an empty string, clears) the caller's xuid. It
-// returns an HTTP status + error on a validation or uniqueness failure.
-func updateXUID(ctx context.Context, d Deps, me int64, raw string) (int, error) {
+// updateXUID sets (or, for an empty string, clears) the caller's xuid,
+// returning a huma error on a validation or uniqueness failure.
+func updateXUID(ctx context.Context, d Deps, me int64, raw string) error {
 	var xuid *string
 	if raw != "" {
 		if !validateXUID(raw) {
-			return http.StatusBadRequest, errors.New("xuid invalid (1–64 printable chars)")
+			return huma.Error400BadRequest("xuid invalid (1–64 printable chars)")
 		}
 		xuid = &raw
 	}
@@ -184,9 +202,9 @@ func updateXUID(ctx context.Context, d Deps, me int64, raw string) (int, error) 
 	})
 	switch {
 	case webutil.IsUniqueViolation(err):
-		return http.StatusConflict, errors.New("xuid already in use")
+		return huma.Error409Conflict("xuid already in use")
 	case err != nil:
-		return http.StatusInternalServerError, errors.New("profile patch: xuid")
+		return serverError(ctx, "profile patch: xuid", err)
 	}
-	return 0, nil
+	return nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -258,9 +259,15 @@ func TestPresence_accepts_custom_status_rejects_empty(t *testing.T) {
 		map[string]string{"status": "watching_replay"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
+	// 32-rune multibyte status (96 bytes) must be accepted: the schema bound is
+	// counted in runes, not bytes.
+	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/presence", "k", tok,
+		map[string]string{"status": strings.Repeat("あ", 32)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
 	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/presence", "k", tok,
 		map[string]string{"status": ""})
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode, string(body))
 }
 
 // ── game invites (by email) ─────────────────────────────────────────────────
