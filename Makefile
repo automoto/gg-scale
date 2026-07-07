@@ -77,10 +77,10 @@ templ-generate: ## Regenerate *_templ.go dashboard templates
 	go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
 
 # Regenerates openapi.yaml (the /v1 JSON API spec, used for SDK generation)
-# from the router/handler source via ehabterra/apispec + apispec.yaml. Builds
-# a patched apispec on first run — see scripts/gen-openapi.sh for why.
+# directly from the huma-registered /v1 operations — the spec is emitted from
+# the handlers themselves, so it cannot drift. See docs/openapi-generation.md.
 openapi: ## Regenerate openapi.yaml from the /v1 routes
-	@bash scripts/gen-openapi.sh
+	@go run ./cmd/openapi-dump openapi.yaml
 
 # Regenerates internal/fleet/plugin/proto/*.pb.go from fleet.proto. The
 # generated files are committed so CI does not need protoc; this target only

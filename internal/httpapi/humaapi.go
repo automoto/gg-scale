@@ -47,6 +47,18 @@ func newHumaConfig(version string) huma.Config {
 	cfg.Info.Description = "Player-facing and game-server-facing HTTP API for ggscale. " +
 		"Authenticate with a tenant API key (Authorization: Bearer). Player endpoints " +
 		"additionally require a session token in X-Session-Token."
+	cfg.Info.Contact = &huma.Contact{
+		Name: "ggscale",
+		URL:  "https://github.com/ggscale/ggscale",
+	}
+	cfg.Servers = []*huma.Server{
+		{URL: "http://localhost:8080", Description: "Local development server (default HTTP_ADDR)"},
+		{
+			URL:         "https://{host}",
+			Description: "Self-hosted or managed deployment",
+			Variables:   map[string]*huma.ServerVariable{"host": {Default: "ggscale.example.com"}},
+		},
+	}
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		"ApiKeyAuth": {
 			Type:        "http",
