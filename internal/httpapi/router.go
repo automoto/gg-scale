@@ -308,8 +308,13 @@ func NewRouter(d Deps) http.Handler {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 					mountRealtimeRoutes(r, d)
-					mountMatchmakerRoutes(r, d)
-					mountGameSessionRoutes(r, d)
+
+					if d.Matchmaker != nil {
+						r.Group(func(r chi.Router) {
+							r.Use(tenant.RequireKeyScope(tenant.ScopeMatchmaker))
+							registerMatchmakerRoutes(groupAPI(r, humaCfg), d)
+						})
+					}
 
 					if d.ServerList != nil {
 						r.Group(func(r chi.Router) {
@@ -336,6 +341,7 @@ func NewRouter(d Deps) http.Handler {
 					registerLeaderboardReadRoutes(papi, d)
 					registerFriendRoutes(papi, d)
 					registerRemoteAddrRoutes(papi, d)
+					registerGameSessionRoutes(papi, d)
 
 					// Score submission is server-authoritative: only
 					// callers with a secret key (game server / tenant

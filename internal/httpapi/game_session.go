@@ -7,14 +7,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 var (
@@ -33,20 +32,22 @@ func (a gameSessionAddr) valid() bool {
 	return a.Port >= 1 && a.Port <= 65535
 }
 
+// Request fields are schema-optional so the handlers keep ownership of their
+// (cross-field) validation → 400, matching the pre-migration wire.
 type gameSessionCreateRequest struct {
-	TitleID    string          `json:"title_id"`
-	PublicAddr gameSessionAddr `json:"public_addr"`
-	Props      json.RawMessage `json:"props"`
-	MaxPlayers int             `json:"max_players"`
-	Private    bool            `json:"private"`
+	TitleID    string          `json:"title_id,omitempty"`
+	PublicAddr gameSessionAddr `json:"public_addr,omitempty"`
+	Props      json.RawMessage `json:"props,omitempty"`
+	MaxPlayers int             `json:"max_players,omitempty"`
+	Private    bool            `json:"private,omitempty"`
 }
 
 type gameSessionJoinRequest struct {
-	PublicAddr gameSessionAddr `json:"public_addr"`
+	PublicAddr gameSessionAddr `json:"public_addr,omitempty"`
 }
 
 type gameSessionHeartbeatRequest struct {
-	QoS *json.RawMessage `json:"qos"`
+	QoS *json.RawMessage `json:"qos,omitempty"`
 }
 
 type peerEntry struct {
@@ -81,36 +82,126 @@ func buildPeerEntries(rows []sqlcgen.ListGameSessionPeersRow) []peerEntry {
 	return out
 }
 
-// POST /v1/game-session
-func gameSessionCreateHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req gameSessionCreateRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
+type gameSessionOutput struct {
+	Body gameSessionResponse
+}
 
-		ctx := r.Context()
+type gameSessionCreateInput struct {
+	Body gameSessionCreateRequest
+}
+
+type gameSessionIDInput struct {
+	ID string `path:"id"`
+}
+
+type gameSessionJoinInput struct {
+	ID   string `path:"id"`
+	Body gameSessionJoinRequest
+}
+
+type gameSessionHeartbeatInput struct {
+	ID   string `path:"id"`
+	Body gameSessionHeartbeatRequest
+}
+
+type gameSessionResolveInput struct {
+	JoinCode string `query:"joinCode"`
+}
+
+type gameSessionResolveResult struct {
+	SessionID string `json:"session_id"`
+}
+
+type gameSessionResolveOutput struct {
+	Body gameSessionResolveResult
+}
+
+type gameSessionHeartbeatResult struct {
+	OK    bool        `json:"ok"`
+	Peers []peerEntry `json:"peers"`
+}
+
+type gameSessionHeartbeatOutput struct {
+	Body gameSessionHeartbeatResult
+}
+
+func registerGameSessionRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID:   "createGameSession",
+		Method:        http.MethodPost,
+		Path:          "/v1/game-session",
+		Summary:       "Create a game session",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusCreated,
+	}, gameSessionCreate(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "resolveGameSession",
+		Method:      http.MethodGet,
+		Path:        "/v1/game-session",
+		Summary:     "Resolve a game session by join code",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, gameSessionResolve(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "getGameSession",
+		Method:      http.MethodGet,
+		Path:        "/v1/game-session/{id}",
+		Summary:     "Get a game session",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, gameSessionGet(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "joinGameSession",
+		Method:      http.MethodPost,
+		Path:        "/v1/game-session/{id}/join",
+		Summary:     "Join a game session",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, gameSessionJoin(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "heartbeatGameSession",
+		Method:      http.MethodPost,
+		Path:        "/v1/game-session/{id}/heartbeat",
+		Summary:     "Heartbeat a game session peer",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, gameSessionHeartbeat(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "leaveGameSession",
+		Method:        http.MethodDelete,
+		Path:          "/v1/game-session/{id}",
+		Summary:       "Leave (or, for the host, end) a game session",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, gameSessionLeave(d))
+}
+
+func gameSessionCreate(d Deps) func(context.Context, *gameSessionCreateInput) (*gameSessionOutput, error) {
+	return func(ctx context.Context, in *gameSessionCreateInput) (*gameSessionOutput, error) {
+		req := in.Body
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		hostUserID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		if !req.PublicAddr.valid() {
-			http.Error(w, "public_addr.port out of range", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("public_addr.port out of range")
 		}
 		if req.MaxPlayers > gamesession.MaxPlayersLimit {
-			http.Error(w, "max_players exceeds limit", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("max_players exceeds limit")
 		}
 		if d.GameSessions == nil {
-			http.Error(w, "game sessions unavailable", http.StatusServiceUnavailable)
-			return
+			return nil, huma.Error503ServiceUnavailable("game sessions unavailable")
 		}
 
 		created, err := d.GameSessions.Create(ctx, gamesession.CreateParams{
@@ -130,19 +221,17 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, gamesession.ErrProjectCapped):
-			http.Error(w, "session limit reached for this project", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("session limit reached for this project")
 		case err != nil:
-			webutil.InternalError(w, "game session create", err)
-			return
+			return nil, serverError(ctx, "game session create", err)
 		}
 
-		writeJSONStatus(w, http.StatusCreated, gameSessionResponse{
+		return &gameSessionOutput{Body: gameSessionResponse{
 			SessionID: created.SessionID,
 			JoinCode:  created.JoinCode,
 			State:     created.State,
 			Peers:     buildPeerEntries(created.Peers),
-		})
+		}}, nil
 	}
 }
 
@@ -170,20 +259,16 @@ func canAccessPrivateSession(ctx context.Context, q *sqlcgen.Queries, sessionID 
 	return invites > 0, nil
 }
 
-// GET /v1/game-session/{id}
-func gameSessionGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		sessionID := chi.URLParam(r, "id")
+func gameSessionGet(d Deps) func(context.Context, *gameSessionIDInput) (*gameSessionOutput, error) {
+	return func(ctx context.Context, in *gameSessionIDInput) (*gameSessionOutput, error) {
+		sessionID := in.ID
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
 		var (
@@ -212,40 +297,33 @@ func gameSessionGetHandler(d Deps) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errGameSessionForbidden) {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
+				return nil, huma.Error404NotFound("not found")
 			}
-			webutil.InternalError(w, "game session get: tx", err)
-			return
+			return nil, serverError(ctx, "game session get: tx", err)
 		}
 
-		writeJSON(w, gameSessionResponse{
+		return &gameSessionOutput{Body: gameSessionResponse{
 			SessionID: sess.ID,
 			JoinCode:  sess.JoinCode,
 			State:     sess.State,
 			Peers:     buildPeerEntries(peers),
-		})
+		}}, nil
 	}
 }
 
-// GET /v1/game-session?joinCode=<code>
-func gameSessionResolveHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		joinCode := r.URL.Query().Get("joinCode")
+func gameSessionResolve(d Deps) func(context.Context, *gameSessionResolveInput) (*gameSessionResolveOutput, error) {
+	return func(ctx context.Context, in *gameSessionResolveInput) (*gameSessionResolveOutput, error) {
+		joinCode := in.JoinCode
 		if joinCode == "" {
-			http.Error(w, "joinCode required", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("joinCode required")
 		}
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
 		var row sqlcgen.GetGameSessionByJoinCodeRow
@@ -271,40 +349,29 @@ func gameSessionResolveHandler(d Deps) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errGameSessionForbidden) {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
+				return nil, huma.Error404NotFound("not found")
 			}
-			webutil.InternalError(w, "game session resolve: tx", err)
-			return
+			return nil, serverError(ctx, "game session resolve: tx", err)
 		}
 
-		writeJSON(w, map[string]string{"session_id": row.ID})
+		return &gameSessionResolveOutput{Body: gameSessionResolveResult{SessionID: row.ID}}, nil
 	}
 }
 
-// POST /v1/game-session/{id}/join
-func gameSessionJoinHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req gameSessionJoinRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-
-		ctx := r.Context()
-		sessionID := chi.URLParam(r, "id")
+func gameSessionJoin(d Deps) func(context.Context, *gameSessionJoinInput) (*gameSessionOutput, error) {
+	return func(ctx context.Context, in *gameSessionJoinInput) (*gameSessionOutput, error) {
+		req := in.Body
+		sessionID := in.ID
 		joinerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 		if !req.PublicAddr.valid() {
-			http.Error(w, "public_addr.port out of range", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("public_addr.port out of range")
 		}
 
 		ip := req.PublicAddr.IP
@@ -364,42 +431,31 @@ func gameSessionJoinHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows), errors.Is(err, errGameSessionForbidden):
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		case errors.Is(err, errGameSessionEnded), errors.Is(err, errGameSessionExpired):
-			http.Error(w, "session no longer joinable", http.StatusGone)
-			return
+			return nil, huma.Error410Gone("session no longer joinable")
 		case errors.Is(err, errGameSessionFull):
-			http.Error(w, "session is full", http.StatusConflict)
-			return
+			return nil, huma.Error409Conflict("session is full")
 		case err != nil:
-			webutil.InternalError(w, "game session join: tx", err)
-			return
+			return nil, serverError(ctx, "game session join: tx", err)
 		}
 
-		writeJSON(w, gameSessionResponse{
+		return &gameSessionOutput{Body: gameSessionResponse{
 			SessionID: sess.ID,
 			JoinCode:  sess.JoinCode,
 			State:     sess.State,
 			Peers:     buildPeerEntries(peers),
-		})
+		}}, nil
 	}
 }
 
-// POST /v1/game-session/{id}/heartbeat
-func gameSessionHeartbeatHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req gameSessionHeartbeatRequest
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-
-		ctx := r.Context()
-		sessionID := chi.URLParam(r, "id")
+func gameSessionHeartbeat(d Deps) func(context.Context, *gameSessionHeartbeatInput) (*gameSessionHeartbeatOutput, error) {
+	return func(ctx context.Context, in *gameSessionHeartbeatInput) (*gameSessionHeartbeatOutput, error) {
+		req := in.Body
+		sessionID := in.ID
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		// nil qos preserves the stored value (see TouchGameSessionPeer).
@@ -435,32 +491,26 @@ func gameSessionHeartbeatHandler(d Deps) http.HandlerFunc {
 			return qerr
 		})
 		if err != nil {
-			webutil.InternalError(w, "game session heartbeat: tx", err)
-			return
+			return nil, serverError(ctx, "game session heartbeat: tx", err)
 		}
 		if !isMember {
-			http.Error(w, "not a member of this session", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not a member of this session")
 		}
 
-		writeJSON(w, map[string]any{"ok": true, "peers": buildPeerEntries(peers)})
+		return &gameSessionHeartbeatOutput{Body: gameSessionHeartbeatResult{OK: true, Peers: buildPeerEntries(peers)}}, nil
 	}
 }
 
-// DELETE /v1/game-session/{id}
-func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		sessionID := chi.URLParam(r, "id")
+func gameSessionLeave(d Deps) func(context.Context, *gameSessionIDInput) (*struct{}, error) {
+	return func(ctx context.Context, in *gameSessionIDInput) (*struct{}, error) {
+		sessionID := in.ID
 		callerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "api key has no project pin", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
@@ -489,13 +539,11 @@ func gameSessionLeaveHandler(d Deps) http.HandlerFunc {
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				http.Error(w, "not found", http.StatusNotFound)
-				return
+				return nil, huma.Error404NotFound("not found")
 			}
-			webutil.InternalError(w, "game session leave: tx", err)
-			return
+			return nil, serverError(ctx, "game session leave: tx", err)
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }

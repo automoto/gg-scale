@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
@@ -20,7 +21,6 @@ import (
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const (
@@ -189,64 +189,89 @@ func normalizeTicketCounts(req *matchmakerTicketRequest, mode matchmaker.Mode) s
 	return ""
 }
 
-func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+type matchmakerCreateInput struct {
+	Body matchmakerTicketRequest
+}
+
+type matchmakerTicketOutput struct {
+	Body matchmakerTicketResponse
+}
+
+type matchmakerTicketIDInput struct {
+	ID int64 `path:"id"`
+}
+
+func registerMatchmakerRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID:   "createMatchmakerTicket",
+		Method:        http.MethodPost,
+		Path:          "/v1/matchmaker/tickets",
+		Summary:       "Create a matchmaking ticket",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusCreated,
+		MaxBodyBytes:  64 << 10,
+	}, matchmakerCreateTicket(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "getMatchmakerTicket",
+		Method:      http.MethodGet,
+		Path:        "/v1/matchmaker/tickets/{id}",
+		Summary:     "Get a matchmaking ticket",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, matchmakerGetTicket(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "cancelMatchmakerTicket",
+		Method:        http.MethodDelete,
+		Path:          "/v1/matchmaker/tickets/{id}",
+		Summary:       "Cancel a matchmaking ticket",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, matchmakerCancelTicket(d))
+}
+
+func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
+	return func(ctx context.Context, in *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
 		tenantID, err := db.TenantFromContext(ctx)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "no project", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("no project")
 		}
 		playerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		req, err := webutil.DecodeJSON[matchmakerTicketRequest](w, r, 64<<10)
-		if err != nil {
-			if errors.Is(err, webutil.ErrBodyTooLarge) {
-				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
+		req := in.Body
 		if len(req.Attributes) > 0 && !json.Valid(req.Attributes) {
-			http.Error(w, "attributes must be valid JSON", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("attributes must be valid JSON")
 		}
 		mode, problem := resolveTicketMode(&req)
 		if problem != "" {
-			http.Error(w, problem, http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest(problem)
 		}
 		if d.RBAC == nil {
-			http.Error(w, "authorization unavailable", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("authorization unavailable")
 		}
 		allowed, aerr := d.RBAC.CanPlayer(tenantID, playerID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
 		if aerr != nil {
-			http.Error(w, "authorization check failed", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("authorization check failed")
 		}
 		if !allowed {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("forbidden")
 		}
 		enabled, ferr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureMatchmaker)
 		if ferr != nil {
-			http.Error(w, "feature check failed", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("feature check failed")
 		}
 		if !enabled {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden("forbidden")
 		}
 		var fleetID int64
 		if mode == matchmaker.ModeFleetAllocation {
@@ -255,49 +280,40 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 			// entitlement.
 			key, ok := tenant.APIKeyFromContext(ctx)
 			if !ok {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
+				return nil, huma.Error401Unauthorized("unauthorized")
 			}
 			if !key.HasScope(tenant.ScopeFleet) {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
+				return nil, huma.Error403Forbidden("forbidden")
 			}
 			dedicated, derr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureDedicatedServers)
 			if derr != nil {
-				http.Error(w, "feature check failed", http.StatusInternalServerError)
-				return
+				return nil, huma.Error500InternalServerError("feature check failed")
 			}
 			if !dedicated {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
+				return nil, huma.Error403Forbidden("forbidden")
 			}
 			if d.Fleet == nil {
-				http.Error(w, "fleet backend not configured", http.StatusServiceUnavailable)
-				return
+				return nil, huma.Error503ServiceUnavailable("fleet backend not configured")
 			}
 			f, gerr := d.Fleet.Fleets().GetByName(ctx, projectID, req.Fleet)
 			if errors.Is(gerr, fleet.ErrFleetNotFound) {
-				http.Error(w, "unknown fleet", http.StatusBadRequest)
-				return
+				return nil, huma.Error400BadRequest("unknown fleet")
 			}
 			if gerr != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+				return nil, huma.Error500InternalServerError("internal error")
 			}
 			fleetID = f.ID
 		}
-		if !allowMatchmakerAction(w, r, d, tenantID, projectID, playerID, "create", matchmakerCreateRate, matchmakerCreateBurst) {
-			return
+		if aerr := allowMatchmakerAction(ctx, d, tenantID, projectID, playerID, "create", matchmakerCreateRate, matchmakerCreateBurst); aerr != nil {
+			return nil, aerr
 		}
 		// d.Pool is required to mount the router; nil only in handler unit
 		// tests, where the ban check has nothing to consult anyway.
 		if d.Pool != nil {
 			if banned, berr := playerTenantBanned(ctx, d, playerID); berr != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+				return nil, huma.Error500InternalServerError("internal error")
 			} else if banned {
-				http.Error(w, "account banned", http.StatusForbidden)
-				return
+				return nil, huma.Error403Forbidden("account banned")
 			}
 		}
 
@@ -325,134 +341,98 @@ func matchmakerCreateTicketHandler(d Deps) http.HandlerFunc {
 		}
 		ticket, err := d.Matchmaker.Enqueue(ctx, enq)
 		if errors.Is(err, matchmaker.ErrTicketLimit) {
-			http.Error(w, "too many queued tickets", http.StatusTooManyRequests)
-			return
+			return nil, huma.Error429TooManyRequests("too many queued tickets")
 		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
 		d.Metrics.MatchmakerTicket()
-		writeTicket(w, ticket, http.StatusCreated)
+		return &matchmakerTicketOutput{Body: ticketResponse(ticket, nil)}, nil
 	}
 }
 
-func matchmakerGetTicketHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := parseTicketID(w, r)
+func matchmakerGetTicket(d Deps) func(context.Context, *matchmakerTicketIDInput) (*matchmakerTicketOutput, error) {
+	return func(ctx context.Context, in *matchmakerTicketIDInput) (*matchmakerTicketOutput, error) {
+		playerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
-		playerID, ok := playerauth.IDFromContext(r.Context())
-		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
-		}
-		ticket, err := d.Matchmaker.Get(r.Context(), id, playerID)
+		ticket, err := d.Matchmaker.Get(ctx, in.ID, playerID)
 		if errors.Is(err, matchmaker.ErrNotFound) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
 		// Matched tickets carry their roster (and session/allocation
 		// details) so a missed WebSocket event is recoverable by polling.
 		// A match past its retention window degrades to the bare ticket.
 		var match *matchmaker.Match
 		if ticket.MatchID != "" {
-			m, merr := d.Matchmaker.GetMatch(r.Context(), ticket.MatchID)
+			m, merr := d.Matchmaker.GetMatch(ctx, ticket.MatchID)
 			if merr != nil && !errors.Is(merr, matchmaker.ErrNotFound) {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
+				return nil, huma.Error500InternalServerError("internal error")
 			}
 			match = m
 		}
-		writeMatchedTicket(w, ticket, match, http.StatusOK)
+		return &matchmakerTicketOutput{Body: ticketResponse(ticket, match)}, nil
 	}
 }
 
-func matchmakerCancelTicketHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, ok := parseTicketID(w, r)
+func matchmakerCancelTicket(d Deps) func(context.Context, *matchmakerTicketIDInput) (*struct{}, error) {
+	return func(ctx context.Context, in *matchmakerTicketIDInput) (*struct{}, error) {
+		playerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
-		playerID, ok := playerauth.IDFromContext(r.Context())
+		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error400BadRequest("no project")
 		}
-		projectID, ok := db.ProjectFromContext(r.Context())
-		if !ok {
-			http.Error(w, "no project", http.StatusBadRequest)
-			return
-		}
-		tenantID, err := db.TenantFromContext(r.Context())
+		tenantID, err := db.TenantFromContext(ctx)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
+			return nil, huma.Error500InternalServerError("internal error")
 		}
-		if !allowMatchmakerAction(w, r, d, tenantID, projectID, playerID, "cancel", matchmakerCancelRate, matchmakerCancelBurst) {
-			return
+		if aerr := allowMatchmakerAction(ctx, d, tenantID, projectID, playerID, "cancel", matchmakerCancelRate, matchmakerCancelBurst); aerr != nil {
+			return nil, aerr
 		}
-		err = d.Matchmaker.Cancel(r.Context(), id, playerID)
-		switch {
+		switch err = d.Matchmaker.Cancel(ctx, in.ID, playerID); {
 		case errors.Is(err, matchmaker.ErrNotFound):
-			http.Error(w, "not found", http.StatusNotFound)
+			return nil, huma.Error404NotFound("not found")
 		case errors.Is(err, matchmaker.ErrAlreadyTerminal):
-			http.Error(w, "ticket already finalised", http.StatusConflict)
+			return nil, huma.Error409Conflict("ticket already finalised")
 		case err != nil:
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		default:
-			w.WriteHeader(http.StatusNoContent)
+			return nil, huma.Error500InternalServerError("internal error")
 		}
+		return nil, nil
 	}
 }
 
-func allowMatchmakerAction(w http.ResponseWriter, r *http.Request, d Deps, tenantID, projectID, playerID int64, action string, rate, burst float64) bool {
+// allowMatchmakerAction enforces the per-action token bucket. On denial it
+// returns a 429 problem+json carrying the canonical Retry-After header.
+func allowMatchmakerAction(ctx context.Context, d Deps, tenantID, projectID, playerID int64, action string, rate, burst float64) error {
 	if d.Limiter == nil {
-		http.Error(w, "rate limiter unavailable", http.StatusInternalServerError)
-		return false
+		return huma.Error500InternalServerError("rate limiter unavailable")
 	}
 	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, playerID)
-	decision, err := d.Limiter.Allow(r.Context(), key, rate, burst)
+	decision, err := d.Limiter.Allow(ctx, key, rate, burst)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return false
+		return huma.Error500InternalServerError("internal error")
 	}
 	if decision.Allowed {
-		return true
+		return nil
 	}
 	retrySec := int(math.Ceil(decision.RetryAfter.Seconds()))
 	if retrySec < 1 {
 		retrySec = 1
 	}
-	w.Header().Set("Retry-After", strconv.Itoa(retrySec))
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusTooManyRequests)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error":               "rate_limit_exceeded",
-		"retry_after_seconds": retrySec,
-	})
-	return false
+	return huma.ErrorWithHeaders(
+		huma.Error429TooManyRequests("rate_limit_exceeded"),
+		http.Header{"Retry-After": []string{strconv.Itoa(retrySec)}},
+	)
 }
 
-func parseTicketID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
-		return 0, false
-	}
-	return id, true
-}
-
-func writeTicket(w http.ResponseWriter, t *matchmaker.Ticket, status int) {
-	writeMatchedTicket(w, t, nil, status)
-}
-
-func writeMatchedTicket(w http.ResponseWriter, t *matchmaker.Ticket, m *matchmaker.Match, status int) {
+func ticketResponse(t *matchmaker.Ticket, m *matchmaker.Match) matchmakerTicketResponse {
 	resp := matchmakerTicketResponse{
 		ID:                t.ID,
 		Status:            string(t.Status),
@@ -483,7 +463,5 @@ func writeMatchedTicket(w http.ResponseWriter, t *matchmaker.Ticket, m *matchmak
 		resp.SessionID = m.SessionID
 		resp.JoinCode = m.JoinCode
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(resp)
+	return resp
 }

@@ -46,28 +46,3 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		MaxPerPlayer: d.RealtimeMaxPerPlayer,
 	}))
 }
-
-func mountMatchmakerRoutes(r chi.Router, d Deps) {
-	if d.Matchmaker == nil {
-		return
-	}
-	r.Route("/matchmaker/tickets", func(r chi.Router) {
-		r.Use(tenant.RequireKeyScope(tenant.ScopeMatchmaker))
-		r.Post("/", matchmakerCreateTicketHandler(d))
-		r.Get("/{id}", matchmakerGetTicketHandler(d))
-		r.Delete("/{id}", matchmakerCancelTicketHandler(d))
-	})
-}
-
-func mountGameSessionRoutes(r chi.Router, d Deps) {
-	r.Route("/game-session", func(r chi.Router) {
-		r.Post("/", gameSessionCreateHandler(d))
-		r.Get("/", gameSessionResolveHandler(d))
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", gameSessionGetHandler(d))
-			r.Post("/join", gameSessionJoinHandler(d))
-			r.Post("/heartbeat", gameSessionHeartbeatHandler(d))
-			r.Delete("/", gameSessionLeaveHandler(d))
-		})
-	})
-}

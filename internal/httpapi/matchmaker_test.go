@@ -43,7 +43,10 @@ func matchmakerTestRouter(t *testing.T, d Deps, key tenant.APIKey) http.Handler 
 				next.ServeHTTP(w, req.WithContext(ctx))
 			})
 		})
-		mountMatchmakerRoutes(r, d)
+		r.Group(func(r chi.Router) {
+			r.Use(tenant.RequireKeyScope(tenant.ScopeMatchmaker))
+			registerMatchmakerRoutes(groupAPI(r, newHumaConfig("test")), d)
+		})
 	})
 	return r
 }
