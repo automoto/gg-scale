@@ -1,0 +1,52 @@
+# Hand-maintained operations merged into the generated openapi.yaml by
+# scripts/gen-openapi.sh (via scripts/openapi-overlay). Only add entries here
+# when apispec cannot extract them — see docs/openapi-generation.md.
+#
+# Keep in sync with the handlers:
+#   /v1/server/player-sessions/verify → internal/httpapi/player_sessions_verify.go
+paths:
+    /v1/server/player-sessions/verify:
+        post:
+            operationId: github.com/ggscale/ggscale/internal/httpapi.playerSessionVerifyHandler
+            summary: Verify a player session token (server-tier)
+            description: >-
+                Game-server endpoint: the secret API key in Authorization
+                authenticates the calling workload; the body carries the
+                player's session token to verify. Every failure mode returns
+                the same opaque 401 so the endpoint cannot be used as a
+                session-validity oracle.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_playerVerifyRequest'
+            responses:
+                # Remove the generator's "no response found" stub (a null
+                # overlay value deletes the key — see scripts/openapi-overlay).
+                default: null
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_playerVerifyResponse'
+                "401":
+                    description: Invalid session (opaque; covers all failure modes)
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    error:
+                                        type: string
+            security:
+                - ApiKeyAuth: []
+components:
+    schemas:
+        github_com_ggscale_ggscale_internal_httpapi_playerVerifyRequest:
+            type: object
+            properties:
+                session_token:
+                    type: string
+            required:
+                - session_token

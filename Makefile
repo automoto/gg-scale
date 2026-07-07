@@ -1,5 +1,5 @@
 .PHONY: help build fmt test test-integration test-plugins e2e e2e-docker e2e-agones \
-	lint vulncheck check sqlc-gen templ-generate \
+	lint vulncheck check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-fleet-docker down-fleet-docker \
@@ -75,6 +75,12 @@ sqlc-gen: ## Regenerate sqlc queries (Docker, pinned version)
 
 templ-generate: ## Regenerate *_templ.go dashboard templates
 	go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
+
+# Regenerates openapi.yaml (the /v1 JSON API spec, used for SDK generation)
+# from the router/handler source via ehabterra/apispec + apispec.yaml. Builds
+# a patched apispec on first run — see scripts/gen-openapi.sh for why.
+openapi: ## Regenerate openapi.yaml from the /v1 routes
+	@bash scripts/gen-openapi.sh
 
 # Regenerates internal/fleet/plugin/proto/*.pb.go from fleet.proto. The
 # generated files are committed so CI does not need protoc; this target only

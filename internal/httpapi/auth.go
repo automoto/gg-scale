@@ -782,9 +782,19 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, into any) bool {
 	return true
 }
 
+// writeJSON and writeJSONStatus deliberately do not share a body: the OpenAPI
+// generator resolves the response type from the handler's direct call site and
+// loses it behind a second level of indirection (see docs/openapi-generation.md).
+// Keep their serialization logic in sync by hand.
 func writeJSON(w http.ResponseWriter, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	//nolint:gosec // gosec G117 false-positive: handler contract is to return tokens.
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 }
 

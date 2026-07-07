@@ -182,8 +182,7 @@ func gameInviteCreateHandler(d Deps) http.HandlerFunc {
 			})
 		}
 
-		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, map[string]int64{"invite_id": inviteID})
+		writeJSONStatus(w, http.StatusCreated, map[string]int64{"invite_id": inviteID})
 	}
 }
 

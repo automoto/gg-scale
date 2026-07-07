@@ -221,8 +221,7 @@ func gameSessionCreateHandler(d Deps) http.HandlerFunc {
 			return
 		}
 
-		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, gameSessionResponse{
+		writeJSONStatus(w, http.StatusCreated, gameSessionResponse{
 			SessionID: sess.ID,
 			JoinCode:  sess.JoinCode,
 			State:     sess.State,

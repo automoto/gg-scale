@@ -1,0 +1,2380 @@
+openapi: 3.1.1
+info:
+  title: ggscale API
+  description: 'Player-facing and game-server-facing HTTP API for ggscale. Authenticate with a tenant API key (Authorization: Bearer). Player endpoints additionally require a session token in X-Session-Token.'
+  version: 1.0.0
+  contact:
+    name: ggscale
+    url: https://github.com/ggscale/ggscale
+  license:
+    name: ""
+servers:
+  - url: http://localhost:8080
+    description: Local development server (default HTTP_ADDR)
+  - url: https://{host}
+    description: Self-hosted or managed deployment
+    variables:
+      host:
+        default: ggscale.example.com
+paths:
+  /v1/account/remote-addrs:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.ownerRemoteAddrGetHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload'
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    put:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.ownerRemoteAddrPutHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/auth/anonymous:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.anonymousHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_anonymousResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/custom-token:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.customTokenHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_customTokenRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_sessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/login:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.loginHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_loginRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_sessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/logout:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.logoutHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_logoutRequest'
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/refresh:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.refreshHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_refreshRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_sessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/signup:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.signupHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_signupRequest'
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/auth/verify:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.verifyHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_verifyRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          description: Too Many Requests
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/fleets/{fleet}/servers:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.fleetServersListHandler
+      parameters:
+        - name: fleet
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_listServersResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "503":
+          description: Service Unavailable
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/fleets/heartbeat:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.fleetHeartbeatHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_heartbeatRequest'
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          description: Too Many Requests
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "503":
+          description: Service Unavailable
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/friends/:
+    get:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendsListHandler
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}:
+    delete:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendDeleteHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/accept:
+    post:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendAcceptHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "409":
+          description: Conflict
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/block:
+    post:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendBlockHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/reject:
+    post:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendRejectHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "409":
+          description: Conflict
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/remote-addrs:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendRemoteAddrGetHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/request:
+    post:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendRequestHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/friends/{player_id}/unblock:
+    post:
+      tags:
+        - /v1/friends
+      operationId: github.com/ggscale/ggscale/internal/httpapi.friendUnblockHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/untyped-string'
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/game-session/:
+    get:
+      tags:
+        - /v1/game-session
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionResolveHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    post:
+      tags:
+        - /v1/game-session
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionCreateHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionCreateRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          description: Too Many Requests
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/game-session/{id}/:
+    get:
+      tags:
+        - /v1/game-session/{id}
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionGetHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    delete:
+      tags:
+        - /v1/game-session/{id}
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionLeaveHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/game-session/{id}/heartbeat:
+    post:
+      tags:
+        - /v1/game-session/{id}
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionHeartbeatHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionHeartbeatRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/game-session/{id}/join:
+    post:
+      tags:
+        - /v1/game-session/{id}
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameSessionJoinHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionJoinRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "409":
+          description: Conflict
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "410":
+          description: Gone
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/healthz:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.healthzHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+  /v1/invite/:
+    get:
+      tags:
+        - /v1/invite
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameInviteListHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    post:
+      tags:
+        - /v1/invite
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameInviteCreateHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameInviteCreateRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: integer
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "409":
+          description: Conflict
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/invite/{id}:
+    delete:
+      tags:
+        - /v1/invite
+      operationId: github.com/ggscale/ggscale/internal/httpapi.gameInviteDeleteHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/leaderboards/{id}/around-me:
+    get:
+      tags:
+        - /v1/leaderboards
+      operationId: github.com/ggscale/ggscale/internal/httpapi.leaderboardAroundMeHandler
+      parameters:
+        - name: radius
+          in: query
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/leaderboards/{id}/scores:
+    post:
+      tags:
+        - /v1/leaderboards
+      operationId: github.com/ggscale/ggscale/internal/httpapi.leaderboardSubmitHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_submitScoreRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/leaderboards/{id}/top:
+    get:
+      tags:
+        - /v1/leaderboards
+      operationId: github.com/ggscale/ggscale/internal/httpapi.leaderboardTopHandler
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: integer
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/matchmaker/tickets/:
+    post:
+      tags:
+        - /v1/matchmaker/tickets
+      operationId: github.com/ggscale/ggscale/internal/httpapi.matchmakerCreateTicketHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketRequest'
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "503":
+          description: Service Unavailable
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/matchmaker/tickets/{id}:
+    get:
+      tags:
+        - /v1/matchmaker/tickets
+      operationId: github.com/ggscale/ggscale/internal/httpapi.matchmakerGetTicketHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    delete:
+      tags:
+        - /v1/matchmaker/tickets
+      operationId: github.com/ggscale/ggscale/internal/httpapi.matchmakerCancelTicketHandler
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "409":
+          description: Conflict
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "429":
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/presence:
+    put:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.presenceUpdateHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_presenceUpdateRequest'
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/profile/:
+    get:
+      tags:
+        - /v1/profile
+      operationId: github.com/ggscale/ggscale/internal/httpapi.profileGetHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_profileResponse'
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    patch:
+      tags:
+        - /v1/profile
+      operationId: github.com/ggscale/ggscale/internal/httpapi.profilePatchHandler
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_profilePatchRequest'
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json: {}
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/relay/credentials:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.relayCredentialsHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_relay_Credentials'
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "403":
+          description: Forbidden
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/server/player-sessions/verify:
+    post:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.playerSessionVerifyHandler
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_playerVerifyResponse'
+        "401":
+          description: Invalid session (opaque; covers all failure modes)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+      security:
+        - ApiKeyAuth: []
+      summary: Verify a player session token (server-tier)
+      description: >-
+        Game-server endpoint: the secret API key in Authorization authenticates the calling workload; the body carries the player's session token to verify. Every failure mode returns the same opaque 401 so the endpoint cannot be used as a session-validity oracle.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_playerVerifyRequest'
+  /v1/server/players/{player_id}/remote-addrs:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/httpapi.serverRemoteAddrGetHandler
+      parameters:
+        - name: player_id
+          in: path
+          required: true
+          schema:
+            type: string
+          x-warning: This parameter is present in the path but not found in the code.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+  /v1/storage/objects:
+    get:
+      tags:
+        - /v1/storage
+      operationId: github.com/ggscale/ggscale/internal/httpapi.storageListHandler
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: string
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/storage/objects/{key}:
+    get:
+      tags:
+        - /v1/storage
+      operationId: github.com/ggscale/ggscale/internal/httpapi.storageGetHandler
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_storageObjectResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "404":
+          description: Not Found
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    put:
+      tags:
+        - /v1/storage
+      operationId: github.com/ggscale/ggscale/internal/httpapi.storagePutHandler
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_storageObjectResponse'
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "412":
+          description: Precondition Failed
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "413":
+          description: Request Entity Too Large
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+    delete:
+      tags:
+        - /v1/storage
+      operationId: github.com/ggscale/ggscale/internal/httpapi.storageDeleteHandler
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: No Content
+          content:
+            application/json: {}
+        "400":
+          description: Bad Request
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+        "500":
+          description: Internal Server Error
+          content:
+            text/plain; charset=utf-8:
+              schema:
+                type: string
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+  /v1/ws:
+    get:
+      tags:
+        - /v1
+      operationId: github.com/ggscale/ggscale/internal/realtime.ServeWS
+      responses:
+        default:
+          description: Default response (no response found)
+          content:
+            application/json:
+              schema:
+                type: object
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+components:
+  schemas:
+    github_com_ggscale_ggscale_internal_httpapi_anonymousResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        expires_at:
+          type: string
+        external_id:
+          type: string
+        player_id:
+          type: integer
+        refresh_token:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_customTokenRequest:
+      type: object
+      properties:
+        token:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_gameInviteCreateRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        to_email:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_gameSessionAddr:
+      type: object
+      properties:
+        ip:
+          type: string
+        port:
+          type: integer
+    github_com_ggscale_ggscale_internal_httpapi_gameSessionCreateRequest:
+      type: object
+      properties:
+        max_players:
+          type: integer
+        private:
+          type: boolean
+        props:
+          type: string
+          description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        public_addr:
+          $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionAddr'
+        title_id:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_gameSessionHeartbeatRequest:
+      type: object
+      properties:
+        qos:
+          type: string
+          description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+    github_com_ggscale_ggscale_internal_httpapi_gameSessionJoinRequest:
+      type: object
+      properties:
+        public_addr:
+          $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionAddr'
+    github_com_ggscale_ggscale_internal_httpapi_gameSessionResponse:
+      type: object
+      properties:
+        join_code:
+          type: string
+        peers:
+          type: array
+          items:
+            $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_peerEntry'
+        session_id:
+          type: string
+        state:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_heartbeatRequest:
+      type: object
+      properties:
+        address:
+          type: string
+        agones_name:
+          type: string
+        current_players:
+          type: integer
+        fleet:
+          type: string
+        game_mode:
+          type: string
+        level:
+          type: string
+        max_players:
+          type: integer
+        name:
+          type: string
+        region:
+          type: string
+        version:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_listServersResponse:
+      type: object
+      properties:
+        servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_serverlist_Server'
+    github_com_ggscale_ggscale_internal_httpapi_loginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_logoutRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketRequest:
+      type: object
+      properties:
+        attributes:
+          type: string
+          description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        fleet:
+          type: string
+        game_mode:
+          type: string
+        region:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_matchmakerTicketResponse:
+      type: object
+      properties:
+        attributes:
+          type: string
+          description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        created_at:
+          type: string
+        game_mode:
+          type: string
+        id:
+          type: integer
+        match_address:
+          type: string
+        matched_at:
+          type: string
+        protocol_hint:
+          type: string
+        region:
+          type: string
+        status:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_peerEntry:
+      type: object
+      properties:
+        addr:
+          $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_gameSessionAddr'
+        player_id:
+          type: integer
+        relay:
+          type: object
+        xuid:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_playerVerifyResponse:
+      type: object
+      properties:
+        email:
+          type: string
+        external_id:
+          type: string
+        player_id:
+          type: integer
+    github_com_ggscale_ggscale_internal_httpapi_presenceUpdateRequest:
+      type: object
+      properties:
+        session_id:
+          type: string
+        status:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_profilePatchRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        xuid:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_profileResponse:
+      type: object
+      properties:
+        created_at:
+          type: string
+        email:
+          type: string
+        email_verified_at:
+          type: string
+        external_id:
+          type: string
+        id:
+          type: integer
+        project_id:
+          type: integer
+        xuid:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_refreshRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_remoteAddrEntry:
+      type: object
+      properties:
+        address:
+          type: string
+        scope:
+          type: string
+        type:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_remoteAddrsPayload:
+      type: object
+      properties:
+        addresses:
+          type: array
+          items:
+            $ref: '#/components/schemas/github_com_ggscale_ggscale_internal_httpapi_remoteAddrEntry'
+    github_com_ggscale_ggscale_internal_httpapi_sessionResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        expires_at:
+          type: string
+        player_id:
+          type: integer
+        refresh_token:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_signupRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    github_com_ggscale_ggscale_internal_httpapi_storageObjectResponse:
+      type: object
+      properties:
+        key:
+          type: string
+        updated_at:
+          type: string
+        value:
+          type: string
+          description: External type with a custom JSON marshaler; assumed string — add a typeMapping entry to set a precise schema.
+        version:
+          type: integer
+    github_com_ggscale_ggscale_internal_httpapi_submitScoreRequest:
+      type: object
+      properties:
+        score:
+          type: integer
+    github_com_ggscale_ggscale_internal_httpapi_verifyRequest:
+      type: object
+      properties:
+        code:
+          type: string
+        email:
+          type: string
+    github_com_ggscale_ggscale_internal_relay_Credentials:
+      type: object
+      properties:
+        password:
+          type: string
+        realm:
+          type: string
+        ttl:
+          type: integer
+        urls:
+          type: array
+          items:
+            type: string
+        username:
+          type: string
+    github_com_ggscale_ggscale_internal_serverlist_Server:
+      type: object
+      properties:
+        address:
+          type: string
+        current_players:
+          type: integer
+        game_mode:
+          type: string
+        level:
+          type: string
+        max_players:
+          type: integer
+        name:
+          type: string
+        region:
+          type: string
+        version:
+          type: string
+    untyped-string:
+      type: object
+      description: 'External or unresolved type: untyped string'
+    github_com_ggscale_ggscale_internal_httpapi_playerVerifyRequest:
+      type: object
+      properties:
+        session_token:
+          type: string
+      required:
+        - session_token
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      description: Tenant API key (publishable or secret).
+      scheme: bearer
+    PlayerSession:
+      type: apiKey
+      description: Player session JWT issued by the /v1/auth endpoints.
+      name: X-Session-Token
+      in: header

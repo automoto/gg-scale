@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/google/uuid"
@@ -150,12 +151,16 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 
 // POST /v1/friends/{player_id}/accept
 func friendAcceptHandler(d Deps) http.HandlerFunc {
-	return changeStatusHandler(d, "accepted", []string{"pending"})
+	return func(w http.ResponseWriter, r *http.Request) {
+		changeFriendStatus(d, w, r, "accepted", []string{"pending"})
+	}
 }
 
 // POST /v1/friends/{player_id}/reject
 func friendRejectHandler(d Deps) http.HandlerFunc {
-	return changeStatusHandler(d, "rejected", []string{"pending", "accepted"})
+	return func(w http.ResponseWriter, r *http.Request) {
+		changeFriendStatus(d, w, r, "rejected", []string{"pending", "accepted"})
+	}
 }
 
 // DELETE /v1/friends/{player_id}
@@ -299,75 +304,69 @@ func friendBlockToggle(d Deps, w http.ResponseWriter, r *http.Request, block boo
 	writeJSON(w, map[string]any{"status": status})
 }
 
-// changeStatusHandler is shared by accept/reject. allowed gates the transition.
-func changeStatusHandler(d Deps, newStatus string, allowed []string) http.HandlerFunc {
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, s := range allowed {
-		allowedSet[s] = struct{}{}
+// changeFriendStatus is shared by accept/reject. allowed gates the transition.
+func changeFriendStatus(d Deps, w http.ResponseWriter, r *http.Request, newStatus string, allowed []string) {
+	ctx := r.Context()
+	// {player_id} is the OTHER user — for accept/reject the "from" of the
+	// request is them, "to" is the current user.
+	other, ok := pathInt64(r, "player_id")
+	if !ok {
+		http.Error(w, "player_id required", http.StatusBadRequest)
+		return
 	}
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		// {player_id} is the OTHER user — for accept/reject the "from" of the
-		// request is them, "to" is the current user.
-		other, ok := pathInt64(r, "player_id")
-		if !ok {
-			http.Error(w, "player_id required", http.StatusBadRequest)
-			return
-		}
-		me, ok := playerauth.IDFromContext(ctx)
-		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
-		}
+	me, ok := playerauth.IDFromContext(ctx)
+	if !ok {
+		http.Error(w, "no player", http.StatusUnauthorized)
+		return
+	}
 
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			q := sqlcgen.New(tx)
-			myAcc, err := callerAccount(ctx, tx, me)
-			if err != nil {
-				return err
-			}
-			otherAcc, err := q.GetPlayerLinkedAccountID(ctx, other)
-			if err != nil {
-				return err
-			}
-			if !otherAcc.Valid {
-				return errTargetNoAccount
-			}
-			edge, err := q.GetFriendEdgeByAccount(ctx, sqlcgen.GetFriendEdgeByAccountParams{
-				FromAccountID: otherAcc, ToAccountID: myAcc,
-			})
-			if err != nil {
-				return err
-			}
-			if _, ok := allowedSet[edge.Status]; !ok {
-				return errFriendIllegalTransition
-			}
-			return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
-				FromAccountID: otherAcc, ToAccountID: myAcc, Status: newStatus,
-			})
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		myAcc, err := callerAccount(ctx, tx, me)
+		if err != nil {
+			return err
+		}
+		otherAcc, err := q.GetPlayerLinkedAccountID(ctx, other)
+		if err != nil {
+			return err
+		}
+		if !otherAcc.Valid {
+			return errTargetNoAccount
+		}
+		edge, err := q.GetFriendEdgeByAccount(ctx, sqlcgen.GetFriendEdgeByAccountParams{
+			FromAccountID: otherAcc, ToAccountID: myAcc,
 		})
-		switch {
-		case errors.Is(err, errNoAccount):
-			http.Error(w, linkAccountMsg, http.StatusForbidden)
-			return
-		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
-			http.Error(w, "no pending request", http.StatusNotFound)
-			return
-		case errors.Is(err, errFriendIllegalTransition):
-			http.Error(w, "illegal transition", http.StatusConflict)
-			return
-		case err != nil:
-			webutil.InternalError(w, "friend status: tx", err)
-			return
+		if err != nil {
+			return err
 		}
-		switch newStatus {
-		case "accepted":
-			d.Metrics.FriendRequest(observability.FriendRequestAccepted)
-		case "rejected":
-			d.Metrics.FriendRequest(observability.FriendRequestDeclined)
+		if !slices.Contains(allowed, edge.Status) {
+			return errFriendIllegalTransition
 		}
-		writeJSON(w, map[string]any{"status": newStatus})
+		return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
+			FromAccountID: otherAcc, ToAccountID: myAcc, Status: newStatus,
+		})
+	})
+	switch {
+	case errors.Is(err, errNoAccount):
+		http.Error(w, linkAccountMsg, http.StatusForbidden)
+		return
+	case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
+		http.Error(w, "no pending request", http.StatusNotFound)
+		return
+	case errors.Is(err, errFriendIllegalTransition):
+		http.Error(w, "illegal transition", http.StatusConflict)
+		return
+	case err != nil:
+		webutil.InternalError(w, "friend status: tx", err)
+		return
 	}
+	switch newStatus {
+	case "accepted":
+		d.Metrics.FriendRequest(observability.FriendRequestAccepted)
+	case "rejected":
+		d.Metrics.FriendRequest(observability.FriendRequestDeclined)
+	}
+	writeJSON(w, map[string]any{"status": newStatus})
 }
 
 // allowedFriendStatuses guards friendsListHandler.
