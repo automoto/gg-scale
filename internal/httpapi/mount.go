@@ -35,18 +35,6 @@ func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Ha
 	}
 }
 
-func mountFriendRoutes(r chi.Router, d Deps) {
-	r.Route("/friends", func(r chi.Router) {
-		r.Get("/", friendsListHandler(d))
-		r.Post("/{player_id}/request", friendRequestHandler(d))
-		r.Post("/{player_id}/accept", friendAcceptHandler(d))
-		r.Post("/{player_id}/reject", friendRejectHandler(d))
-		r.Post("/{player_id}/block", friendBlockHandler(d))
-		r.Post("/{player_id}/unblock", friendUnblockHandler(d))
-		r.Delete("/{player_id}", friendDeleteHandler(d))
-	})
-}
-
 func mountRealtimeRoutes(r chi.Router, d Deps) {
 	if d.Hub == nil {
 		return

@@ -1,11 +1,12 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -20,12 +21,13 @@ import (
 const maxRemoteAddrs = 4
 
 // remoteAddrEntry is one typed address on the wire. Scope is derived
-// server-side and ignored on input — declared (not dropped) so a GET body
-// round-trips through decodeJSON's DisallowUnknownFields.
+// server-side and ignored on input. type/address are schema-optional so
+// parseRemoteAddrSet owns the (indexed, per-entry) 400 validation rather than
+// a generic schema 422.
 type remoteAddrEntry struct {
-	Type    string `json:"type"`
+	Type    string `json:"type,omitempty"`
 	Scope   string `json:"scope,omitempty"`
-	Address string `json:"address"`
+	Address string `json:"address,omitempty"`
 }
 
 type remoteAddrsPayload struct {
@@ -53,86 +55,118 @@ func parseRemoteAddrSet(entries []remoteAddrEntry) (remoteaddr.Set, error) {
 	return remoteaddr.NewSet(addrs)
 }
 
-func mountRemoteAddrRoutes(r chi.Router, d Deps) {
-	r.Get("/account/remote-addrs", ownerRemoteAddrGetHandler(d))
-	r.Put("/account/remote-addrs", ownerRemoteAddrPutHandler(d))
-	r.Get("/friends/{player_id}/remote-addrs", friendRemoteAddrGetHandler(d))
+type remoteAddrsOutput struct {
+	Body remoteAddrsPayload
 }
 
-// resolveCallerAccount returns the caller player's linked account, or false
-// (with a 403 already written) when the player is anonymous / unlinked.
-func resolveCallerAccount(w http.ResponseWriter, r *http.Request, d Deps) (pgtype.UUID, bool) {
-	playerID, ok := playerauth.IDFromContext(r.Context())
+type remoteAddrsPutInput struct {
+	Body remoteAddrsPayload
+}
+
+type friendRemoteAddrInput struct {
+	PlayerID int64 `path:"player_id" minimum:"1"`
+}
+
+func registerRemoteAddrRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "getAccountRemoteAddrs",
+		Method:      http.MethodGet,
+		Path:        "/v1/account/remote-addrs",
+		Summary:     "Get the caller's remote addresses",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, ownerRemoteAddrGet(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "putAccountRemoteAddrs",
+		Method:      http.MethodPut,
+		Path:        "/v1/account/remote-addrs",
+		Summary:     "Replace the caller's remote addresses",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, ownerRemoteAddrPut(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "getFriendRemoteAddrs",
+		Method:      http.MethodGet,
+		Path:        "/v1/friends/{player_id}/remote-addrs",
+		Summary:     "Get an accepted friend's remote addresses",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendRemoteAddrGet(d))
+}
+
+// callerAccountForRemoteAddr resolves the caller player's linked account,
+// returning a huma 403 when the player is anonymous / unlinked (or the lookup
+// fails — a deliberately opaque outcome preserved from the original).
+func callerAccountForRemoteAddr(ctx context.Context, d Deps) (pgtype.UUID, error) {
+	playerID, ok := playerauth.IDFromContext(ctx)
 	if !ok {
-		http.Error(w, "no player", http.StatusUnauthorized)
-		return pgtype.UUID{}, false
+		return pgtype.UUID{}, huma.Error401Unauthorized("no player")
 	}
 	var acc pgtype.UUID
-	err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		var e error
-		acc, e = sqlcgen.New(tx).GetPlayerLinkedAccountID(r.Context(), playerID)
+		acc, e = sqlcgen.New(tx).GetPlayerLinkedAccountID(ctx, playerID)
 		return e
 	})
 	if err != nil || !acc.Valid {
-		http.Error(w, linkAccountMsg, http.StatusForbidden)
-		return pgtype.UUID{}, false
+		return pgtype.UUID{}, huma.Error403Forbidden(linkAccountMsg)
 	}
-	return acc, true
+	return acc, nil
 }
 
-func ownerRemoteAddrGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		acc, ok := resolveCallerAccount(w, r, d)
-		if !ok {
-			return
-		}
-		writeRemoteAddrs(w, d, r, acc)
-	}
-}
-
-func ownerRemoteAddrPutHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		acc, ok := resolveCallerAccount(w, r, d)
-		if !ok {
-			return
-		}
-		var req remoteAddrsPayload
-		if !decodeJSON(w, r, &req) {
-			return
-		}
-		set, perr := parseRemoteAddrSet(req.Addresses)
-		if perr != nil {
-			http.Error(w, perr.Error(), http.StatusBadRequest)
-			return
-		}
-		err := d.Pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-			return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), remoteAddrSetParams(acc, set))
-		})
+func ownerRemoteAddrGet(d Deps) func(context.Context, *struct{}) (*remoteAddrsOutput, error) {
+	return func(ctx context.Context, _ *struct{}) (*remoteAddrsOutput, error) {
+		acc, err := callerAccountForRemoteAddr(ctx, d)
 		if err != nil {
-			webutil.InternalError(w, "remote-addr put", err)
-			return
+			return nil, err
 		}
-		writeRemoteAddrs(w, d, r, acc)
+		payload, rerr := readRemoteAddrs(ctx, d, acc)
+		if rerr != nil {
+			return nil, serverError(ctx, "remote-addr read", rerr)
+		}
+		return &remoteAddrsOutput{Body: payload}, nil
 	}
 }
 
-// friendRemoteAddrGetHandler lets an ACCEPTED friend read the target's remote
-// addresses. Non-friends, blocked players, and unlinked callers are denied.
-func friendRemoteAddrGetHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		me, ok := resolveCallerAccount(w, r, d)
-		if !ok {
-			return
+func ownerRemoteAddrPut(d Deps) func(context.Context, *remoteAddrsPutInput) (*remoteAddrsOutput, error) {
+	return func(ctx context.Context, in *remoteAddrsPutInput) (*remoteAddrsOutput, error) {
+		acc, err := callerAccountForRemoteAddr(ctx, d)
+		if err != nil {
+			return nil, err
 		}
-		targetPlayer, ok := pathInt64(r, "player_id")
-		if !ok {
-			http.Error(w, "player_id required", http.StatusBadRequest)
-			return
+		set, perr := parseRemoteAddrSet(in.Body.Addresses)
+		if perr != nil {
+			return nil, huma.Error400BadRequest(perr.Error())
 		}
+		if werr := d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+			return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(ctx, remoteAddrSetParams(acc, set))
+		}); werr != nil {
+			return nil, serverError(ctx, "remote-addr put", werr)
+		}
+		payload, rerr := readRemoteAddrs(ctx, d, acc)
+		if rerr != nil {
+			return nil, serverError(ctx, "remote-addr read", rerr)
+		}
+		return &remoteAddrsOutput{Body: payload}, nil
+	}
+}
+
+// friendRemoteAddrGet lets an ACCEPTED friend read the target's remote
+// addresses. Non-friends, blocked players, and unlinked callers are denied,
+// and a non-friend is not distinguished from a blocker.
+func friendRemoteAddrGet(d Deps) func(context.Context, *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
+	return func(ctx context.Context, in *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
+		me, err := callerAccountForRemoteAddr(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		targetPlayer := in.PlayerID
 		var targetAcc pgtype.UUID
-		err := d.Pool.Q(r.Context(), func(tx pgx.Tx) error {
+		qerr := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			acc, e := q.GetPlayerLinkedAccountID(r.Context(), targetPlayer)
+			acc, e := q.GetPlayerLinkedAccountID(ctx, targetPlayer)
 			if e != nil {
 				return e
 			}
@@ -141,12 +175,12 @@ func friendRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 			}
 			targetAcc = acc
 			// Must be accepted friends AND not blocked in either direction.
-			if _, be := q.IsBlockedBetweenAccounts(r.Context(), sqlcgen.IsBlockedBetweenAccountsParams{A: me, B: targetAcc}); be == nil {
+			if _, be := q.IsBlockedBetweenAccounts(ctx, sqlcgen.IsBlockedBetweenAccountsParams{A: me, B: targetAcc}); be == nil {
 				return errFriendBlocked
 			} else if !errors.Is(be, pgx.ErrNoRows) {
 				return be
 			}
-			if _, fe := q.AreAccountsFriendsAccepted(r.Context(), sqlcgen.AreAccountsFriendsAcceptedParams{A: me, B: targetAcc}); fe != nil {
+			if _, fe := q.AreAccountsFriendsAccepted(ctx, sqlcgen.AreAccountsFriendsAcceptedParams{A: me, B: targetAcc}); fe != nil {
 				if errors.Is(fe, pgx.ErrNoRows) {
 					return errNotFriends
 				}
@@ -155,18 +189,18 @@ func friendRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 			return nil
 		})
 		switch {
-		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		case errors.Is(err, errNotFriends), errors.Is(err, errFriendBlocked):
-			// Don't distinguish non-friend from blocked.
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		case err != nil:
-			webutil.InternalError(w, "friend remote-addr", err)
-			return
+		case errors.Is(qerr, errTargetNoAccount), errors.Is(qerr, pgx.ErrNoRows):
+			return nil, huma.Error404NotFound("not found")
+		case errors.Is(qerr, errNotFriends), errors.Is(qerr, errFriendBlocked):
+			return nil, huma.Error403Forbidden("forbidden")
+		case qerr != nil:
+			return nil, serverError(ctx, "friend remote-addr", qerr)
 		}
-		writeRemoteAddrs(w, d, r, targetAcc)
+		payload, rerr := readRemoteAddrs(ctx, d, targetAcc)
+		if rerr != nil {
+			return nil, serverError(ctx, "remote-addr read", rerr)
+		}
+		return &remoteAddrsOutput{Body: payload}, nil
 	}
 }
 
@@ -211,22 +245,33 @@ func serverRemoteAddrGetHandler(d Deps) http.HandlerFunc {
 	}
 }
 
-func writeRemoteAddrs(w http.ResponseWriter, d Deps, r *http.Request, acc pgtype.UUID) {
+// readRemoteAddrs loads an account's stored address set as a wire payload.
+func readRemoteAddrs(ctx context.Context, d Deps, acc pgtype.UUID) (remoteAddrsPayload, error) {
 	var row sqlcgen.GetPlayerAccountRemoteAddrsRow
-	if err := d.Pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+	if err := d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var e error
-		row, e = sqlcgen.New(tx).GetPlayerAccountRemoteAddrs(r.Context(), acc)
+		row, e = sqlcgen.New(tx).GetPlayerAccountRemoteAddrs(ctx, acc)
 		return e
 	}); err != nil {
-		webutil.InternalError(w, "remote-addr read", err)
-		return
+		return remoteAddrsPayload{}, err
 	}
 	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
 	entries := []remoteAddrEntry{}
 	for _, a := range set.List() {
 		entries = append(entries, remoteAddrEntry{Type: string(a.Type), Scope: string(a.Scope), Address: a.Value})
 	}
-	writeJSON(w, remoteAddrsPayload{Addresses: entries})
+	return remoteAddrsPayload{Addresses: entries}, nil
+}
+
+// writeRemoteAddrs serves an account's addresses over the still-chi server-tier
+// route.
+func writeRemoteAddrs(w http.ResponseWriter, d Deps, r *http.Request, acc pgtype.UUID) {
+	payload, err := readRemoteAddrs(r.Context(), d, acc)
+	if err != nil {
+		webutil.InternalError(w, "remote-addr read", err)
+		return
+	}
+	writeJSON(w, payload)
 }
 
 func remoteAddrSetParams(acc pgtype.UUID, set remoteaddr.Set) sqlcgen.SetPlayerAccountRemoteAddrsParams {

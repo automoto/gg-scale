@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,7 +16,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 // Friends are between GLOBAL player_accounts. The JSON API caller is an
@@ -63,23 +63,108 @@ func callerAccount(ctx context.Context, tx pgx.Tx, playerID int64) (pgtype.UUID,
 	return acc, nil
 }
 
-// POST /v1/friends/{player_id}/request
-func friendRequestHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		toUser, ok := pathInt64(r, "player_id")
-		if !ok {
-			http.Error(w, "player_id required", http.StatusBadRequest)
-			return
-		}
+type friendTargetInput struct {
+	PlayerID int64 `path:"player_id" minimum:"1"`
+}
+
+type friendStatusResult struct {
+	Status string `json:"status"`
+}
+
+type friendStatusOutput struct {
+	Body friendStatusResult
+}
+
+type friendsListInput struct {
+	Status string `query:"status"`
+	Limit  string `query:"limit"`
+	Cursor string `query:"cursor"`
+}
+
+type friendsListResult struct {
+	Items      []friendEntry `json:"items"`
+	NextCursor string        `json:"next_cursor"`
+}
+
+type friendsListOutput struct {
+	Body friendsListResult
+}
+
+func registerFriendRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "listFriends",
+		Method:      http.MethodGet,
+		Path:        "/v1/friends",
+		Summary:     "List the caller's friends by status",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendsList(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "requestFriend",
+		Method:      http.MethodPost,
+		Path:        "/v1/friends/{player_id}/request",
+		Summary:     "Send a friend request",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendRequest(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "acceptFriend",
+		Method:      http.MethodPost,
+		Path:        "/v1/friends/{player_id}/accept",
+		Summary:     "Accept a friend request",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendAccept(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "rejectFriend",
+		Method:      http.MethodPost,
+		Path:        "/v1/friends/{player_id}/reject",
+		Summary:     "Reject a friend request",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendReject(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "blockFriend",
+		Method:      http.MethodPost,
+		Path:        "/v1/friends/{player_id}/block",
+		Summary:     "Block a player",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendBlock(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "unblockFriend",
+		Method:      http.MethodPost,
+		Path:        "/v1/friends/{player_id}/unblock",
+		Summary:     "Unblock a player",
+		Tags:        []string{"/v1"},
+		Security:    playerSecurity,
+	}, friendUnblock(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID:   "deleteFriend",
+		Method:        http.MethodDelete,
+		Path:          "/v1/friends/{player_id}",
+		Summary:       "Remove a friend",
+		Tags:          []string{"/v1"},
+		Security:      playerSecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, friendDelete(d))
+}
+
+func friendRequest(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
+		toUser := in.PlayerID
 		fromUser, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		if fromUser == toUser {
-			http.Error(w, "cannot friend self", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("cannot friend self")
 		}
 
 		var status string
@@ -126,56 +211,42 @@ func friendRequestHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, errNoAccount):
-			http.Error(w, linkAccountMsg, http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden(linkAccountMsg)
 		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows), errors.Is(err, errFriendBlocked):
 			// A block never reveals itself to the blockee: a blocked request is
 			// indistinguishable from one to a non-existent target.
-			http.Error(w, "target not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("target not found")
 		case errors.Is(err, errFriendSelf):
-			http.Error(w, "cannot friend self", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("cannot friend self")
 		case err != nil:
-			webutil.InternalError(w, "friend request: tx", err)
-			return
+			return nil, serverError(ctx, "friend request: tx", err)
 		}
 		if status == "blocked" {
-			http.Error(w, "target not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("target not found")
 		}
 		d.Metrics.FriendRequest(observability.FriendRequestSent)
-		writeJSON(w, map[string]any{"status": status})
+		return &friendStatusOutput{Body: friendStatusResult{Status: status}}, nil
 	}
 }
 
-// POST /v1/friends/{player_id}/accept
-func friendAcceptHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		changeFriendStatus(d, w, r, "accepted", []string{"pending"})
+func friendAccept(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
+		return changeFriendStatus(ctx, d, in.PlayerID, "accepted", []string{"pending"})
 	}
 }
 
-// POST /v1/friends/{player_id}/reject
-func friendRejectHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		changeFriendStatus(d, w, r, "rejected", []string{"pending", "accepted"})
+func friendReject(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
+		return changeFriendStatus(ctx, d, in.PlayerID, "rejected", []string{"pending", "accepted"})
 	}
 }
 
-// DELETE /v1/friends/{player_id}
-func friendDeleteHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		toUser, ok := pathInt64(r, "player_id")
-		if !ok {
-			http.Error(w, "player_id required", http.StatusBadRequest)
-			return
-		}
+func friendDelete(d Deps) func(context.Context, *friendTargetInput) (*struct{}, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*struct{}, error) {
+		toUser := in.PlayerID
 		fromUser, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 
 		var affected int64
@@ -200,51 +271,38 @@ func friendDeleteHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, errNoAccount):
-			http.Error(w, linkAccountMsg, http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden(linkAccountMsg)
 		case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		case err != nil:
-			webutil.InternalError(w, "friend delete: tx", err)
-			return
+			return nil, serverError(ctx, "friend delete: tx", err)
 		}
 		if affected == 0 {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
+			return nil, huma.Error404NotFound("not found")
 		}
-		w.WriteHeader(http.StatusNoContent)
+		return nil, nil
 	}
 }
 
-// POST /v1/friends/{player_id}/block and /unblock
-func friendBlockHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		friendBlockToggle(d, w, r, true)
+func friendBlock(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
+		return friendBlockToggle(ctx, d, in.PlayerID, true)
 	}
 }
 
-func friendUnblockHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		friendBlockToggle(d, w, r, false)
+func friendUnblock(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
+	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
+		return friendBlockToggle(ctx, d, in.PlayerID, false)
 	}
 }
 
-func friendBlockToggle(d Deps, w http.ResponseWriter, r *http.Request, block bool) {
-	ctx := r.Context()
-	toUser, ok := pathInt64(r, "player_id")
-	if !ok {
-		http.Error(w, "player_id required", http.StatusBadRequest)
-		return
-	}
+func friendBlockToggle(ctx context.Context, d Deps, toUser int64, block bool) (*friendStatusOutput, error) {
 	fromUser, ok := playerauth.IDFromContext(ctx)
 	if !ok {
-		http.Error(w, "no player", http.StatusUnauthorized)
-		return
+		return nil, huma.Error401Unauthorized("no player")
 	}
 	if fromUser == toUser {
-		http.Error(w, "cannot block self", http.StatusBadRequest)
-		return
+		return nil, huma.Error400BadRequest("cannot block self")
 	}
 
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
@@ -285,39 +343,28 @@ func friendBlockToggle(d Deps, w http.ResponseWriter, r *http.Request, block boo
 	})
 	switch {
 	case errors.Is(err, errNoAccount):
-		http.Error(w, linkAccountMsg, http.StatusForbidden)
-		return
+		return nil, huma.Error403Forbidden(linkAccountMsg)
 	case errors.Is(err, errTargetNoAccount):
-		http.Error(w, "target not found", http.StatusNotFound)
-		return
+		return nil, huma.Error404NotFound("target not found")
 	case errors.Is(err, errFriendSelf):
-		http.Error(w, "cannot block self", http.StatusBadRequest)
-		return
+		return nil, huma.Error400BadRequest("cannot block self")
 	case err != nil:
-		webutil.InternalError(w, "friend block: tx", err)
-		return
+		return nil, serverError(ctx, "friend block: tx", err)
 	}
 	status := "blocked"
 	if !block {
 		status = "unblocked"
 	}
-	writeJSON(w, map[string]any{"status": status})
+	return &friendStatusOutput{Body: friendStatusResult{Status: status}}, nil
 }
 
 // changeFriendStatus is shared by accept/reject. allowed gates the transition.
-func changeFriendStatus(d Deps, w http.ResponseWriter, r *http.Request, newStatus string, allowed []string) {
-	ctx := r.Context()
+func changeFriendStatus(ctx context.Context, d Deps, other int64, newStatus string, allowed []string) (*friendStatusOutput, error) {
 	// {player_id} is the OTHER user — for accept/reject the "from" of the
 	// request is them, "to" is the current user.
-	other, ok := pathInt64(r, "player_id")
-	if !ok {
-		http.Error(w, "player_id required", http.StatusBadRequest)
-		return
-	}
 	me, ok := playerauth.IDFromContext(ctx)
 	if !ok {
-		http.Error(w, "no player", http.StatusUnauthorized)
-		return
+		return nil, huma.Error401Unauthorized("no player")
 	}
 
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
@@ -348,17 +395,13 @@ func changeFriendStatus(d Deps, w http.ResponseWriter, r *http.Request, newStatu
 	})
 	switch {
 	case errors.Is(err, errNoAccount):
-		http.Error(w, linkAccountMsg, http.StatusForbidden)
-		return
+		return nil, huma.Error403Forbidden(linkAccountMsg)
 	case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
-		http.Error(w, "no pending request", http.StatusNotFound)
-		return
+		return nil, huma.Error404NotFound("no pending request")
 	case errors.Is(err, errFriendIllegalTransition):
-		http.Error(w, "illegal transition", http.StatusConflict)
-		return
+		return nil, huma.Error409Conflict("illegal transition")
 	case err != nil:
-		webutil.InternalError(w, "friend status: tx", err)
-		return
+		return nil, serverError(ctx, "friend status: tx", err)
 	}
 	switch newStatus {
 	case "accepted":
@@ -366,10 +409,10 @@ func changeFriendStatus(d Deps, w http.ResponseWriter, r *http.Request, newStatu
 	case "rejected":
 		d.Metrics.FriendRequest(observability.FriendRequestDeclined)
 	}
-	writeJSON(w, map[string]any{"status": newStatus})
+	return &friendStatusOutput{Body: friendStatusResult{Status: newStatus}}, nil
 }
 
-// allowedFriendStatuses guards friendsListHandler.
+// allowedFriendStatuses guards the friends list.
 var allowedFriendStatuses = map[string]struct{}{
 	"pending":  {},
 	"accepted": {},
@@ -377,26 +420,22 @@ var allowedFriendStatuses = map[string]struct{}{
 	"blocked":  {},
 }
 
-// GET /v1/friends?status=...
-func friendsListHandler(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
+func friendsList(d Deps) func(context.Context, *friendsListInput) (*friendsListOutput, error) {
+	return func(ctx context.Context, in *friendsListInput) (*friendsListOutput, error) {
 		me, ok := playerauth.IDFromContext(ctx)
 		if !ok {
-			http.Error(w, "no player", http.StatusUnauthorized)
-			return
+			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, _ := db.ProjectFromContext(ctx)
-		status := r.URL.Query().Get("status")
+		status := in.Status
 		if status == "" {
 			status = "accepted"
 		}
 		if _, allowed := allowedFriendStatuses[status]; !allowed {
-			http.Error(w, "invalid status", http.StatusBadRequest)
-			return
+			return nil, huma.Error400BadRequest("invalid status")
 		}
-		limit := parseLimit(r.URL.Query().Get("limit"), 50, 100)
-		cursor := parseCursor(r.URL.Query().Get("cursor"))
+		limit := parseLimit(in.Limit, 50, 100)
+		cursor := parseCursor(in.Cursor)
 
 		var items []friendEntry
 		var lastID int64
@@ -496,11 +535,9 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 		})
 		switch {
 		case errors.Is(err, errNoAccount):
-			http.Error(w, linkAccountMsg, http.StatusForbidden)
-			return
+			return nil, huma.Error403Forbidden(linkAccountMsg)
 		case err != nil:
-			webutil.InternalError(w, "friends list: tx", err)
-			return
+			return nil, serverError(ctx, "friends list: tx", err)
 		}
 		if items == nil {
 			items = []friendEntry{}
@@ -509,6 +546,6 @@ func friendsListHandler(d Deps) http.HandlerFunc {
 		if len(items) == int(limit) {
 			next = strconv.FormatInt(lastID, 10)
 		}
-		writeJSON(w, map[string]any{"items": items, "next_cursor": next})
+		return &friendsListOutput{Body: friendsListResult{Items: items, NextCursor: next}}, nil
 	}
 }
