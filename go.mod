@@ -5,6 +5,7 @@ go 1.26.4
 require (
 	agones.dev/agones v1.57.0
 	github.com/a-h/templ v0.2.543
+	github.com/caarlos0/env/v11 v11.4.1
 	github.com/casbin/casbin/v3 v3.10.0
 	github.com/coder/websocket v1.8.14
 	github.com/containerd/errdefs v1.0.0
