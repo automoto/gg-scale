@@ -136,6 +136,44 @@ func TestNonPlatformAdmin_without_membership_denied(t *testing.T) {
 	assert.False(t, allowed)
 }
 
+func TestTenantOwner_manages_both_api_key_types(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "owner"))
+
+	for _, obj := range []string{rbac.ObjectAPIKeySecret, rbac.ObjectAPIKeyPublic} {
+		allowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, obj, rbac.ActionManage)
+		require.NoError(t, err)
+		assert.True(t, allowed, "owner manages %s", obj)
+	}
+}
+
+func TestTenantAdmin_manages_only_publishable_api_keys(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
+
+	pub, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, rbac.ObjectAPIKeyPublic, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.True(t, pub, "admin manages publishable keys")
+
+	sec, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, rbac.ObjectAPIKeySecret, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.False(t, sec, "admin must not create/manage secret keys")
+}
+
+func TestTeamManagement_is_owner_only(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetControlPanelMembershipRole(1, 7, "owner"))
+	require.NoError(t, a.SetControlPanelMembershipRole(2, 7, "admin"))
+
+	ownerAllowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 1}, 7, rbac.ObjectTeam, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.True(t, ownerAllowed, "owner manages the team")
+
+	adminAllowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 2}, 7, rbac.ObjectTeam, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.False(t, adminAllowed, "team management (invites, role grants, removals) is owner-only")
+}
+
 func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	a := newAuthorizer(t)
 

@@ -23,6 +23,7 @@ import (
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webassets"
@@ -65,6 +66,9 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
 	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
 	TwoFactor *twofactor.Cipher
+	// StorageLimits (may be nil) reads/writes per-tenant/project storage-size
+	// overrides for the rate-limits page.
+	StorageLimits storagelimit.LimitStore
 }
 
 // PluginSnapshot is the read-only view the admin/plugins page renders.
@@ -102,6 +106,7 @@ type Handler struct {
 	// users re-enter from login).
 	verifySigningKey []byte
 	twoFactor        *twofactor.Cipher
+	storageLimits    storagelimit.LimitStore
 }
 
 // New builds the control panel router. Callers should only mount it when
@@ -134,6 +139,7 @@ func New(d Deps) http.Handler {
 		metrics:          d.Metrics,
 		verifySigningKey: key,
 		twoFactor:        d.TwoFactor,
+		storageLimits:    d.StorageLimits,
 	}
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
@@ -189,6 +195,8 @@ func New(d Deps) http.Handler {
 			r.Get("/rate-limits", h.rateLimitsPage)
 			r.Post("/rate-limits/api", h.updateTenantAPILimitHandler)
 			r.Post("/rate-limits/projects/{projectID}/invites", h.updateProjectInviteLimitHandler)
+			r.Post("/rate-limits/storage", h.updateTenantStorageLimitHandler)
+			r.Post("/rate-limits/projects/{projectID}/storage", h.updateProjectStorageLimitHandler)
 			r.Get("/team", h.teamPage)
 			r.Get(segTeamInvite, h.inviteTeamPage)
 			r.Post(segTeamInvite, h.inviteTeammateHandler)
@@ -495,6 +503,17 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 			http.StatusUnprocessableEntity,
 			map[string]string{"key_type": "Pick a key type"}, "")
+		return
+	}
+	// Secret keys can submit scores and verify sessions, so creating one is
+	// owner-only; admins are limited to publishable keys. The shared roleAdmin
+	// route guard only checks project:manage, so enforce the key-type boundary
+	// here (api_key:secret vs api_key:publishable).
+	keyObject := rbac.ObjectAPIKeyPublic
+	if keyType == tenant.KeyTypeSecret {
+		keyObject = rbac.ObjectAPIKeySecret
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, keyObject, rbac.ActionManage) {
 		return
 	}
 	var projectID *int64

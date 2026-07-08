@@ -44,6 +44,7 @@ import (
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
+	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
 )
@@ -260,6 +261,8 @@ func run() error {
 		Lookup:                        tenant.NewSQLLookup(pool),
 		Limiter:                       ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:            ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
+		StorageMaxValueBytes:          cfg.StorageMaxValueBytes,
+		StorageLimits:                 storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
 		ProxyTrust:                    ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
 		Signer:                        signer,
 		Mailer:                        m,
@@ -280,14 +283,15 @@ func run() error {
 		ServerList:                    serverListRegistry,
 		RelayIssuer:                   relayIssuer,
 		ControlPanel: controlpanel.Config{
-			Mount:              cfg.ControlPanelEnabled,
-			CookieSecure:       cfg.ControlPanelCookieSecure,
-			BaseURL:            cfg.ControlPanelBaseURL,
-			MailFrom:           cfg.MailFrom,
-			TrustedProxyHeader: cfg.TrustedProxyHeader,
-			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
-			FleetEnabled:       cfg.FeatureFleetEnabled,
-			RelayEnabled:       cfg.FeatureP2PRelayEnabled,
+			Mount:                cfg.ControlPanelEnabled,
+			CookieSecure:         cfg.ControlPanelCookieSecure,
+			BaseURL:              cfg.ControlPanelBaseURL,
+			MailFrom:             cfg.MailFrom,
+			TrustedProxyHeader:   cfg.TrustedProxyHeader,
+			TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
+			FleetEnabled:         cfg.FeatureFleetEnabled,
+			RelayEnabled:         cfg.FeatureP2PRelayEnabled,
+			StorageMaxValueBytes: cfg.StorageMaxValueBytes,
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
 			// cross into the control panel package.

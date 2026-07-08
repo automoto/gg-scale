@@ -37,6 +37,7 @@ import (
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/serverlist"
+	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/webassets"
@@ -58,6 +59,12 @@ type Deps struct {
 	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
 	// overrides. Wrap the DB store in a CachedOverrideStore.
 	RateLimitOverrides ratelimit.OverrideStore
+	// StorageMaxValueBytes is the platform default cap on a storage object's
+	// value; 0 uses the compiled fallback (1 MiB).
+	StorageMaxValueBytes int64
+	// StorageLimits (may be nil) resolves per-tenant/project storage-size
+	// overrides on top of StorageMaxValueBytes.
+	StorageLimits storagelimit.LimitStore
 	// ProxyTrust resolves the real client IP for per-IP limits when the server
 	// is behind a trusted reverse proxy / load balancer. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
@@ -247,6 +254,7 @@ func NewRouter(d Deps) http.Handler {
 				RBAC:               d.RBAC,
 				PluginInfo:         d.ControlPanelPluginInfo,
 				TwoFactor:          d.TwoFactor,
+				StorageLimits:      d.StorageLimits,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {

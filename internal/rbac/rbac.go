@@ -23,6 +23,14 @@ import (
 var modelFS embed.FS
 
 const defaultPolicyReloadInterval = 10 * time.Second
+
+// featureGrantCacheTTL bounds per-(tenant, project, feature) caching of grant
+// decisions: an entitlement toggle takes effect within this window rather than
+// instantly. This staleness is intentional — feature grants gate paid infra
+// (relay, dedicated servers, fleet backends), not data access or emergency
+// revocation — and is consistent with the poll-based Casbin reload above. Beating
+// it across HA instances would require LISTEN/NOTIFY invalidation, not a longer or
+// shorter TTL.
 const featureGrantCacheTTL = 5 * time.Second
 
 // ErrAuthorizerUnavailable is returned when a mutating RBAC operation is called
@@ -53,7 +61,6 @@ const (
 const (
 	ObjectTenant           = "tenant"
 	ObjectProject          = "project"
-	ObjectAPIKey           = "api_key"
 	ObjectAPIKeySecret     = "api_key:secret"
 	ObjectAPIKeyPublic     = "api_key:publishable"
 	ObjectTeam             = "team"

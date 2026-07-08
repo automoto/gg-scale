@@ -26,6 +26,7 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
@@ -44,13 +45,14 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1", Commit: "test",
-		Pool:    pool,
-		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Limiter: ratelimit.NewCacheLimiter(c.cache),
-		Signer:  signer,
-		Mailer:  rec,
-		Cache:   c.cache,
-		RBAC:    authorizer,
+		Pool:          pool,
+		Lookup:        tenant.NewSQLLookup(c.appPool),
+		Limiter:       ratelimit.NewCacheLimiter(c.cache),
+		Signer:        signer,
+		Mailer:        rec,
+		Cache:         c.cache,
+		RBAC:          authorizer,
+		StorageLimits: storagelimit.NewStore(pool),
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -311,6 +313,85 @@ func TestStorage_put_get_delete_round_trip(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	resp, _ = authedReq(t, http.MethodGet, srv.URL+"/v1/storage/objects/save", "k", access, nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestStorageLimit_resolution_precedence(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	store := storagelimit.NewStore(db.NewPool(c.appPool))
+	ctx := context.Background()
+
+	// No overrides → the caller's platform default.
+	got, err := store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(999), got)
+
+	// Tenant override applies.
+	require.NoError(t, store.Set(ctx, 0, tenantID, nil, 5000))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5000), got)
+
+	// Project override wins over the tenant override.
+	pid := projectID
+	require.NoError(t, store.Set(ctx, 0, tenantID, &pid, 2000))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), got)
+
+	// Clearing the project override falls back to the tenant override.
+	require.NoError(t, store.Set(ctx, 0, tenantID, &pid, 0))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(5000), got)
+
+	// Set a project override at the tenant ceiling, then lower the tenant
+	// override below it: the stale project value is clamped to the new ceiling
+	// instead of outliving it.
+	require.NoError(t, store.Set(ctx, 0, tenantID, &pid, 5000))
+	require.NoError(t, store.Set(ctx, 0, tenantID, nil, 3000))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3000), got)
+
+	// Clearing the tenant override drops the ceiling to the platform default,
+	// which also clamps the still-present project override.
+	require.NoError(t, store.Set(ctx, 0, tenantID, nil, 0))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(999), got)
+
+	// Re-setting the same project row updates in place (ON CONFLICT upsert)
+	// rather than erroring on the unique index.
+	require.NoError(t, store.Set(ctx, 0, tenantID, &pid, 400))
+	got, err = store.Resolve(ctx, tenantID, projectID, 999)
+	require.NoError(t, err)
+	assert.Equal(t, int64(400), got)
+}
+
+func TestStorage_respects_tenant_limit_override(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	// A 1 KiB tenant-level override, so the test needn't send a 1 MiB payload to
+	// exceed the platform default — and it exercises the override resolution.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO storage_limits (tenant_id, max_value_bytes) VALUES ($1, 1024)`, tenantID)
+	require.NoError(t, err)
+
+	srv, _ := newFullStackServer(t, c)
+	access := anonymousLogin(t, srv.URL, "k")
+
+	// Over the 1 KiB cap → 413, before any DB write.
+	resp, body := authedReq(t, http.MethodPut, srv.URL+"/v1/storage/objects/big", "k", access,
+		map[string]any{"blob": strings.Repeat("a", 2000)})
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode, string(body))
+	resp, _ = authedReq(t, http.MethodGet, srv.URL+"/v1/storage/objects/big", "k", access, nil)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	// Under the cap → stored.
+	resp, body = authedReq(t, http.MethodPut, srv.URL+"/v1/storage/objects/small", "k", access,
+		map[string]any{"hp": 100})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 }
 
 func TestStorage_if_match_blocks_stale_writes(t *testing.T) {

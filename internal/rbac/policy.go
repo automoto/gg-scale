@@ -19,7 +19,7 @@ p, role:tenant_owner, *, project:*:matchmaker, *
 p, role:tenant_owner, *, project:*:relay, *
 p, role:tenant_owner, *, project:*:matchmaking:dedicated, *
 p, role:tenant_owner, *, project:*:leaderboard, manage
-p, role:tenant_owner, *, api_key, manage
+p, role:tenant_owner, *, api_key:*, manage
 p, role:tenant_owner, *, team, manage
 p, role:tenant_owner, *, audit, read
 

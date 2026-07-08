@@ -179,13 +179,19 @@ func TestTenantBan_blocks_login(t *testing.T) {
 		`SELECT id, tenant_id FROM project_players WHERE email = 'banme@example.com'`).Scan(&playerID, &tenantID))
 	accID := linkPlayerAccountReturningID(t, c, playerID)
 
+	// Login refuses unverified emails; verify directly since this server has
+	// no mail recorder to complete the signup flow.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players SET email_verified_at = now() WHERE id = $1`, playerID)
+	require.NoError(t, err)
+
 	// Login works before the ban.
 	resp, body = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",
 		map[string]string{"email": "banme@example.com", "password": "hunter2hunter2"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
 	// Ban the account tenant-wide (and bump epoch as the control panel handler does).
-	_, err := c.bootstrapPool.Exec(context.Background(),
+	_, err = c.bootstrapPool.Exec(context.Background(),
 		`INSERT INTO tenant_player_bans (tenant_id, player_account_id) VALUES ($1, $2)`, tenantID, accID)
 	require.NoError(t, err)
 	_, err = c.bootstrapPool.Exec(context.Background(),

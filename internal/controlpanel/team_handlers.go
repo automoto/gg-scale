@@ -15,6 +15,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -65,6 +66,9 @@ func (h *Handler) inviteTeamPage(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ObjectTeam, rbac.ActionManage) {
 		return
 	}
 	if !webutil.ParseForm(w, r) {
@@ -146,6 +150,9 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ObjectTeam, rbac.ActionManage) {
+		return
+	}
 	inviteID, ok := parsePathID(w, r, "inviteID")
 	if !ok {
 		return
@@ -168,6 +175,9 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ObjectTeam, rbac.ActionManage) {
 		return
 	}
 	targetUserID, ok := parsePathID(w, r, "userID")
@@ -195,6 +205,9 @@ func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request
 func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ObjectTeam, rbac.ActionManage) {
 		return
 	}
 	membershipID, ok := parsePathID(w, r, "membershipID")

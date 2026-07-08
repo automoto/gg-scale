@@ -650,6 +650,37 @@ templ RateLimitsPage(vm RateLimitsView) {
 				}
 			}
 		</section>
+		<section class="card">
+			<h2>Storage limits</h2>
+			<p class="card-subtitle">
+				Maximum size (bytes) of a single stored value. Blank = default. Platform default:
+				{ stringFromInt(vm.StoragePlatformDefault) } bytes.
+			</p>
+			if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/storage") } class="rate-limit-row">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<strong>Tenant default</strong>
+					<label>Max value bytes
+						<input name="max_value_bytes" type="number" step="1" min="0" value={ storageBytesValue(vm.StorageTenantOverride) } placeholder={ stringFromInt(vm.StoragePlatformDefault) }/>
+					</label>
+					<button type="submit" class="btn-inline">Save</button>
+				</form>
+			} else if vm.StorageTenantOverride > 0 {
+				<p class="card-subtitle">Tenant limit: { stringFromInt(vm.StorageTenantOverride) } bytes (set by a platform admin).</p>
+			} else {
+				<p class="card-subtitle">Tenant limit: { stringFromInt(vm.StoragePlatformDefault) } bytes (platform default).</p>
+			}
+			for _, p := range vm.Projects {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(p.ProjectID) + "/storage") } class="rate-limit-row">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<strong>{ p.ProjectName }</strong>
+					<label>Max value bytes
+						<input name="max_value_bytes" type="number" step="1" min="0" value={ storageBytesValue(p.StorageOverrideBytes) } placeholder={ stringFromInt(vm.StoragePlatformDefault) }/>
+					</label>
+					<button type="submit" class="btn-inline">Save</button>
+				</form>
+			}
+		</section>
 	}
 }
 

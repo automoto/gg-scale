@@ -185,6 +185,11 @@ type Config struct {
 	// DBStatementTimeout bounds runaway queries. Set via SET LOCAL in Q().
 	DBStatementTimeout time.Duration
 
+	// StorageMaxValueBytes is the platform default cap on a single storage
+	// object's value. Per-tenant / per-project overrides (storage_limits) may
+	// raise or lower it; the effective limit is resolved per write.
+	StorageMaxValueBytes int64
+
 	// SMTPTLS selects how the mailer establishes TLS: "off", "starttls"
 	// (default; hard-fails if the server doesn't advertise it), or
 	// "implicit" (TLS from connect, typically port 465).
@@ -592,6 +597,14 @@ var declared = []varDecl{
 			return fmt.Errorf("DB_STATEMENT_TIMEOUT %q: must be a positive duration", v)
 		}
 		c.DBStatementTimeout = d
+		return nil
+	}},
+	{name: "STORAGE_MAX_VALUE_BYTES", defval: "1048576", set: func(c *Config, v string) error {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("STORAGE_MAX_VALUE_BYTES %q: must be a positive integer", v)
+		}
+		c.StorageMaxValueBytes = n
 		return nil
 	}},
 	{name: "DOCKER_BIND_IP", defval: "127.0.0.1", set: func(c *Config, v string) error {

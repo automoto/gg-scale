@@ -66,10 +66,15 @@ func TestBackend_RealDaemon_Allocate_to_Deallocate(t *testing.T) {
 
 	require.NoError(t, be.Deallocate(context.Background(), 0, got.BackendRef))
 
-	// Post-deallocate the port should no longer accept connections.
-	conn, dialErr := net.DialTimeout("tcp", got.Address, 500*time.Millisecond)
-	if dialErr == nil {
-		_ = conn.Close()
-		t.Fatalf("expected dial to %s to fail after Deallocate", got.Address)
-	}
+	// Post-deallocate the port should stop accepting connections. Docker
+	// Desktop tears down its host port proxy asynchronously, so poll briefly.
+	require.Eventually(t, func() bool {
+		conn, dialErr := net.DialTimeout("tcp", got.Address, 500*time.Millisecond)
+		if dialErr == nil {
+			_ = conn.Close()
+			return false
+		}
+		return true
+	}, 10*time.Second, 250*time.Millisecond,
+		"expected dial to %s to fail after Deallocate", got.Address)
 }

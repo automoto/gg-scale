@@ -5392,7 +5392,7 @@ INSERT INTO public.casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p','role:tenant_admin','*','project','manage'),
     ('p','role:tenant_admin','*','project:*:leaderboard','manage'),
     ('p','role:tenant_admin','*','project:*:players','manage'),
-    ('p','role:tenant_owner','*','api_key','manage'),
+    ('p','role:tenant_owner','*','api_key:*','manage'),
     ('p','role:tenant_owner','*','audit','read'),
     ('p','role:tenant_owner','*','project','manage'),
     ('p','role:tenant_owner','*','project:*:allocation','*'),
@@ -5407,3 +5407,9 @@ INSERT INTO public.casbin_rule (ptype, v0, v1, v2, v3) VALUES
     ('p','role:tenant_owner','*','tenant','manage')
 
 ON CONFLICT DO NOTHING;
+
+-- Restore a normal search_path for subsequent migrations. The dump above zeroed
+-- it at session scope (so every object had to be schema-qualified); without this
+-- reset, later migrations on the same connection see no schema for unqualified
+-- CREATE/DROP and fail with SQLSTATE 3F000.
+SELECT pg_catalog.set_config('search_path', 'public', false);

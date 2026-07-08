@@ -14,9 +14,19 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/storagelimit"
 )
 
 const storageListMaxLimit = 100
+
+// storageLimit returns the platform default value-size cap from config, or the
+// compiled fallback when config is unset. Oversize writes → 413.
+func storageLimit(d Deps) int64 {
+	if d.StorageMaxValueBytes > 0 {
+		return d.StorageMaxValueBytes
+	}
+	return storagelimit.DefaultMaxValueBytes
+}
 
 type storageObjectResponse struct {
 	Key       string          `json:"key"`
@@ -98,11 +108,9 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		if in.Key == "" {
 			return nil, huma.Error400BadRequest("key required")
 		}
-		raw := in.RawBody
-		if !json.Valid(raw) {
+		if !json.Valid(in.RawBody) {
 			return nil, huma.Error400BadRequest("value must be valid JSON")
 		}
-
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
 			return nil, huma.Error400BadRequest("no project")
@@ -112,53 +120,76 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		var (
-			version   int64
-			updatedAt time.Time
-		)
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			q := sqlcgen.New(tx)
-			if in.IfMatch != "" {
-				expected, perr := strconv.ParseInt(in.IfMatch, 10, 64)
-				if perr != nil {
-					return errIfMatchInvalid
-				}
-				row, qerr := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
-					ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
-					Version: expected, Value: raw,
-				})
-				if qerr != nil {
-					return qerr
-				}
-				version = row.Version
-				updatedAt = row.UpdatedAt.Time
-				return nil
-			}
-			row, qerr := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: raw,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			version = row.Version
-			updatedAt = row.UpdatedAt.Time
-			return nil
-		})
-		if errors.Is(err, errIfMatchInvalid) {
-			return nil, huma.Error400BadRequest("If-Match must be an integer version")
-		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, huma.Error412PreconditionFailed("version mismatch")
-		}
+		limit, err := resolveStorageLimit(ctx, d, projectID)
 		if err != nil {
+			return nil, serverError(ctx, "storage put: resolve limit", err)
+		}
+		if int64(len(in.RawBody)) > limit {
+			return nil, huma.Error413RequestEntityTooLarge("value exceeds maximum size")
+		}
+
+		version, updatedAt, err := putStorageObject(ctx, d, projectID, ownerID, in)
+		switch {
+		case errors.Is(err, errIfMatchInvalid):
+			return nil, huma.Error400BadRequest("If-Match must be an integer version")
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil, huma.Error412PreconditionFailed("version mismatch")
+		case err != nil:
 			return nil, serverError(ctx, "storage put: tx", err)
 		}
 
 		return &storageObjectOutput{Body: storageObjectResponse{
-			Key: in.Key, Value: raw, Version: version,
+			Key: in.Key, Value: in.RawBody, Version: version,
 			UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
 		}}, nil
 	}
+}
+
+// resolveStorageLimit returns the effective value-size cap: the platform
+// default, unless a tenant/project override is configured.
+func resolveStorageLimit(ctx context.Context, d Deps, projectID int64) (int64, error) {
+	limit := storageLimit(d)
+	if d.StorageLimits == nil {
+		return limit, nil
+	}
+	tenantID, _ := db.TenantFromContext(ctx)
+	return d.StorageLimits.Resolve(ctx, tenantID, projectID, limit)
+}
+
+// putStorageObject upserts the object in a transaction, honoring an optional
+// If-Match version precondition, and returns the new version and timestamp.
+func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in *storagePutInput) (int64, time.Time, error) {
+	var (
+		version   int64
+		updatedAt time.Time
+	)
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if in.IfMatch == "" {
+			row, qerr := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: in.RawBody,
+			})
+			if qerr != nil {
+				return qerr
+			}
+			version, updatedAt = row.Version, row.UpdatedAt.Time
+			return nil
+		}
+		expected, perr := strconv.ParseInt(in.IfMatch, 10, 64)
+		if perr != nil {
+			return errIfMatchInvalid
+		}
+		row, qerr := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
+			ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
+			Version: expected, Value: in.RawBody,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		version, updatedAt = row.Version, row.UpdatedAt.Time
+		return nil
+	})
+	return version, updatedAt, err
 }
 
 func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectOutput, error) {

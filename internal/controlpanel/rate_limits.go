@@ -104,6 +104,24 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		return RateLimitsView{}, err
 	}
 
+	// Storage value-size limits: platform default plus tenant/project overrides.
+	view.StoragePlatformDefault = h.storagePlatformDefault()
+	if h.storageLimits != nil {
+		overrides, serr := h.storageLimits.ListForTenant(ctx, tenantID)
+		if serr != nil {
+			return RateLimitsView{}, serr
+		}
+		for _, o := range overrides {
+			if o.ProjectID == nil {
+				view.StorageTenantOverride = o.MaxValueBytes
+				continue
+			}
+			if pv, ok := perProject[*o.ProjectID]; ok {
+				pv.StorageOverrideBytes = o.MaxValueBytes
+			}
+		}
+	}
+
 	for _, pv := range ordered {
 		view.Projects = append(view.Projects, *pv)
 	}
@@ -236,6 +254,15 @@ func rlValue(f float64) string {
 		return ""
 	}
 	return rlNum(f)
+}
+
+// storageBytesValue formats a storage-limit form field: blank when unset (0) so
+// the placeholder shows the platform default, otherwise the override in bytes.
+func storageBytesValue(n int64) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func parseLimitField(s string) (float64, error) {

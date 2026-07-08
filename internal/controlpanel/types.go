@@ -32,6 +32,9 @@ type Config struct {
 	// RelayEnabled mirrors the FEATURE_P2P_RELAY_ENABLED startup switch. Gates
 	// whether the p2p_relay per-key scope can be granted from the control panel.
 	RelayEnabled bool
+	// StorageMaxValueBytes is the platform default storage value cap, shown on
+	// the rate-limits page as the fallback when no tenant/project override is set.
+	StorageMaxValueBytes int64
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this
@@ -232,16 +235,23 @@ type RateLimitsView struct {
 	Projects           []ProjectInviteLimitView
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
-	Message            string
-	Error              string
+	// Storage object value-size cap in bytes. StoragePlatformDefault is the
+	// config fallback; StorageTenantOverride (0 = none) is platform-admin
+	// editable; per-project overrides live on each ProjectInviteLimitView.
+	StoragePlatformDefault int64
+	StorageTenantOverride  int64
+	Message                string
+	Error                  string
 }
 
-// ProjectInviteLimitView is one project's invite-quota override (0 = default).
+// ProjectInviteLimitView is one project's invite-quota override (0 = default)
+// plus its storage value-size override in bytes (0 = default).
 type ProjectInviteLimitView struct {
-	ProjectID      int64
-	ProjectName    string
-	InviterPerHour float64
-	DomainPerDay   float64
+	ProjectID            int64
+	ProjectName          string
+	InviterPerHour       float64
+	DomainPerDay         float64
+	StorageOverrideBytes int64
 }
 
 // APILimitCardView is the tenant HTTP API limit card shared by the
