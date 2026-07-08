@@ -106,6 +106,36 @@ func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
 	assert.False(t, allowed)
 }
 
+func TestPlatformAdmin_manages_any_tenant_control_panel(t *testing.T) {
+	a := newAuthorizer(t)
+	// Platform admin with no membership in tenant 7.
+	pa := rbac.ControlPanelUser{ID: 99, IsPlatformAdmin: true}
+
+	cases := []struct {
+		name     string
+		obj, act string
+	}{
+		{"project manage", rbac.ObjectProject, rbac.ActionManage},
+		{"tenant manage", rbac.ObjectTenant, rbac.ActionManage},
+		{"players manage", rbac.ProjectPlayersObject(99), rbac.ActionManage},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			allowed, err := a.CanControlPanel(pa, 7, tc.obj, tc.act)
+			require.NoError(t, err)
+			assert.True(t, allowed)
+		})
+	}
+}
+
+func TestNonPlatformAdmin_without_membership_denied(t *testing.T) {
+	a := newAuthorizer(t)
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 99, IsPlatformAdmin: false},
+		7, rbac.ObjectProject, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
 func TestDefaultPolicy_api_key_roles_preserve_secret_boundaries(t *testing.T) {
 	a := newAuthorizer(t)
 

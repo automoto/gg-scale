@@ -475,6 +475,11 @@ func authLogin(d Deps) func(context.Context, *loginInput) (*sessionOutput, error
 			if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(in.Body.Password)) != nil {
 				return errBadCredentials
 			}
+			// Email verification gate: checked only after the password matches so
+			// an attacker can't probe verification state without valid credentials.
+			if !row.EmailVerifiedAt.Valid {
+				return errEmailUnverified
+			}
 			// Tenant-ban enforcement: a banned account cannot log in.
 			if _, berr := q.IsPlayerBannedByTenant(ctx, row.ID); berr == nil {
 				return errPlayerBanned
@@ -500,6 +505,10 @@ func authLogin(d Deps) func(context.Context, *loginInput) (*sessionOutput, error
 		if errors.Is(err, errBadCredentials) {
 			d.Metrics.Login(observability.SurfaceAPI, observability.LoginInvalid)
 			return nil, huma.Error401Unauthorized("invalid credentials")
+		}
+		if errors.Is(err, errEmailUnverified) {
+			d.Metrics.Login(observability.SurfaceAPI, observability.LoginUnverified)
+			return nil, huma.Error403Forbidden("email not verified")
 		}
 		if errors.Is(err, errPlayerBanned) {
 			d.Metrics.Login(observability.SurfaceAPI, observability.LoginLocked)
@@ -746,6 +755,7 @@ var (
 	errBadCredentials           = errors.New("auth: bad credentials")
 	errSessionRevoked           = errors.New("auth: session revoked or expired")
 	errPlayerBanned             = errors.New("auth: player banned in tenant")
+	errEmailUnverified          = errors.New("auth: email not verified")
 	errCustomTokenNotConfigured = errors.New("auth: custom token secret not set")
 	errCustomTokenInvalid       = errors.New("auth: custom token invalid")
 	errVerifyBadCode            = errors.New("auth: bad verification code")

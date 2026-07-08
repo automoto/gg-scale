@@ -43,3 +43,5 @@ work/
 .claude/*
 ggscale-seed
 sdk-go
+.playwright-mcp/*
+node_modules*

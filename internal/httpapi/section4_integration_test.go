@@ -177,6 +177,22 @@ func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
+func TestLogin_before_verification_is_denied(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv, _ := newFullStackServer(t, c)
+
+	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
+		map[string]string{"email": "unverified@example.com", "password": "supersecret"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+
+	// No verify step: the account exists with the correct password but an
+	// unverified email, so login must be refused rather than minting a session.
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/login", "k",
+		map[string]string{"email": "unverified@example.com", "password": "supersecret"})
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
+}
+
 func TestSignup_responds_uniformly_on_duplicate(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")

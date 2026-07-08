@@ -162,11 +162,17 @@ func main() {
 func truncateAll(ctx context.Context, pool *pgxpool.Pool) error {
 	tables := []string{
 		"usage_samples", "fleet_allocation_events", "game_server_allocations",
-		"matchmaking_tickets", "fleets", "leaderboard_entries", "leaderboards",
-		"friend_edges", "storage_objects", "sessions", "end_users",
-		"audit_log", "api_keys", "projects", "tenants",
-		"dashboard_invitations", "dashboard_sessions", "dashboard_memberships",
-		"dashboard_users", "platform_audit_log",
+		"matchmaker_matches", "matchmaking_tickets", "fleets",
+		"leaderboard_entries", "leaderboards", "friend_edges",
+		"storage_objects", "sessions", "player_account_sessions",
+		"player_account_totp_backup_codes", "player_account_totp",
+		"player_account_trusted_devices", "tenant_player_bans",
+		"project_players", "player_accounts", "audit_log", "api_keys",
+		"projects", "tenants", "control_panel_invitations",
+		"control_panel_sessions", "control_panel_memberships",
+		"control_panel_user_totp_backup_codes", "control_panel_user_totp",
+		"control_panel_trusted_devices", "control_panel_users",
+		"platform_audit_log", "feature_grants", "rate_limit_overrides",
 	}
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -183,6 +189,12 @@ func truncateAll(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("TRUNCATE TABLE %s CASCADE", t)); err != nil {
 			return fmt.Errorf("truncate %s: %w", t, err)
 		}
+	}
+	// casbin_rule holds both static 'p' policy (seeded by migrations) and 'g'
+	// grouping rows (subject→role). Truncating it would wipe the policy, so clear
+	// only the grouping rows that reference the now-truncated subjects.
+	if _, err := tx.Exec(ctx, `DELETE FROM casbin_rule WHERE ptype = 'g'`); err != nil {
+		return fmt.Errorf("clear casbin grouping rows: %w", err)
 	}
 	committed = true
 	return tx.Commit(ctx)
@@ -209,6 +221,7 @@ type playerSeed struct {
 	id         int64
 	externalID string
 	email      *string
+	accountID  *string
 }
 
 func seed(ctx context.Context, pool *pgxpool.Pool) error {
@@ -223,6 +236,9 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("create admin: %w", err)
 	}
 	log.Printf("created platform admin id=%d email=admin@demo.ggscale password=%s", adminID, dashboardPassword)
+	if err := s.grantGroupingRow(ctx, cpUserSubject(adminID), roleGroupPlatformAdmin, "*"); err != nil {
+		return fmt.Errorf("grant platform admin role: %w", err)
+	}
 
 	// 2. Tenants + first project via dashboard_create_tenant
 	var tenants []tenantSeed
@@ -231,13 +247,22 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		projectName := gameNames[i][0]
 		keyHash := randomHash()
 
-		var tid, pid int64
+		var tid, pid, bootstrapKeyID int64
 		err := pool.QueryRow(ctx,
-			`SELECT tenant_id, project_id FROM dashboard_create_tenant($1, $2, $3, $4, $5)`,
+			`SELECT tenant_id, project_id, api_key_id FROM control_panel_create_tenant($1, $2, $3, $4, $5)`,
 			adminID, name, projectName, keyHash, "bootstrap-key",
-		).Scan(&tid, &pid)
+		).Scan(&tid, &pid, &bootstrapKeyID)
 		if err != nil {
 			return fmt.Errorf("create tenant %q: %w", name, err)
+		}
+
+		// The function makes the actor an owner and mints a secret bootstrap key;
+		// mirror the Casbin grouping the control panel would have written.
+		if err := s.grantGroupingRow(ctx, cpUserSubject(adminID), roleGroupTenantOwner, tenantDomain(tid)); err != nil {
+			return fmt.Errorf("grant tenant owner role: %w", err)
+		}
+		if err := s.grantGroupingRow(ctx, apiKeySubject(bootstrapKeyID), roleGroupAPIServer, tenantDomain(tid)); err != nil {
+			return fmt.Errorf("grant bootstrap key role: %w", err)
 		}
 
 		if _, err := pool.Exec(ctx, `UPDATE tenants SET tier = $1 WHERE id = $2`, tier, tid); err != nil {
@@ -275,11 +300,14 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		_, err = pool.Exec(ctx,
-			`INSERT INTO dashboard_memberships (dashboard_user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
+			`INSERT INTO control_panel_memberships (control_panel_user_id, tenant_id, role) VALUES ($1, $2, 'owner')`,
 			uid, t.id,
 		)
 		if err != nil {
 			return err
+		}
+		if err := s.grantGroupingRow(ctx, cpUserSubject(uid), roleGroupTenantOwner, tenantDomain(t.id)); err != nil {
+			return fmt.Errorf("grant tenant owner role: %w", err)
 		}
 		log.Printf("created tenant owner id=%d email=%s tenant=%q", uid, email, t.name)
 	}
@@ -288,13 +316,17 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	for _, t := range tenants {
 		for _, p := range t.projects {
 			keyHash := randomHash()
-			_, err := pool.Exec(ctx,
+			var keyID int64
+			err := pool.QueryRow(ctx,
 				`INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes, key_type)
-				 VALUES ($1, $2, $3, $4, $5, 'publishable')`,
+				 VALUES ($1, $2, $3, $4, $5, 'publishable') RETURNING id`,
 				t.id, p.id, keyHash, fmt.Sprintf("sdk-%s", p.name), []string{"read"},
-			)
+			).Scan(&keyID)
 			if err != nil {
 				return err
+			}
+			if err := s.grantGroupingRow(ctx, apiKeySubject(keyID), roleGroupAPIClient, tenantDomain(t.id)); err != nil {
+				return fmt.Errorf("grant api key role: %w", err)
 			}
 		}
 	}
@@ -332,6 +364,32 @@ type seeder struct {
 	rng  *rand.Rand
 }
 
+// Casbin grouping-row helpers. The control panel writes these subject→role rows
+// in-transaction when it provisions tenants, memberships, and API keys. The seed
+// inserts those records directly, so it must write the matching grouping rows or
+// authorization checks return 403. Formats mirror internal/rbac.
+const (
+	roleGroupPlatformAdmin = "role:platform_admin"
+	roleGroupTenantOwner   = "role:tenant_owner"
+	roleGroupAPIServer     = "role:api_server"
+	roleGroupAPIClient     = "role:api_client"
+)
+
+func cpUserSubject(id int64) string { return "control_panel:user:" + strconv.FormatInt(id, 10) }
+func apiKeySubject(id int64) string { return "api_key:" + strconv.FormatInt(id, 10) }
+func tenantDomain(id int64) string  { return "tenant:" + strconv.FormatInt(id, 10) }
+
+// grantGroupingRow writes a Casbin grouping row assigning subject the given role
+// within domain (use "*" for the global platform-admin domain).
+func (s *seeder) grantGroupingRow(ctx context.Context, subject, role, domain string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO casbin_rule (ptype, v0, v1, v2) VALUES ('g', $1, $2, $3)
+		 ON CONFLICT DO NOTHING`,
+		subject, role, domain,
+	)
+	return err
+}
+
 func (s *seeder) withTenant(ctx context.Context, tenantID int64, fn func(pgx.Tx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -363,7 +421,7 @@ func (s *seeder) createDashboardUser(ctx context.Context, email, password string
 	}
 	var id int64
 	err = s.pool.QueryRow(ctx,
-		`INSERT INTO dashboard_users (email, password_hash, is_platform_admin)
+		`INSERT INTO control_panel_users (email, password_hash, is_platform_admin)
 		 VALUES ($1, $2, $3) RETURNING id`,
 		email, hash, isAdmin,
 	).Scan(&id)
@@ -377,6 +435,7 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 	for i := 0; i < playerCount; i++ {
 		var id int64
 		var email *string
+		var accountID *string
 		externalID := fmt.Sprintf("player-%s-%d", randomHex(4), i)
 		if s.rng.IntN(3) != 0 { // 2/3 have emails
 			addr := fmt.Sprintf("%s.%s.%d@%s",
@@ -391,14 +450,23 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		err := s.withTenant(ctx, tenantID, func(tx pgx.Tx) error {
 			if email != nil {
 				passHash, _ := bcrypt.GenerateFromPassword([]byte(playerPassword), bcryptCost)
+				var acc string
+				if err := tx.QueryRow(ctx,
+					`INSERT INTO player_accounts (email, password_hash, display_name, email_verified_at)
+					 VALUES ($1, $2, $3, now()) RETURNING id::text`,
+					*email, passHash, playerNames[s.rng.IntN(len(playerNames))],
+				).Scan(&acc); err != nil {
+					return err
+				}
+				accountID = &acc
 				return tx.QueryRow(ctx,
-					`INSERT INTO end_users (tenant_id, project_id, external_id, email, password_hash)
-					 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-					tenantID, p.id, externalID, *email, passHash,
+					`INSERT INTO project_players (tenant_id, project_id, external_id, email, password_hash, email_verified_at, player_account_id)
+					 VALUES ($1, $2, $3, $4, $5, now(), $6) RETURNING id`,
+					tenantID, p.id, externalID, *email, passHash, acc,
 				).Scan(&id)
 			}
 			return tx.QueryRow(ctx,
-				`INSERT INTO end_users (tenant_id, project_id, external_id)
+				`INSERT INTO project_players (tenant_id, project_id, external_id)
 				 VALUES ($1, $2, $3) RETURNING id`,
 				tenantID, p.id, externalID,
 			).Scan(&id)
@@ -406,7 +474,7 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		if err != nil {
 			return fmt.Errorf("player %d: %w", i, err)
 		}
-		players = append(players, playerSeed{id: id, externalID: externalID, email: email})
+		players = append(players, playerSeed{id: id, externalID: externalID, email: email, accountID: accountID})
 	}
 
 	// Leaderboards
@@ -440,7 +508,7 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 			recorded := time.Now().Add(-time.Duration(s.rng.IntN(30*24)) * time.Hour)
 			err := s.withTenant(ctx, tenantID, func(tx pgx.Tx) error {
 				_, err := tx.Exec(ctx,
-					`INSERT INTO leaderboard_entries (tenant_id, leaderboard_id, end_user_id, score, recorded_at)
+					`INSERT INTO leaderboard_entries (tenant_id, leaderboard_id, player_id, score, recorded_at)
 					 VALUES ($1, $2, $3, $4, $5)`,
 					tenantID, lbID, player.id, score, recorded,
 				)
@@ -453,10 +521,16 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 	}
 
 	// Friend edges
+	accountPlayers := make([]playerSeed, 0, len(players))
+	for _, player := range players {
+		if player.accountID != nil {
+			accountPlayers = append(accountPlayers, player)
+		}
+	}
 	friendCount := 5 + s.rng.IntN(10)
-	for i := 0; i < friendCount && len(players) > 3; i++ {
-		a := players[s.rng.IntN(len(players))]
-		b := players[s.rng.IntN(len(players))]
+	for i := 0; i < friendCount && len(accountPlayers) > 3; i++ {
+		a := accountPlayers[s.rng.IntN(len(accountPlayers))]
+		b := accountPlayers[s.rng.IntN(len(accountPlayers))]
 		if a.id == b.id {
 			continue
 		}
@@ -465,10 +539,10 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		updated := created.Add(time.Duration(s.rng.IntN(24)) * time.Hour)
 		err := s.withTenant(ctx, tenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx,
-				`INSERT INTO friend_edges (tenant_id, from_user_id, to_user_id, status, created_at, updated_at)
-				 VALUES ($1, $2, $3, $4, $5, $6)
-				 ON CONFLICT (tenant_id, from_user_id, to_user_id) DO NOTHING`,
-				tenantID, a.id, b.id, status, created, updated,
+				`INSERT INTO friend_edges (from_account_id, to_account_id, status, created_at, updated_at)
+				 VALUES ($1, $2, $3, $4, $5)
+				 ON CONFLICT (from_account_id, to_account_id) DO NOTHING`,
+				*a.accountID, *b.accountID, status, created, updated,
 			)
 			return err
 		})
@@ -479,10 +553,10 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		if status == "accepted" {
 			_ = s.withTenant(ctx, tenantID, func(tx pgx.Tx) error {
 				_, err := tx.Exec(ctx,
-					`INSERT INTO friend_edges (tenant_id, from_user_id, to_user_id, status, created_at, updated_at)
-					 VALUES ($1, $2, $3, $4, $5, $6)
-					 ON CONFLICT (tenant_id, from_user_id, to_user_id) DO NOTHING`,
-					tenantID, b.id, a.id, status, created, updated,
+					`INSERT INTO friend_edges (from_account_id, to_account_id, status, created_at, updated_at)
+					 VALUES ($1, $2, $3, $4, $5)
+					 ON CONFLICT (from_account_id, to_account_id) DO NOTHING`,
+					*b.accountID, *a.accountID, status, created, updated,
 				)
 				return err
 			})
@@ -586,7 +660,7 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		err := s.withTenant(ctx, tenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx,
 				`INSERT INTO matchmaking_tickets
-				 (tenant_id, project_id, fleet_id, end_user_id, region, game_mode, attributes, status, match_address, created_at, matched_at)
+				 (tenant_id, project_id, fleet_id, player_id, region, game_mode, attributes, status, match_address, created_at, matched_at)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 				tenantID, p.id, fleetID, player.id, region, mode, attributes, status, matchAddress, created, matched,
 			)
@@ -646,21 +720,21 @@ func (s *seeder) seedAuditLogs(ctx context.Context, tenantID int64) error {
 
 func printSummary(ctx context.Context, pool *pgxpool.Pool) {
 	var counts struct {
-		Tenants   int64
-		Projects  int64
-		Players   int64
-		Scores    int64
-		Friends   int64
-		Fleets    int64
-		Allocs    int64
-		Tickets   int64
-		Usage     int64
-		Storage   int64
-		Audit     int64
+		Tenants  int64
+		Projects int64
+		Players  int64
+		Scores   int64
+		Friends  int64
+		Fleets   int64
+		Allocs   int64
+		Tickets  int64
+		Usage    int64
+		Storage  int64
+		Audit    int64
 	}
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM tenants`).Scan(&counts.Tenants)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM projects`).Scan(&counts.Projects)
-	_ = pool.QueryRow(ctx, `SELECT count(*) FROM end_users`).Scan(&counts.Players)
+	_ = pool.QueryRow(ctx, `SELECT count(*) FROM project_players`).Scan(&counts.Players)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM leaderboard_entries`).Scan(&counts.Scores)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM friend_edges`).Scan(&counts.Friends)
 	_ = pool.QueryRow(ctx, `SELECT count(*) FROM fleets`).Scan(&counts.Fleets)

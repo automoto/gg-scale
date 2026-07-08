@@ -101,6 +101,17 @@ func TestGameSession_host_create_sees_self_as_peer(t *testing.T) {
 	assert.Equal(t, id, out.Peers[0].PlayerID)
 }
 
+func TestGameSession_negative_max_players_rejected(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	srv := newServerForCluster(t, c)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
+		map[string]any{"public_addr": addr("1.2.3.4", 9000), "max_players": -1})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+}
+
 func TestGameSession_join_sees_both_peers(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")

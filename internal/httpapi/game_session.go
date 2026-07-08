@@ -197,6 +197,12 @@ func gameSessionCreate(d Deps) func(context.Context, *gameSessionCreateInput) (*
 		if !req.PublicAddr.valid() {
 			return nil, huma.Error400BadRequest("public_addr.port out of range")
 		}
+		// max_players is omitempty: 0 means "unset" and the service applies the
+		// default. A negative value is never valid, so reject it rather than
+		// silently coercing it to the default.
+		if req.MaxPlayers < 0 {
+			return nil, huma.Error400BadRequest("max_players must not be negative")
+		}
 		if req.MaxPlayers > gamesession.MaxPlayersLimit {
 			return nil, huma.Error400BadRequest("max_players exceeds limit")
 		}

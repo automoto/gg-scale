@@ -208,7 +208,9 @@ func (a *Authorizer) CanControlPanel(user ControlPanelUser, tenantID int64, obj,
 		return allowed, err
 	}
 	if user.IsPlatformAdmin {
-		return a.enforce(RolePlatformAdmin, dom, obj, act)
+		// Platform admins manage every tenant's control panel, independent of
+		// membership. A per-tenant opt-out may be added later.
+		return true, nil
 	}
 	return false, nil
 }
