@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(70), v)
+	assert.Equal(t, uint(1), v)
 	assert.False(t, dirty)
 }
 
@@ -189,7 +189,7 @@ func TestUp_enables_rls_with_isolation_policy(t *testing.T) {
 	assert.Equal(t, 0, policyCount(t, dsn, "player_accounts"), "player_accounts is global — no RLS policy")
 }
 
-func TestDown_walks_back_through_every_migration(t *testing.T) {
+func TestDown_tears_down_the_baseline(t *testing.T) {
 	dsn := startPostgres(t)
 
 	r, err := migrate.New(dsn, migrationsDir(t))
@@ -197,10 +197,7 @@ func TestDown_walks_back_through_every_migration(t *testing.T) {
 	t.Cleanup(func() { _ = r.Close() })
 
 	require.NoError(t, r.Up())
-
-	for v := uint(17); v > 0; v-- {
-		require.NoError(t, r.Down(), "down from version %d", v)
-	}
+	require.NoError(t, r.Down())
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)

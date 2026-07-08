@@ -169,6 +169,16 @@ func (a *Authorizer) Close() {
 	a.enforcer.StopAutoLoadPolicy()
 }
 
+// PolicyRules returns the enforcer's p-rules as [subject, domain, object,
+// action] tuples. It is the code's source of truth for the static policy and
+// lets tests assert the persisted migration seed has not drifted from it.
+func (a *Authorizer) PolicyRules() ([][]string, error) {
+	if a == nil {
+		return nil, ErrAuthorizerUnavailable
+	}
+	return a.enforcer.GetPolicy()
+}
+
 // ReloadPolicy refreshes the in-memory enforcer from persistent policy.
 func (a *Authorizer) ReloadPolicy() error {
 	if a == nil {
