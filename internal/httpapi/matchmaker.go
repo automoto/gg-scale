@@ -69,7 +69,7 @@ type matchmakerTicketResponse struct {
 	// on (lower-cased: "tcp", "udp", "tcpudp"). Empty when the backend
 	// can't determine it (older allocations, plugin backends that don't
 	// surface it). Game-specific SDKs already know what to dial; this
-	// field is for cross-game launchers, dashboards, and defense-in-depth.
+	// field is for cross-game launchers, control panels, and defense-in-depth.
 	ProtocolHint string `json:"protocol_hint,omitempty"`
 	// SessionID / JoinCode are set for matched game_session tickets.
 	SessionID string `json:"session_id,omitempty"`

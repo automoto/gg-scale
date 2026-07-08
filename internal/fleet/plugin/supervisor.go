@@ -267,7 +267,7 @@ func (s *Supervisor) RestartCount() int {
 }
 
 // TotalRestartCount is the lifetime count of subprocess restarts. Never
-// resets — useful for ops dashboards and tests that assert a restart
+// resets — useful for ops monitoring and tests that assert a restart
 // happened without racing the consecutive-count reset.
 func (s *Supervisor) TotalRestartCount() int {
 	return int(s.totalRestarts.Load())

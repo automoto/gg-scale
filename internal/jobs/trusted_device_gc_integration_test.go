@@ -56,7 +56,7 @@ func TestSweepExpiredTrustedDevices_removes_only_expired_rows(t *testing.T) {
 
 	var userID int64
 	require.NoError(t, raw.QueryRow(ctx,
-		`INSERT INTO dashboard_users (email, password_hash, email_verified_at)
+		`INSERT INTO control_panel_users (email, password_hash, email_verified_at)
 		 VALUES ('gc@example.com', '\x00', now()) RETURNING id`).Scan(&userID))
 	var accountID string
 	require.NoError(t, raw.QueryRow(ctx,
@@ -64,7 +64,7 @@ func TestSweepExpiredTrustedDevices_removes_only_expired_rows(t *testing.T) {
 		 VALUES ('gc-player@example.com', '\x00', now()) RETURNING id`).Scan(&accountID))
 
 	_, err := raw.Exec(ctx,
-		`INSERT INTO dashboard_trusted_devices (dashboard_user_id, token_hash, expires_at)
+		`INSERT INTO control_panel_trusted_devices (control_panel_user_id, token_hash, expires_at)
 		 VALUES ($1, '\x01', now() - interval '1 day'),
 		        ($1, '\x02', now() + interval '1 day')`, userID)
 	require.NoError(t, err)
@@ -76,9 +76,9 @@ func TestSweepExpiredTrustedDevices_removes_only_expired_rows(t *testing.T) {
 
 	require.NoError(t, SweepExpiredTrustedDevices(ctx, pool))
 
-	var dashboardLeft, playersLeft int64
-	require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM dashboard_trusted_devices`).Scan(&dashboardLeft))
+	var controlPanelLeft, playersLeft int64
+	require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM control_panel_trusted_devices`).Scan(&controlPanelLeft))
 	require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM player_account_trusted_devices`).Scan(&playersLeft))
-	assert.Equal(t, int64(1), dashboardLeft, "only the live dashboard device survives")
+	assert.Equal(t, int64(1), controlPanelLeft, "only the live control panel device survives")
 	assert.Equal(t, int64(1), playersLeft, "only the live player device survives")
 }

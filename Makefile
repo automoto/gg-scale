@@ -73,7 +73,7 @@ check: lint test ## Local CI mirror: lint + unit tests
 sqlc-gen: ## Regenerate sqlc queries (Docker, pinned version)
 	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:$(SQLC_VERSION) generate
 
-templ-generate: ## Regenerate *_templ.go dashboard templates
+templ-generate: ## Regenerate *_templ.go control panel templates
 	go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
 
 # Regenerates openapi.yaml (the /v1 JSON API spec, used for SDK generation)

@@ -1,5 +1,5 @@
 // Package webutil holds the small HTTP helpers shared by every
-// server-rendered surface in ggscale: the operator dashboard, the
+// server-rendered surface in ggscale: the operator control panel, the
 // player-facing site, and the JSON auth handlers in internal/httpapi.
 //
 // Each of those used to carry private copies of these helpers. Keeping
@@ -27,14 +27,14 @@ const (
 	// MaxFormBodyBytes caps the body size for HTML form POSTs.
 	MaxFormBodyBytes = 1 << 20
 
-	dashboardCSP = "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
-	playerCSP    = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+	controlPanelCSP = "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+	playerCSP       = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 )
 
 // SecurityHeaders sets browser-protection headers for the authenticated
-// dashboard. Dashboard JS/CSS must be served as first-party static assets.
+// control panel. ControlPanel JS/CSS must be served as first-party static assets.
 func SecurityHeaders(next http.Handler) http.Handler {
-	return securityHeadersWithCSP(dashboardCSP, next)
+	return securityHeadersWithCSP(controlPanelCSP, next)
 }
 
 // PlayerSecurityHeaders sets a stricter policy for player-facing forms. They

@@ -138,7 +138,7 @@ or empty):
 }
 ```
 
-What `protocol_hint` is **for**: cross-game launchers, dashboards, and
+What `protocol_hint` is **for**: cross-game launchers, control panels, and
 defense-in-depth in clients that handle multiple games. A unified
 launcher can show "TCP/WebSocket" vs "UDP" badges; a client built for
 a known game can sanity-check the protocol it expects matches what it

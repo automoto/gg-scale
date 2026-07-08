@@ -1,4 +1,4 @@
--- Player-account mirrors of dashboard_totp.sql; see the comments there for
+-- Player-account mirrors of control_panel_totp.sql; see the comments there for
 -- the atomicity rationale on each statement.
 
 -- name: UpsertPlayerAccountTOTPPending :one

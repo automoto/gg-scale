@@ -12,7 +12,7 @@ import (
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-func TestSecurityHeadersDisallowInlineDashboardAssets(t *testing.T) {
+func TestSecurityHeadersDisallowInlineControlPanelAssets(t *testing.T) {
 	h := webutil.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))

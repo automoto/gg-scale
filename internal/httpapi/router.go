@@ -22,7 +22,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auth"
 	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/dashboard"
+	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/gamesession"
@@ -65,7 +65,7 @@ type Deps struct {
 	Mailer     mailer.Mailer
 	MailFrom   string
 	// TwoFactor encrypts TOTP secrets and signs 2FA pending cookies for the
-	// dashboard and player surfaces. nil = 2FA enrollment unavailable.
+	// control panel and player surfaces. nil = 2FA enrollment unavailable.
 	TwoFactor *twofactor.Cipher
 	Cache     cache.Store
 	Registry  *prometheus.Registry
@@ -104,12 +104,12 @@ type Deps struct {
 	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
 	RelayIssuer *relay.Issuer
 
-	Dashboard          dashboard.Config
-	DashboardBootstrap *dashboard.Bootstrap
-	// DashboardPluginInfo is the closure the admin/plugins page calls to
+	ControlPanel          controlpanel.Config
+	ControlPanelBootstrap *controlpanel.Bootstrap
+	// ControlPanelPluginInfo is the closure the admin/plugins page calls to
 	// snapshot the running fleet plugin. nil when no plugin backend is
 	// configured — the page renders "no plugin backend" in that case.
-	DashboardPluginInfo func() *dashboard.PluginSnapshot
+	ControlPanelPluginInfo func() *controlpanel.PluginSnapshot
 
 	// Players controls whether the player-facing /v1/players/p/{projectID}/
 	// site is mounted.
@@ -228,11 +228,11 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewObservability(reg))
 		registerHealthz(groupAPI(r, humaCfg), d)
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
-		// dashboard and player surfaces. Mounted unconditionally so player
-		// pages stay styled even when the dashboard is disabled.
+		// control panel and player surfaces. Mounted unconditionally so player
+		// pages stay styled even when the control panel is disabled.
 		r.Mount("/assets", webassets.Handler())
-		if d.Dashboard.Enabled() {
-			r.Mount("/dashboard", dashboard.New(dashboard.Deps{
+		if d.ControlPanel.Enabled() {
+			r.Mount("/control-panel", controlpanel.New(controlpanel.Deps{
 				Pool:               d.Pool,
 				Cache:              d.Cache,
 				Limiter:            d.Limiter,
@@ -240,12 +240,12 @@ func NewRouter(d Deps) http.Handler {
 				ProxyTrust:         d.ProxyTrust,
 				Registry:           reg,
 				Metrics:            d.Metrics,
-				Config:             d.Dashboard,
-				Bootstrap:          d.DashboardBootstrap,
+				Config:             d.ControlPanel,
+				Bootstrap:          d.ControlPanelBootstrap,
 				Mailer:             d.Mailer,
 				Fleet:              d.Fleet,
 				RBAC:               d.RBAC,
-				PluginInfo:         d.DashboardPluginInfo,
+				PluginInfo:         d.ControlPanelPluginInfo,
 				TwoFactor:          d.TwoFactor,
 			}))
 		}

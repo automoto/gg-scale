@@ -1,6 +1,6 @@
 -- Fleet templates: operator-defined recipes that allocations are drawn from.
 -- Lookup is by project-scoped name (the public identifier used by the SDK,
--- matchmaker API, and dashboard URLs). Soft delete keeps historical
+-- matchmaker API, and control panel URLs). Soft delete keeps historical
 -- allocations referenceable in the UI.
 
 -- name: CreateFleet :one
@@ -34,7 +34,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL;
 
 -- name: ListFleetsForProject :many
--- Dashboard list. Soft-deleted rows are excluded; include_deleted is reserved
+-- Control panel list. Soft-deleted rows are excluded; include_deleted is reserved
 -- for a future "archive" view but not wired through the UI yet.
 SELECT id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
 FROM fleets

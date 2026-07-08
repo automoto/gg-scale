@@ -13,19 +13,19 @@ import (
 
 func baseProd() *config.Config {
 	return &config.Config{
-		Env:                         "production",
-		DBMaxConns:                  10,
-		DBMinConns:                  2,
-		DBMaxConnLifetime:           time.Hour,
-		CORSAllowedOrigins:          []string{"https://app.example.com"},
-		DashboardEnabled:            true,
-		DashboardBootstrapTokenFile: "/run/secrets/ggscale-bootstrap",
-		DashboardCookieSecure:       true,
-		DashboardBaseURL:            "https://dashboard.example.com",
-		JWTSigningKey:               "1234567890abcdef1234567890abcdef",
-		MetricsAuthToken:            "1234567890abcdef1234567890abcdef",
-		FleetBackend:                "agones",
-		FeatureFleetEnabled:         true,
+		Env:                            "production",
+		DBMaxConns:                     10,
+		DBMinConns:                     2,
+		DBMaxConnLifetime:              time.Hour,
+		CORSAllowedOrigins:             []string{"https://app.example.com"},
+		ControlPanelEnabled:            true,
+		ControlPanelBootstrapTokenFile: "/run/secrets/ggscale-bootstrap",
+		ControlPanelCookieSecure:       true,
+		ControlPanelBaseURL:            "https://control-panel.example.com",
+		JWTSigningKey:                  "1234567890abcdef1234567890abcdef",
+		MetricsAuthToken:               "1234567890abcdef1234567890abcdef",
+		FleetBackend:                   "agones",
+		FeatureFleetEnabled:            true,
 	}
 }
 
@@ -56,14 +56,14 @@ func TestValidateRejectsWildcardCORSInProd(t *testing.T) {
 
 func TestValidateRequiresSecureCookieInProd(t *testing.T) {
 	c := baseProd()
-	c.DashboardCookieSecure = false
+	c.ControlPanelCookieSecure = false
 	err := c.Validate()
-	assert.ErrorContains(t, err, "DASHBOARD_COOKIE_SECURE")
+	assert.ErrorContains(t, err, "CONTROL_PANEL_COOKIE_SECURE")
 }
 
-func TestValidateRequiresHTTPSDashboardBaseURLInProd(t *testing.T) {
+func TestValidateRequiresHTTPSControlPanelBaseURLInProd(t *testing.T) {
 	c := baseProd()
-	c.DashboardBaseURL = "http://dashboard.example.com"
+	c.ControlPanelBaseURL = "http://control-panel.example.com"
 	err := c.Validate()
 	assert.ErrorContains(t, err, "HTTPS")
 }
@@ -77,9 +77,9 @@ func TestValidateRequiresJWTKeyInProd(t *testing.T) {
 
 func TestValidateRequiresBootstrapTokenFileInProd(t *testing.T) {
 	c := baseProd()
-	c.DashboardBootstrapTokenFile = ""
+	c.ControlPanelBootstrapTokenFile = ""
 	err := c.Validate()
-	assert.ErrorContains(t, err, "DASHBOARD_BOOTSTRAP_TOKEN_FILE")
+	assert.ErrorContains(t, err, "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE")
 }
 
 func TestValidateRequiresMetricsTokenInProd(t *testing.T) {

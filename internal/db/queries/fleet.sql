@@ -55,7 +55,7 @@ ORDER BY id DESC
 LIMIT $2;
 
 -- name: ListAllocationsForProject :many
--- Dashboard fleet list: optionally include terminal rows (shutdown/failed)
+-- Control panel fleet list: optionally include terminal rows (shutdown/failed)
 -- and paginate. include_terminal=false keeps the page focused on live
 -- allocations; the UI toggles it via a query param.
 SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,

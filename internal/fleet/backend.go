@@ -98,7 +98,7 @@ type AllocationRequest struct {
 	TenantID  int64
 	ProjectID int64
 	// FleetID identifies the fleet template this allocation is drawn from.
-	// Required at the matchmaker / dashboard boundary; the Manager refuses
+	// Required at the matchmaker / control panel boundary; the Manager refuses
 	// to dispatch a request with FleetID == 0.
 	FleetID int64
 	// Backend is the backend name resolved from the fleet template. The
@@ -132,7 +132,7 @@ type Allocation struct {
 	// Protocol is the wire protocol the game-server listens on,
 	// lower-cased ("tcp", "udp", "tcpudp"). Surfaced to clients via the
 	// matchmaker response's protocol_hint so cross-game launchers /
-	// dashboards can dial the right transport. Empty when the backend
+	// control panels can dial the right transport. Empty when the backend
 	// can't determine it (older backends, plugin backends that don't set
 	// it). The client is built for a specific game and ultimately knows
 	// its protocol; protocol_hint is defense-in-depth and observability.

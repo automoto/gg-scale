@@ -361,7 +361,7 @@ type ReservePlayerVerifyAttemptRow struct {
 	EmailVerificationLifetimeAttempts int32
 }
 
-// Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
+// Atomic check-and-bump (see ReserveControlPanelVerifyAttempt for the
 // TOCTOU explanation). Returns 0 rows when already at cap.
 func (q *Queries) ReservePlayerVerifyAttempt(ctx context.Context, arg ReservePlayerVerifyAttemptParams) (ReservePlayerVerifyAttemptRow, error) {
 	row := q.db.QueryRow(ctx, reservePlayerVerifyAttempt, arg.ID, arg.MaxAttempts)

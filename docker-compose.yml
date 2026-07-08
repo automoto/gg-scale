@@ -70,10 +70,10 @@ services:
       # MailHog speaks plain SMTP only; turn TLS off for the dev stack.
       SMTP_TLS: "off"
       MAIL_FROM: "noreply@ggscale.dev"
-      DASHBOARD_DISABLED: "false"
-      DASHBOARD_COOKIE_SECURE: "false"
+      CONTROL_PANEL_DISABLED: "false"
+      CONTROL_PANEL_COOKIE_SECURE: "false"
       # First-run bootstrap token is written here; read with: cat ./data/bootstrap.token
-      DASHBOARD_BOOTSTRAP_TOKEN_FILE: /run/ggscale/bootstrap.token
+      CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE: /run/ggscale/bootstrap.token
     volumes:
       - ./data:/run/ggscale
     ports:

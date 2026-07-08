@@ -218,7 +218,7 @@ type CountMatchmakerMatchesByModeRow struct {
 	MatchCount int64
 }
 
-// Dashboard matchmaker page: matches formed per mode within the retention
+// Control panel matchmaker page: matches formed per mode within the retention
 // window (rows are GC'd after MatchTTL, so this reads as "recent matches").
 func (q *Queries) CountMatchmakerMatchesByMode(ctx context.Context, projectID int64) ([]CountMatchmakerMatchesByModeRow, error) {
 	rows, err := q.db.Query(ctx, countMatchmakerMatchesByMode, projectID)
@@ -550,7 +550,7 @@ type ListMatchmakerBucketsForProjectRow struct {
 	MaxCountHigh int32
 }
 
-// Dashboard matchmaker page: queue depth per (mode, region, game_mode)
+// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 // bucket for the current tenant's project, plus oldest queued ticket and
 // the min/max count spread so operators can spot stuck buckets at a glance.
 func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error) {

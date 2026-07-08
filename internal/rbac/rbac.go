@@ -51,24 +51,24 @@ const (
 
 // Objects are the stable Casbin object names used by routes and policies.
 const (
-	ObjectTenant          = "tenant"
-	ObjectProject         = "project"
-	ObjectAPIKey          = "api_key"
-	ObjectAPIKeySecret    = "api_key:secret"
-	ObjectAPIKeyPublic    = "api_key:publishable"
-	ObjectTeam            = "team"
-	ObjectAudit           = "audit"
-	ObjectAuth            = "auth"
-	ObjectProfile         = "profile"
-	ObjectStorage         = "storage"
-	ObjectFriends         = "friends"
-	ObjectLeaderboard     = "leaderboard"
-	ObjectRealtime        = "realtime"
-	ObjectPlayer          = "player"
-	ObjectCustomToken     = "custom_token"
-	ObjectFeatureRequest  = "feature_request"
-	ObjectDashboardUser   = "dashboard_user"
-	ObjectPlatformPlugins = "platform:plugins"
+	ObjectTenant           = "tenant"
+	ObjectProject          = "project"
+	ObjectAPIKey           = "api_key"
+	ObjectAPIKeySecret     = "api_key:secret"
+	ObjectAPIKeyPublic     = "api_key:publishable"
+	ObjectTeam             = "team"
+	ObjectAudit            = "audit"
+	ObjectAuth             = "auth"
+	ObjectProfile          = "profile"
+	ObjectStorage          = "storage"
+	ObjectFriends          = "friends"
+	ObjectLeaderboard      = "leaderboard"
+	ObjectRealtime         = "realtime"
+	ObjectPlayer           = "player"
+	ObjectCustomToken      = "custom_token"
+	ObjectFeatureRequest   = "feature_request"
+	ObjectControlPanelUser = "control_panel_user"
+	ObjectPlatformPlugins  = "platform:plugins"
 )
 
 // Roles are the stable Casbin role names used in grouping policy.
@@ -114,8 +114,8 @@ func featureDefault(feature Feature) bool {
 	return feature == FeatureMatchmaker
 }
 
-// DashboardUser is the authorization-relevant view of a dashboard user.
-type DashboardUser struct {
+// ControlPanelUser is the authorization-relevant view of a control panel user.
+type ControlPanelUser struct {
 	ID              int64
 	IsPlatformAdmin bool
 }
@@ -197,13 +197,13 @@ func newEnforcer(adapter any, autoSave bool) (*casbin.SyncedEnforcer, error) {
 	return e, nil
 }
 
-// CanDashboard reports whether a dashboard user can perform act on obj.
-func (a *Authorizer) CanDashboard(user DashboardUser, tenantID int64, obj, act string) (bool, error) {
+// CanControlPanel reports whether a control panel user can perform act on obj.
+func (a *Authorizer) CanControlPanel(user ControlPanelUser, tenantID int64, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
 	dom := TenantDomain(tenantID)
-	allowed, err := a.enforce(DashboardSubject(user.ID), dom, obj, act)
+	allowed, err := a.enforce(ControlPanelSubject(user.ID), dom, obj, act)
 	if err != nil || allowed {
 		return allowed, err
 	}
@@ -297,28 +297,28 @@ func (a *Authorizer) storeFeatureCache(key featureCacheKey, enabled bool, now ti
 	}
 }
 
-// SetDashboardMembershipRole replaces a dashboard user's tenant role.
-func (a *Authorizer) SetDashboardMembershipRole(userID, tenantID int64, membershipRole string) error {
-	role, ok := DashboardMembershipRole(membershipRole)
+// SetControlPanelMembershipRole replaces a control panel user's tenant role.
+func (a *Authorizer) SetControlPanelMembershipRole(userID, tenantID int64, membershipRole string) error {
+	role, ok := ControlPanelMembershipRole(membershipRole)
 	if !ok {
-		return fmt.Errorf("rbac: unknown dashboard membership role %q", membershipRole)
+		return fmt.Errorf("rbac: unknown control panel membership role %q", membershipRole)
 	}
-	return a.setSubjectRole(DashboardSubject(userID), role, TenantDomain(tenantID))
+	return a.setSubjectRole(ControlPanelSubject(userID), role, TenantDomain(tenantID))
 }
 
-// SetDashboardMembershipRoleTx writes a dashboard user's tenant role in tx.
-func (a *Authorizer) SetDashboardMembershipRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, membershipRole string) error {
-	role, ok := DashboardMembershipRole(membershipRole)
+// SetControlPanelMembershipRoleTx writes a control panel user's tenant role in tx.
+func (a *Authorizer) SetControlPanelMembershipRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, membershipRole string) error {
+	role, ok := ControlPanelMembershipRole(membershipRole)
 	if !ok {
-		return fmt.Errorf("rbac: unknown dashboard membership role %q", membershipRole)
+		return fmt.Errorf("rbac: unknown control panel membership role %q", membershipRole)
 	}
-	return a.setSubjectRoleTx(ctx, tx, DashboardSubject(userID), role, TenantDomain(tenantID))
+	return a.setSubjectRoleTx(ctx, tx, ControlPanelSubject(userID), role, TenantDomain(tenantID))
 }
 
-// GrantableDashboardRole reports whether role is an à-la-carte dashboard role a
+// GrantableControlPanelRole reports whether role is an à-la-carte control panel role a
 // tenant admin may grant on top of a user's membership role. These coexist
 // with the membership role rather than replacing it.
-func GrantableDashboardRole(role string) bool {
+func GrantableControlPanelRole(role string) bool {
 	switch role {
 	case RoleFleetOperator:
 		return true
@@ -327,76 +327,76 @@ func GrantableDashboardRole(role string) bool {
 	}
 }
 
-// AddDashboardRole grants an à-la-carte dashboard role to a user, alongside
+// AddControlPanelRole grants an à-la-carte control panel role to a user, alongside
 // their membership role.
-func (a *Authorizer) AddDashboardRole(userID, tenantID int64, role string) error {
+func (a *Authorizer) AddControlPanelRole(userID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !GrantableDashboardRole(role) {
+	if !GrantableControlPanelRole(role) {
 		return fmt.Errorf("rbac: role %q is not grantable", role)
 	}
-	_, err := a.enforcer.AddGroupingPolicy(DashboardSubject(userID), role, TenantDomain(tenantID))
+	_, err := a.enforcer.AddGroupingPolicy(ControlPanelSubject(userID), role, TenantDomain(tenantID))
 	return err
 }
 
-// RemoveDashboardRole revokes a single à-la-carte dashboard role from a user,
+// RemoveControlPanelRole revokes a single à-la-carte control panel role from a user,
 // leaving their membership role intact.
-func (a *Authorizer) RemoveDashboardRole(userID, tenantID int64, role string) error {
+func (a *Authorizer) RemoveControlPanelRole(userID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !GrantableDashboardRole(role) {
+	if !GrantableControlPanelRole(role) {
 		return fmt.Errorf("rbac: role %q is not grantable", role)
 	}
-	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, ControlPanelSubject(userID), role, TenantDomain(tenantID))
 	return err
 }
 
-// AddDashboardRoleTx grants an à-la-carte dashboard role to a user in tx,
+// AddControlPanelRoleTx grants an à-la-carte control panel role to a user in tx,
 // alongside their membership role.
-func (a *Authorizer) AddDashboardRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
+func (a *Authorizer) AddControlPanelRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !GrantableDashboardRole(role) {
+	if !GrantableControlPanelRole(role) {
 		return fmt.Errorf("rbac: role %q is not grantable", role)
 	}
-	return insertRule(ctx, tx, "g", []string{DashboardSubject(userID), role, TenantDomain(tenantID)})
+	return insertRule(ctx, tx, "g", []string{ControlPanelSubject(userID), role, TenantDomain(tenantID)})
 }
 
-// RemoveDashboardRoleTx revokes a single à-la-carte dashboard role from a user
+// RemoveControlPanelRoleTx revokes a single à-la-carte control panel role from a user
 // in tx, leaving their membership role intact.
-func (a *Authorizer) RemoveDashboardRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
+func (a *Authorizer) RemoveControlPanelRoleTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64, role string) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	if !GrantableDashboardRole(role) {
+	if !GrantableControlPanelRole(role) {
 		return fmt.Errorf("rbac: role %q is not grantable", role)
 	}
-	return removeFilteredRule(ctx, tx, "g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+	return removeFilteredRule(ctx, tx, "g", 0, ControlPanelSubject(userID), role, TenantDomain(tenantID))
 }
 
-// HasDashboardRole reports whether a user holds an explicit role grant in a
+// HasControlPanelRole reports whether a user holds an explicit role grant in a
 // tenant. Reads the in-memory enforcer, so callers that just mutated policy
 // should ReloadPolicy first.
-func (a *Authorizer) HasDashboardRole(userID, tenantID int64, role string) (bool, error) {
+func (a *Authorizer) HasControlPanelRole(userID, tenantID int64, role string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
-	rules, err := a.enforcer.GetFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), role, TenantDomain(tenantID))
+	rules, err := a.enforcer.GetFilteredNamedGroupingPolicy("g", 0, ControlPanelSubject(userID), role, TenantDomain(tenantID))
 	if err != nil {
 		return false, fmt.Errorf("rbac: get grouping policy: %w", err)
 	}
 	return len(rules) > 0, nil
 }
 
-// AddPlatformAdmin grants the global platform-admin role to a dashboard user.
+// AddPlatformAdmin grants the global platform-admin role to a control panel user.
 func (a *Authorizer) AddPlatformAdmin(userID int64) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	_, err := a.enforcer.AddGroupingPolicy(DashboardSubject(userID), RolePlatformAdmin, "*")
+	_, err := a.enforcer.AddGroupingPolicy(ControlPanelSubject(userID), RolePlatformAdmin, "*")
 	return err
 }
 
@@ -405,7 +405,7 @@ func (a *Authorizer) AddPlatformAdminTx(ctx context.Context, tx pgx.Tx, userID i
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	return insertRule(ctx, tx, "g", []string{DashboardSubject(userID), RolePlatformAdmin, "*"})
+	return insertRule(ctx, tx, "g", []string{ControlPanelSubject(userID), RolePlatformAdmin, "*"})
 }
 
 // AddAPIKeyRole replaces an API key's tenant role based on its key type.
@@ -449,21 +449,21 @@ func (a *Authorizer) AddPlayerRoleTx(ctx context.Context, tx pgx.Tx, playerID, t
 	return insertRule(ctx, tx, "g", []string{PlayerSubject(playerID), role, TenantDomain(tenantID)})
 }
 
-// RemoveDashboardRoles removes a dashboard user's tenant-scoped roles.
-func (a *Authorizer) RemoveDashboardRoles(userID, tenantID int64) error {
+// RemoveControlPanelRoles removes a control panel user's tenant-scoped roles.
+func (a *Authorizer) RemoveControlPanelRoles(userID, tenantID int64) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, DashboardSubject(userID), "", TenantDomain(tenantID))
+	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, ControlPanelSubject(userID), "", TenantDomain(tenantID))
 	return err
 }
 
-// RemoveDashboardRolesTx removes a dashboard user's tenant-scoped roles in tx.
-func (a *Authorizer) RemoveDashboardRolesTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64) error {
+// RemoveControlPanelRolesTx removes a control panel user's tenant-scoped roles in tx.
+func (a *Authorizer) RemoveControlPanelRolesTx(ctx context.Context, tx pgx.Tx, userID, tenantID int64) error {
 	if a == nil {
 		return ErrAuthorizerUnavailable
 	}
-	return removeFilteredRule(ctx, tx, "g", 0, DashboardSubject(userID), "", TenantDomain(tenantID))
+	return removeFilteredRule(ctx, tx, "g", 0, ControlPanelSubject(userID), "", TenantDomain(tenantID))
 }
 
 // RemoveAPIKeyRoles removes all roles for an API key.
@@ -533,8 +533,8 @@ func (a *Authorizer) enforce(sub, dom, obj, act string) (bool, error) {
 	return allowed, nil
 }
 
-// DashboardMembershipRole maps legacy dashboard membership roles to Casbin roles.
-func DashboardMembershipRole(role string) (string, bool) {
+// ControlPanelMembershipRole maps legacy control panel membership roles to Casbin roles.
+func ControlPanelMembershipRole(role string) (string, bool) {
 	switch role {
 	case "owner":
 		return RoleTenantOwner, true
@@ -588,9 +588,9 @@ func TenantDomain(tenantID int64) string {
 	return "tenant:" + strconv.FormatInt(tenantID, 10)
 }
 
-// DashboardSubject returns the Casbin subject for a dashboard user.
-func DashboardSubject(userID int64) string {
-	return "dashboard:user:" + strconv.FormatInt(userID, 10)
+// ControlPanelSubject returns the Casbin subject for a control panel user.
+func ControlPanelSubject(userID int64) string {
+	return "control_panel:user:" + strconv.FormatInt(userID, 10)
 }
 
 // APIKeySubject returns the Casbin subject for an API key.
@@ -639,7 +639,7 @@ func ProjectDedicatedMatchmakingObject(projectID int64) string {
 }
 
 // ProjectLeaderboardObject returns the project leaderboard object name used to
-// gate dashboard leaderboard management (distinct from the bare "leaderboard"
+// gate control panel leaderboard management (distinct from the bare "leaderboard"
 // object the player/secret-key APIs read and submit against).
 func ProjectLeaderboardObject(projectID int64) string {
 	return projectObject(projectID, "leaderboard")

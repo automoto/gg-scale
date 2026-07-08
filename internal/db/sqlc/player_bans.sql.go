@@ -144,7 +144,7 @@ type ListTenantPlayerBansRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-// Dashboard list for a tenant, enriched with the banned account's email.
+// Control panel list for a tenant, enriched with the banned account's email.
 func (q *Queries) ListTenantPlayerBans(ctx context.Context, tenantID int64) ([]ListTenantPlayerBansRow, error) {
 	rows, err := q.db.Query(ctx, listTenantPlayerBans, tenantID)
 	if err != nil {

@@ -111,7 +111,7 @@ func playerLayout(title string) templ.Component {
 	})
 }
 
-// playerAuthLayout centers a single card, mirroring the dashboard's
+// playerAuthLayout centers a single card, mirroring the control panel's
 // authLayout — used for signup / login / verify / invite-accept.
 func playerAuthLayout(title string) templ.Component {
 	return templ.ComponentFunc(func(ctx context.Context, templ_7745c5c3_W io.Writer) (templ_7745c5c3_Err error) {

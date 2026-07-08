@@ -21,7 +21,7 @@ const (
 // InviteLimits parameterises the three invite-send buckets. Defaults are
 // deliberately generous for a legitimate admin while capping bulk abuse.
 type InviteLimits struct {
-	// InviterPerHour caps invites a single dashboard user may send per hour.
+	// InviterPerHour caps invites a single control panel user may send per hour.
 	InviterPerHour float64
 	// DomainPerDay caps invites per project (player invites) or per tenant
 	// (team invites) per day.
@@ -52,7 +52,7 @@ type InviteThrottle struct {
 
 // InviteAttempt identifies one invite send for throttling.
 type InviteAttempt struct {
-	// InviterID is the dashboard user sending the invite.
+	// InviterID is the control panel user sending the invite.
 	InviterID int64
 	// TenantID and ProjectID scope override lookups. ProjectID is 0 for team
 	// invites (tenant-wide overrides only).

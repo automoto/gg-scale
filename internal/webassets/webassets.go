@@ -1,8 +1,8 @@
 // Package webassets serves the shared front-end assets (Pico CSS, the
-// ggscale stylesheet, and web fonts) used by both the dashboard and the
+// ggscale stylesheet, and web fonts) used by both the control panel and the
 // player-facing site. Embedding them once and mounting at a single
 // origin-relative path (/v1/assets) keeps player pages styled even when the
-// dashboard surface is disabled, and avoids duplicating the font files.
+// control panel surface is disabled, and avoids duplicating the font files.
 package webassets
 
 import (
@@ -66,7 +66,7 @@ func Handler() http.Handler {
 }
 
 // Serve writes the chi "/*" wildcard asset from root inside fsys with the
-// shared cache and nosniff headers. The dashboard's own JS assets are served
+// shared cache and nosniff headers. The control panel's own JS assets are served
 // through it too, so the traversal guard and cache policy live in one place.
 func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string) {
 	name := chi.URLParam(r, "*")

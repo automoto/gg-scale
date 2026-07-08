@@ -11,7 +11,7 @@ import (
 // in store.go (Postgres-backed) and in tests (in-memory). The shape is
 // minimal on purpose: the manager doesn't expose query helpers, so the only
 // surface to maintain is the lifecycle four-pack plus Get plus a couple of
-// dashboard read paths.
+// control panel read paths.
 type Store interface {
 	InsertPending(ctx context.Context, req AllocationRequest, backend string) (AllocationID, error)
 	MarkReady(ctx context.Context, id AllocationID, backendRef, address string) error
@@ -156,7 +156,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 }
 
 // appendEvent is fire-and-forget — event-log failures must not block the
-// allocator's hot path. The dashboard renders "no events yet" if the table is
+// allocator's hot path. The control panel renders "no events yet" if the table is
 // empty for any reason.
 func (m *Manager) appendEvent(ctx context.Context, id AllocationID, status Status, address, errMsg string) {
 	_ = m.store.AppendEvent(ctx, id, status, address, errMsg)
@@ -217,7 +217,7 @@ func (m *Manager) BackendsForTenant(ctx context.Context) ([]BackendStats, error)
 	return m.store.BackendsForTenant(ctx)
 }
 
-// Backend returns the in-process backend the manager is bound to. The dashboard
+// Backend returns the in-process backend the manager is bound to. The control panel
 // uses this for live health probes (HealthCheck) and to surface the configured
 // backend name on the backends page.
 func (m *Manager) Backend() Backend {
@@ -225,7 +225,7 @@ func (m *Manager) Backend() Backend {
 }
 
 // Fleets exposes the fleet template store. Used by the matchmaker HTTP
-// handler to resolve a fleet name to an id, and by the dashboard fleets
+// handler to resolve a fleet name to an id, and by the control panel fleets
 // CRUD pages. Tenant scoping happens inside the store via RLS.
 func (m *Manager) Fleets() FleetStore { return m.fleets }
 

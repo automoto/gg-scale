@@ -177,20 +177,20 @@ func TestPendingKeyIsDerivedAndStable(t *testing.T) {
 }
 
 func TestGenerateKey(t *testing.T) {
-	key, err := GenerateKey("ggscale dashboard", "op@example.com")
+	key, err := GenerateKey("ggscale control panel", "op@example.com")
 
 	require.NoError(t, err)
-	assert.Equal(t, "ggscale dashboard", key.Issuer())
+	assert.Equal(t, "ggscale control panel", key.Issuer())
 	assert.Equal(t, "op@example.com", key.AccountName())
 	assert.NotEmpty(t, key.Secret())
 }
 
 func TestKeyFromPartsMatchesGeneratedKey(t *testing.T) {
-	generated, err := GenerateKey("ggscale dashboard", "op@example.com")
+	generated, err := GenerateKey("ggscale control panel", "op@example.com")
 	require.NoError(t, err)
 	now := time.Unix(1_700_000_000, 0)
 
-	rebuilt, err := KeyFromParts("ggscale dashboard", "op@example.com", generated.Secret())
+	rebuilt, err := KeyFromParts("ggscale control panel", "op@example.com", generated.Secret())
 
 	require.NoError(t, err)
 	assert.Equal(t, generated.Secret(), rebuilt.Secret())

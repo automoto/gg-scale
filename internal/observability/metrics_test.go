@@ -18,7 +18,7 @@ func TestNewMetrics_counts_with_labels(t *testing.T) {
 
 	m.Signup(observability.SignupAccount)
 	m.Signup(observability.SignupAccount)
-	m.Login(observability.SurfaceDashboard, observability.LoginOK)
+	m.Login(observability.SurfaceControlPanel, observability.LoginOK)
 
 	expected := `
 # HELP ggscale_signups_total Successful signups by identity kind.

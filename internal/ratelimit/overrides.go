@@ -119,7 +119,7 @@ func (s *DBOverrideStore) InviteLimit(ctx context.Context, tenantID, projectID i
 }
 
 // OverrideInvalidator drops cached override entries for a tenant. A write path
-// (the dashboard override forms) calls this so a change takes effect without
+// (the control panel override forms) calls this so a change takes effect without
 // waiting out the cache TTL. It is separate from OverrideStore because only the
 // caching layer implements it — a raw DBOverrideStore has nothing to drop.
 type OverrideInvalidator interface {

@@ -9,9 +9,9 @@ import (
 )
 
 // CSRFCookieName is the cookie holding the per-page CSRF nonce. Shared
-// across the player site and the dashboard invite-accept flow — both are
+// across the player site and the control panel invite-accept flow — both are
 // anonymous-form surfaces (no session yet) so they can't use a
-// session-bound CSRF token like the rest of the dashboard.
+// session-bound CSRF token like the rest of the control panel.
 const CSRFCookieName = "ggscale_csrf"
 
 // CSRFFormField is the conventional hidden form field name carrying the

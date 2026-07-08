@@ -73,7 +73,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 RETURNING email_verification_attempts;
 
 -- name: ReservePlayerVerifyAttempt :one
--- Atomic check-and-bump (see ReserveDashboardVerifyAttempt for the
+-- Atomic check-and-bump (see ReserveControlPanelVerifyAttempt for the
 -- TOCTOU explanation). Returns 0 rows when already at cap.
 UPDATE project_players
 SET email_verification_attempts = email_verification_attempts + 1,

@@ -53,7 +53,7 @@ func jarClient(t *testing.T) *http.Client {
 // player-account flow through the server-rendered player site.
 func TestPlayerAccount_signup_verify_login_happy_path(t *testing.T) {
 	c := startCluster(t)
-	srv, rec := newDashboardAndPlayerServer(t, c)
+	srv, rec := newControlPanelAndPlayerServer(t, c)
 	client := jarClient(t)
 
 	base := srv.URL + "/v1/players/account"
@@ -118,7 +118,7 @@ func TestPlayerAccount_signup_verify_login_happy_path(t *testing.T) {
 // account cannot log in.
 func TestPlayerAccount_disabled_account_rejected(t *testing.T) {
 	c := startCluster(t)
-	srv, _ := newDashboardAndPlayerServer(t, c)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
 	client := jarClient(t)
 	base := srv.URL + "/v1/players/account"
 	const email = "disabled-player@example.com"
@@ -137,7 +137,7 @@ func TestPlayerAccount_disabled_account_rejected(t *testing.T) {
 // revocation lever: bumping session_epoch invalidates a live account session.
 func TestPlayerAccount_epoch_bump_revokes_session(t *testing.T) {
 	c := startCluster(t)
-	srv, _ := newDashboardAndPlayerServer(t, c)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
 	client := jarClient(t)
 	base := srv.URL + "/v1/players/account"
 	const email = "epoch-player@example.com"
@@ -175,7 +175,7 @@ func TestPlayerAccount_epoch_bump_revokes_session(t *testing.T) {
 // AND project) allows it; a disabled toggle makes it invite-only.
 func TestPlayerAccount_public_join_respects_effective_policy(t *testing.T) {
 	c := startCluster(t)
-	srv, _ := newDashboardAndPlayerServer(t, c)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
 	base := srv.URL + "/v1/players/account"
 	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "join-key")
 

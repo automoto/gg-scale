@@ -173,7 +173,7 @@ WHERE status = 'queued'
   AND expires_at < now();
 
 -- name: ListMatchmakerBucketsForProject :many
--- Dashboard matchmaker page: queue depth per (mode, region, game_mode)
+-- Control panel matchmaker page: queue depth per (mode, region, game_mode)
 -- bucket for the current tenant's project, plus oldest queued ticket and
 -- the min/max count spread so operators can spot stuck buckets at a glance.
 SELECT mode,
@@ -191,7 +191,7 @@ GROUP BY mode, region, game_mode, status
 ORDER BY mode, region, game_mode, status;
 
 -- name: CountMatchmakerMatchesByMode :many
--- Dashboard matchmaker page: matches formed per mode within the retention
+-- Control panel matchmaker page: matches formed per mode within the retention
 -- window (rows are GC'd after MatchTTL, so this reads as "recent matches").
 SELECT mode, count(*)::bigint AS match_count
 FROM matchmaker_matches

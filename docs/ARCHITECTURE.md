@@ -11,7 +11,7 @@ observability on `/metrics`. Strategic sequencing lives in [`mvp.md`](mvp.md).
 There are four compose scenarios, each in its own file:
 
 - **basic dev** (default `make up`, root `docker-compose.yml`) — Postgres, migrate,
-  `ggscale-server`, MailHog. Dashboard on host port **3001** (mapped to the server).
+  `ggscale-server`, MailHog. Control panel on host port **3001** (mapped to the server).
   No Prometheus sidecar in this file; scrape `/metrics` from your own collector or use
   `make up-full` (`compose/full.yml`) for bundled Prometheus.
 - **fleet/docker** (`make up-fleet-docker`, `compose/fleet-docker.yml`) — basic dev plus
@@ -30,7 +30,7 @@ There are four compose scenarios, each in its own file:
                    │  /v1/ws            (realtime Hub)            │
                    │  /v1/matchmaker/*  (ticket queue + worker)   │
                    │  /v1/relay/*       (TURN-REST credentials)   │
-                   │  /v1/dashboard     (HTMX + templ)            │
+                   │  /v1/control-panel     (HTMX + templ)            │
                    │  /metrics                                    │
                    │  + cache.Store (memory or olric)             │
                    │  + fleet.Manager → Backend                   │
@@ -51,28 +51,28 @@ There are four compose scenarios, each in its own file:
 |---|---|---|---|
 | `postgres` | `postgres:17` | 5432 | Primary DB. `pg_isready` healthcheck. |
 | `migrate` | `migrate/migrate:v4.19.1` | — | One-shot init; applies `db/migrations/*.up.sql` before the server starts. |
-| `ggscale-server` | build `Dockerfile` | 8080, 3001→8080 | `/v1/*` HTTP API, `/metrics`, HTMX dashboard at `/v1/dashboard/*`. |
+| `ggscale-server` | build `Dockerfile` | 8080, 3001→8080 | `/v1/*` HTTP API, `/metrics`, HTMX control panel at `/v1/control-panel/*`. |
 | `mailhog` | `mailhog/mailhog:v1.0.1` | 1025 / 8025 | SMTP sink + web UI for auth/profile verification mail in dev. |
 
 **Full dev stack** (`compose/full.yml`, `make up-full`) adds Prometheus and
 Stripe mock on top of the Docker fleet backend — see that file for the extended service matrix.
 
-## Dashboard bootstrap
+## Control panel bootstrap
 
-On first run (no dashboard users in the DB), `ggscale-server` generates a
+On first run (no control panel users in the DB), `ggscale-server` generates a
 one-time setup token. Both compose files write this token to a file via
-`DASHBOARD_BOOTSTRAP_TOKEN_FILE=/run/ggscale/bootstrap.token`, which is
+`CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE=/run/ggscale/bootstrap.token`, which is
 bind-mounted to `./data/` on the host:
 
 ```shell
 cat ./data/bootstrap.token
 ```
 
-Navigate to `http://localhost:3001/v1/dashboard/setup`, paste the token into
+Navigate to `http://localhost:3001/v1/control-panel/setup`, paste the token into
 the **Bootstrap token** field, and create the first platform-admin account.
 The token is kept out of structured logs and out of URLs — log aggregators
 (Loki, Datadog, CloudWatch) and browser history would otherwise retain the
-plaintext value. If `DASHBOARD_BOOTSTRAP_TOKEN_FILE` is unset the token falls
+plaintext value. If `CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE` is unset the token falls
 back to stderr only.
 
 ## K8s-profile services
@@ -129,9 +129,9 @@ two diverge.
 | `HTTP_ADDR` | no | `:8080` | HTTP listen address. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, `error`. |
 | `ENV` | no | `dev` | `dev`, `staging`, `prod`. |
-| `DASHBOARD_DISABLED` | no | `false` | Disable the server-rendered dashboard when `true`. |
-| `DASHBOARD_BOOTSTRAP_TOKEN_FILE` | no | (empty) | Optional path for the first-run bootstrap token; written mode 0600. |
-| `DASHBOARD_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on dashboard session cookies. |
+| `CONTROL_PANEL_DISABLED` | no | `false` | Disable the server-rendered control panel when `true`. |
+| `CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE` | no | (empty) | Optional path for the first-run bootstrap token; written mode 0600. |
+| `CONTROL_PANEL_COOKIE_SECURE` | no | `false` | Sets the `Secure` flag on control panel session cookies. |
 | `CACHE_BACKEND` | no | `memory` | Cache.Store backend. `memory` (default; in-process map; zero networking deps; covers dev, single-VM self-host, tests) or `olric` (embedded Olric cluster across the app processes; opt-in for multi-VM regions where rate-limit and connection-cap state must be shared). |
 | `CACHE_OLRIC_BIND_ADDR` | no | `127.0.0.1` | Olric protocol bind. |
 | `CACHE_OLRIC_BIND_PORT` | no | `3320` | Olric protocol port. |
@@ -151,8 +151,11 @@ two diverge.
 | `AGONES_SELECTOR_LABELS` | no | (empty) | Additional `k=v,…` label selector. |
 | `AGONES_KUBECONFIG` | no | (empty) | Path to kubeconfig. Empty tries in-cluster, then `~/.kube/config`. |
 | `REALTIME_MAX_PER_TENANT` | no | `0` | Concurrent `/v1/ws` connections per tenant; 0 disables the cap. |
-| `MATCHMAKER_BUCKET_SIZE` | no | `1` | Tickets per allocated match in a `(tenant, project, region, game_mode)` bucket. |
+| `MATCHMAKER_RELAX_AFTER` | no | `30s` | How long a below-max group's oldest member waits before the group commits at a smaller valid size. |
+| `MATCHMAKER_REGION_RELAX_AFTER` | no | `60s` | How long before cross-region grouping unlocks for `allow_cross_region` tickets. `0` disables widening. |
 | `MATCHMAKER_INTERVAL` | no | `5s` | Fallback scan cadence. The hot path is Postgres LISTEN/NOTIFY; this ticker catches gaps during a listener reconnect. |
+| `MATCHMAKER_MAX_TICKETS_PER_PLAYER` | no | `3` | Concurrent queued-ticket cap per player per project. `0` disables. |
+| `MATCHMAKER_TICKET_TTL` | no | `10m` | Queued-ticket lifetime before the sweeper fails it. `0` disables expiry. |
 | `RELAY_PUBLIC_IP` | no | (empty) | Public address advertised to TURN peers. Setting this + `RELAY_SHARED_SECRET` boots the UDP listener. |
 | `RELAY_BIND_ADDR` | no | `0.0.0.0` | UDP bind host. |
 | `RELAY_UDP_PORT` | no | `3478` | UDP bind port. |
@@ -176,36 +179,36 @@ All product routes mount under `/v1/`; anything else returns **404**.
 | Realtime | `GET /v1/ws` (WebSocket upgrade; heartbeat, presence, `match_ready` push) | API key + session |
 | Matchmaker | `POST/GET/DELETE /v1/matchmaker/tickets[/{id}]` | API key + session |
 | Relay | `POST /v1/relay/credentials` (TURN-REST credential issue) | API key + session |
-| Dashboard | `/v1/dashboard/*` | Separate platform session (bcrypt users, CSRF) |
+| Control panel | `/v1/control-panel/*` | Separate platform session (bcrypt users, CSRF) |
 
 **Tenant middleware** (`internal/tenant`) runs on the API-key group before rate limiting
 and resolves `Authorization: Bearer` → `tenant_id` / optional `project_id`.
 
-## Dashboard auth
+## Control panel auth
 
-The dashboard is a separate operator surface under `/v1/dashboard`, not part
-of the player auth API. It uses platform-scoped `dashboard_users` with bcrypt
-password hashes, opaque DB-backed `dashboard_sessions`, and CSRF tokens on
-state-changing forms. A `dashboard_memberships` table maps dashboard users to
+The control panel is a separate operator surface under `/v1/control-panel`, not part
+of the player auth API. It uses platform-scoped `control_panel_users` with bcrypt
+password hashes, opaque DB-backed `control_panel_sessions`, and CSRF tokens on
+state-changing forms. A `control_panel_memberships` table maps control panel users to
 tenants with `owner`, `admin`, or `member` roles; API-key management requires
 `admin` or stronger. Platform admins can see every tenant.
 
 Fresh installs are bootstrapped with a one-time token generated at server
-startup when `dashboard_users` is empty. The token is written to
-`DASHBOARD_BOOTSTRAP_TOKEN_FILE` (if set) or stderr, and accepted only by
-`/v1/dashboard/setup`. Operators paste the token into the setup form — it is
+startup when `control_panel_users` is empty. The token is written to
+`CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE` (if set) or stderr, and accepted only by
+`/v1/control-panel/setup`. Operators paste the token into the setup form — it is
 never pre-filled from a URL query parameter to keep it out of access logs and
 browser history. Once the first platform admin is created, setup returns 410
 and all access goes through email/password login.
 
 ## Reverse-proxy IP trust
 
-Dashboard sessions record the client IP for auditing. `clientIP()` reads
+Control panel sessions record the client IP for auditing. `clientIP()` reads
 `RemoteAddr` by default and ignores forwarded headers. To record a proxy
 supplied address, set `TRUSTED_PROXY_HEADER` (for example
 `CF-Connecting-IP`) and `TRUSTED_PROXY_CIDRS` to the CIDR ranges of the
 reverse proxies allowed to set that header. Headers from any other peer are
-ignored, so direct clients cannot spoof dashboard session or audit IPs.
+ignored, so direct clients cannot spoof control panel session or audit IPs.
 
 ## Tenant isolation
 
@@ -356,20 +359,45 @@ exercises the real upgrade path against an httptest server.
 ## Matchmaker
 
 The matchmaker (`internal/matchmaker`) turns player "find me a match"
-requests into game-server allocations. Players POST a ticket to
-`/v1/matchmaker/tickets`; a background worker batches tickets into
-buckets keyed by `(tenant_id, project_id, region, game_mode)` and, once
-a bucket fills, calls `fleet.Manager.Allocate` exactly once. Each
-matched player gets a `match_ready` envelope pushed through the realtime
-hub with the live server's address.
+requests into match results. Players POST a ticket to
+`/v1/matchmaker/tickets` with a **mode** selecting what a match resolves
+to:
 
-Schema lives in migration `0019_fleet_allocations` (the allocation table)
-and `0020_matchmaking_tickets` (the queue), both RLS-isolated by
-`tenant_id`. The queue uses an `AFTER INSERT` trigger added in
-`0021_matchmaker_notify` that emits `NOTIFY matchmaker_ticket` with a
-JSON `(tenant, project, region, game_mode)` payload — the worker
-subscribes via Postgres LISTEN and wakes event-driven within
-milliseconds of a ticket landing, instead of polling.
+- `match_only` — a bare roster + `mm_`-prefixed match id (P2P, listen
+  servers, game-managed hosting). Needs no backend at all.
+- `game_session` — a private game session created for the roster
+  (join code + pre-seeded members) via `internal/gamesession`.
+- `fleet_allocation` — a dedicated server allocated through
+  `fleet.Manager.Allocate` (requires the fleet scope/entitlement and
+  `FEATURE_FLEET_ENABLED`).
+
+Tickets carry `min_count`/`max_count`/`count_multiple` group sizing, a
+soft `region` preference, queryable `string_properties` /
+`numeric_properties`, and a `query` expression
+(`internal/matchmaker/query`: parsed to an AST, evaluated in Go, never
+compiled to SQL). Matching is mutual — every member's query must accept
+every other member's properties. `region` widens to cross-region play
+after `MATCHMAKER_REGION_RELAX_AFTER` unless the ticket pins
+`allow_cross_region=false`; below-max groups commit after
+`MATCHMAKER_RELAX_AFTER`. Group formation lives in
+`internal/matchmaker/groups.go` and runs per claimed bucket.
+
+Each rostered player gets a `matchmaker_matched` envelope pushed through
+the realtime hub (`ticket_id`, `match_id`, `mode`, per-mode result
+fields, and the `users` roster). Committed matches persist in
+`matchmaker_matches` (retention-bounded, GC'd by the hourly
+leader-elected `matchmaker_gc` River job) so `GET
+/v1/matchmaker/tickets/{id}` can recover the full result after a missed
+WebSocket delivery — SDKs subscribe to the push but should poll on
+reconnect.
+
+Schema lives in migrations `0020` (queue), `0067` (modes/counts/
+properties), `0068` (match results), and `0069` (worker RLS policies —
+the worker scans cross-tenant without a tenant GUC). The queue uses an
+`AFTER INSERT` trigger (`0021`, updated in `0067`) that emits `NOTIFY
+matchmaker_ticket` with a JSON bucket payload — the worker subscribes
+via Postgres LISTEN and wakes event-driven within milliseconds of a
+ticket landing, instead of polling.
 
 The worker loop converges three event sources:
 
@@ -380,12 +408,10 @@ The worker loop converges three event sources:
    (e.g. the in-memory queue used in tests).
 3. **`ctx.Done`** for graceful shutdown.
 
-Bucket processing uses `FOR UPDATE SKIP LOCKED` (`PopMatchmakerBucket`)
-so multiple ggscale-server processes can run workers safely against the
-same Postgres without double-popping. The HTTP `GET
-/v1/matchmaker/tickets/{id}` path is the authoritative source of truth
-for clients — SDKs subscribe to the WebSocket push but should poll on
-reconnect to recover from any missed `match_ready` delivery.
+Bucket claiming uses `FOR UPDATE SKIP LOCKED` two-phase claims
+(claim → resolve → commit per group) so multiple ggscale-server
+processes can run workers safely against the same Postgres without
+double-matching; a sweeper releases claims left by crashed workers.
 
 ## TURN relay
 
@@ -454,7 +480,7 @@ pinned to commit SHAs.
    credentials.
 3. **e2e** — depends on `docker-build`; loads the artifact image, starts compose
    (lite stack + k8s profile), installs Agones, runs `go test -tags=e2e ./tests/e2e/...`
-   (healthz against ggscale/MailHog/dashboard; Agones smoke skips when no kubeconfig).
+   (healthz against ggscale/MailHog/control-panel; Agones smoke skips when no kubeconfig).
    On failure, compose logs are captured as an artifact.
 
 A fourth job, `docker-publish` (push image to GHCR on main), is wired and
@@ -531,7 +557,7 @@ v1.9+ planning must therefore not regress on — are:
 
 What v1.9+ does add (recorded here so this doc can grow into it without
 surprise): a consumer-storefront frontend (browse sunset titles, rent an
-instance, manage server settings) and a publisher royalty dashboard.
+instance, manage server settings) and a publisher royalty control panel.
 Both are application-layer additions on top of the v1.0 control plane —
 new UI, no new substrate.
 

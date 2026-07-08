@@ -142,7 +142,7 @@ func New(d Deps) http.Handler {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
 		// Anonymous-form CSRF (double-submit cookie). The player site has
-		// no session before login/verify, so the dashboard's session-bound
+		// no session before login/verify, so the control panel's session-bound
 		// CSRF token doesn't apply — RequireCSRF + CSRFCookie work
 		// together: the cookie middleware mints a per-page nonce on GET,
 		// templates render it as a hidden field, RequireCSRF enforces the
@@ -186,7 +186,7 @@ type verifyCookiePayload struct {
 }
 
 // playerVerifyTTL is the lifetime of a verify-pending cookie. Mirrors the
-// dashboard ttl; baked into the signed cookie payload as a server-checked
+// control panel ttl; baked into the signed cookie payload as a server-checked
 // expiry so a cookie can't be replayed past it.
 const playerVerifyTTL = 30 * time.Minute
 

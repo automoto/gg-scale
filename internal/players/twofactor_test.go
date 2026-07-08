@@ -68,7 +68,7 @@ func TestAccountTwoFactorCookie_rejects_expired(t *testing.T) {
 }
 
 func TestAccountTwoFactorCookie_rejects_non_uuid_subject(t *testing.T) {
-	// A dashboard pending payload (int64 subject) signed with the same key
+	// A control panel pending payload (int64 subject) signed with the same key
 	// must not open as a player pending grant.
 	h := newTwoFactorTestHandler(t)
 	value := twofactor.EncodePending(h.twoFactor.PendingKey(), twofactor.Pending{

@@ -33,7 +33,7 @@ type CreateFleetParams struct {
 
 // Fleet templates: operator-defined recipes that allocations are drawn from.
 // Lookup is by project-scoped name (the public identifier used by the SDK,
-// matchmaker API, and dashboard URLs). Soft delete keeps historical
+// matchmaker API, and control panel URLs). Soft delete keeps historical
 // allocations referenceable in the UI.
 func (q *Queries) CreateFleet(ctx context.Context, arg CreateFleetParams) (Fleet, error) {
 	row := q.db.QueryRow(ctx, createFleet,
@@ -124,7 +124,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY name
 `
 
-// Dashboard list. Soft-deleted rows are excluded; include_deleted is reserved
+// Control panel list. Soft-deleted rows are excluded; include_deleted is reserved
 // for a future "archive" view but not wired through the UI yet.
 func (q *Queries) ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error) {
 	rows, err := q.db.Query(ctx, listFleetsForProject, projectID)

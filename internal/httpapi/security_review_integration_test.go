@@ -50,7 +50,7 @@ func accountSignup(t *testing.T, baseURL, email, password string) (int, string) 
 func TestAccountSignup_duplicate_email_indistinguishable(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "sk")
-	srv, _ := newDashboardAndPlayerServer(t, c)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
 
 	// Fresh signup creates the account and redirects to verify.
 	status, loc := accountSignup(t, srv.URL, "dup@example.com", "hunter2hunter2")

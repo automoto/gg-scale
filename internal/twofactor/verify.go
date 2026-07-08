@@ -8,7 +8,7 @@ import (
 )
 
 // Verify outcomes. Callers map these to their surface-specific HTTP responses;
-// they are the single source of truth for the challenge result so the dashboard
+// they are the single source of truth for the challenge result so the control panel
 // and player surfaces cannot drift on lockout/replay semantics.
 var (
 	// ErrBadCode is a wrong, malformed, or replayed code.
@@ -21,7 +21,7 @@ var (
 )
 
 // Credential is the stored TOTP state the verify flow reads. It is ID-type
-// agnostic so one flow serves both the int64 dashboard users and the UUID
+// agnostic so one flow serves both the int64 control panel users and the UUID
 // player accounts.
 type Credential struct {
 	SecretEnc   []byte

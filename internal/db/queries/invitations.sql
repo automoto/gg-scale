@@ -1,7 +1,7 @@
--- Dashboard team invitations (operator-side: platform / tenant admins).
+-- Control panel team invitations (operator-side: platform / tenant admins).
 
--- name: CreateDashboardInvitation :one
-INSERT INTO dashboard_invitations (
+-- name: CreateControlPanelInvitation :one
+INSERT INTO control_panel_invitations (
     email, tenant_id, role, code_hash, expires_at, invited_by_user_id
 )
 VALUES (
@@ -14,7 +14,7 @@ VALUES (
 )
 RETURNING id, created_at, expires_at;
 
--- name: GetDashboardInvitationByCodeHash :one
+-- name: GetControlPanelInvitationByCodeHash :one
 SELECT
     i.id,
     i.email::text AS email,
@@ -26,13 +26,13 @@ SELECT
     i.invited_by_user_id,
     i.created_at,
     t.name AS tenant_name
-FROM dashboard_invitations i
+FROM control_panel_invitations i
 LEFT JOIN tenants t ON t.id = i.tenant_id
 WHERE i.code_hash = sqlc.arg(code_hash)
   AND i.accepted_at IS NULL
   AND i.revoked_at IS NULL;
 
--- name: GetDashboardInvitationByID :one
+-- name: GetControlPanelInvitationByID :one
 SELECT
     id,
     email::text AS email,
@@ -43,10 +43,10 @@ SELECT
     revoked_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE id = sqlc.arg(id);
 
--- name: ListDashboardInvitationsForTenant :many
+-- name: ListControlPanelInvitationsForTenant :many
 SELECT
     id,
     email::text AS email,
@@ -54,7 +54,7 @@ SELECT
     expires_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL
@@ -68,27 +68,27 @@ SELECT
     expires_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE tenant_id IS NULL
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 ORDER BY created_at DESC;
 
--- name: MarkDashboardInvitationAccepted :exec
-UPDATE dashboard_invitations
+-- name: MarkControlPanelInvitationAccepted :exec
+UPDATE control_panel_invitations
 SET accepted_at = now()
 WHERE id = sqlc.arg(id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL;
 
--- name: RevokeDashboardInvitation :exec
-UPDATE dashboard_invitations
+-- name: RevokeControlPanelInvitation :exec
+UPDATE control_panel_invitations
 SET revoked_at = now()
 WHERE id = sqlc.arg(id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL;
 
--- name: ListDashboardMembersForTenant :many
+-- name: ListControlPanelMembersForTenant :many
 SELECT
     m.id AS membership_id,
     u.id AS user_id,
@@ -97,8 +97,8 @@ SELECT
     u.is_platform_admin,
     u.last_login_at,
     m.created_at
-FROM dashboard_memberships m
-JOIN dashboard_users u ON u.id = m.dashboard_user_id
+FROM control_panel_memberships m
+JOIN control_panel_users u ON u.id = m.control_panel_user_id
 WHERE m.tenant_id = sqlc.arg(tenant_id)
 ORDER BY m.created_at ASC;
 
@@ -108,34 +108,34 @@ SELECT
     email::text AS email,
     last_login_at,
     created_at
-FROM dashboard_users
+FROM control_panel_users
 WHERE is_platform_admin = true
 ORDER BY created_at ASC;
 
--- name: DeleteDashboardMembership :exec
-DELETE FROM dashboard_memberships
+-- name: DeleteControlPanelMembership :exec
+DELETE FROM control_panel_memberships
 WHERE id = sqlc.arg(id)
   AND tenant_id = sqlc.arg(tenant_id);
 
--- name: DeleteDashboardMembershipUnlessSelf :execrows
+-- name: DeleteControlPanelMembershipUnlessSelf :execrows
 -- Removes a membership row but refuses to delete the actor's own row. The
 -- previous approach loaded every member to do this check client-side; this
 -- predicate folds it into one statement.
-DELETE FROM dashboard_memberships
+DELETE FROM control_panel_memberships
 WHERE id = sqlc.arg(id)
   AND tenant_id = sqlc.arg(tenant_id)
-  AND dashboard_user_id <> sqlc.arg(actor_user_id);
+  AND control_panel_user_id <> sqlc.arg(actor_user_id);
 
 
--- name: CreateDashboardMembership :one
-INSERT INTO dashboard_memberships (dashboard_user_id, tenant_id, role)
-VALUES (sqlc.arg(dashboard_user_id), sqlc.arg(tenant_id), sqlc.arg(role))
-ON CONFLICT (dashboard_user_id, tenant_id) DO UPDATE
+-- name: CreateControlPanelMembership :one
+INSERT INTO control_panel_memberships (control_panel_user_id, tenant_id, role)
+VALUES (sqlc.arg(control_panel_user_id), sqlc.arg(tenant_id), sqlc.arg(role))
+ON CONFLICT (control_panel_user_id, tenant_id) DO UPDATE
     SET role = EXCLUDED.role
 RETURNING id;
 
--- name: PromoteDashboardUserToPlatformAdmin :exec
-UPDATE dashboard_users
+-- name: PromoteControlPanelUserToPlatformAdmin :exec
+UPDATE control_panel_users
 SET is_platform_admin = true
 WHERE id = sqlc.arg(id);
 

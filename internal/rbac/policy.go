@@ -3,11 +3,11 @@ package rbac
 const defaultPolicyCSV = `
 p, role:platform_owner, *, *, *
 p, role:platform_admin, *, tenant, read
-p, role:platform_admin, *, dashboard_user, read
-p, role:platform_admin, *, dashboard_user, disable
+p, role:platform_admin, *, control_panel_user, read
+p, role:platform_admin, *, control_panel_user, disable
 p, role:platform_admin, *, platform:plugins, read
 p, role:platform_support, *, tenant, read
-p, role:platform_support, *, dashboard_user, read
+p, role:platform_support, *, control_panel_user, read
 
 p, role:tenant_owner, *, tenant, manage
 p, role:tenant_owner, *, project, manage

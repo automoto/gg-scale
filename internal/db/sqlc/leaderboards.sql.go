@@ -67,7 +67,7 @@ func (q *Queries) GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardR
 	return i, err
 }
 
-const getLeaderboardForDashboard = `-- name: GetLeaderboardForDashboard :one
+const getLeaderboardForControlPanel = `-- name: GetLeaderboardForControlPanel :one
 SELECT id, project_id, name, sort_order, created_at
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -76,12 +76,12 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 `
 
-type GetLeaderboardForDashboardParams struct {
+type GetLeaderboardForControlPanelParams struct {
 	ProjectID int64
 	ID        int64
 }
 
-type GetLeaderboardForDashboardRow struct {
+type GetLeaderboardForControlPanelRow struct {
 	ID        int64
 	ProjectID int64
 	Name      string
@@ -89,9 +89,9 @@ type GetLeaderboardForDashboardRow struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-func (q *Queries) GetLeaderboardForDashboard(ctx context.Context, arg GetLeaderboardForDashboardParams) (GetLeaderboardForDashboardRow, error) {
-	row := q.db.QueryRow(ctx, getLeaderboardForDashboard, arg.ProjectID, arg.ID)
-	var i GetLeaderboardForDashboardRow
+func (q *Queries) GetLeaderboardForControlPanel(ctx context.Context, arg GetLeaderboardForControlPanelParams) (GetLeaderboardForControlPanelRow, error) {
+	row := q.db.QueryRow(ctx, getLeaderboardForControlPanel, arg.ProjectID, arg.ID)
+	var i GetLeaderboardForControlPanelRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProjectID,

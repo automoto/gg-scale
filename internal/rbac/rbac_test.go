@@ -20,9 +20,9 @@ func newAuthorizer(t *testing.T) *rbac.Authorizer {
 
 func TestDefaultPolicy_allows_tenant_admin_in_own_domain(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 7, rbac.ObjectProject, rbac.ActionManage)
 
@@ -32,9 +32,9 @@ func TestDefaultPolicy_allows_tenant_admin_in_own_domain(t *testing.T) {
 
 func TestDefaultPolicy_denies_tenant_admin_in_other_domain(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 8, rbac.ObjectProject, rbac.ActionManage)
 
@@ -44,9 +44,9 @@ func TestDefaultPolicy_denies_tenant_admin_in_other_domain(t *testing.T) {
 
 func TestDefaultPolicy_treats_current_member_as_read_only_analyst(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 7, rbac.ObjectProject, rbac.ActionManage)
 
@@ -56,9 +56,9 @@ func TestDefaultPolicy_treats_current_member_as_read_only_analyst(t *testing.T) 
 
 func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "admin"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 7, rbac.ProjectPlayersObject(99), rbac.ActionManage)
 
@@ -68,9 +68,9 @@ func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T
 
 func TestDefaultPolicy_allows_tenant_owner_to_allocate_project_fleet(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "owner"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "owner"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 7, rbac.ProjectAllocationObject(99), rbac.ActionAllocate)
 
@@ -82,9 +82,9 @@ func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *t
 	for _, role := range []string{"admin", "owner"} {
 		t.Run(role, func(t *testing.T) {
 			a := newAuthorizer(t)
-			require.NoError(t, a.SetDashboardMembershipRole(42, 7, role))
+			require.NoError(t, a.SetControlPanelMembershipRole(42, 7, role))
 
-			allowed, err := a.CanDashboard(rbac.DashboardUser{
+			allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 				ID: 42,
 			}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
 
@@ -96,9 +96,9 @@ func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *t
 
 func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
 
-	allowed, err := a.CanDashboard(rbac.DashboardUser{
+	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
 		ID: 42,
 	}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
 
@@ -149,35 +149,35 @@ func TestDefaultPolicy_allows_relay_and_dedicated_matchmaking_for_standard_playe
 func TestFleetOperator_coexists_with_membership_role(t *testing.T) {
 	a := newAuthorizer(t)
 	// A member with the analyst membership role, then also granted fleet_operator.
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
-	require.NoError(t, a.AddDashboardRole(42, 7, rbac.RoleFleetOperator))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
+	require.NoError(t, a.AddControlPanelRole(42, 7, rbac.RoleFleetOperator))
 
-	u := rbac.DashboardUser{ID: 42}
+	u := rbac.ControlPanelUser{ID: 42}
 	// fleet_operator capability now applies...
-	manage, err := a.CanDashboard(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
+	manage, err := a.CanControlPanel(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
 	assert.True(t, manage, "fleet_operator grants fleet manage")
 	// ...and the analyst membership capability is still intact.
-	read, err := a.CanDashboard(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	read, err := a.CanControlPanel(u, 7, rbac.ObjectProject, rbac.ActionRead)
 	require.NoError(t, err)
 	assert.True(t, read, "membership role survives the extra grant")
 
-	has, err := a.HasDashboardRole(42, 7, rbac.RoleFleetOperator)
+	has, err := a.HasControlPanelRole(42, 7, rbac.RoleFleetOperator)
 	require.NoError(t, err)
 	assert.True(t, has)
 }
 
 func TestFleetOperator_revoke_leaves_membership(t *testing.T) {
 	a := newAuthorizer(t)
-	require.NoError(t, a.SetDashboardMembershipRole(42, 7, "member"))
-	require.NoError(t, a.AddDashboardRole(42, 7, rbac.RoleFleetOperator))
-	require.NoError(t, a.RemoveDashboardRole(42, 7, rbac.RoleFleetOperator))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
+	require.NoError(t, a.AddControlPanelRole(42, 7, rbac.RoleFleetOperator))
+	require.NoError(t, a.RemoveControlPanelRole(42, 7, rbac.RoleFleetOperator))
 
-	u := rbac.DashboardUser{ID: 42}
-	manage, err := a.CanDashboard(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
+	u := rbac.ControlPanelUser{ID: 42}
+	manage, err := a.CanControlPanel(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
 	assert.False(t, manage, "fleet manage gone after revoke")
-	read, err := a.CanDashboard(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	read, err := a.CanControlPanel(u, 7, rbac.ObjectProject, rbac.ActionRead)
 	require.NoError(t, err)
 	assert.True(t, read, "membership role untouched by revoke")
 }
@@ -193,9 +193,9 @@ func TestFeatureEnabled_denies_by_default(t *testing.T) {
 	}
 }
 
-func TestAddDashboardRole_rejects_non_grantable_role(t *testing.T) {
+func TestAddControlPanelRole_rejects_non_grantable_role(t *testing.T) {
 	a := newAuthorizer(t)
-	err := a.AddDashboardRole(42, 7, rbac.RoleTenantOwner)
+	err := a.AddControlPanelRole(42, 7, rbac.RoleTenantOwner)
 	assert.Error(t, err, "membership roles are not à-la-carte grantable")
 }
 

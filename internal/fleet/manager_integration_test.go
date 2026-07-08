@@ -124,7 +124,7 @@ func TestManager_endToEnd_resolves_fleet_then_allocates_real_container(t *testin
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-	// The persisted row must carry the fleet_id so the dashboard can
+	// The persisted row must carry the fleet_id so the control panel can
 	// surface "this allocation came from <fleet>" without joining through
 	// metadata.
 	persisted, err := mgr.Get(ctx, alloc.ID)

@@ -43,7 +43,7 @@ func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (Cre
 	return i, err
 }
 
-const createDashboardAPIKey = `-- name: CreateDashboardAPIKey :one
+const createControlPanelAPIKey = `-- name: CreateControlPanelAPIKey :one
 WITH args AS (
     SELECT
         $1::bigint AS project_id,
@@ -70,28 +70,28 @@ CROSS JOIN args
 RETURNING id, created_at
 `
 
-type CreateDashboardAPIKeyParams struct {
+type CreateControlPanelAPIKeyParams struct {
 	ProjectID *int64
 	KeyHash   []byte
 	Label     string
 	KeyType   string
 }
 
-type CreateDashboardAPIKeyRow struct {
+type CreateControlPanelAPIKeyRow struct {
 	ID        int64
 	CreatedAt pgtype.Timestamptz
 }
 
 // New keys start with the matchmaker scope: matchmaking is a zero-config
-// feature. Fleet/relay scopes stay opt-in via the dashboard toggles.
-func (q *Queries) CreateDashboardAPIKey(ctx context.Context, arg CreateDashboardAPIKeyParams) (CreateDashboardAPIKeyRow, error) {
-	row := q.db.QueryRow(ctx, createDashboardAPIKey,
+// feature. Fleet/relay scopes stay opt-in via the control panel toggles.
+func (q *Queries) CreateControlPanelAPIKey(ctx context.Context, arg CreateControlPanelAPIKeyParams) (CreateControlPanelAPIKeyRow, error) {
+	row := q.db.QueryRow(ctx, createControlPanelAPIKey,
 		arg.ProjectID,
 		arg.KeyHash,
 		arg.Label,
 		arg.KeyType,
 	)
-	var i CreateDashboardAPIKeyRow
+	var i CreateControlPanelAPIKeyRow
 	err := row.Scan(&i.ID, &i.CreatedAt)
 	return i, err
 }

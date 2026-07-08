@@ -282,7 +282,7 @@ type UpsertPlayerAccountTOTPPendingParams struct {
 	SecretEnc       []byte
 }
 
-// Player-account mirrors of dashboard_totp.sql; see the comments there for
+// Player-account mirrors of control_panel_totp.sql; see the comments there for
 // the atomicity rationale on each statement.
 func (q *Queries) UpsertPlayerAccountTOTPPending(ctx context.Context, arg UpsertPlayerAccountTOTPPendingParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertPlayerAccountTOTPPending, arg.PlayerAccountID, arg.SecretEnc)

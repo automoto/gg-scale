@@ -52,7 +52,7 @@ type Refunder interface {
 const routeClassDefault = "v1"
 
 // APIKeyBucketKey returns the default route-class bucket key for apiKeyID.
-// Dashboard revocation uses this to clear limiter state immediately.
+// ControlPanel revocation uses this to clear limiter state immediately.
 func APIKeyBucketKey(apiKeyID int64) string {
 	return bucketKey(apiKeyID, routeClassDefault)
 }

@@ -1,6 +1,6 @@
 # Frontend Guidelines
 
-A code-review checklist for the dashboard (Go + Templ + HTMX, Pico CSS).
+A code-review checklist for the control panel (Go + Templ + HTMX, Pico CSS).
 Each rule is a thing a reviewer should actually block on. Nits go elsewhere.
 
 > For styling/CSS conventions, Pico constraints, pinned asset versions
@@ -62,7 +62,7 @@ Each rule is a thing a reviewer should actually block on. Nits go elsewhere.
 For any resource the user can create (tenant, project, API key, etc.):
 
 - **List page** owns the table and a small `+ New <thing>` pill button on the upper-right of `.page-header` (`role="button" class="btn-inline"`). No inline create form on the list page.
-- The pill button links to a sibling `/new` route (e.g. `/v1/dashboard/tenants/{id}/projects/new`).
+- The pill button links to a sibling `/new` route (e.g. `/v1/control-panel/tenants/{id}/projects/new`).
 - **`/new` page** is a full `appLayout` page with a `.breadcrumb`, `.page-header` (eyebrow + H1 + subtitle), and a single `<section class="card">` containing the form. End the form with a `Cancel` link (`secondary outline btn-inline`) + `Create <thing>` submit (`btn-inline`) inside `.form-actions`.
 - POST handler re-renders the same `New<Thing>Page` view on validation/conflict error (422 / 409) with `FieldErrors` and the user's input preserved. On success, plain `303` redirect back to the list page; pass a one-shot success message via a `?created=…` query param the list handler reads into `View.Message` and renders as `class="flash-success"`.
 - If the create produces a one-time secret (e.g. an API key plaintext), redirect to a dedicated success page in `appLayout` (see `APIKeyCreatedPage` / `SignupSuccessPage`) instead of swapping a fragment in place.
@@ -71,7 +71,7 @@ The tenants list (`HomePage`) is the reference. Match its header structure verba
 
 ## 10. Testing components
 
-- Render the component into a `bytes.Buffer` (or `httptest.ResponseRecorder`) and assert against the HTML with `strings.Contains` — see `internal/dashboard/templates_test.go`. No new dependencies, no browser. Don't pull in `goquery` or another HTML parser unless the assertions actually need DOM traversal — for the small surface here, plain string checks are enough.
+- Render the component into a `bytes.Buffer` (or `httptest.ResponseRecorder`) and assert against the HTML with `strings.Contains` — see `internal/controlpanel/templates_test.go`. No new dependencies, no browser. Don't pull in `goquery` or another HTML parser unless the assertions actually need DOM traversal — for the small surface here, plain string checks are enough.
 - Worth writing for: role-gated nav, conditional error rendering, anything where a regression would be silent.
 
 ---
@@ -79,5 +79,5 @@ The tenants list (`HomePage`) is the reference. Match its header structure verba
 ## What we deliberately don't require
 
 - We don't use **Tailwind** or **Alpine.js**. Don't sneak them in via a code-review comment — that's a stack-level decision.
-- The dashboard is a single Go package today. **Feature-slicing** is fine to pursue later, but it isn't a review criterion now.
+- The control panel is a single Go package today. **Feature-slicing** is fine to pursue later, but it isn't a review criterion now.
 - File-name casing: whatever the Go toolchain is happy with. Don't bikeshed.

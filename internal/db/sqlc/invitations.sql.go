@@ -11,9 +11,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const createDashboardInvitation = `-- name: CreateDashboardInvitation :one
+const createControlPanelInvitation = `-- name: CreateControlPanelInvitation :one
 
-INSERT INTO dashboard_invitations (
+INSERT INTO control_panel_invitations (
     email, tenant_id, role, code_hash, expires_at, invited_by_user_id
 )
 VALUES (
@@ -27,7 +27,7 @@ VALUES (
 RETURNING id, created_at, expires_at
 `
 
-type CreateDashboardInvitationParams struct {
+type CreateControlPanelInvitationParams struct {
 	Email           string
 	TenantID        *int64
 	Role            string
@@ -36,15 +36,15 @@ type CreateDashboardInvitationParams struct {
 	InvitedByUserID int64
 }
 
-type CreateDashboardInvitationRow struct {
+type CreateControlPanelInvitationRow struct {
 	ID        int64
 	CreatedAt pgtype.Timestamptz
 	ExpiresAt pgtype.Timestamptz
 }
 
-// Dashboard team invitations (operator-side: platform / tenant admins).
-func (q *Queries) CreateDashboardInvitation(ctx context.Context, arg CreateDashboardInvitationParams) (CreateDashboardInvitationRow, error) {
-	row := q.db.QueryRow(ctx, createDashboardInvitation,
+// Control panel team invitations (operator-side: platform / tenant admins).
+func (q *Queries) CreateControlPanelInvitation(ctx context.Context, arg CreateControlPanelInvitationParams) (CreateControlPanelInvitationRow, error) {
+	row := q.db.QueryRow(ctx, createControlPanelInvitation,
 		arg.Email,
 		arg.TenantID,
 		arg.Role,
@@ -52,27 +52,27 @@ func (q *Queries) CreateDashboardInvitation(ctx context.Context, arg CreateDashb
 		arg.ExpiresAt,
 		arg.InvitedByUserID,
 	)
-	var i CreateDashboardInvitationRow
+	var i CreateControlPanelInvitationRow
 	err := row.Scan(&i.ID, &i.CreatedAt, &i.ExpiresAt)
 	return i, err
 }
 
-const createDashboardMembership = `-- name: CreateDashboardMembership :one
-INSERT INTO dashboard_memberships (dashboard_user_id, tenant_id, role)
+const createControlPanelMembership = `-- name: CreateControlPanelMembership :one
+INSERT INTO control_panel_memberships (control_panel_user_id, tenant_id, role)
 VALUES ($1, $2, $3)
-ON CONFLICT (dashboard_user_id, tenant_id) DO UPDATE
+ON CONFLICT (control_panel_user_id, tenant_id) DO UPDATE
     SET role = EXCLUDED.role
 RETURNING id
 `
 
-type CreateDashboardMembershipParams struct {
-	DashboardUserID int64
-	TenantID        int64
-	Role            string
+type CreateControlPanelMembershipParams struct {
+	ControlPanelUserID int64
+	TenantID           int64
+	Role               string
 }
 
-func (q *Queries) CreateDashboardMembership(ctx context.Context, arg CreateDashboardMembershipParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createDashboardMembership, arg.DashboardUserID, arg.TenantID, arg.Role)
+func (q *Queries) CreateControlPanelMembership(ctx context.Context, arg CreateControlPanelMembershipParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createControlPanelMembership, arg.ControlPanelUserID, arg.TenantID, arg.Role)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -197,30 +197,30 @@ func (q *Queries) CreatePlayerSession(ctx context.Context, arg CreatePlayerSessi
 	return id, err
 }
 
-const deleteDashboardMembership = `-- name: DeleteDashboardMembership :exec
-DELETE FROM dashboard_memberships
+const deleteControlPanelMembership = `-- name: DeleteControlPanelMembership :exec
+DELETE FROM control_panel_memberships
 WHERE id = $1
   AND tenant_id = $2
 `
 
-type DeleteDashboardMembershipParams struct {
+type DeleteControlPanelMembershipParams struct {
 	ID       int64
 	TenantID int64
 }
 
-func (q *Queries) DeleteDashboardMembership(ctx context.Context, arg DeleteDashboardMembershipParams) error {
-	_, err := q.db.Exec(ctx, deleteDashboardMembership, arg.ID, arg.TenantID)
+func (q *Queries) DeleteControlPanelMembership(ctx context.Context, arg DeleteControlPanelMembershipParams) error {
+	_, err := q.db.Exec(ctx, deleteControlPanelMembership, arg.ID, arg.TenantID)
 	return err
 }
 
-const deleteDashboardMembershipUnlessSelf = `-- name: DeleteDashboardMembershipUnlessSelf :execrows
-DELETE FROM dashboard_memberships
+const deleteControlPanelMembershipUnlessSelf = `-- name: DeleteControlPanelMembershipUnlessSelf :execrows
+DELETE FROM control_panel_memberships
 WHERE id = $1
   AND tenant_id = $2
-  AND dashboard_user_id <> $3
+  AND control_panel_user_id <> $3
 `
 
-type DeleteDashboardMembershipUnlessSelfParams struct {
+type DeleteControlPanelMembershipUnlessSelfParams struct {
 	ID          int64
 	TenantID    int64
 	ActorUserID int64
@@ -229,15 +229,15 @@ type DeleteDashboardMembershipUnlessSelfParams struct {
 // Removes a membership row but refuses to delete the actor's own row. The
 // previous approach loaded every member to do this check client-side; this
 // predicate folds it into one statement.
-func (q *Queries) DeleteDashboardMembershipUnlessSelf(ctx context.Context, arg DeleteDashboardMembershipUnlessSelfParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDashboardMembershipUnlessSelf, arg.ID, arg.TenantID, arg.ActorUserID)
+func (q *Queries) DeleteControlPanelMembershipUnlessSelf(ctx context.Context, arg DeleteControlPanelMembershipUnlessSelfParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteControlPanelMembershipUnlessSelf, arg.ID, arg.TenantID, arg.ActorUserID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
 }
 
-const getDashboardInvitationByCodeHash = `-- name: GetDashboardInvitationByCodeHash :one
+const getControlPanelInvitationByCodeHash = `-- name: GetControlPanelInvitationByCodeHash :one
 SELECT
     i.id,
     i.email::text AS email,
@@ -249,14 +249,14 @@ SELECT
     i.invited_by_user_id,
     i.created_at,
     t.name AS tenant_name
-FROM dashboard_invitations i
+FROM control_panel_invitations i
 LEFT JOIN tenants t ON t.id = i.tenant_id
 WHERE i.code_hash = $1
   AND i.accepted_at IS NULL
   AND i.revoked_at IS NULL
 `
 
-type GetDashboardInvitationByCodeHashRow struct {
+type GetControlPanelInvitationByCodeHashRow struct {
 	ID              int64
 	Email           string
 	TenantID        *int64
@@ -269,9 +269,9 @@ type GetDashboardInvitationByCodeHashRow struct {
 	TenantName      *string
 }
 
-func (q *Queries) GetDashboardInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetDashboardInvitationByCodeHashRow, error) {
-	row := q.db.QueryRow(ctx, getDashboardInvitationByCodeHash, codeHash)
-	var i GetDashboardInvitationByCodeHashRow
+func (q *Queries) GetControlPanelInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetControlPanelInvitationByCodeHashRow, error) {
+	row := q.db.QueryRow(ctx, getControlPanelInvitationByCodeHash, codeHash)
+	var i GetControlPanelInvitationByCodeHashRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -287,7 +287,7 @@ func (q *Queries) GetDashboardInvitationByCodeHash(ctx context.Context, codeHash
 	return i, err
 }
 
-const getDashboardInvitationByID = `-- name: GetDashboardInvitationByID :one
+const getControlPanelInvitationByID = `-- name: GetControlPanelInvitationByID :one
 SELECT
     id,
     email::text AS email,
@@ -298,11 +298,11 @@ SELECT
     revoked_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE id = $1
 `
 
-type GetDashboardInvitationByIDRow struct {
+type GetControlPanelInvitationByIDRow struct {
 	ID              int64
 	Email           string
 	TenantID        *int64
@@ -314,9 +314,9 @@ type GetDashboardInvitationByIDRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-func (q *Queries) GetDashboardInvitationByID(ctx context.Context, id int64) (GetDashboardInvitationByIDRow, error) {
-	row := q.db.QueryRow(ctx, getDashboardInvitationByID, id)
-	var i GetDashboardInvitationByIDRow
+func (q *Queries) GetControlPanelInvitationByID(ctx context.Context, id int64) (GetControlPanelInvitationByIDRow, error) {
+	row := q.db.QueryRow(ctx, getControlPanelInvitationByID, id)
+	var i GetControlPanelInvitationByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
@@ -553,7 +553,7 @@ func (q *Queries) IncrementPlayerVerificationAttemptsByID(ctx context.Context, i
 	return email_verification_attempts, err
 }
 
-const listDashboardInvitationsForTenant = `-- name: ListDashboardInvitationsForTenant :many
+const listControlPanelInvitationsForTenant = `-- name: ListControlPanelInvitationsForTenant :many
 SELECT
     id,
     email::text AS email,
@@ -561,14 +561,14 @@ SELECT
     expires_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE tenant_id = $1
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 ORDER BY created_at DESC
 `
 
-type ListDashboardInvitationsForTenantRow struct {
+type ListControlPanelInvitationsForTenantRow struct {
 	ID              int64
 	Email           string
 	Role            string
@@ -577,15 +577,15 @@ type ListDashboardInvitationsForTenantRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-func (q *Queries) ListDashboardInvitationsForTenant(ctx context.Context, tenantID *int64) ([]ListDashboardInvitationsForTenantRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardInvitationsForTenant, tenantID)
+func (q *Queries) ListControlPanelInvitationsForTenant(ctx context.Context, tenantID *int64) ([]ListControlPanelInvitationsForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listControlPanelInvitationsForTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDashboardInvitationsForTenantRow
+	var items []ListControlPanelInvitationsForTenantRow
 	for rows.Next() {
-		var i ListDashboardInvitationsForTenantRow
+		var i ListControlPanelInvitationsForTenantRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Email,
@@ -604,7 +604,7 @@ func (q *Queries) ListDashboardInvitationsForTenant(ctx context.Context, tenantI
 	return items, nil
 }
 
-const listDashboardMembersForTenant = `-- name: ListDashboardMembersForTenant :many
+const listControlPanelMembersForTenant = `-- name: ListControlPanelMembersForTenant :many
 SELECT
     m.id AS membership_id,
     u.id AS user_id,
@@ -613,13 +613,13 @@ SELECT
     u.is_platform_admin,
     u.last_login_at,
     m.created_at
-FROM dashboard_memberships m
-JOIN dashboard_users u ON u.id = m.dashboard_user_id
+FROM control_panel_memberships m
+JOIN control_panel_users u ON u.id = m.control_panel_user_id
 WHERE m.tenant_id = $1
 ORDER BY m.created_at ASC
 `
 
-type ListDashboardMembersForTenantRow struct {
+type ListControlPanelMembersForTenantRow struct {
 	MembershipID    int64
 	UserID          int64
 	Email           string
@@ -629,15 +629,15 @@ type ListDashboardMembersForTenantRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-func (q *Queries) ListDashboardMembersForTenant(ctx context.Context, tenantID int64) ([]ListDashboardMembersForTenantRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardMembersForTenant, tenantID)
+func (q *Queries) ListControlPanelMembersForTenant(ctx context.Context, tenantID int64) ([]ListControlPanelMembersForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listControlPanelMembersForTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListDashboardMembersForTenantRow
+	var items []ListControlPanelMembersForTenantRow
 	for rows.Next() {
-		var i ListDashboardMembersForTenantRow
+		var i ListControlPanelMembersForTenantRow
 		if err := rows.Scan(
 			&i.MembershipID,
 			&i.UserID,
@@ -665,7 +665,7 @@ SELECT
     expires_at,
     invited_by_user_id,
     created_at
-FROM dashboard_invitations
+FROM control_panel_invitations
 WHERE tenant_id IS NULL
   AND accepted_at IS NULL
   AND revoked_at IS NULL
@@ -714,7 +714,7 @@ SELECT
     email::text AS email,
     last_login_at,
     created_at
-FROM dashboard_users
+FROM control_panel_users
 WHERE is_platform_admin = true
 ORDER BY created_at ASC
 `
@@ -800,16 +800,16 @@ func (q *Queries) ListPlayerInvitationsForProject(ctx context.Context, projectID
 	return items, nil
 }
 
-const markDashboardInvitationAccepted = `-- name: MarkDashboardInvitationAccepted :exec
-UPDATE dashboard_invitations
+const markControlPanelInvitationAccepted = `-- name: MarkControlPanelInvitationAccepted :exec
+UPDATE control_panel_invitations
 SET accepted_at = now()
 WHERE id = $1
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 `
 
-func (q *Queries) MarkDashboardInvitationAccepted(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markDashboardInvitationAccepted, id)
+func (q *Queries) MarkControlPanelInvitationAccepted(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markControlPanelInvitationAccepted, id)
 	return err
 }
 
@@ -883,27 +883,27 @@ func (q *Queries) PlayerInviteLookup(ctx context.Context, codeHash []byte) (Play
 	return i, err
 }
 
-const promoteDashboardUserToPlatformAdmin = `-- name: PromoteDashboardUserToPlatformAdmin :exec
-UPDATE dashboard_users
+const promoteControlPanelUserToPlatformAdmin = `-- name: PromoteControlPanelUserToPlatformAdmin :exec
+UPDATE control_panel_users
 SET is_platform_admin = true
 WHERE id = $1
 `
 
-func (q *Queries) PromoteDashboardUserToPlatformAdmin(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, promoteDashboardUserToPlatformAdmin, id)
+func (q *Queries) PromoteControlPanelUserToPlatformAdmin(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, promoteControlPanelUserToPlatformAdmin, id)
 	return err
 }
 
-const revokeDashboardInvitation = `-- name: RevokeDashboardInvitation :exec
-UPDATE dashboard_invitations
+const revokeControlPanelInvitation = `-- name: RevokeControlPanelInvitation :exec
+UPDATE control_panel_invitations
 SET revoked_at = now()
 WHERE id = $1
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 `
 
-func (q *Queries) RevokeDashboardInvitation(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokeDashboardInvitation, id)
+func (q *Queries) RevokeControlPanelInvitation(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, revokeControlPanelInvitation, id)
 	return err
 }
 

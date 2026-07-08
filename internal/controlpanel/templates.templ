@@ -1,0 +1,2513 @@
+package controlpanel
+
+import "github.com/ggscale/ggscale/internal/webassets"
+
+templ baseHead(title string) {
+	<head>
+		<meta charset="utf-8"/>
+		<meta name="viewport" content="width=device-width, initial-scale=1"/>
+		<meta name="color-scheme" content="dark"/>
+		<title>{ title }</title>
+		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true}'/>
+		<link rel="stylesheet" href={ webassets.URL("pico.min.css") }/>
+		<link rel="stylesheet" href={ webassets.URL("app.css") }/>
+		<script src="/v1/control-panel/assets/htmx.min.js" defer></script>
+		<script src="/v1/control-panel/assets/controlpanel.js" defer></script>
+	</head>
+}
+
+templ appLayout(title, userEmail, csrfToken string) {
+	<!doctype html>
+	<html lang="en" data-theme="dark">
+		@baseHead(title)
+		<body>
+			<header class="app-header">
+				<nav>
+					<ul>
+						<li><a class="brand" href="/v1/control-panel">ggscale</a></li>
+					</ul>
+					<ul>
+						<li><a href="/v1/control-panel">Control panel</a></li>
+						<li><a href="/v1/control-panel/help">Help</a></li>
+						<li><a href="/v1/control-panel/account/password">Account</a></li>
+						<li><span class="user-email">{ userEmail }</span></li>
+						<li>
+							<form method="post" action="/v1/control-panel/logout">
+								<input type="hidden" name="_csrf" value={ csrfToken }/>
+								<button type="submit" class="secondary outline btn-inline">Sign out</button>
+							</form>
+						</li>
+					</ul>
+				</nav>
+			</header>
+			<main class="app-main">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+templ authLayout(title string) {
+	<!doctype html>
+	<html lang="en" data-theme="dark">
+		@baseHead(title)
+		<body>
+			<main class="auth-shell">
+				<article>
+					{ children... }
+				</article>
+			</main>
+		</body>
+	</html>
+}
+
+// errorAlert renders a form/page error banner. It renders nothing when the
+// message is empty so callers can drop the surrounding `if vm.Error != ""`.
+templ errorAlert(message string) {
+	if message != "" {
+		<p role="alert">{ message }</p>
+	}
+}
+
+// flashSuccess renders a success banner, or nothing when the message is empty.
+templ flashSuccess(message string) {
+	if message != "" {
+		<p class="flash-success">{ message }</p>
+	}
+}
+
+// FormErrorFragment is the htmx-swapped error response for inline form posts.
+templ FormErrorFragment(message string) {
+	@errorAlert(message)
+}
+
+templ fieldError(errs map[string]string, name string) {
+	if msg, ok := errs[name]; ok {
+		<small class="field-error" id={ name + "-error" }>{ msg }</small>
+	}
+}
+
+templ LoginPage(vm LoginView) {
+	@authLayout("Sign in — ggscale") {
+		<h1>ggscale Control panel</h1>
+		<p class="subtitle">Sign in to your admin account.</p>
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/control-panel/login">
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
+			@fieldError(vm.FieldErrors, "email")
+			<label for="password">Password</label>
+			<input id="password" name="password" type="password" autocomplete="current-password" required aria-describedby="password-error"/>
+			@fieldError(vm.FieldErrors, "password")
+			<button type="submit">Sign in</button>
+		</form>
+	}
+}
+
+templ SetupTokenPage(vm SetupTokenView) {
+	@authLayout("Set up — ggscale") {
+		<h1>Set up ggscale</h1>
+		<p class="subtitle">Step 1 of 2 — paste the bootstrap token to start setup.</p>
+		if vm.TokenFilePath != "" {
+			<p>The token was written to <code>{ vm.TokenFilePath }</code> on the server. Read it from there.</p>
+		} else {
+			<p>The token was printed to the server&apos;s stderr (no <code>CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE</code> configured). Check your server logs.</p>
+		}
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/control-panel/setup/token">
+			<label for="bootstrap_token">Bootstrap token</label>
+			<input id="bootstrap_token" name="bootstrap_token" type="text" autocomplete="off" required aria-describedby="bootstrap_token-error"/>
+			@fieldError(vm.FieldErrors, "bootstrap_token")
+			<button type="submit">Continue</button>
+		</form>
+	}
+}
+
+templ SetupAdminPage(vm SetupAdminView) {
+	@authLayout("Set up — ggscale") {
+		<h1>Create admin account</h1>
+		<p class="subtitle">Step 2 of 2 — set the email and password for the first administrator.</p>
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/control-panel/setup">
+			<input type="hidden" name="bootstrap_token" value={ vm.Token }/>
+			<label for="email">Email</label>
+			<input id="email" name="email" type="email" value={ vm.Email } autocomplete="username" required aria-describedby="email-error"/>
+			@fieldError(vm.FieldErrors, "email")
+			<label for="password">Password</label>
+			<input id="password" name="password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="password-error"/>
+			@fieldError(vm.FieldErrors, "password")
+			<button type="submit">Create admin account</button>
+		</form>
+	}
+}
+
+templ HomePage(vm HomeView) {
+	@appLayout("ggscale Control panel", vm.UserEmail, vm.CSRFToken) {
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Tenants</p>
+				<h1>Tenants</h1>
+				<p class="subtitle">Tenants you have access to.</p>
+			</div>
+			<div class="actions-cell">
+				if vm.IsPlatformAdmin {
+					<a href="/v1/control-panel/admin/users" role="button" class="secondary outline btn-inline">Control panel users</a>
+					<a href="/v1/control-panel/admin/player-accounts" role="button" class="secondary outline btn-inline">Player accounts</a>
+					<a href="/v1/control-panel/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
+					<a href="/v1/control-panel/admin/settings" role="button" class="secondary outline btn-inline">Server settings</a>
+				}
+				<a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+			</div>
+		</div>
+		<section class="card">
+			if len(vm.Tenants) == 0 {
+				<div class="empty-state">
+					<p>No tenants yet.</p>
+					<p><a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">Create your first tenant</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Tenant</th>
+							<th>Role</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, tenant := range vm.Tenants {
+							<tr>
+								<td>{ tenant.Name }</td>
+								<td><span class="badge badge-role">{ tenant.Role }</span></td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") } role="button" class="secondary outline">Projects</a>
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/team") } role="button" class="secondary outline">Team</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewTenantPage(vm NewTenantView) {
+	@appLayout("New tenant — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / New</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">New tenant</p>
+				<h1>New tenant</h1>
+				<p class="subtitle">Sets up a tenant with a starter project and its first API key.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action="/v1/control-panel/tenants" hx-post="/v1/control-panel/tenants" hx-target="#signup-result" hx-headers={ csrfHeaders(vm.CSRFToken) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="grid">
+					<label>
+						Tenant name
+						<input name="tenant_name" required autofocus aria-describedby="tenant_name-error"/>
+						@fieldError(vm.FieldErrors, "tenant_name")
+					</label>
+					<label>
+						Starter project name
+						<input name="project_name" required aria-describedby="project_name-error"/>
+						@fieldError(vm.FieldErrors, "project_name")
+					</label>
+				</div>
+				<label>
+					First API key name
+					<input name="label" value="Default key" aria-describedby="label-error"/>
+					@fieldError(vm.FieldErrors, "label")
+				</label>
+				<div class="form-actions">
+					<a href="/v1/control-panel" role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create tenant</button>
+				</div>
+			</form>
+			<div id="signup-result"></div>
+		</section>
+	}
+}
+
+templ ProjectsPage(vm ProjectsView) {
+	@appLayout("Projects — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Projects</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Projects</p>
+				<h1>Projects</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<div class="header-actions">
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings") } role="button" class="secondary outline btn-inline">Settings</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") } role="button" class="secondary outline btn-inline">Rate limits</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			if len(vm.Projects) == 0 {
+				<div class="empty-state">
+					<p>No projects yet.</p>
+					<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">Create your first project</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Public joining</th>
+							<th>Created</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Projects {
+							<tr>
+								<td>{ p.Name }</td>
+								<td class="actions-cell">
+									if p.PublicJoiningEnabled {
+										<span class="badge badge-active">on</span>
+									} else {
+										<span class="badge badge-revoked">invite only</span>
+									}
+									@projectJoiningToggleForm(vm.TenantID, p.ID, vm.CSRFToken, "", p.PublicJoiningEnabled)
+								</td>
+								<td>{ timeString(p.CreatedAt) }</td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") } role="button" class="secondary outline">Players</a>
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/leaderboards") } role="button" class="secondary outline">Leaderboards</a>
+									if vm.FleetEnabled {
+										<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") } role="button" class="secondary outline">Fleets</a>
+										<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") } role="button" class="secondary outline">Allocations</a>
+									}
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline">API keys</a>
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/settings") } role="button" class="secondary outline">Settings</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewProjectPage(vm NewProjectView) {
+	@appLayout("New project — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">New project</p>
+				<h1>New project</h1>
+				<p class="subtitle">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Project name
+					<input name="name" value={ vm.Name } required autofocus placeholder="e.g. arcade-prod" aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create project</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ SignupSuccessPage(vm SignupSuccessView) {
+	<section class="color-block color-block--lime">
+		<p class="eyebrow">Tenant created</p>
+		<h2>Save your API key</h2>
+		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
+		<dl class="kv">
+			<dt>Tenant ID</dt>
+			<dd>{ stringFromInt(vm.TenantID) }</dd>
+			<dt>Project ID</dt>
+			<dd>{ stringFromInt(vm.ProjectID) }</dd>
+			<dt>API key ID</dt>
+			<dd>{ stringFromInt(vm.APIKeyID) }</dd>
+			<dt>API key</dt>
+			<dd><code>{ vm.APIKey }</code></dd>
+		</dl>
+		<div class="form-actions">
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Manage API keys</a>
+		</div>
+	</section>
+}
+
+templ APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) {
+	@appLayout("API key created — ggscale", userEmail, csrfToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / Created
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">API key created</p>
+				<h1>Save your API key</h1>
+				<p class="subtitle">Store this key now. It will not be shown again.</p>
+			</div>
+		</div>
+		<section class="color-block color-block--lime">
+			<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
+			<dl class="kv">
+				<dt>API key ID</dt>
+				<dd>{ stringFromInt(vm.APIKeyID) }</dd>
+				<dt>API key</dt>
+				<dd><code>{ vm.APIKey }</code></dd>
+			</dl>
+			<div class="form-actions">
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="btn-inline">Back to API keys</a>
+			</div>
+		</section>
+	}
+}
+
+templ NewAPIKeyPage(vm NewAPIKeyView) {
+	@appLayout("New API key — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">New API key</p>
+				<h1>New API key</h1>
+				<p class="subtitle">Generates a new key. The plaintext value is shown once after creation.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="grid">
+					<label>
+						Project
+						<select id="project_id" name="project_id" aria-describedby="project_id-error">
+							<option value="" selected?={ vm.ProjectID == "" }>Tenant-wide (all projects)</option>
+							for _, p := range vm.Projects {
+								<option value={ stringFromInt(p.ID) } selected?={ vm.ProjectID == stringFromInt(p.ID) }>{ p.Name }</option>
+							}
+						</select>
+						@fieldError(vm.FieldErrors, "project_id")
+					</label>
+					<label>
+						Type
+						<select id="key_type" name="key_type" aria-describedby="key_type-error">
+							<option value="publishable" selected?={ vm.KeyType != "secret" }>Publishable — embed in shipped game clients (read + player session bootstrap)</option>
+							<option value="secret" selected?={ vm.KeyType == "secret" }>Secret — game server / backend only (writes, leaderboard submit, fleet register)</option>
+						</select>
+						@fieldError(vm.FieldErrors, "key_type")
+					</label>
+					<label>
+						Name
+						<input id="key_label" name="label" value={ vm.Label } placeholder="e.g. CI deploy key" required aria-describedby="label-error"/>
+						@fieldError(vm.FieldErrors, "label")
+					</label>
+				</div>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create API key</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ APIKeysPage(vm APIKeysView) {
+	@appLayout("API keys — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / API keys</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">API keys</p>
+				<h1>API keys</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/new") } role="button" class="btn-inline">+ New API key</a>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			if len(vm.Keys) == 0 {
+				<div class="empty-state">
+					<p>No API keys yet.</p>
+					<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/new") } role="button" class="btn-inline">Create your first API key</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Project</th>
+							<th>Key Name</th>
+							<th>Feature access</th>
+							<th>Created</th>
+							<th>Status</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, key := range vm.Keys {
+							<tr>
+								<td>
+									if key.ProjectID == nil {
+										<span class="muted">tenant-wide</span>
+									} else if key.ProjectName != "" {
+										{ key.ProjectName }
+									} else {
+										<span class="muted">(deleted)</span>
+									}
+								</td>
+								<td class="label-cell">
+									<details class="label-edit">
+										<summary class="label-edit-toggle" aria-label="Edit name" title="Edit name">
+											<span class="label-display">{ key.Label }</span>
+											<span class="label-edit-icon" aria-hidden="true">✎</span>
+										</summary>
+										<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/label") }>
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<input name="label" value={ key.Label } aria-label="API key name"/>
+											<button type="submit" class="secondary outline">Save</button>
+										</form>
+									</details>
+								</td>
+								<td class="feature-cell">
+									if key.RevokedAt != nil {
+										<span class="muted">—</span>
+									} else {
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "matchmaker", "Matchmaker", key.MatchmakerGrantable)
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "fleet", "Fleet", key.FleetGrantable)
+										@scopeToggle(vm.TenantID, vm.CSRFToken, key, "p2p_relay", "Relay", key.RelayGrantable)
+									}
+								</td>
+								<td>{ timeString(key.CreatedAt) }</td>
+								if key.RevokedAt != nil {
+									<td><span class="badge badge-revoked">Revoked</span></td>
+									<td class="actions-cell"><small>{ timeString(*key.RevokedAt) }</small></td>
+								} else {
+									<td><span class="badge badge-active">Active</span></td>
+									<td class="actions-cell">
+										<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke") }>
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="contrast outline">Revoke</button>
+										</form>
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+// scopeToggle renders one feature-scope grant/revoke control for an API key.
+// A held scope always shows a Revoke button. An unheld scope shows a Grant
+// button only when the feature is grantable (env switch on + feature_grant
+// row); otherwise it renders "no access" so operators can't grant a feature
+// the deployment refuses to run.
+templ scopeToggle(tenantID int64, csrf string, key APIKeyView, scope, label string, grantable bool) {
+	if key.HasScope(scope) {
+		<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenantID) + "/api-keys/" + stringFromInt(key.ID) + "/scopes") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="scope" value={ scope }/>
+			<input type="hidden" name="action" value="revoke"/>
+			<span class="badge badge-active">{ label }</span>
+			<button type="submit" class="secondary outline btn-inline">Revoke</button>
+		</form>
+	} else if grantable {
+		<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenantID) + "/api-keys/" + stringFromInt(key.ID) + "/scopes") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="scope" value={ scope }/>
+			<input type="hidden" name="action" value="grant"/>
+			<button type="submit" class="btn-inline">Grant { label }</button>
+		</form>
+	} else {
+		<span class="muted">{ label }: no access</span>
+	}
+}
+
+// fleetOperatorToggle renders the grant/revoke control for the à-la-carte
+// role:fleet_operator on a tenant member. Rendered only when the fleet feature
+// is enabled (the caller gates on vm.FleetEnabled).
+templ fleetOperatorToggle(tenantID int64, csrf string, m TeamMemberView) {
+	if m.FleetOperator {
+		<form method="post" action={ templ.URL(tenantTeamPath(tenantID) + "/members/" + stringFromInt(m.UserID) + "/roles") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="role" value="role:fleet_operator"/>
+			<input type="hidden" name="action" value="revoke"/>
+			<span class="badge badge-active">Fleet operator</span>
+			<button type="submit" class="secondary outline btn-inline">Revoke</button>
+		</form>
+	} else {
+		<form method="post" action={ templ.URL(tenantTeamPath(tenantID) + "/members/" + stringFromInt(m.UserID) + "/roles") } class="scope-toggle">
+			<input type="hidden" name="_csrf" value={ csrf }/>
+			<input type="hidden" name="role" value="role:fleet_operator"/>
+			<input type="hidden" name="action" value="grant"/>
+			<button type="submit" class="btn-inline">Grant fleet operator</button>
+		</form>
+	}
+}
+
+// apiLimitCard is the tenant HTTP API limit card shared by the rate-limits
+// and tenant-settings pages.
+templ apiLimitCard(vm APILimitCardView) {
+	<section class="card">
+		<h2>HTTP API limit</h2>
+		<p class="card-subtitle">
+			Per-second rate and burst applied to this tenant's API keys. Blank
+			restores the tier default ({ rlNum(vm.DefaultRate) }/s, burst { rlNum(vm.DefaultBurst) }).
+		</p>
+		if vm.IsPlatformAdmin {
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				if vm.RedirectTo != "" {
+					<input type="hidden" name="redirect_to" value={ vm.RedirectTo }/>
+				}
+				<label>Rate (requests/second)
+					<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.Rate) } placeholder={ rlNum(vm.DefaultRate) }/>
+				</label>
+				<label>Burst
+					<input name="burst" type="number" step="any" min="0" value={ rlValue(vm.Burst) } placeholder={ rlNum(vm.DefaultBurst) }/>
+				</label>
+				<button type="submit">Save API limit</button>
+			</form>
+		} else {
+			if vm.Overridden {
+				<p>Override active: <strong>{ rlNum(vm.Rate) }</strong>/s, burst <strong>{ rlNum(vm.Burst) }</strong>.</p>
+			} else {
+				<p>Using the tier default.</p>
+			}
+			<p class="muted">Only platform admins can change the API ceiling.</p>
+		}
+	</section>
+}
+
+// projectJoiningToggleForm posts the per-project public-joining toggle,
+// shared by the projects list and the project settings page. redirectTo,
+// when non-empty, returns the post to the embedding page.
+templ projectJoiningToggleForm(tenantID, projectID int64, csrfToken, redirectTo string, enabled bool) {
+	<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenantID) + "/projects/" + stringFromInt(projectID) + "/public-joining") }>
+		<input type="hidden" name="_csrf" value={ csrfToken }/>
+		if redirectTo != "" {
+			<input type="hidden" name="redirect_to" value={ redirectTo }/>
+		}
+		if enabled {
+			<input type="hidden" name="public_joining_enabled" value=""/>
+			<button type="submit" class="contrast outline btn-inline">Set invite-only</button>
+		} else {
+			<input type="hidden" name="public_joining_enabled" value="on"/>
+			<button type="submit" class="btn-inline">Allow public joining</button>
+		}
+	</form>
+}
+
+templ RateLimitsPage(vm RateLimitsView) {
+	@appLayout("Rate limits — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Rate limits</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Rate limits</p>
+				<h1>Rate limits</h1>
+				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
+		@apiLimitCard(vm.apiLimitCardView())
+		<section class="card">
+			<h2>Invite quotas</h2>
+			<p class="card-subtitle">
+				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour,
+				{ rlNum(vm.DefaultDomainDay) }/project/day).
+			</p>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state"><p>No projects yet.</p></div>
+			} else {
+				for _, p := range vm.Projects {
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(p.ProjectID) + "/invites") } class="rate-limit-row">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<strong>{ p.ProjectName }</strong>
+						<label>Invites / inviter / hour
+							<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(p.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
+						</label>
+						<label>Invites / project / day
+							<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(p.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
+						</label>
+						<button type="submit" class="btn-inline">Save</button>
+					</form>
+				}
+			}
+		</section>
+	}
+}
+
+templ HelpPage(vm HelpView) {
+	@appLayout("Help — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Help</p>
+				<h1>Concepts &amp; quick start</h1>
+				<p class="subtitle">A 2-minute tour of how ggscale fits together.</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>The 30-second version</h2>
+			<p class="card-subtitle">What you need to put ggscale in front of players.</p>
+			<ol class="quick-steps">
+				<li><strong>Create a tenant.</strong> The control panel sets up a tenant, a starter project, and a first API key in one step.</li>
+				<li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li>
+				<li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the tenant&apos;s API key.</li>
+			</ol>
+		</section>
+		<section class="card">
+			<h2>The pieces</h2>
+			<p class="card-subtitle">Each row is one row in the database, and one place in this control panel.</p>
+			<dl class="concept-list">
+				<dt>Tenant</dt>
+				<dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (projects, API keys, player accounts, save data, leaderboards) belongs to exactly one tenant. Tenants never see each other&apos;s data.</dd>
+				<dt>Project</dt>
+				<dd>A workload partition inside a tenant. Most studios use one project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting projects keeps prod and staging data separate while still rolling up to one tenant for billing and admin.</dd>
+				<dt>API key</dt>
+				<dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd>
+				<dt>Control panel user</dt>
+				<dd>You. Humans who log in here to manage tenants, projects, and keys. Control panel users are separate from players; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles.</dd>
+				<dt>Player</dt>
+				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. Players never touch this control panel.</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>How a request flows</h2>
+			<p class="card-subtitle">Why each piece matters at runtime.</p>
+			<pre class="flow-diagram">
+your game ──► ggscale HTTP API
+              │
+              ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project)
+              └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Tenant
+              │
+              ▼
+       Postgres (Row-Level Security)
+       Only rows belonging to that tenant_id are visible.</pre>
+			<p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses tenant lines.</p>
+		</section>
+		<section class="card">
+			<h2>What to do next</h2>
+			<ul class="next-steps">
+				<li><a href="/v1/control-panel/tenants/new">Create your first tenant</a> — gets you a tenant, a starter project, and your first API key in one step.</li>
+				<li>Open the <a href="/v1/control-panel">Control panel</a> to see tenants you can manage.</li>
+				<li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li>
+			</ul>
+		</section>
+	}
+}
+
+templ AccountPage(vm AccountView) {
+	@appLayout("Account — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Control panel</a> / Account</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Account</p>
+				<h1>Account</h1>
+				<p class="subtitle">Signed in as { vm.UserEmail }</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
+		<section class="card">
+			<h2>Change password</h2>
+			<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
+			<form method="post" action="/v1/control-panel/account/password">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="current_password">Current password</label>
+				<input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error"/>
+				@fieldError(vm.FieldErrors, "current_password")
+				<label for="new_password">New password</label>
+				<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="new_password-error"/>
+				@fieldError(vm.FieldErrors, "new_password")
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Update password</button>
+				</div>
+			</form>
+		</section>
+		@twoFactorCard(vm)
+	}
+}
+
+templ twoFactorCard(vm AccountView) {
+	<section class="card">
+		<h2>Two-factor authentication</h2>
+		if !vm.TwoFactorAvailable {
+			<p class="card-subtitle">Not available on this server. Ask your operator to configure a two-factor encryption key.</p>
+		} else if !vm.TwoFactorEnabled {
+			<p class="card-subtitle">Add a second sign-in step with an authenticator app such as Google Authenticator.</p>
+			<form method="post" action="/v1/control-panel/account/2fa/setup">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Enable two-factor authentication</button>
+				</div>
+			</form>
+		} else {
+			<p class="card-subtitle">Enabled. Backup codes remaining: { stringFromInt(int64(vm.BackupCodesRemaining)) }.</p>
+			<h3>Regenerate backup codes</h3>
+			<p class="card-subtitle">Replaces all remaining backup codes with a fresh set.</p>
+			<form method="post" action="/v1/control-panel/account/2fa/backup-codes">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="regenerate_password">Current password</label>
+				<input id="regenerate_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="regenerate_password-error"/>
+				@fieldError(vm.FieldErrors, "regenerate_password")
+				<label for="regenerate_code">Authenticator code</label>
+				<input id="regenerate_code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required aria-describedby="regenerate_code-error"/>
+				@fieldError(vm.FieldErrors, "regenerate_code")
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Regenerate backup codes</button>
+				</div>
+			</form>
+			<h3>Disable two-factor authentication</h3>
+			<p class="card-subtitle">All other sessions and remembered devices will be signed out.</p>
+			<form method="post" action="/v1/control-panel/account/2fa/disable">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="disable_password">Current password</label>
+				<input id="disable_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="disable_password-error"/>
+				@fieldError(vm.FieldErrors, "disable_password")
+				<label for="disable_code">Authenticator or backup code</label>
+				<input id="disable_code" name="code" type="text" autocomplete="one-time-code" required aria-describedby="disable_code-error"/>
+				@fieldError(vm.FieldErrors, "disable_code")
+				<div class="form-actions">
+					<button type="submit" class="secondary btn-inline">Disable</button>
+				</div>
+			</form>
+		}
+	</section>
+}
+
+templ TwoFactorChallengePage(vm TwoFactorChallengeView) {
+	@authLayout("Two-factor check — ggscale") {
+		<h1>Two-factor check</h1>
+		<p class="subtitle">Enter the 6-digit code from your authenticator app, or one of your backup codes.</p>
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/control-panel/login/2fa">
+			<label for="code">Code</label>
+			<input id="code" name="code" type="text" autocomplete="one-time-code" autofocus required/>
+			<label for="trust_device">
+				<input id="trust_device" name="trust_device" type="checkbox" value="1"/>
+				Remember this device for 30 days
+			</label>
+			<button type="submit">Verify</button>
+		</form>
+	}
+}
+
+templ TwoFactorSetupPage(vm TwoFactorSetupView) {
+	@appLayout("Set up two-factor — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Control panel</a> / <a href="/v1/control-panel/account/password">Account</a> / Two-factor</div>
+		<section class="card">
+			<h2>Set up two-factor authentication</h2>
+			<p class="card-subtitle">Scan the QR code with an authenticator app (Google Authenticator, Aegis, 1Password, …), then confirm with the 6-digit code it shows.</p>
+			@errorAlert(vm.Error)
+			<img src={ vm.QRDataURI } alt="Authenticator enrollment QR code" width="220" height="220"/>
+			<p>Can&apos;t scan? Enter this key manually:</p>
+			<p><code>{ vm.Secret }</code></p>
+			<form method="post" action="/v1/control-panel/account/2fa/confirm">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="code">6-digit code</label>
+				<input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Confirm and enable</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ TwoFactorBackupCodesPage(vm TwoFactorBackupCodesView) {
+	@appLayout("Backup codes — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Control panel</a> / <a href="/v1/control-panel/account/password">Account</a> / Backup codes</div>
+		<section class="card">
+			<h2>Backup codes</h2>
+			@flashSuccess(vm.Message)
+			<p class="card-subtitle">Each code works once. Store them somewhere safe — they will not be shown again.</p>
+			<ul class="backup-codes">
+				for _, code := range vm.Codes {
+					<li><code>{ code }</code></li>
+				}
+			</ul>
+			<p><a href="/v1/control-panel/account/password">Back to account</a></p>
+		</section>
+	}
+}
+
+templ TeamPage(vm TeamView) {
+	@appLayout("Team — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Team</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Team</p>
+				<h1>Tenant team</h1>
+				<p class="subtitle">Members of tenant #{ stringFromInt(vm.TenantID) }.</p>
+			</div>
+			<a href={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") } role="button" class="btn-inline">+ Invite teammate</a>
+		</div>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
+		<section class="card">
+			<h2>Members</h2>
+			if len(vm.Members) == 0 {
+				<div class="empty-state"><p>No members yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							if vm.FleetEnabled {
+								<th>Fleet access</th>
+							}
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, m := range vm.Members {
+							<tr>
+								<td>{ m.Email }</td>
+								<td><span class="badge badge-role">{ m.Role }</span></td>
+								if vm.FleetEnabled {
+									<td class="feature-cell">
+										@fleetOperatorToggle(vm.TenantID, vm.CSRFToken, m)
+									</td>
+								}
+								<td>{ timeString(m.JoinedAt) }</td>
+								<td class="actions-cell">
+									if m.UserID == vm.IsOwnerID {
+										<span class="badge">you</span>
+									} else {
+										<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/members/" + stringFromInt(m.MembershipID) + "/remove") } data-confirm="Remove this member?">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="secondary outline btn-inline">Remove</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+		<section class="card">
+			<h2>Pending invites</h2>
+			if len(vm.Pending) == 0 {
+				<div class="empty-state"><p>No pending invites.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							<th>Expires</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Pending {
+							<tr>
+								<td>{ p.Email }</td>
+								<td><span class="badge badge-role">{ p.Role }</span></td>
+								<td>{ timeString(p.ExpiresAt) }</td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invites/" + stringFromInt(p.ID) + "/revoke") } data-confirm="Revoke this invite?">
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="secondary outline btn-inline">Revoke</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ InviteTeamPage(vm InviteTeamView) {
+	@appLayout("Invite teammate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL(tenantTeamPath(vm.TenantID)) }>Team</a> / Invite
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite teammate</p>
+				<h1>Invite a teammate</h1>
+				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<label>
+					Role
+					<select name="role" aria-describedby="role-error">
+						<option value="tenant_admin" selected?={ vm.Role != "tenant_member" }>Tenant admin</option>
+						<option value="tenant_member" selected?={ vm.Role == "tenant_member" }>Tenant member</option>
+					</select>
+					@fieldError(vm.FieldErrors, "role")
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL(tenantTeamPath(vm.TenantID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlatformTeamPage(vm PlatformTeamView) {
+	@appLayout("Platform admins — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">Platform admins</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Platform admins</p>
+				<h1>Platform admins</h1>
+				<p class="subtitle">Users with full administrative access to every tenant.</p>
+			</div>
+			<div class="actions-cell">
+				<a href="/v1/control-panel/admin/users" role="button" class="secondary outline btn-inline">Control panel users</a>
+				<a href="/v1/control-panel/admin/settings" role="button" class="secondary outline btn-inline">Server settings</a>
+				<a href="/v1/control-panel/admin/team/invite" role="button" class="btn-inline">+ Invite platform admin</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Admins</h2>
+			if len(vm.Admins) == 0 {
+				<div class="empty-state"><p>No platform admins yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Last login</th>
+							<th>Joined</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, a := range vm.Admins {
+							<tr>
+								<td>{ a.Email }</td>
+								<td>{ timeString(a.LastLoginAt) }</td>
+								<td>{ timeString(a.JoinedAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+		<section class="card">
+			<h2>Pending invites</h2>
+			if len(vm.Pending) == 0 {
+				<div class="empty-state"><p>No pending invites.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Expires</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Pending {
+							<tr>
+								<td>{ p.Email }</td>
+								<td>{ timeString(p.ExpiresAt) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
+	@appLayout("Invite platform admin — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel/admin/team">Platform admins</a> / Invite</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite platform admin</p>
+				<h1>Invite a platform admin</h1>
+				<p class="subtitle">They will have full administrative access to every tenant.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action="/v1/control-panel/admin/team/invite">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<div class="form-actions">
+					<a href="/v1/control-panel/admin/team" role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlayersPage(vm PlayersView) {
+	@appLayout("Players — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Players
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Players</p>
+				<h1>Players</h1>
+				<p class="subtitle">Game players in project #{ stringFromInt(vm.ProjectID) }.</p>
+			</div>
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") } role="button" class="btn-inline">+ Invite player</a>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<form method="get" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email contains…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Players) == 0 {
+				<div class="empty-state"><p>No players yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>External ID</th>
+							<th>Verified</th>
+							<th>Status</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Players {
+							<tr>
+								<td>{ p.Email }</td>
+								<td><code>{ p.ExternalID }</code></td>
+								<td>
+									if !p.EmailVerifiedAt.IsZero() {
+										<span class="badge">verified</span>
+									} else {
+										<span class="badge">unverified</span>
+									}
+								</td>
+								<td>
+									if !p.DisabledAt.IsZero() {
+										<span class="badge">disabled</span>
+									} else {
+										<span class="badge badge-role">active</span>
+									}
+								</td>
+								<td>{ timeString(p.CreatedAt) }</td>
+								<td><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(p.ID)) } role="button" class="secondary outline">View</a></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p>Showing { stringFromInt(int64(len(vm.Players))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
+			}
+		</section>
+	}
+}
+
+templ InvitePlayerPage(vm InvitePlayerView) {
+	@appLayout("Invite player — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / Invite
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Invite player</p>
+				<h1>Invite a player</h1>
+				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Email
+					<input name="email" type="email" value={ vm.Email } required autofocus aria-describedby="email-error"/>
+					@fieldError(vm.FieldErrors, "email")
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Send invite</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ PlayerDetailPage(vm PlayerDetailView) {
+	@appLayout("Player — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / { vm.Player.Email }
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player</p>
+				<h1>{ vm.Player.Email }</h1>
+				<p class="subtitle">External ID <code>{ vm.Player.ExternalID }</code></p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<dl class="kv">
+				<dt>Email verified</dt>
+				<dd>{ timeString(vm.Player.EmailVerifiedAt) }</dd>
+				<dt>Disabled</dt>
+				<dd>{ timeString(vm.Player.DisabledAt) }</dd>
+				<dt>Created</dt>
+				<dd>{ timeString(vm.Player.CreatedAt) }</dd>
+			</dl>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/disable") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				if !vm.Player.DisabledAt.IsZero() {
+					<input type="hidden" name="enable" value="true"/>
+					<button type="submit" class="btn-inline">Re-enable player</button>
+				} else {
+					<input type="hidden" name="enable" value="false"/>
+					<button type="submit" class="secondary outline btn-inline">Disable player (this project)</button>
+				}
+			</form>
+		</section>
+		if vm.Player.AccountID != "" {
+			<section class="card">
+				<h2>gg-scale account</h2>
+				<dl class="kv">
+					<dt>Account</dt>
+					<dd><code>{ vm.Player.AccountID }</code></dd>
+					if len(vm.Player.RemoteAddrs) == 0 {
+						<dt>Remote addresses</dt>
+						<dd><span class="muted">—</span></dd>
+					}
+					for _, addr := range vm.Player.RemoteAddrs {
+						<dt>{ addr.TypeLabel }</dt>
+						<dd>
+							<code>{ addr.Address }</code>
+							if addr.ScopeLabel != "" {
+								<span class="badge">{ addr.ScopeLabel }</span>
+							}
+						</dd>
+					}
+					<dt>Tenant ban</dt>
+					<dd>
+						if vm.Player.TenantBanned {
+							<span class="badge badge-revoked">banned</span>
+						} else {
+							<span class="badge badge-active">not banned</span>
+						}
+					</dd>
+				</dl>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/ban") } data-confirm="Ban this player's account across the whole tenant?">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					if vm.Player.TenantBanned {
+						<input type="hidden" name="ban" value="false"/>
+						<button type="submit" class="secondary outline btn-inline">Lift tenant ban</button>
+					} else {
+						<input type="hidden" name="ban" value="true"/>
+						<label>Reason (optional)
+							<input name="reason" type="text" maxlength="200"/>
+						</label>
+						<button type="submit" class="contrast outline btn-inline">Ban account tenant-wide</button>
+					}
+				</form>
+			</section>
+		}
+	}
+}
+
+templ VerifyPage(vm VerifyView) {
+	@authLayout("Verify email — ggscale") {
+		<h1>Verify your email</h1>
+		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>. Enter it below.</p>
+		@flashSuccess(vm.Message)
+		@errorAlert(vm.Error)
+		<form method="post" action="/v1/control-panel/verify">
+			<label for="code">Verification code</label>
+			<input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus aria-describedby="code-error"/>
+			<button type="submit">Verify</button>
+		</form>
+		<form method="post" action="/v1/control-panel/verify/resend" class="resend-form">
+			<button type="submit" class="secondary outline">Send a new code</button>
+		</form>
+	}
+}
+
+templ AcceptInvitePage(vm AcceptInviteView) {
+	@authLayout("Accept invite — ggscale") {
+		<h1>Accept invite</h1>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		} else {
+			if vm.IsPlatform {
+				<p class="subtitle">You've been invited to ggscale as a <strong>platform admin</strong>.</p>
+			} else {
+				<p class="subtitle">You've been invited to <strong>{ vm.TenantName }</strong> as <strong>{ vm.Role }</strong>.</p>
+			}
+			<p>Email: <code>{ vm.Email }</code></p>
+			<form method="post" action="/v1/control-panel/invite/accept">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<input type="hidden" name="code" value={ vm.Code }/>
+				if vm.NewUser {
+					<label>
+						Set a password (≥ 12 chars)
+						<input name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				} else {
+					<p>Enter your existing ggscale password to confirm and attach this role to your account.</p>
+					<label>
+						Password
+						<input name="password" type="password" autocomplete="current-password" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				}
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Accept invite</button>
+				</div>
+			</form>
+		}
+	}
+}
+
+templ FleetPage(vm FleetView) {
+	@appLayout("Fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleet
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>Allocations</h1>
+				<p class="subtitle">
+					Project #{ stringFromInt(vm.ProjectID) } —
+					if vm.BackendName != "" {
+						backend <code>{ vm.BackendName }</code>
+					} else {
+						no backend configured
+					}
+				</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Fleets</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/fleet/backends") } role="button" class="secondary outline btn-inline">Backends</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/matchmaker") } role="button" class="secondary outline btn-inline">Matchmaker</a>
+				if vm.Enabled {
+					<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ Manual allocate</a>
+				}
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<form method="get" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+				<label>
+					if vm.IncludeTerminal {
+						<input type="checkbox" name="all" value="1" checked/>
+					} else {
+						<input type="checkbox" name="all" value="1"/>
+					}
+					Include terminal (shutdown / failed)
+				</label>
+				<button type="submit" class="secondary outline btn-inline">Apply</button>
+			</form>
+		</section>
+		if !vm.Enabled {
+			<section class="card">
+				<div class="empty-state">
+					<p>No fleet backend configured.</p>
+					<p class="card-subtitle">Set <code>FLEET_BACKEND</code> (e.g. <code>docker</code>, <code>agones</code>, <code>plugin:ovh</code>) and restart.</p>
+				</div>
+			</section>
+		} else {
+			<section class="card"
+				hx-get={ allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/table?" + fleetQuery(vm) }
+				hx-trigger="every 5s"
+				hx-swap="innerHTML">
+				@FleetTableFragment(vm)
+			</section>
+		}
+	}
+}
+
+templ FleetTableFragment(vm FleetView) {
+	if len(vm.Allocations) == 0 {
+		<div class="empty-state"><p>No allocations.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr>
+					<th>ID</th>
+					<th>Status</th>
+					<th>Region</th>
+					<th>Backend ref</th>
+					<th>Address</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, a := range vm.Allocations {
+					<tr>
+						<td>#{ stringFromInt(a.ID) }</td>
+						<td><span class="badge badge-role">{ a.Status }</span></td>
+						<td>{ a.Region }</td>
+						<td><code>{ a.BackendRef }</code></td>
+						<td><code>{ a.Address }</code></td>
+						<td class="actions-cell">
+							<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(a.ID)) } role="button" class="secondary outline">View</a>
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+		<p>Showing { stringFromInt(int64(len(vm.Allocations))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
+	}
+}
+
+templ FleetDetailPage(vm FleetDetailView) {
+	@appLayout("Allocation — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			#{ stringFromInt(vm.Allocation.ID) }
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Allocation</p>
+				<h1>#{ stringFromInt(vm.Allocation.ID) }</h1>
+				<p class="subtitle">Backend <code>{ vm.Allocation.Backend }</code> — status <span class="badge badge-role">{ vm.Allocation.Status }</span></p>
+			</div>
+			if !allocationTerminal(vm.Allocation.Status) {
+				<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") } role="button" class="contrast outline btn-inline">Deallocate</a>
+			}
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card"
+			hx-get={ allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/events" }
+			hx-trigger="every 5s"
+			hx-swap="innerHTML">
+			@FleetDetailFragment(vm)
+		</section>
+	}
+}
+
+templ FleetDetailFragment(vm FleetDetailView) {
+	<dl class="kv">
+		<dt>ID</dt><dd>#{ stringFromInt(vm.Allocation.ID) }</dd>
+		<dt>Status</dt><dd><span class="badge badge-role">{ vm.Allocation.Status }</span></dd>
+		<dt>Backend</dt><dd><code>{ vm.Allocation.Backend }</code></dd>
+		<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
+		<dt>Region</dt><dd>{ vm.Allocation.Region }</dd>
+		<dt>Address</dt><dd><code>{ vm.Allocation.Address }</code></dd>
+	</dl>
+	<h2>Recent events</h2>
+	if len(vm.Events) == 0 {
+		<div class="empty-state"><p>No events yet.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr>
+					<th>When</th>
+					<th>Status</th>
+					<th>Address</th>
+					<th>Error</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, e := range vm.Events {
+					<tr>
+						<td>{ timeString(e.CreatedAt) }</td>
+						<td><span class="badge">{ e.Status }</span></td>
+						<td><code>{ e.Address }</code></td>
+						<td>{ e.ErrMessage }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ NewFleetAllocationPage(vm NewAllocationView) {
+	@appLayout("Manual allocate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Manual allocate
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Manual allocate</p>
+				<h1>Manual allocate</h1>
+				<p class="subtitle">
+					Bypasses the matchmaker queue and asks
+					if vm.BackendName != "" {
+						<code>{ vm.BackendName }</code>
+					} else {
+						the fleet backend
+					}
+					to bring up a server now.
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			if !vm.Enabled {
+				<p role="alert">No fleet backend configured.</p>
+			} else {
+				if len(vm.Fleets) == 0 {
+					<p role="alert">
+						No fleet templates exist for this project. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create one</a> before allocating.
+					</p>
+				}
+				if len(vm.Fleets) > 0 {
+					@errorAlert(vm.Error)
+				<form method="post" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>
+						Fleet
+						<select name="fleet" required>
+							<option value="">Pick a fleet…</option>
+							for _, f := range vm.Fleets {
+								if f.BackendMatches {
+									<option value={ f.Name } selected?={ f.Name == vm.Fleet }>{ f.Name } ({ f.Backend })</option>
+								} else {
+									<option value={ f.Name } disabled>{ f.Name } — backend mismatch</option>
+								}
+							}
+						</select>
+						@fieldError(vm.FieldErrors, "fleet")
+					</label>
+					<label>
+						Region
+						<input name="region" value={ vm.Region } required placeholder="us-east-1" aria-describedby="region-error"/>
+						@fieldError(vm.FieldErrors, "region")
+					</label>
+					<label>
+						Game mode
+						<input name="game_mode" value={ vm.GameMode } placeholder="deathmatch"/>
+					</label>
+					<label>
+						Capacity
+						<input name="capacity" type="number" min="1" value={ capacityString(vm.Capacity) } required/>
+					</label>
+					<div class="form-actions">
+						<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+						<button type="submit" class="btn-inline">Allocate</button>
+					</div>
+				</form>
+				}
+			}
+		</section>
+	}
+}
+
+templ DeallocateConfirmPage(vm DeallocateConfirmView) {
+	@appLayout("Deallocate — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> /
+			Deallocate
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Confirm</p>
+				<h1>Deallocate #{ stringFromInt(vm.Allocation.ID) }</h1>
+				<p class="subtitle">Type the allocation ID exactly to confirm — this stops the game server.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<dl class="kv">
+				<dt>Backend</dt><dd><code>{ vm.Allocation.Backend }</code></dd>
+				<dt>Backend ref</dt><dd><code>{ vm.Allocation.BackendRef }</code></dd>
+				<dt>Address</dt><dd><code>{ vm.Allocation.Address }</code></dd>
+			</dl>
+			<form method="post" action={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID) + "/deallocate") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Type <code>{ stringFromInt(vm.Allocation.ID) }</code> to confirm
+					<input name="confirm_id" autocomplete="off" required/>
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="contrast btn-inline">Deallocate</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ FleetBackendsPage(vm FleetBackendsView) {
+	@appLayout("Backends — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Backends</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Backends</p>
+				<h1>Fleet backends</h1>
+				<p class="subtitle">
+					Configured backend:
+					if vm.ConfiguredName != "" {
+						<code>{ vm.ConfiguredName }</code>
+					} else {
+						none
+					}
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>Health</h2>
+			if !vm.Enabled {
+				<p>No backend configured.</p>
+			} else if vm.HealthErr != "" {
+				<p role="alert">Backend unreachable: { vm.HealthErr }</p>
+			} else {
+				<p class="flash-success">Backend healthy.</p>
+			}
+		</section>
+		<section class="card">
+			<h2>Allocations by backend</h2>
+			if len(vm.Backends) == 0 {
+				<div class="empty-state"><p>No allocations recorded for this tenant.</p></div>
+			} else {
+				<table class="data-table">
+					<thead><tr><th>Backend</th><th>Allocation count</th></tr></thead>
+					<tbody>
+						for _, b := range vm.Backends {
+							<tr><td><code>{ b.Name }</code></td><td>{ stringFromInt(b.AllocationCount) }</td></tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ MatchmakerQueuePage(vm MatchmakerQueueView) {
+	@appLayout("Matchmaker — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Matchmaker</p>
+				<h1>Queue depth</h1>
+				<p class="subtitle">Tickets grouped by region, game mode, and status — project #{ stringFromInt(vm.ProjectID) }.</p>
+			</div>
+		</div>
+		<section class="card"
+			hx-get={ "/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/matchmaker/table" }
+			hx-trigger="every 5s"
+			hx-swap="innerHTML">
+			@MatchmakerTableFragment(vm)
+		</section>
+	}
+}
+
+templ MatchmakerTableFragment(vm MatchmakerQueueView) {
+	if len(vm.Matches) > 0 {
+		<p class="subtitle">
+			Recent matches:
+			for i, m := range vm.Matches {
+				if i > 0 {
+					{ " · " }
+				}
+				{ m.Mode } { stringFromInt(m.Count) }
+			}
+		</p>
+	}
+	if len(vm.Buckets) == 0 {
+		<div class="empty-state"><p>No tickets in flight.</p></div>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr><th>Mode</th><th>Region</th><th>Game mode</th><th>Status</th><th>Tickets</th><th>Size</th><th>Oldest</th></tr>
+			</thead>
+			<tbody>
+				for _, b := range vm.Buckets {
+					<tr>
+						<td>{ b.Mode }</td>
+						<td>{ b.Region }</td>
+						<td>{ b.GameMode }</td>
+						<td><span class="badge">{ b.Status }</span></td>
+						<td>{ stringFromInt(b.Count) }</td>
+						<td>{ stringFromInt(int64(b.MinCount)) }–{ stringFromInt(int64(b.MaxCount)) }</td>
+						<td>{ timeString(b.Oldest) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+templ PlatformPluginsPage(vm PlatformPluginsView) {
+	@appLayout("Plugins — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">Platform admin / Plugins</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Plugins</p>
+				<h1>Fleet plugin status</h1>
+				<p class="subtitle">Snapshot of the running fleet plugin subprocess.</p>
+			</div>
+		</div>
+		<section class="card">
+			if vm.Snapshot == nil {
+				<p>No plugin backend configured (FLEET_BACKEND is not <code>plugin:&lt;name&gt;</code>).</p>
+			} else {
+				<dl class="kv">
+					<dt>Name</dt><dd>{ vm.Snapshot.Name }</dd>
+					<dt>Version</dt><dd>{ vm.Snapshot.Version }</dd>
+					<dt>Protocol version</dt><dd>{ stringFromInt(int64(vm.Snapshot.ProtocolVersion)) }</dd>
+					<dt>PID</dt><dd>{ stringFromInt(int64(vm.Snapshot.Pid)) }</dd>
+					<dt>Consecutive restarts</dt><dd>{ stringFromInt(int64(vm.Snapshot.RestartCount)) }</dd>
+					<dt>Lifetime restarts</dt><dd>{ stringFromInt(int64(vm.Snapshot.TotalRestartCount)) }</dd>
+				</dl>
+				if vm.Snapshot.HealthErr != "" {
+					<p role="alert">Health probe failed: { vm.Snapshot.HealthErr }</p>
+				} else {
+					<p class="flash-success">Health probe OK.</p>
+				}
+			}
+		</section>
+	}
+}
+
+templ PlatformUsersPage(vm PlatformUsersView) {
+	@appLayout("Control panel users — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Control panel users</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Control panel users</p>
+				<h1>Control panel users</h1>
+				<p class="subtitle">Every control panel user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
+			</div>
+			<a href="/v1/control-panel/admin/team" role="button" class="secondary outline btn-inline">Platform admins</a>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<form method="get" action="/v1/control-panel/admin/users">
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email contains…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Users) == 0 {
+				<div class="empty-state"><p>No control panel users yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Role</th>
+							<th>Tenants</th>
+							<th>Status</th>
+							<th>Last login</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, u := range vm.Users {
+							<tr>
+								<td>{ u.Email }</td>
+								<td>
+									if u.IsPlatformAdmin {
+										<span class="badge badge-role">platform admin</span>
+									} else {
+										<span class="badge">member</span>
+									}
+								</td>
+								<td>{ stringFromInt(u.TenantCount) }</td>
+								<td>
+									if !u.DisabledAt.IsZero() {
+										<span class="badge badge-revoked">disabled</span>
+									} else {
+										<span class="badge badge-active">active</span>
+									}
+								</td>
+								<td>{ timeString(u.LastLoginAt) }</td>
+								<td>{ timeString(u.CreatedAt) }</td>
+								<td class="actions-cell">
+									if u.IsSelf {
+										<span class="badge">you</span>
+									} else if !u.DisabledAt.IsZero() {
+										<form method="post" action={ templ.URL("/v1/control-panel/admin/users/" + stringFromInt(u.ID) + "/enable") } data-confirm="Re-enable this user?">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="secondary outline btn-inline">Re-enable</button>
+										</form>
+									} else {
+										<form method="post" action={ templ.URL("/v1/control-panel/admin/users/" + stringFromInt(u.ID) + "/disable") } data-confirm="Disable this user? Their active sessions and pending invitations will be revoked.">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="contrast outline btn-inline">Disable</button>
+										</form>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p>Showing { stringFromInt(int64(len(vm.Users))) } of { approximateTotalLabel(vm.Total, vm.HasNext) }.</p>
+			}
+		</section>
+	}
+}
+
+templ PlayerAccountsPage(vm PlayerAccountsView) {
+	@appLayout("Player accounts — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Player accounts</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player accounts</p>
+				<h1>Player accounts</h1>
+				<p class="subtitle">Global gg-scale accounts across every project. Disabling locks the account out of the platform and revokes its sessions.</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<form method="get" action="/v1/control-panel/admin/player-accounts">
+				<label>
+					Search email
+					<input name="q" type="search" value={ vm.Search } placeholder="email starts with…"/>
+				</label>
+				<button type="submit" class="btn-inline">Search</button>
+			</form>
+		</section>
+		<section class="card">
+			if len(vm.Accounts) == 0 {
+				<div class="empty-state"><p>No player accounts found.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Email</th>
+							<th>Verified</th>
+							<th>Status</th>
+							<th>Joined</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, a := range vm.Accounts {
+							<tr>
+								<td>{ a.Email }</td>
+								<td>
+									if a.Verified {
+										<span class="badge badge-active">verified</span>
+									} else {
+										<span class="badge">unverified</span>
+									}
+								</td>
+								<td>
+									if a.Disabled {
+										<span class="badge badge-revoked">disabled</span>
+									} else {
+										<span class="badge badge-active">active</span>
+									}
+								</td>
+								<td>{ timeString(a.CreatedAt) }</td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/control-panel/admin/player-accounts/" + a.ID) } role="button" class="secondary outline btn-inline">View</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
+	@appLayout("Player account — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / <a href="/v1/control-panel/admin/player-accounts">Player accounts</a> / { vm.Email }</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Player account</p>
+				<h1>{ vm.Email }</h1>
+				<p class="subtitle">
+					if vm.DisplayName != "" {
+						{ vm.DisplayName } —
+					}
+					joined { timeString(vm.CreatedAt) }.
+				</p>
+			</div>
+			<div class="actions-cell">
+				if vm.Disabled {
+					<form method="post" action={ templ.URL("/v1/control-panel/admin/player-accounts/" + vm.ID + "/enable") } data-confirm="Re-enable this account?">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="secondary outline btn-inline">Re-enable</button>
+					</form>
+				} else {
+					<form method="post" action={ templ.URL("/v1/control-panel/admin/player-accounts/" + vm.ID + "/disable") } data-confirm="Disable this account platform-wide? Its sessions will be revoked.">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="contrast outline btn-inline">Disable</button>
+					</form>
+				}
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<p>
+				Status:
+				if vm.Disabled {
+					<span class="badge badge-revoked">disabled</span>
+				} else {
+					<span class="badge badge-active">active</span>
+				}
+				Email:
+				if vm.Verified {
+					<span class="badge badge-active">verified</span>
+				} else {
+					<span class="badge">unverified</span>
+				}
+			</p>
+		</section>
+		<section class="card">
+			<h2>Linked games</h2>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state"><p>No games linked.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Project</th>
+							<th>Tenant</th>
+							<th>External ID</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Projects {
+							<tr>
+								<td>{ p.ProjectName }</td>
+								<td>{ stringFromInt(p.TenantID) }</td>
+								<td><code>{ p.ExternalID }</code></td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ FleetsListPage(vm FleetsListView) {
+	@appLayout("Fleets — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleets
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleets</p>
+				<h1>Fleet templates</h1>
+				<p class="subtitle">
+					Project #{ stringFromInt(vm.ProjectID) } — operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
+				</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Allocations</a>
+				if vm.Enabled {
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New fleet</a>
+				}
+			</div>
+		</div>
+		<section class="card">
+			if vm.Message != "" {
+				<p class="flash">{ vm.Message }</p>
+			}
+			if !vm.Enabled {
+				<p role="alert">No fleet backend configured. Set <code>FLEET_BACKEND</code> in the server environment.</p>
+			} else if len(vm.Fleets) == 0 {
+				<p>No fleet templates yet. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create your first fleet</a>.</p>
+			} else {
+				<table>
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Backend</th>
+							<th>Summary</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, f := range vm.Fleets {
+							<tr>
+								<td><code>{ f.Name }</code></td>
+								<td>
+									<code>{ f.Backend }</code>
+									if !f.BackendMatches {
+										<small class="muted"> (not active)</small>
+									}
+								</td>
+								<td><code>{ f.Summary }</code></td>
+								<td class="actions-cell">
+									<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(f.ID)) } role="button" class="secondary outline btn-inline">Edit</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewFleetPage(vm NewFleetView) {
+	@appLayout("New fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>New fleet template</h1>
+				<p class="subtitle">A template captures the recipe (image, port, probe, …) that future allocations use.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required placeholder="doomerang-ranked"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				<label>
+					Backend
+					<select name="backend"
+						hx-get={ fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new/form" }
+						hx-trigger="change"
+						hx-target="#fleet-backend-fields"
+						hx-include="this"
+						hx-swap="innerHTML">
+						<option value="docker" selected?={ vm.Backend == "docker" || vm.Backend == "" }>docker</option>
+						<option value="agones" selected?={ vm.Backend == "agones" }>agones</option>
+						<option value="plugin" selected?={ vm.Backend == "plugin" }>plugin</option>
+					</select>
+					@fieldError(vm.FieldErrors, "backend")
+				</label>
+				<div id="fleet-backend-fields">
+					@FleetBackendFieldsFragment(vm)
+				</div>
+				<div class="form-actions">
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create fleet</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+// FleetBackendFieldsFragment swaps the backend-specific field set on the
+// create form. Bound to the backend dropdown via hx-get.
+templ FleetBackendFieldsFragment(vm NewFleetView) {
+	switch fleetBackendKind(vm.Backend) {
+		case "agones":
+			@agonesFleetFields(vm)
+		case "plugin":
+			@pluginFleetFields(vm)
+		default:
+			@dockerFleetFields(vm)
+	}
+}
+
+templ dockerFleetFields(vm NewFleetView) {
+	<label>
+		Image
+		<input name="image" value={ vm.Config["image"] } required placeholder="ghcr.io/example/server:1.0"/>
+		@fieldError(vm.FieldErrors, "image")
+	</label>
+	<label>
+		Container port
+		<input name="port" type="number" min="1" max="65535" value={ vm.Config["port"] } required placeholder="7777"/>
+		@fieldError(vm.FieldErrors, "port")
+	</label>
+	<label>
+		Readiness probe
+		<select name="probe_type">
+			<option value="" selected?={ vm.Config["probe_type"] == "" }>none</option>
+			<option value="tcp" selected?={ vm.Config["probe_type"] == "tcp" }>tcp</option>
+			<option value="http" selected?={ vm.Config["probe_type"] == "http" }>http</option>
+		</select>
+	</label>
+	<label>
+		Probe path
+		<input name="probe_path" value={ vm.Config["probe_path"] } placeholder="/healthz"/>
+		<small class="muted">Only used when probe is http.</small>
+	</label>
+	<label>
+		<input type="checkbox" name="pull_image" value="true" checked?={ vm.Config["pull_image"] == "true" }/>
+		Pull image on first allocate
+	</label>
+}
+
+templ agonesFleetFields(vm NewFleetView) {
+	<label>
+		Agones Fleet name
+		<input name="fleet_name" value={ vm.Config["fleet_name"] } required placeholder="doomerang"/>
+		@fieldError(vm.FieldErrors, "fleet_name")
+	</label>
+	<label>
+		Namespace override
+		<input name="namespace" value={ vm.Config["namespace"] } placeholder="(uses AGONES_NAMESPACE)"/>
+	</label>
+	<label>
+		Selector labels
+		<small class="muted">Optional key=value selectors that narrow which GameServers Agones returns. Add one per row.</small>
+	</label>
+	for k, v := range fleetSelectorLabels(vm.Config) {
+		<div class="kv-row">
+			<input name="selector_key[]" value={ k } placeholder="key"/>
+			<input name="selector_value[]" value={ v } placeholder="value"/>
+		</div>
+	}
+	<div class="kv-row">
+		<input name="selector_key[]" placeholder="key"/>
+		<input name="selector_value[]" placeholder="value"/>
+	</div>
+}
+
+templ pluginFleetFields(vm NewFleetView) {
+	<label>
+		Plugin config
+		<small class="muted">Free-form key/value pairs passed through to the plugin RPC.</small>
+	</label>
+	for k, v := range vm.Config {
+		<div class="kv-row">
+			<input name="config_key[]" value={ k } placeholder="key"/>
+			<input name="config_value[]" value={ v } placeholder="value"/>
+		</div>
+	}
+	<div class="kv-row">
+		<input name="config_key[]" placeholder="key"/>
+		<input name="config_value[]" placeholder="value"/>
+	</div>
+}
+
+templ EditFleetPage(vm EditFleetView) {
+	@appLayout("Edit fleet — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> /
+			<code>{ vm.Name }</code>
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Fleet</p>
+				<h1>{ vm.Name }</h1>
+				<p class="subtitle">
+					Backend: <code>{ vm.Backend }</code>
+					if vm.Backend != vm.BackendConfigured {
+						<small class="muted"> — does not match configured backend <code>{ vm.BackendConfigured }</code>; allocations will be refused.</small>
+					}
+				</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@FleetBackendFieldsFragment(editToNewFleetView(vm))
+				<div class="form-actions">
+					<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Save changes</button>
+				</div>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Delete fleet</h2>
+			<p class="muted">Soft-deletes this template. Historical allocations keep their fleet reference; new allocations can no longer pick it.</p>
+			<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.FleetID) + "/delete") } data-confirm="Delete this fleet template?">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<button type="submit" class="btn-inline contrast outline">Delete</button>
+			</form>
+		</section>
+	}
+}
+
+templ LeaderboardsListPage(vm LeaderboardsListView) {
+	@appLayout("Leaderboards — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Leaderboards
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboards</p>
+				<h1>Leaderboards</h1>
+				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New leaderboard</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			if len(vm.Leaderboards) == 0 {
+				<div class="empty-state">
+					<p>No leaderboards yet.</p>
+					<p><a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">Create your first leaderboard</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Sort order</th>
+							<th>Created</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, lb := range vm.Leaderboards {
+							<tr>
+								<td>{ lb.Name }</td>
+								<td>
+									if lb.SortOrder == "asc" {
+										<span class="badge">Low score first</span>
+									} else {
+										<span class="badge badge-active">High score first</span>
+									}
+								</td>
+								<td>{ timeString(lb.CreatedAt) }</td>
+								<td class="actions-cell">
+									<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(lb.ID)) } role="button" class="secondary outline btn-inline">Edit</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ NewLeaderboardPage(vm LeaderboardFormView) {
+	@appLayout("New leaderboard — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / New
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboard</p>
+				<h1>New leaderboard</h1>
+				<p class="subtitle">Names must be unique within the project.</p>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required autofocus placeholder="e.g. weekly-high-scores" aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				<div class="form-actions">
+					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Create leaderboard</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ EditLeaderboardPage(vm LeaderboardFormView) {
+	@appLayout("Edit leaderboard — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / Edit
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Leaderboard</p>
+				<h1>Edit leaderboard</h1>
+			</div>
+		</div>
+		<section class="card">
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID)) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Name
+					<input name="name" value={ vm.Name } required aria-describedby="name-error"/>
+					@fieldError(vm.FieldErrors, "name")
+				</label>
+				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				<div class="form-actions">
+					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Save changes</button>
+				</div>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Delete leaderboard</h2>
+			<p class="muted">Soft-deletes the leaderboard. Existing score entries are retained but the leaderboard is hidden from players and the API.</p>
+			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID) + "/delete") } data-confirm="Delete this leaderboard?">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<button type="submit" class="btn-inline contrast outline">Delete</button>
+			</form>
+		</section>
+	}
+}
+
+templ leaderboardSortOrderField(sortOrder string, fieldErrors map[string]string) {
+	<label>
+		Sort order
+		<select name="sort_order">
+			<option value="desc" selected?={ sortOrder != "asc" }>High score ranks first (default)</option>
+			<option value="asc" selected?={ sortOrder == "asc" }>Low score ranks first</option>
+		</select>
+		@fieldError(fieldErrors, "sort_order")
+	</label>
+}
+
+templ TenantSettingsPage(vm TenantSettingsView) {
+	@appLayout("Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Settings</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Tenant settings</p>
+				<h1>Settings</h1>
+				<p class="subtitle">{ vm.TenantName } — tenant #{ stringFromInt(vm.TenantID) }</p>
+			</div>
+			<div class="actions-cell">
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">Projects</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/team") } role="button" class="secondary outline btn-inline">Team</a>
+				<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") } role="button" class="secondary outline btn-inline">API keys</a>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Public joining</h2>
+			<p class="card-subtitle">
+				Master switch for this tenant. A player can publicly join a project only when BOTH this and the project's toggle are on. Disabling makes every project invite-only. Admin invites always bypass these switches.
+			</p>
+			if vm.PublicJoining {
+				<p>Status: <span class="badge badge-active">enabled</span></p>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") } data-confirm="Disable public joining for the whole tenant? Every project becomes invite-only.">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value=""/>
+					<input type="hidden" name="redirect_to" value={ tenantSettingsPathTpl(vm.TenantID) }/>
+					<button type="submit" class="contrast outline btn-inline">Disable for all projects</button>
+				</form>
+			} else {
+				<p>Status: <span class="badge badge-revoked">disabled — invite only</span></p>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/public-joining") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="public_joining_enabled" value="on"/>
+					<input type="hidden" name="redirect_to" value={ tenantSettingsPathTpl(vm.TenantID) }/>
+					<button type="submit" class="btn-inline">Enable for all projects</button>
+				</form>
+			}
+		</section>
+		@apiLimitCard(vm.apiLimitCardView())
+		<section class="card">
+			<h2>Tenant</h2>
+			<dl class="kv">
+				<dt>Tenant ID</dt>
+				<dd>{ stringFromInt(vm.TenantID) }</dd>
+				<dt>Name</dt>
+				<dd>{ vm.TenantName }</dd>
+				<dt>Tier</dt>
+				<dd>{ vm.Tier }</dd>
+			</dl>
+			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
+		</section>
+	}
+}
+
+templ ProjectSettingsPage(vm ProjectSettingsView) {
+	@appLayout("Project settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb">
+			<a href="/v1/control-panel">Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Settings
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Project settings</p>
+				<h1>{ vm.ProjectName }</h1>
+				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) }</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Public joining</h2>
+			<p class="card-subtitle">Effective join policy = tenant master switch AND this project's toggle.</p>
+			<p>
+				Effective:
+				if vm.EffectiveJoin() {
+					<span class="badge badge-active">players can self-join</span>
+				} else {
+					<span class="badge badge-revoked">invite only</span>
+				}
+			</p>
+			@projectJoiningToggleForm(vm.TenantID, vm.ProjectID, vm.CSRFToken, projectSettingsPathTpl(vm.TenantID, vm.ProjectID), vm.ProjectPublicJoining)
+			if !vm.TenantPublicJoining {
+				<p class="muted">The tenant master switch is off, so this project stays invite-only regardless of the toggle above.</p>
+			}
+		</section>
+		<section class="card">
+			<h2>Invite quotas</h2>
+			<p class="card-subtitle">
+				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour, { rlNum(vm.DefaultDomainDay) }/project/day).
+			</p>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(vm.ProjectID) + "/invites") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<input type="hidden" name="redirect_to" value={ projectSettingsPathTpl(vm.TenantID, vm.ProjectID) }/>
+				<label>Invites / inviter / hour
+					<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(vm.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
+				</label>
+				<label>Invites / project / day
+					<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(vm.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
+				</label>
+				<button type="submit" class="btn-inline">Save quotas</button>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Project</h2>
+			<dl class="kv">
+				<dt>Project ID</dt>
+				<dd>{ stringFromInt(vm.ProjectID) }</dd>
+				<dt>Name</dt>
+				<dd>{ vm.ProjectName }</dd>
+				<dt>Created</dt>
+				<dd>{ timeString(vm.CreatedAt) }</dd>
+			</dl>
+		</section>
+	}
+}
+
+templ ServerSettingsPage(vm ServerSettingsView) {
+	@appLayout("Server settings — ggscale", vm.UserEmail, vm.CSRFToken) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Server settings</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Server settings</p>
+				<h1>Server settings</h1>
+				<p class="subtitle">Read-only view of server-wide configuration. Set via environment variables; secrets show only whether they are configured.</p>
+			</div>
+		</div>
+		<section class="card">
+			<h2>Runtime</h2>
+			<dl class="kv">
+				<dt>Environment</dt>
+				<dd>{ orDash(vm.Snapshot.Env) }</dd>
+				<dt>Log level</dt>
+				<dd>{ orDash(vm.Snapshot.LogLevel) }</dd>
+				<dt>HTTP address</dt>
+				<dd>{ orDash(vm.Snapshot.HTTPAddr) }</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Features</h2>
+			<dl class="kv">
+				<dt>Control panel</dt>
+				<dd>@boolBadge(vm.Snapshot.ControlPanelEnabled)</dd>
+				<dt>Players</dt>
+				<dd>@boolBadge(vm.Snapshot.PlayersEnabled)</dd>
+				<dt>Fleet</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureFleetEnabled)</dd>
+				<dt>P2P relay</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureP2PRelayEnabled)</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Fleet</h2>
+			<dl class="kv">
+				<dt>Backend</dt>
+				<dd>{ orDash(vm.Snapshot.FleetBackend) }</dd>
+				<dt>Region</dt>
+				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Mail</h2>
+			<dl class="kv">
+				<dt>Provider</dt>
+				<dd>{ orDash(vm.Snapshot.MailProvider) }</dd>
+				<dt>SMTP address</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPAddr) }</dd>
+				<dt>SMTP user</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPUser) }</dd>
+				<dt>SMTP TLS</dt>
+				<dd>{ orDash(vm.Snapshot.SMTPTLS) }</dd>
+				<dt>From</dt>
+				<dd>{ orDash(vm.Snapshot.MailFrom) }</dd>
+				<dt>SMTP password</dt>
+				<dd>@configuredBadge(vm.Snapshot.SMTPPasswordSet)</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>Network &amp; secrets</h2>
+			<dl class="kv">
+				<dt>CORS origins</dt>
+				<dd>{ orDash(joinComma(vm.Snapshot.CORSAllowedOrigins)) }</dd>
+				<dt>JWT signing key</dt>
+				<dd>@configuredBadge(vm.Snapshot.JWTConfigured)</dd>
+				<dt>Relay shared secret</dt>
+				<dd>@configuredBadge(vm.Snapshot.RelaySecretSet)</dd>
+				<dt>Database</dt>
+				<dd>@configuredBadge(vm.Snapshot.DatabaseConfigured)</dd>
+			</dl>
+		</section>
+	}
+}
+
+templ boolBadge(on bool) {
+	if on {
+		<span class="badge badge-active">on</span>
+	} else {
+		<span class="badge badge-revoked">off</span>
+	}
+}
+
+templ configuredBadge(set bool) {
+	if set {
+		<span class="badge badge-active">configured</span>
+	} else {
+		<span class="badge badge-revoked">not set</span>
+	}
+}

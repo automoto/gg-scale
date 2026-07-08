@@ -27,9 +27,9 @@ type Metrics struct {
 
 // Signup kinds.
 const (
-	SignupAccount       = "account"        // global player account
-	SignupPlayer        = "player"         // per-project player identity
-	SignupDashboardUser = "dashboard_user" // dashboard operator
+	SignupAccount          = "account"            // global player account
+	SignupPlayer           = "player"             // per-project player identity
+	SignupControlPanelUser = "control_panel_user" // control panel operator
 )
 
 // Verification results.
@@ -42,9 +42,9 @@ const (
 
 // Login surfaces and results.
 const (
-	SurfaceAPI       = "api"
-	SurfaceDashboard = "dashboard"
-	SurfacePlayer    = "player"
+	SurfaceAPI          = "api"
+	SurfaceControlPanel = "control_panel"
+	SurfacePlayer       = "player"
 
 	LoginOK         = "ok"
 	LoginInvalid    = "invalid"

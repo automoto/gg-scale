@@ -33,7 +33,7 @@ WHERE u.id = sqlc.arg(player_id)
 LIMIT 1;
 
 -- name: ListTenantPlayerBans :many
--- Dashboard list for a tenant, enriched with the banned account's email.
+-- Control panel list for a tenant, enriched with the banned account's email.
 SELECT b.player_account_id, a.email::text AS email, b.reason, b.created_at
 FROM tenant_player_bans b
 JOIN player_accounts a ON a.id = b.player_account_id

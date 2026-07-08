@@ -183,7 +183,7 @@ type CasbinRule struct {
 	V5    *string
 }
 
-type DashboardInvitation struct {
+type ControlPanelInvitation struct {
 	ID              int64
 	Email           string
 	TenantID        *int64
@@ -196,38 +196,38 @@ type DashboardInvitation struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-type DashboardMembership struct {
-	ID              int64
-	DashboardUserID int64
-	TenantID        int64
-	Role            string
-	CreatedAt       pgtype.Timestamptz
+type ControlPanelMembership struct {
+	ID                 int64
+	ControlPanelUserID int64
+	TenantID           int64
+	Role               string
+	CreatedAt          pgtype.Timestamptz
 }
 
-type DashboardSession struct {
-	ID              int64
-	DashboardUserID int64
-	RefreshHash     []byte
-	CsrfSecret      []byte
-	ExpiresAt       pgtype.Timestamptz
-	LastSeenAt      pgtype.Timestamptz
-	RevokedAt       pgtype.Timestamptz
-	Ip              *string
-	UserAgent       *string
-	CreatedAt       pgtype.Timestamptz
+type ControlPanelSession struct {
+	ID                 int64
+	ControlPanelUserID int64
+	RefreshHash        []byte
+	CsrfSecret         []byte
+	ExpiresAt          pgtype.Timestamptz
+	LastSeenAt         pgtype.Timestamptz
+	RevokedAt          pgtype.Timestamptz
+	Ip                 *string
+	UserAgent          *string
+	CreatedAt          pgtype.Timestamptz
 }
 
-type DashboardTrustedDevice struct {
-	ID              int64
-	DashboardUserID int64
-	TokenHash       []byte
-	ExpiresAt       pgtype.Timestamptz
-	Ip              *string
-	UserAgent       *string
-	CreatedAt       pgtype.Timestamptz
+type ControlPanelTrustedDevice struct {
+	ID                 int64
+	ControlPanelUserID int64
+	TokenHash          []byte
+	ExpiresAt          pgtype.Timestamptz
+	Ip                 *string
+	UserAgent          *string
+	CreatedAt          pgtype.Timestamptz
 }
 
-type DashboardUser struct {
+type ControlPanelUser struct {
 	ID                                int64
 	Email                             string
 	PasswordHash                      []byte
@@ -247,34 +247,34 @@ type DashboardUser struct {
 	EmailVerificationLockedUntil      pgtype.Timestamptz
 }
 
-type DashboardUserTotp struct {
-	DashboardUserID int64
-	SecretEnc       []byte
-	ConfirmedAt     pgtype.Timestamptz
-	LastUsedStep    int64
-	Attempts        int32
-	LockedUntil     pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
+type ControlPanelUserTotp struct {
+	ControlPanelUserID int64
+	SecretEnc          []byte
+	ConfirmedAt        pgtype.Timestamptz
+	LastUsedStep       int64
+	Attempts           int32
+	LockedUntil        pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
 }
 
-type DashboardUserTotpBackupCode struct {
-	ID              int64
-	DashboardUserID int64
-	CodeHash        []byte
-	UsedAt          pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
+type ControlPanelUserTotpBackupCode struct {
+	ID                 int64
+	ControlPanelUserID int64
+	CodeHash           []byte
+	UsedAt             pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
 }
 
 type FeatureGrant struct {
-	ID                        int64
-	TenantID                  int64
-	ProjectID                 *int64
-	Feature                   string
-	Enabled                   bool
-	ApprovedByDashboardUserID *int64
-	Reason                    *string
-	CreatedAt                 pgtype.Timestamptz
-	UpdatedAt                 pgtype.Timestamptz
+	ID                           int64
+	TenantID                     int64
+	ProjectID                    *int64
+	Feature                      string
+	Enabled                      bool
+	ApprovedByControlPanelUserID *int64
+	Reason                       *string
+	CreatedAt                    pgtype.Timestamptz
+	UpdatedAt                    pgtype.Timestamptz
 }
 
 type Fleet struct {

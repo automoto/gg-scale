@@ -1,5 +1,5 @@
 // Package verifycode provides the shared primitives for 6-digit email
-// verification codes used by both the operator dashboard and the
+// verification codes used by both the operator control panel and the
 // player-facing player flow:
 //
 //   - 6-digit numeric code generation

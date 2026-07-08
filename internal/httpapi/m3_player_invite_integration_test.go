@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/dashboard"
+	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -28,10 +28,10 @@ import (
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
-// newDashboardAndPlayerServer wires the dashboard AND the player UI
+// newControlPanelAndPlayerServer wires the control panel AND the player UI
 // together so the cross-stack player-invite test can simulate the full
 // invite-accept flow.
-func newDashboardAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
+func newControlPanelAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
@@ -52,13 +52,13 @@ func newDashboardAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *m
 		Mailer:   rec,
 		MailFrom: "no-reply@example.test",
 		RBAC:     authorizer,
-		Dashboard: dashboard.Config{
+		ControlPanel: controlpanel.Config{
 			Mount:    true,
 			BaseURL:  "http://app.example.test",
 			MailFrom: "no-reply@example.test",
 		},
-		DashboardBootstrap: dashboard.DisabledBootstrap(),
-		Players:            players.Config{Mount: true},
+		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),
+		Players:               players.Config{Mount: true},
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -76,14 +76,14 @@ func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
 	// Tenant B with project B — actor must NOT be able to invite into.
 	_, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-b")
 
-	adminID := seedDashboardUser(t, c, "admin-a@example.com", "correct-horse-battery-staple", false)
-	seedDashboardMembership(t, c, adminID, tenantA, "admin")
+	adminID := seedControlPanelUser(t, c, "admin-a@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 
-	srv, _ := newDashboardAndPlayerServer(t, c)
-	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "admin-a@example.com", "correct-horse-battery-staple")
+	srv, _ := newControlPanelAndPlayerServer(t, c)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin-a@example.com", "correct-horse-battery-staple")
 
 	form := url.Values{"_csrf": {csrf}, "email": {"player@example.com"}}
-	target := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
+	target := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantA, 10) +
 		"/projects/" + strconv.FormatInt(projectB, 10) + "/players/invite"
 
 	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
@@ -109,21 +109,21 @@ func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
 }
 
 // TestPlayerInvite_happy_path_creates_account_and_logs_in covers H6:
-// dashboard admin invites a player; the magic-link URL in the email
+// control panel admin invites a player; the magic-link URL in the email
 // actually resolves (was a 404 pre-fix); accepting it creates the
 // player, marks them verified, and issues a player session.
 func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	c := startCluster(t)
 	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
-	adminID := seedDashboardUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
-	seedDashboardMembership(t, c, adminID, tenantA, "admin")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 
-	srv, rec := newDashboardAndPlayerServer(t, c)
-	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	srv, rec := newControlPanelAndPlayerServer(t, c)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
 
 	// 1) Admin sends the invite.
 	form := url.Values{"_csrf": {csrf}, "email": {"newplayer@example.com"}}
-	invitePath := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
+	invitePath := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantA, 10) +
 		"/projects/" + strconv.FormatInt(projectA, 10) + "/players/invite"
 	req, err := http.NewRequest(http.MethodPost, invitePath, strings.NewReader(form.Encode()))
 	require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 }
 
 // csrfHiddenFieldRE matches the rendered `<input ... name="_csrf" value="…">`
-// element in any of the player/dashboard templates. Used by integration
+// element in any of the player/control-panel templates. Used by integration
 // tests that drive form posts and need to round-trip the CSRF token.
 var csrfHiddenFieldRE = regexp.MustCompile(`name="_csrf"\s+value="([^"]+)"`)
 

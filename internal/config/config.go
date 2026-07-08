@@ -136,16 +136,16 @@ type Config struct {
 	// In local dev (compose, go run) override with the repo-relative path.
 	MigrationsDir string
 
-	// DashboardEnabled controls whether /v1/dashboard is mounted.
-	DashboardEnabled bool
-	// DashboardBootstrapTokenFile optionally writes the first-run token to a file.
-	DashboardBootstrapTokenFile string
-	// DashboardCookieSecure sets the Secure flag on the dashboard session cookie.
-	DashboardCookieSecure bool
-	// DashboardBaseURL is the externally-visible origin prefixed onto magic
-	// links emitted in dashboard invite emails. Empty means relative paths
+	// ControlPanelEnabled controls whether /v1/control-panel is mounted.
+	ControlPanelEnabled bool
+	// ControlPanelBootstrapTokenFile optionally writes the first-run token to a file.
+	ControlPanelBootstrapTokenFile string
+	// ControlPanelCookieSecure sets the Secure flag on the control panel session cookie.
+	ControlPanelCookieSecure bool
+	// ControlPanelBaseURL is the externally-visible origin prefixed onto magic
+	// links emitted in control panel invite emails. Empty means relative paths
 	// (fine for local dev; bad for production).
-	DashboardBaseURL string
+	ControlPanelBaseURL string
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool
 
@@ -275,32 +275,32 @@ var declared = []varDecl{
 		c.TwoFactorEncKey = v
 		return nil
 	}},
-	{name: "DASHBOARD_DISABLED", defval: "false", set: func(c *Config, v string) error {
+	{name: "CONTROL_PANEL_DISABLED", defval: "false", set: func(c *Config, v string) error {
 		disabled, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("DASHBOARD_DISABLED %q: %w", v, err)
+			return fmt.Errorf("CONTROL_PANEL_DISABLED %q: %w", v, err)
 		}
-		c.DashboardEnabled = !disabled
+		c.ControlPanelEnabled = !disabled
 		return nil
 	}},
-	{name: "DASHBOARD_BOOTSTRAP_TOKEN_FILE", defval: "", set: func(c *Config, v string) error {
-		c.DashboardBootstrapTokenFile = v
+	{name: "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", defval: "", set: func(c *Config, v string) error {
+		c.ControlPanelBootstrapTokenFile = v
 		return nil
 	}},
 	{name: "MIGRATIONS_DIR", defval: "/migrations", set: func(c *Config, v string) error {
 		c.MigrationsDir = v
 		return nil
 	}},
-	{name: "DASHBOARD_COOKIE_SECURE", defval: "false", set: func(c *Config, v string) error {
+	{name: "CONTROL_PANEL_COOKIE_SECURE", defval: "false", set: func(c *Config, v string) error {
 		secure, err := strconv.ParseBool(v)
 		if err != nil {
-			return fmt.Errorf("DASHBOARD_COOKIE_SECURE %q: %w", v, err)
+			return fmt.Errorf("CONTROL_PANEL_COOKIE_SECURE %q: %w", v, err)
 		}
-		c.DashboardCookieSecure = secure
+		c.ControlPanelCookieSecure = secure
 		return nil
 	}},
-	{name: "DASHBOARD_BASE_URL", defval: "", set: func(c *Config, v string) error {
-		c.DashboardBaseURL = v
+	{name: "CONTROL_PANEL_BASE_URL", defval: "", set: func(c *Config, v string) error {
+		c.ControlPanelBaseURL = v
 		return nil
 	}},
 	{name: "PLAYERS_ENABLED", defval: "true", set: func(c *Config, v string) error {

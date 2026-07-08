@@ -98,7 +98,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 ORDER BY name;
 
--- name: GetLeaderboardForDashboard :one
+-- name: GetLeaderboardForControlPanel :one
 SELECT id, project_id, name, sort_order, created_at
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint

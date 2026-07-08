@@ -46,7 +46,7 @@ func Write(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target str
 }
 
 // WritePlatform inserts a platform-scoped row into platform_audit_log (no
-// tenant FK). Use for dashboard login/logout and other platform events.
+// tenant FK). Use for control panel login/logout and other platform events.
 func WritePlatform(ctx context.Context, tx pgx.Tx, actorUserID int64, action, target string, payload any) error {
 	body, err := marshalPayload(payload)
 	if err != nil {

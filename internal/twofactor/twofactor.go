@@ -1,5 +1,5 @@
 // Package twofactor holds the TOTP two-factor primitives shared by the
-// dashboard and player-account login surfaces: secret encryption at rest,
+// control panel and player-account login surfaces: secret encryption at rest,
 // RFC 6238 code validation with replay protection, backup codes, and QR
 // rendering for enrollment. Key provisioning (Load) is package-owned;
 // per-user credential persistence stays with the callers because the two
@@ -292,7 +292,7 @@ func QRPNGDataURI(key *otp.Key) (string, error) {
 
 // Pending is the signed state parked in a cookie between password success
 // and the challenge submission. Subject is the user's ID in string form so
-// one codec serves both surfaces (int64 dashboard IDs, UUID player IDs).
+// one codec serves both surfaces (int64 control panel IDs, UUID player IDs).
 type Pending struct {
 	Purpose   string `json:"purpose"`
 	Subject   string `json:"subject"`

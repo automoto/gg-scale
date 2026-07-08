@@ -3,8 +3,8 @@
 # ggscale-server gets the Docker socket mounted and FLEET_BACKEND=docker so
 # fleet allocations spawn a fresh game-server container per request and
 # return {host, port} to the client. Before allocations succeed, an operator
-# creates one or more fleet templates in the dashboard at
-#   /v1/dashboard/tenants/<t>/projects/<p>/fleets
+# creates one or more fleet templates in the control panel at
+#   /v1/control-panel/tenants/<t>/projects/<p>/fleets
 # Each template captures the image, container port, and probe — no env vars.
 #
 # Usage:

@@ -24,7 +24,7 @@ const (
 	accountTrustCookieName     = "ggscale_account_trust"
 	accountChallengePath       = accountBasePath + "/login/2fa"
 	accountTwoFactorPath       = accountBasePath + "/2fa"
-	// playerTwoFactorIssuer is distinct from the dashboard issuer so someone
+	// playerTwoFactorIssuer is distinct from the control panel issuer so someone
 	// enrolled on both surfaces sees two distinguishable authenticator
 	// entries.
 	playerTwoFactorIssuer = "ggscale"

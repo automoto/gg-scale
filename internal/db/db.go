@@ -167,7 +167,7 @@ func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payloa
 }
 
 // BootstrapQ runs fn inside a transaction before a tenant context exists.
-// Keep this for narrow bootstrap paths such as dashboard tenant creation;
+// Keep this for narrow bootstrap paths such as control panel tenant creation;
 // tenant-scoped request handlers should use Q so RLS receives app.tenant_id.
 func (p *Pool) BootstrapQ(ctx context.Context, fn func(pgx.Tx) error) error {
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})

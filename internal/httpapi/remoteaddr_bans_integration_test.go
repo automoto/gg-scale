@@ -184,7 +184,7 @@ func TestTenantBan_blocks_login(t *testing.T) {
 		map[string]string{"email": "banme@example.com", "password": "hunter2hunter2"})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	// Ban the account tenant-wide (and bump epoch as the dashboard handler does).
+	// Ban the account tenant-wide (and bump epoch as the control panel handler does).
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`INSERT INTO tenant_player_bans (tenant_id, player_account_id) VALUES ($1, $2)`, tenantID, accID)
 	require.NoError(t, err)

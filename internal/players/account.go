@@ -442,7 +442,7 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !row.EmailVerifiedAt.Valid {
-		// Same contract as the dashboard / per-project login: forward to the
+		// Same contract as the control panel / per-project login: forward to the
 		// verify screen with a fresh code. Cooldown (nil) and lockout are not
 		// 500s — the verify screen surfaces the lockout on submit.
 		if verr := h.startAccountVerification(r.Context(), row.ID, email); verr != nil && !errors.Is(verr, errVerifyAccountLocked) {
@@ -560,7 +560,7 @@ func (h *Handler) accountLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
 }
 
-// --- verification helpers (mirror players/dashboard) -----------------------
+// --- verification helpers (mirror players/control-panel) -----------------------
 
 func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype.UUID, email string) error {
 	var state sqlcgen.GetPlayerAccountVerificationStateRow

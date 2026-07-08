@@ -20,7 +20,7 @@ INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id, created_at;
 
--- name: CreateDashboardAPIKey :one
+-- name: CreateControlPanelAPIKey :one
 WITH args AS (
     SELECT
         sqlc.narg(project_id)::bigint AS project_id,
@@ -40,7 +40,7 @@ project_ctx AS (
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
 -- New keys start with the matchmaker scope: matchmaking is a zero-config
--- feature. Fleet/relay scopes stay opt-in via the dashboard toggles.
+-- feature. Fleet/relay scopes stay opt-in via the control panel toggles.
 INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
 SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{matchmaker}'::text[]
 FROM tenant_ctx t

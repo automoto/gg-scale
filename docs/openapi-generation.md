@@ -8,66 +8,54 @@ hand:
 make openapi        # regenerate after adding/changing /v1 routes or handler types
 ```
 
-The pipeline is [ehabterra/apispec](https://github.com/ehabterra/apispec)
-driven by `apispec.yaml` (repo root) via `scripts/gen-openapi.sh`. The HTML
-surfaces (dashboard, player pages, web assets) are excluded — only the JSON
-API is specified.
+The spec is emitted directly from the [Huma v2](https://huma.rocks) operations
+that back every `/v1` route. Each endpoint is a typed `huma.Register` call
+(request input, response output, security metadata), so the document is
+generated from the handlers themselves and **cannot drift** from the wire.
+`make openapi` runs `go run ./cmd/openapi-dump openapi.yaml`, which builds the
+operation set in-process and writes `api.OpenAPI().YAML()`. It is fast and
+side-effect-free — no external analyzer, no live dependencies, no OOM risk.
 
-## How handlers map into the spec
+The HTML surfaces (control panel, player pages, web assets) are not huma
+operations and are intentionally absent — only the JSON API is specified.
 
-apispec statically traces chi route registrations into handler bodies:
+## How it works
 
-- `decodeJSON(w, r, &req)` → request body schema from `req`'s type
-- `writeJSON(w, body)` → 200 response schema from `body`'s type
-- `writeJSONStatus(w, status, body)` → response schema under `status`
-- `http.Error` / `w.WriteHeader` → error/no-body status codes
-- `tenant.New` middleware → `ApiKeyAuth` (bearer) security requirement
-- `playerauth.New` middleware → `PlayerSession` (X-Session-Token) requirement
+- `internal/httpapi/openapi.go` — `OpenAPIDoc(version)` registers every `/v1`
+  operation into one shared `huma.OpenAPI` document. It needs no live
+  dependencies: the handler closures are registered but never invoked, so a
+  zero `Deps` suffices. The `register*` list there mirrors `NewRouter`'s
+  registrations (NewRouter spreads them across middleware-scoped chi groups;
+  the doc only needs the operation metadata, so they collapse onto one
+  adapter). `TestOpenAPIDoc_covers_expected_paths` fails if that list drifts.
+- `cmd/openapi-dump` — thin `main` that calls `OpenAPIDoc` and writes the YAML.
+- Schemas, request/response bodies, status codes, and `ApiKeyAuth` /
+  `PlayerSession` security all come straight from each operation's Go types and
+  `huma.Operation` metadata. No conventions to keep extraction happy — the
+  types *are* the spec.
 
-Conventions that keep extraction accurate:
+## Hand-maintained additions
 
-- Respond through `writeJSON` / `writeJSONStatus`, not ad-hoc
-  `WriteHeader`+`Encode` pairs.
-- Handler factories must return a closure directly (`return func(w, r) {...}`).
-  Returning another factory's result (`return otherFactory(...)`) breaks the
-  tracer's route→handler linkage — delegate to a plain function from inside
-  the closure instead (see `friendAcceptHandler` / `changeFriendStatus`).
-- The tracer resolves a response body's type through exactly one level of
-  indirection (handler call site → helper parameter). `writeJSON` must keep
-  its `json.NewEncoder(w).Encode(body)` inline rather than delegating to
-  `writeJSONStatus` — chaining helpers degrades every response schema to a
-  bare `object`.
+Two routes can't be fully described by huma on their own; `OpenAPIDoc` patches
+them into the document after registration:
 
-## Patched apispec build
-
-Upstream apispec (v0.3.5 and main @ cb336e36) needs two fixes for this
-codebase, carried in `scripts/patches/apispec-fixes.patch` until merged
-upstream:
-
-1. A visited-set guard in `extractRouteChildren` — the tracker tree contains
-   cycles here, which crashed the tool with a stack overflow.
-2. Implicit-200 normalization in `buildResponses` — a body written without
-   `WriteHeader` is a 200 per net/http semantics; unpaired bodies otherwise
-   land in a `default:` slot (or duplicate/mislabel statuses).
-
-`scripts/gen-openapi.sh` clones the pinned commit, applies the patch, and
-caches the binary at `bin/apispec-patched`.
-
-## Overlay for operations apispec cannot extract
-
-`openapi-overlay.yaml` (repo root) is deep-merged into the generated spec as
-the last step of `make openapi` (by `scripts/openapi-overlay`; a `null` value
-deletes the key it overrides). Entries there are hand-maintained — keep them
-in sync with their handlers when the wire contract changes.
-
-Current entries:
-
-- `POST /v1/server/player-sessions/verify` — apispec fails to traverse this
-  handler's subtree (cause not yet isolated upstream), so its request body,
-  200 response, and opaque 401 come from the overlay. Handler:
+- **`POST /v1/server/player-sessions/verify`** — its handler is a huma
+  body-callback (it owns the raw request/response to keep the opaque-401 wire),
+  so huma emits no schema for it. `enrichVerifyOp` fills in the request body,
+  the 200 response, and the opaque 401 from the `playerVerifyRequest` /
+  `playerVerifyResponse` types. Handler:
   `internal/httpapi/player_sessions_verify.go`.
+- **`GET /v1/ws`** — the realtime WebSocket route stays a plain chi handler
+  (not a huma op), so `addWebSocketStub` hand-adds a stub operation. OpenAPI
+  cannot describe the socket protocol.
 
-## Known gaps
+Both live in Go alongside the types they reference — there is no separate
+overlay file or merge tool.
 
-- `GET /v1/ws` — WebSocket upgrade endpoint; OpenAPI cannot describe the
-  socket protocol, so it appears as a stub operation.
+## Notes for SDK generators
+
+- Documented paths are canonical (no trailing slash), e.g. `/v1/friends`,
+  `/v1/profile`, `/v1/game-session`. The server also answers the
+  trailing-slash form at runtime, but the spec lists only the canonical path.
+- Error responses are `application/problem+json` (`{title, status, detail,
+  errors[]}`) except the deliberately-opaque verify 401.

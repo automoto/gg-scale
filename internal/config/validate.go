@@ -69,17 +69,17 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("CORS_ALLOWED_ORIGINS must not contain '*' in production")
 			}
 		}
-		if !c.DashboardCookieSecure {
-			return fmt.Errorf("DASHBOARD_COOKIE_SECURE must be true in production")
+		if !c.ControlPanelCookieSecure {
+			return fmt.Errorf("CONTROL_PANEL_COOKIE_SECURE must be true in production")
 		}
-		if c.DashboardBaseURL == "" {
-			return fmt.Errorf("DASHBOARD_BASE_URL must be set in production")
+		if c.ControlPanelBaseURL == "" {
+			return fmt.Errorf("CONTROL_PANEL_BASE_URL must be set in production")
 		}
-		if !strings.HasPrefix(c.DashboardBaseURL, "https://") {
-			return fmt.Errorf("DASHBOARD_BASE_URL must use HTTPS in production (got %q)", c.DashboardBaseURL)
+		if !strings.HasPrefix(c.ControlPanelBaseURL, "https://") {
+			return fmt.Errorf("CONTROL_PANEL_BASE_URL must use HTTPS in production (got %q)", c.ControlPanelBaseURL)
 		}
-		if c.DashboardEnabled && c.DashboardBootstrapTokenFile == "" {
-			return fmt.Errorf("DASHBOARD_BOOTSTRAP_TOKEN_FILE must be set in production when dashboard is enabled")
+		if c.ControlPanelEnabled && c.ControlPanelBootstrapTokenFile == "" {
+			return fmt.Errorf("CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE must be set in production when control panel is enabled")
 		}
 		if c.JWTSigningKey == "" {
 			return fmt.Errorf("JWT_SIGNING_KEY must be set in production")

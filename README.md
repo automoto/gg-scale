@@ -4,7 +4,7 @@ Open-source, self-hostable backend for multiplayer games. One Go binary and a Po
 
 ## What it is
 
-`ggscale-server` is a single Go binary. Point it at a Postgres URL and it serves a multi-tenant HTTP + WebSocket API under `/v1/`, an admin dashboard, and an optional hosted player site. A second compose file adds k3s + Agones for studios that want an authoritative game-server fleet.
+`ggscale-server` is a single Go binary. Point it at a Postgres URL and it serves a multi-tenant HTTP + WebSocket API under `/v1/`, an admin control panel, and an optional hosted player site. A second compose file adds k3s + Agones for studios that want an authoritative game-server fleet.
 
 Everything below ships in-tree today. New to the model? Read [`docs/CONCEPTS.md`](docs/CONCEPTS.md) for tenants, projects, and API keys, or [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the request path.
 
@@ -25,10 +25,10 @@ If you cloned without submodules, run `git submodule update --init --recursive` 
 
 Any Docker engine works. If a build fails with `docker-credential-desktop: executable file not found in $PATH`, see [CONTRIBUTING.md § Troubleshooting](CONTRIBUTING.md#troubleshooting).
 
-### Bootstrap the dashboard
+### Bootstrap the control panel
 
 1. Read the one-time token: `cat ./data/bootstrap.token` (also printed in `docker compose logs ggscale-server` at first startup).
-2. Open `http://localhost:8080/v1/dashboard/setup`, create the first platform admin, then sign in at `/v1/dashboard/login`.
+2. Open `http://localhost:8080/v1/control-panel/setup`, create the first platform admin, then sign in at `/v1/control-panel/login`.
 3. Create a **tenant**, a **project**, and a **secret API key** (shown once; store it safely). Every player-facing `/v1/*` call authenticates with `Authorization: Bearer <api_key>`.
 
 ## Player and session features
@@ -78,7 +78,7 @@ Two ways to put players into a game, depending on whether your title runs dedica
 
 ## Fleet backends
 
-A *fleet* is the pool of game-server instances ggscale allocates from when a match needs a host. The backend is chosen with `FLEET_BACKEND`; allocations always return a `{host, port}` clients connect to. Per-fleet templates (image, port, health probe) are managed in the dashboard, not in env vars.
+A *fleet* is the pool of game-server instances ggscale allocates from when a match needs a host. The backend is chosen with `FLEET_BACKEND`; allocations always return a `{host, port}` clients connect to. Per-fleet templates (image, port, health probe) are managed in the control panel, not in env vars.
 
 | Backend | `FLEET_BACKEND` | Best for |
 |---|---|---|

@@ -9,13 +9,13 @@ import (
 	"context"
 )
 
-// iteratorForInsertDashboardTOTPBackupCodes implements pgx.CopyFromSource.
-type iteratorForInsertDashboardTOTPBackupCodes struct {
-	rows                 []InsertDashboardTOTPBackupCodesParams
+// iteratorForInsertControlPanelTOTPBackupCodes implements pgx.CopyFromSource.
+type iteratorForInsertControlPanelTOTPBackupCodes struct {
+	rows                 []InsertControlPanelTOTPBackupCodesParams
 	skippedFirstNextCall bool
 }
 
-func (r *iteratorForInsertDashboardTOTPBackupCodes) Next() bool {
+func (r *iteratorForInsertControlPanelTOTPBackupCodes) Next() bool {
 	if len(r.rows) == 0 {
 		return false
 	}
@@ -27,20 +27,20 @@ func (r *iteratorForInsertDashboardTOTPBackupCodes) Next() bool {
 	return len(r.rows) > 0
 }
 
-func (r iteratorForInsertDashboardTOTPBackupCodes) Values() ([]interface{}, error) {
+func (r iteratorForInsertControlPanelTOTPBackupCodes) Values() ([]interface{}, error) {
 	return []interface{}{
-		r.rows[0].DashboardUserID,
+		r.rows[0].ControlPanelUserID,
 		r.rows[0].CodeHash,
 	}, nil
 }
 
-func (r iteratorForInsertDashboardTOTPBackupCodes) Err() error {
+func (r iteratorForInsertControlPanelTOTPBackupCodes) Err() error {
 	return nil
 }
 
 // Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
-func (q *Queries) InsertDashboardTOTPBackupCodes(ctx context.Context, arg []InsertDashboardTOTPBackupCodesParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"dashboard_user_totp_backup_codes"}, []string{"dashboard_user_id", "code_hash"}, &iteratorForInsertDashboardTOTPBackupCodes{rows: arg})
+func (q *Queries) InsertControlPanelTOTPBackupCodes(ctx context.Context, arg []InsertControlPanelTOTPBackupCodesParams) (int64, error) {
+	return q.db.CopyFrom(ctx, []string{"control_panel_user_totp_backup_codes"}, []string{"control_panel_user_id", "code_hash"}, &iteratorForInsertControlPanelTOTPBackupCodes{rows: arg})
 }
 
 // iteratorForInsertPlayerAccountTOTPBackupCodes implements pgx.CopyFromSource.

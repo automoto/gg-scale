@@ -21,7 +21,7 @@ type TrustedDeviceGCArgs struct{}
 // Kind implements river.JobArgs.
 func (TrustedDeviceGCArgs) Kind() string { return TrustedDeviceGCKind }
 
-// TrustedDeviceGCWorker deletes expired dashboard and player-account
+// TrustedDeviceGCWorker deletes expired control-panel and player-account
 // trusted-device rows. Expired rows are already inert — validation checks
 // expires_at — so this sweep is pure hygiene and safe to retry.
 type TrustedDeviceGCWorker struct {
@@ -43,11 +43,11 @@ func (w *TrustedDeviceGCWorker) Work(ctx context.Context, _ *river.Job[TrustedDe
 // login surfaces. The tables are platform-global (no tenant, no RLS), so a
 // single BootstrapQ pass covers everything.
 func SweepExpiredTrustedDevices(ctx context.Context, pool *db.Pool) error {
-	var dashboard, players int64
+	var controlPanel, players int64
 	if err := pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		var qerr error
-		if dashboard, qerr = q.DeleteExpiredDashboardTrustedDevices(ctx); qerr != nil {
+		if controlPanel, qerr = q.DeleteExpiredControlPanelTrustedDevices(ctx); qerr != nil {
 			return qerr
 		}
 		players, qerr = q.DeleteExpiredPlayerAccountTrustedDevices(ctx)
@@ -55,8 +55,8 @@ func SweepExpiredTrustedDevices(ctx context.Context, pool *db.Pool) error {
 	}); err != nil {
 		return err
 	}
-	if dashboard > 0 || players > 0 {
-		slog.InfoContext(ctx, "trusted device GC", "dashboard_deleted", dashboard, "players_deleted", players)
+	if controlPanel > 0 || players > 0 {
+		slog.InfoContext(ctx, "trusted device GC", "control_panel_deleted", controlPanel, "players_deleted", players)
 	}
 	return nil
 }

@@ -127,7 +127,7 @@ func (b *Backend) Name() string { return "docker" }
 
 // Template captures the per-allocation knobs the docker backend reads off
 // AllocationRequest.Config. Operators set these by creating a fleet in the
-// dashboard; the manager flattens fleet.config into req.Config before
+// control panel; the manager flattens fleet.config into req.Config before
 // dispatching.
 type Template struct {
 	Image     string
@@ -139,7 +139,7 @@ type Template struct {
 
 // TemplateFromConfig parses AllocationRequest.Config keys into a Template
 // and validates the required fields (image, port). Returns a meaningful
-// error if either is missing or malformed so the dashboard can surface it
+// error if either is missing or malformed so the control panel can surface it
 // against the fleet row.
 func (b *Backend) TemplateFromConfig(cfg map[string]string) (Template, error) {
 	t := Template{
@@ -170,7 +170,7 @@ func (b *Backend) TemplateFromConfig(cfg map[string]string) (Template, error) {
 }
 
 // TemplateFromConfig is the package-level shim used by callers that don't
-// have a backend instance handy (notably the dashboard fleet form, which
+// have a backend instance handy (notably the control panel fleet form, which
 // validates templates before persisting). Registry policy isn't checked
 // without a backend; the request-time path still does.
 func TemplateFromConfig(cfg map[string]string) (Template, error) {

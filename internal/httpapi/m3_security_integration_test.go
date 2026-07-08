@@ -86,7 +86,7 @@ func TestRefresh_rejects_disabled_player(t *testing.T) {
 // a successful verify call must not behave like "freshly verified" and
 // must never mint a session in the JSON payload. (Sessions come only
 // from /login, /refresh, /custom-token.) This is the JSON-API counterpart
-// of the C3 dashboard/player-UI fix that redirects already-verified
+// of the C3 control panel/player-UI fix that redirects already-verified
 // users to login instead of issuing a session.
 func TestVerify_replay_for_verified_user_is_idempotent_no_session(t *testing.T) {
 	c := startCluster(t)

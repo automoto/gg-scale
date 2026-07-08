@@ -10,7 +10,7 @@
 #
 # Endpoints:
 #   ggscale-server:  http://localhost:8080
-#   dashboard:       http://localhost:8080/v1/dashboard
+#   control panel:  http://localhost:8080/v1/control-panel
 #   prometheus:      http://localhost:9090
 #   mailhog UI:      http://localhost:8025
 

@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/dashboard"
+	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/players"
@@ -54,14 +54,14 @@ func newPlayersServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	return srv
 }
 
-// TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency is the load-bearing
+// TestH14_ControlPanelLoginFailures_AreAtomicUnderConcurrency is the load-bearing
 // assertion for the TOCTOU fix: ten concurrent failed logins must produce
 // login_failures = 10, not some smaller number from racing read-then-writes.
-func TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
+func TestH14_ControlPanelLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 	c := startCluster(t)
 	const email = "lockme@example.com"
-	seedDashboardUser(t, c, email, "correct-horse-battery-staple", false)
-	srv := newDashboardIntegrationServer(t, c, dashboard.DisabledBootstrap())
+	seedControlPanelUser(t, c, email, "correct-horse-battery-staple", false)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
 
 	const concurrent = 10
 	var (
@@ -79,7 +79,7 @@ func TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 			defer wg.Done()
 			<-clientReady
 			form := url.Values{"email": {email}, "password": {"wrong-password"}}
-			req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/dashboard/login",
+			req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/control-panel/login",
 				strings.NewReader(form.Encode()))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -116,7 +116,7 @@ func TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 	// every increment (zero lost to TOCTOU).
 	var failures int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT login_failures FROM dashboard_users WHERE email = $1`, email).Scan(&failures))
+		`SELECT login_failures FROM control_panel_users WHERE email = $1`, email).Scan(&failures))
 	assert.Equal(t, concurrent, failures,
 		"login_failures must equal concurrent attempts (got 401=%d locked=%d other=%d)",
 		seen401.Load(), seenLocked.Load(), seenOther.Load())
@@ -125,7 +125,7 @@ func TestH14_DashboardLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 	// column must be set.
 	var lockedUntil *time.Time
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT locked_until FROM dashboard_users WHERE email = $1`, email).Scan(&lockedUntil))
+		`SELECT locked_until FROM control_panel_users WHERE email = $1`, email).Scan(&lockedUntil))
 	require.NotNil(t, lockedUntil)
 	assert.True(t, lockedUntil.After(time.Now()), "locked_until must be in the future")
 }
@@ -190,17 +190,17 @@ func TestH6_PlayerSitePOST_AcceptsRequestWithMatchingCSRF(t *testing.T) {
 		"unknown email with valid csrf reaches the handler → 401, not 403")
 }
 
-// TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS proves the H5 conversion
+// TestH5_ControlPanelPlayers_AcrossTenants_IsolatedByRLS proves the H5 conversion
 // from BootstrapQ to Q+WithTenant actually enforces tenant scoping at the RLS
 // layer — even with a forged URL targeting the wrong tenant.
-func TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
+func TestH5_ControlPanelPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 	c := startCluster(t)
 	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "h5-tenant-a")
 	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "h5-tenant-b")
-	aliceID := seedDashboardUser(t, c, "alice-h5@example.com", "correct-horse-battery-staple", false)
-	bobID := seedDashboardUser(t, c, "bob-h5@example.com", "correct-horse-battery-staple", false)
-	seedDashboardMembership(t, c, aliceID, tenantA, "owner")
-	seedDashboardMembership(t, c, bobID, tenantB, "owner")
+	aliceID := seedControlPanelUser(t, c, "alice-h5@example.com", "correct-horse-battery-staple", false)
+	bobID := seedControlPanelUser(t, c, "bob-h5@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, aliceID, tenantA, "owner")
+	seedControlPanelMembership(t, c, bobID, tenantB, "owner")
 
 	// Seed one player in each tenant.
 	ctx := context.Background()
@@ -214,11 +214,11 @@ func TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 		 VALUES ($1, $2, 'bob-player', 'bob-player@example.com') RETURNING id`,
 		tenantB, projectB).Scan(&pidB))
 
-	srv := newDashboardIntegrationServer(t, c, dashboard.DisabledBootstrap())
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
 
 	// Alice signs in, then asks for tenant A's player list — should see alice-player.
-	aliceCookie, _ := dashboardLoginCookieAndCSRF(t, srv.URL, "alice-h5@example.com", "correct-horse-battery-staple")
-	listPathA := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantA, 10) +
+	aliceCookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "alice-h5@example.com", "correct-horse-battery-staple")
+	listPathA := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantA, 10) +
 		"/projects/" + strconv.FormatInt(projectA, 10) + "/players"
 	bodyA := getWithCookie(t, listPathA, aliceCookie)
 	assert.Contains(t, bodyA, "alice-player@example.com")
@@ -227,7 +227,7 @@ func TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 	// Forged URL: Alice tries to view tenant B's player directly. The
 	// requireTenantAccess middleware rejects (403); RLS would also block
 	// even if the middleware were bypassed.
-	forgedPath := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantB, 10) +
+	forgedPath := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantB, 10) +
 		"/projects/" + strconv.FormatInt(projectB, 10) + "/players/" + strconv.FormatInt(pidB, 10)
 	forgedResp := getResponseWithCookie(t, forgedPath, aliceCookie)
 	defer forgedResp.Body.Close()
@@ -236,18 +236,18 @@ func TestH5_DashboardPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 }
 
 // TestM5_APIKeyCreate_EmitsPlatformAuditRow proves the M5 audit expansion:
-// every dashboard API-key create writes a platform_audit_log row tagged with
+// every control panel API-key create writes a platform_audit_log row tagged with
 // the actor and the action.
 func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "m5-audit")
-	ownerID := seedDashboardUser(t, c, "owner-m5@example.com", "correct-horse-battery-staple", false)
-	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
+	ownerID := seedControlPanelUser(t, c, "owner-m5@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
-	srv := newDashboardIntegrationServer(t, c, dashboard.DisabledBootstrap())
-	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner-m5@example.com", "correct-horse-battery-staple")
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner-m5@example.com", "correct-horse-battery-staple")
 
-	createURL := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) + "/api-keys"
+	createURL := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) + "/api-keys"
 	resp := postFormWithCookie(t, createURL, url.Values{
 		"_csrf":    {csrf},
 		"key_type": {"secret"},
@@ -259,7 +259,7 @@ func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 	var count int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM platform_audit_log
-		 WHERE action = 'dashboard.api_key.create'
+		 WHERE action = 'control_panel.api_key.create'
 		   AND actor_user_id = $1
 		   AND (payload->>'tenant_id')::bigint = $2`,
 		ownerID, tenantID).Scan(&count))
@@ -270,13 +270,13 @@ func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "m5-audit-revoke")
-	ownerID := seedDashboardUser(t, c, "owner-m5r@example.com", "correct-horse-battery-staple", false)
-	seedDashboardMembership(t, c, ownerID, tenantID, "owner")
+	ownerID := seedControlPanelUser(t, c, "owner-m5r@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
-	srv := newDashboardIntegrationServer(t, c, dashboard.DisabledBootstrap())
-	cookie, csrf := dashboardLoginCookieAndCSRF(t, srv.URL, "owner-m5r@example.com", "correct-horse-battery-staple")
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner-m5r@example.com", "correct-horse-battery-staple")
 
-	createResp := postFormWithCookie(t, srv.URL+"/v1/dashboard/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys",
+	createResp := postFormWithCookie(t, srv.URL+"/v1/control-panel/tenants/"+strconv.FormatInt(tenantID, 10)+"/api-keys",
 		url.Values{"_csrf": {csrf}, "key_type": {"secret"}, "label": {"to revoke"}}, cookie)
 	createResp.Body.Close()
 
@@ -284,7 +284,7 @@ func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT id FROM api_keys WHERE label = 'to revoke'`).Scan(&keyID))
 
-	revokeURL := srv.URL + "/v1/dashboard/tenants/" + strconv.FormatInt(tenantID, 10) +
+	revokeURL := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
 		"/api-keys/" + strconv.FormatInt(keyID, 10) + "/revoke"
 	revokeResp := postFormWithCookie(t, revokeURL, url.Values{"_csrf": {csrf}}, cookie)
 	revokeResp.Body.Close()
@@ -292,7 +292,7 @@ func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	var count int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM platform_audit_log
-		 WHERE action = 'dashboard.api_key.revoke'
+		 WHERE action = 'control_panel.api_key.revoke'
 		   AND actor_user_id = $1
 		   AND target = $2`,
 		ownerID, strconv.FormatInt(keyID, 10)).Scan(&count))

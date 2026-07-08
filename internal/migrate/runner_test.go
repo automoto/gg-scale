@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(69), v)
+	assert.Equal(t, uint(70), v)
 	assert.False(t, dirty)
 }
 
@@ -157,7 +157,7 @@ func TestUp_creates_all_phase1_tables(t *testing.T) {
 		"audit_log",
 		"platform_audit_log",
 		"usage_samples",
-		"dashboard_users", "dashboard_memberships", "dashboard_sessions",
+		"control_panel_users", "control_panel_memberships", "control_panel_sessions",
 	} {
 		assert.True(t, tableExists(t, dsn, table), "table %s should exist", table)
 	}

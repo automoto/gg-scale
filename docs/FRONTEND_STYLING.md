@@ -1,13 +1,13 @@
 # Frontend Styling & Asset Conventions
 
-How the dashboard and player surfaces are styled, the constraints every change
+How the control panel and player surfaces are styled, the constraints every change
 must respect, and where to look things up. This is the **design/CSS/asset**
 companion to [`FRONTEND_GUIDELINES.md`](./FRONTEND_GUIDELINES.md), which covers
 the templ/HTMX **behavior** review checklist. Read both before changing UI.
 
 > TL;DR for agents: server-rendered Go + templ, **Pico CSS v2 dark theme** with
 > minimal variable overrides, **htmx v2.0.10** for interactivity, a ~17-line
-> vanilla `dashboard.js`. No build step, no CDN, no Tailwind, no Alpine, no
+> vanilla `controlpanel.js`. No build step, no CDN, no Tailwind, no Alpine, no
 > inline `<script>`/`<style>`. A strict CSP enforces all of that — work with
 > it, not around it.
 
@@ -18,15 +18,15 @@ the templ/HTMX **behavior** review checklist. Read both before changing UI.
 | Asset | Version | File (embedded) | Upstream docs |
 |---|---|---|---|
 | Pico CSS | **2.1.1** | `internal/webassets/static/pico.min.css` | <https://picocss.com/docs> |
-| htmx | **2.0.10** | `internal/dashboard/static/htmx.min.js` | <https://htmx.org/docs/> |
+| htmx | **2.0.10** | `internal/controlpanel/static/htmx.min.js` | <https://htmx.org/docs/> |
 | shared theme | — | `internal/webassets/static/app.css` | this doc |
-| dashboard JS | — | `internal/dashboard/static/dashboard.js` | this doc |
+| control panel JS | — | `internal/controlpanel/static/controlpanel.js` | this doc |
 | fonts | — | `internal/webassets/static/fonts/` (Inter Variable, JetBrains Mono) | self-hosted `woff2` |
 
 - Shared assets (Pico, `app.css`, fonts) live in `internal/webassets`, are
   compiled in via `//go:embed static`, and are served at `/v1/assets/*` so
-  both the dashboard and the player site use them. Dashboard-only JS stays in
-  `internal/dashboard/static` at `/v1/dashboard/assets/*`.
+  both the control panel and the player site use them. Control panel-only JS stays in
+  `internal/controlpanel/static` at `/v1/control-panel/assets/*`.
 - All assets are served with
   `Cache-Control: public, max-age=31536000, immutable`. Stylesheet links must
   therefore go through `webassets.URL("app.css")`, which appends a content-hash
@@ -46,7 +46,7 @@ the templ/HTMX **behavior** review checklist. Read both before changing UI.
 
 Set in `internal/webutil/webutil.go`. Everything below follows from it.
 
-**Dashboard** (`SecurityHeaders`):
+**Control panel** (`SecurityHeaders`):
 ```
 default-src 'self'; script-src 'self'; script-src-attr 'none';
 style-src 'self'; style-src-attr 'none'; img-src 'self' data:;
@@ -68,7 +68,7 @@ Hard rules this imposes (a reviewer should block on any of these):
   CSS variables in `app.css` only. (`style-src-attr 'none'` will silently
   drop inline styles.)
 - **No `hx-on:*` / inline event handlers.** `script-src-attr 'none'` blocks
-  them. Use a delegated listener in `dashboard.js` instead — see the
+  them. Use a delegated listener in `controlpanel.js` instead — see the
   `data-confirm` pattern.
 - **No third-party origins.** Fonts, CSS, JS, images are all same-origin
   (`img-src` also allows `data:`).
@@ -166,7 +166,7 @@ duplicating whole `<option>`/`<input>` branches in an `if/else`.
 
 ## 6. JavaScript
 
-- One file: `internal/dashboard/static/dashboard.js`, loaded `defer`. It's a
+- One file: `internal/controlpanel/static/controlpanel.js`, loaded `defer`. It's a
   single delegated `submit` listener implementing `data-confirm` (confirm()
   before destructive form posts).
 - **Add behavior as delegated listeners in this file**, keyed off `data-*`

@@ -23,7 +23,7 @@ import (
 	"github.com/ggscale/ggscale/internal/auth"
 	cachebuild "github.com/ggscale/ggscale/internal/cache/build"
 	"github.com/ggscale/ggscale/internal/config"
-	"github.com/ggscale/ggscale/internal/dashboard"
+	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
 	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
@@ -143,7 +143,7 @@ func run() error {
 		return fmt.Errorf("mailer: %w", err)
 	}
 	// One wrap covers every surface: the same Mailer instance fans out to the
-	// api, dashboard, and player-site handlers.
+	// api, control panel, and player-site handlers.
 	m = mailer.Metered(m, metrics)
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
@@ -159,9 +159,9 @@ func run() error {
 		return fmt.Errorf("rbac: %w", err)
 	}
 	defer authorizer.Close()
-	var dashboardBootstrap *dashboard.Bootstrap
-	if cfg.DashboardEnabled {
-		dashboardBootstrap, err = dashboard.LoadBootstrap(ctx, appPool, cfg.DashboardBootstrapTokenFile, logger)
+	var controlPanelBootstrap *controlpanel.Bootstrap
+	if cfg.ControlPanelEnabled {
+		controlPanelBootstrap, err = controlpanel.LoadBootstrap(ctx, appPool, cfg.ControlPanelBootstrapTokenFile, logger)
 		if err != nil {
 			return err
 		}
@@ -279,10 +279,10 @@ func run() error {
 		GameSessions:                  gameSessions,
 		ServerList:                    serverListRegistry,
 		RelayIssuer:                   relayIssuer,
-		Dashboard: dashboard.Config{
-			Mount:              cfg.DashboardEnabled,
-			CookieSecure:       cfg.DashboardCookieSecure,
-			BaseURL:            cfg.DashboardBaseURL,
+		ControlPanel: controlpanel.Config{
+			Mount:              cfg.ControlPanelEnabled,
+			CookieSecure:       cfg.ControlPanelCookieSecure,
+			BaseURL:            cfg.ControlPanelBaseURL,
 			MailFrom:           cfg.MailFrom,
 			TrustedProxyHeader: cfg.TrustedProxyHeader,
 			TrustedProxyCIDRs:  cfg.TrustedProxyCIDRs,
@@ -290,12 +290,12 @@ func run() error {
 			RelayEnabled:       cfg.FeatureP2PRelayEnabled,
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
-			// cross into the dashboard package.
-			ServerSettings: dashboard.ServerSettingsSnapshot{
+			// cross into the control panel package.
+			ServerSettings: controlpanel.ServerSettingsSnapshot{
 				Env:                    cfg.Env,
 				LogLevel:               cfg.LogLevel,
 				HTTPAddr:               cfg.HTTPAddr,
-				DashboardEnabled:       cfg.DashboardEnabled,
+				ControlPanelEnabled:    cfg.ControlPanelEnabled,
 				PlayersEnabled:         cfg.PlayersEnabled,
 				FeatureFleetEnabled:    cfg.FeatureFleetEnabled,
 				FeatureP2PRelayEnabled: cfg.FeatureP2PRelayEnabled,
@@ -315,12 +315,12 @@ func run() error {
 		},
 		Players: players.Config{
 			Mount:        cfg.PlayersEnabled,
-			CookieSecure: cfg.DashboardCookieSecure,
+			CookieSecure: cfg.ControlPanelCookieSecure,
 		},
-		DashboardBootstrap:  dashboardBootstrap,
-		DashboardPluginInfo: pluginInfo,
-		CORSAllowedOrigins:  cfg.CORSAllowedOrigins,
-		MetricsAuthToken:    cfg.MetricsAuthToken,
+		ControlPanelBootstrap:  controlPanelBootstrap,
+		ControlPanelPluginInfo: pluginInfo,
+		CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
+		MetricsAuthToken:       cfg.MetricsAuthToken,
 	})
 
 	srv := &http.Server{
@@ -502,17 +502,17 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 	), closer, nil
 }
 
-// pluginInfoFromCloser returns a snapshot closure for the dashboard's
+// pluginInfoFromCloser returns a snapshot closure for the control panel's
 // admin/plugins page when the fleet backend is a plugin supervisor. Returns
 // nil for non-plugin backends (docker, agones), in which case the page
 // renders "no plugin backend configured".
-func pluginInfoFromCloser(ctx context.Context, mgr *fleet.Manager, closer io.Closer) func() *dashboard.PluginSnapshot {
+func pluginInfoFromCloser(ctx context.Context, mgr *fleet.Manager, closer io.Closer) func() *controlpanel.PluginSnapshot {
 	sup, ok := closer.(*fleetplugin.Supervisor)
 	if !ok {
 		return nil
 	}
-	return func() *dashboard.PluginSnapshot {
-		snap := &dashboard.PluginSnapshot{
+	return func() *controlpanel.PluginSnapshot {
+		snap := &controlpanel.PluginSnapshot{
 			Pid:               sup.Pid(),
 			RestartCount:      sup.RestartCount(),
 			TotalRestartCount: sup.TotalRestartCount(),

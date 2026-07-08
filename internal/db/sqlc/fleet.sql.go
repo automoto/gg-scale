@@ -332,7 +332,7 @@ type ListAllocationsForProjectRow struct {
 	ReleasedAt  pgtype.Timestamptz
 }
 
-// Dashboard fleet list: optionally include terminal rows (shutdown/failed)
+// Control panel fleet list: optionally include terminal rows (shutdown/failed)
 // and paginate. include_terminal=false keeps the page focused on live
 // allocations; the UI toggles it via a query param.
 func (q *Queries) ListAllocationsForProject(ctx context.Context, arg ListAllocationsForProjectParams) ([]ListAllocationsForProjectRow, error) {
