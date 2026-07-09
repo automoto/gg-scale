@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -27,6 +28,35 @@ func signSession(t *testing.T, signer *auth.Signer, tenantID, projectID, playerI
 		PlayerID:  playerID,
 		ExpiresAt: time.Now().Add(exp),
 	})
+	require.NoError(t, err)
+	return tok
+}
+
+// verifyWireClaims mirrors internal/auth's unexported wireClaims shape (same
+// JSON field names) so this test can mint a token whose exp is already past
+// signer.Sign's 30s verification leeway. auth.Signer.Sign refuses to issue an
+// already-expired claim, so an expired token can only exist on the wire as a
+// stale client credential — this reproduces that directly with the shared
+// test signing key.
+type verifyWireClaims struct {
+	jwt.RegisteredClaims
+	PlayerID  int64 `json:"puid"`
+	TenantID  int64 `json:"tid"`
+	ProjectID int64 `json:"pid,omitempty"`
+}
+
+func signExpiredSession(t *testing.T, tenantID, projectID, playerID int64) string {
+	t.Helper()
+	claims := verifyWireClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+		},
+		PlayerID:  playerID,
+		TenantID:  tenantID,
+		ProjectID: projectID,
+	}
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testSignerKey))
 	require.NoError(t, err)
 	return tok
 }
@@ -119,7 +149,7 @@ func TestPlayersVerify_rejects_invalid_sessions(t *testing.T) {
 		{
 			name: "expired_token",
 			mutate: func(t *testing.T, _ *cluster, tenantID, projectID, playerID int64) string {
-				return signSession(t, newTestSigner(t), tenantID, projectID, playerID, -time.Hour)
+				return signExpiredSession(t, tenantID, projectID, playerID)
 			},
 		},
 		{

@@ -138,7 +138,7 @@ func (p *httpapiPostgresFixture) start(ctx context.Context) error {
 	}
 	p.templateDSN = dsn
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	if err != nil {
 		return err
 	}

@@ -146,7 +146,7 @@ func kubeconfigOrSkip(t *testing.T) string {
 	if v := os.Getenv("KUBECONFIG"); v != "" {
 		return v
 	}
-	abs, err := filepath.Abs(filepath.Join("..", "..", "..", ".k3s", "kubeconfig.yaml"))
+	abs, err := filepath.Abs(filepath.Join("..", "..", "..", "..", ".k3s", "kubeconfig.yaml"))
 	require.NoError(t, err)
 	if _, err := os.Stat(abs); err != nil {
 		t.Skipf("kubeconfig not found at %s; run make up-k8s && make agones-install", abs)

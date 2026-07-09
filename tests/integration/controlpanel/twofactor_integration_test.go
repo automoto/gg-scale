@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlpanel
+package controlpanel_test
 
 import (
 	"context"
@@ -25,6 +25,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
@@ -37,6 +38,15 @@ const (
 	tfTestPassword = "correct-horse-battery"
 	tfLoginPath    = "/v1/control-panel/login"
 	tfChallenge    = "/v1/control-panel/login/2fa"
+
+	// testTwoFactorHexKey mirrors internal/controlpanel/twofactor_test.go:15, which stays behind as a unit test.
+	testTwoFactorHexKey = "6368616e676520746869732070617373776f726420746f206120736563726574"
+
+	pathControlPanel        = "/v1/control-panel"
+	sessionCookieName       = "ggscale_control_panel_session"
+	trustedDeviceCookieName = "ggscale_control_panel_trust"
+	pathControlPanelAccount = "/v1/control-panel/account/password"
+	twoFactorIssuer         = "ggscale control panel"
 )
 
 func startTwoFactorDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
@@ -59,7 +69,7 @@ func startTwoFactorDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	r, err := migrate.New(dsn, migrationsDir)
 	require.NoError(t, err)
@@ -159,7 +169,7 @@ func TestControlPanelTwoFactor_fullFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount(pathControlPanel, New(Deps{Pool: pool, Config: Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
+	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 
@@ -321,7 +331,7 @@ func TestControlPanelTwoFactor_fullFlow(t *testing.T) {
 
 	t.Run("nil_cipher_fails_closed_for_enrolled_user", func(t *testing.T) {
 		bare := chi.NewRouter()
-		bare.Mount(pathControlPanel, New(Deps{Pool: pool, Config: Config{Mount: true}, Mailer: noopMailer}))
+		bare.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer}))
 		bareSrv := httptest.NewServer(bare)
 		defer bareSrv.Close()
 
@@ -377,7 +387,7 @@ func TestControlPanelTwoFactor_replayedValidCodeDoesNotLock(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount(pathControlPanel, New(Deps{Pool: pool, Config: Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
+	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 

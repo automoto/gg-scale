@@ -41,7 +41,7 @@ func startPostgres(t *testing.T) string {
 
 func migrationsDir(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	abs, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	return abs
 }
@@ -135,7 +135,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(2), v)
+	assert.Equal(t, uint(3), v)
 	assert.False(t, dirty)
 }
 

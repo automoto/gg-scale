@@ -39,7 +39,7 @@ func startMigratedDB(t *testing.T) (*db.Pool, int64, int64) {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	r, err := migrate.New(dsn, migrationsDir)
 	require.NoError(t, err)

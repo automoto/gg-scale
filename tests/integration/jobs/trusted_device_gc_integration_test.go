@@ -1,6 +1,6 @@
 //go:build integration
 
-package jobs
+package jobs_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/jobs"
 	"github.com/ggscale/ggscale/internal/migrate"
 )
 
@@ -37,7 +38,7 @@ func startJobsDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	r, err := migrate.New(dsn, migrationsDir)
 	require.NoError(t, err)
@@ -74,7 +75,7 @@ func TestSweepExpiredTrustedDevices_removes_only_expired_rows(t *testing.T) {
 		        ($1, '\x04', now() + interval '1 day')`, accountID)
 	require.NoError(t, err)
 
-	require.NoError(t, SweepExpiredTrustedDevices(ctx, pool))
+	require.NoError(t, jobs.SweepExpiredTrustedDevices(ctx, pool))
 
 	var controlPanelLeft, playersLeft int64
 	require.NoError(t, raw.QueryRow(ctx, `SELECT count(*) FROM control_panel_trusted_devices`).Scan(&controlPanelLeft))

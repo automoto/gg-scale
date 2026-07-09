@@ -1,6 +1,6 @@
 //go:build integration
 
-package players
+package players_test
 
 import (
 	"context"
@@ -28,12 +28,25 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	_ "github.com/ggscale/ggscale/internal/mailer/noop"
 	"github.com/ggscale/ggscale/internal/migrate"
+	"github.com/ggscale/ggscale/internal/players"
 	"github.com/ggscale/ggscale/internal/twofactor"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-const tfTestPassword = "player-password-1"
+const (
+	tfTestPassword = "player-password-1"
+
+	// testTwoFactorHexKey mirrors internal/players/twofactor_test.go:16, which stays behind as a unit test.
+	testTwoFactorHexKey = "6368616e676520746869732070617373776f726420746f206120736563726574"
+
+	accountBasePath          = "/v1/players/account"
+	accountSessionCookieName = "ggscale_account_session"
+	accountChallengePath     = accountBasePath + "/login/2fa"
+	accountTwoFactorPath     = accountBasePath + "/2fa"
+	accountTrustCookieName   = "ggscale_account_trust"
+	playerTwoFactorIssuer    = "ggscale"
+)
 
 func startPlayersDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
 	t.Helper()
@@ -55,7 +68,7 @@ func startPlayersDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	r, err := migrate.New(dsn, migrationsDir)
 	require.NoError(t, err)
@@ -153,7 +166,7 @@ func TestPlayerAccountTwoFactor_fullFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount("/v1/players", New(Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: Config{Mount: true}, TwoFactor: cipher}))
+	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 
@@ -324,7 +337,7 @@ func TestPlayerAccountTwoFactor_replayedValidCodeDoesNotLock(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount("/v1/players", New(Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: Config{Mount: true}, TwoFactor: cipher}))
+	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 

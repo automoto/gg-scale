@@ -1,6 +1,6 @@
 //go:build integration
 
-package twofactor
+package twofactor_test
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/migrate"
+	"github.com/ggscale/ggscale/internal/twofactor"
 )
 
 func startTwoFactorLoadDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
@@ -38,7 +39,7 @@ func startTwoFactorLoadDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {
 	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	require.NoError(t, err)
 
-	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "db", "migrations"))
+	migrationsDir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	r, err := migrate.New(dsn, migrationsDir)
 	require.NoError(t, err)
@@ -63,7 +64,7 @@ func TestLoad_generates_and_persists_key_when_nothing_configured(t *testing.T) {
 	pool, raw := startTwoFactorLoadDB(t)
 	ctx := context.Background()
 
-	first, err := Load(ctx, pool, "")
+	first, err := twofactor.Load(ctx, pool, "")
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	assert.Equal(t, int64(1), storedKeyCount(t, raw))
@@ -73,7 +74,7 @@ func TestLoad_generates_and_persists_key_when_nothing_configured(t *testing.T) {
 
 	// A second boot loads the same key: old ciphertext still opens, no
 	// second row appears.
-	second, err := Load(ctx, pool, "")
+	second, err := twofactor.Load(ctx, pool, "")
 	require.NoError(t, err)
 	plaintext, err := second.Decrypt(sealed)
 	require.NoError(t, err)
@@ -85,13 +86,13 @@ func TestLoad_env_only_never_writes_a_database_key(t *testing.T) {
 	pool, raw := startTwoFactorLoadDB(t)
 	envHex := strings.Repeat("ab", 32)
 
-	c, err := Load(context.Background(), pool, envHex)
+	c, err := twofactor.Load(context.Background(), pool, envHex)
 
 	require.NoError(t, err)
 	require.NotNil(t, c)
 	assert.Equal(t, int64(0), storedKeyCount(t, raw))
 	// Same key material as a plain env cipher: pending cookies interop.
-	plain, err := NewCipher(envHex)
+	plain, err := twofactor.NewCipher(envHex)
 	require.NoError(t, err)
 	assert.Equal(t, plain.PendingKey(), c.PendingKey())
 }
@@ -101,12 +102,12 @@ func TestLoad_env_key_keeps_database_key_as_decrypt_fallback(t *testing.T) {
 	ctx := context.Background()
 	envHex := strings.Repeat("ab", 32)
 
-	dbOnly, err := Load(ctx, pool, "")
+	dbOnly, err := twofactor.Load(ctx, pool, "")
 	require.NoError(t, err)
 	oldSealed, err := dbOnly.Encrypt([]byte("old-enrollment"))
 	require.NoError(t, err)
 
-	ring, err := Load(ctx, pool, envHex)
+	ring, err := twofactor.Load(ctx, pool, envHex)
 	require.NoError(t, err)
 
 	// Old enrollment still opens after the operator switches to the env key.
@@ -118,7 +119,7 @@ func TestLoad_env_key_keeps_database_key_as_decrypt_fallback(t *testing.T) {
 	// the old db-only cipher does not.
 	newSealed, err := ring.Encrypt([]byte("new-enrollment"))
 	require.NoError(t, err)
-	envOnly, err := NewCipher(envHex)
+	envOnly, err := twofactor.NewCipher(envHex)
 	require.NoError(t, err)
 	_, err = envOnly.Decrypt(newSealed)
 	assert.NoError(t, err)
@@ -129,7 +130,7 @@ func TestLoad_env_key_keeps_database_key_as_decrypt_fallback(t *testing.T) {
 func TestLoad_rejects_malformed_env_key(t *testing.T) {
 	pool, _ := startTwoFactorLoadDB(t)
 
-	_, err := Load(context.Background(), pool, "not-hex")
+	_, err := twofactor.Load(context.Background(), pool, "not-hex")
 
 	assert.Error(t, err)
 }
