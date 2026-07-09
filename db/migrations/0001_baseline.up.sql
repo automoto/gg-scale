@@ -5324,7 +5324,10 @@ GRANT SELECT,USAGE ON SEQUENCE public.usage_samples_id_seq TO ggscale_app;
 -- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: -
 --
 
-ALTER DEFAULT PRIVILEGES FOR ROLE ggscale IN SCHEMA public GRANT SELECT,USAGE ON SEQUENCES TO ggscale_app;
+-- NB: dumped from dev as `FOR ROLE ggscale`; dropped so default privileges bind
+-- to the migration/owner role of whatever env runs this (ggscale in dev,
+-- postgres in dokku) rather than a hardcoded dev-only role name.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT,USAGE ON SEQUENCES TO ggscale_app;
 
 
 --
