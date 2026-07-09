@@ -121,8 +121,9 @@ RETURNING id, created_at;
 
 -- name: GetSessionByRefreshHash :one
 -- Joined to project_players so refresh fails for disabled / deleted accounts
--- even if the refresh token is still otherwise valid.
-SELECT s.id, s.player_id, s.project_id, s.expires_at, s.revoked_at
+-- even if the refresh token is still otherwise valid. revoked_reason lets the
+-- refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
+SELECT s.id, s.player_id, s.project_id, s.expires_at, s.revoked_at, s.revoked_reason
 FROM sessions s
 JOIN project_players u ON u.id = s.player_id
 WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -132,19 +133,34 @@ WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND u.disabled_at IS NULL;
 
 -- name: RevokeSession :exec
+-- Rotation path: the token is being superseded by a freshly-issued one, so a
+-- later replay of this hash is a reuse (theft) signal.
 UPDATE sessions
-SET revoked_at = now()
+SET revoked_at = now(), revoked_reason = 'rotated'
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL;
 
 -- name: RevokeSessionByRefreshHash :one
+-- Logout path: a later replay of this hash is a benign stale-client retry, not
+-- reuse, so it must NOT trip the family kill.
 UPDATE sessions
-SET revoked_at = now()
+SET revoked_at = now(), revoked_reason = 'logout'
 WHERE refresh_hash = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL
 RETURNING player_id;
+
+-- name: RevokeActivePlayerSessions :execrows
+-- Reuse-detection response: nuke every live session for the player in this
+-- project. Paired with BumpPlayerSessionEpoch so outstanding access tokens die
+-- at the epoch gate immediately, not just at TTL.
+UPDATE sessions
+SET revoked_at = now(), revoked_reason = 'reuse_detected'
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND player_id = sqlc.arg(player_id)
+  AND revoked_at IS NULL;
 
 -- name: GetTenantCustomTokenSecret :one
 SELECT custom_token_secret

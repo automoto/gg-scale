@@ -90,3 +90,13 @@ func TestServerSettingsPage_is_read_only_and_redacts_secrets(t *testing.T) {
 	assert.NotContains(t, html, `name="redirect_to"`)
 	assert.NotContains(t, html, "Save")
 }
+
+func TestServerSettingsPage_shows_database_stored_badge_for_zero_config_jwt_key(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{JWTConfigured: false},
+	}))
+
+	// The auto-generated key persists in server_secrets: informational, not
+	// the alarm styling used for genuinely missing secrets.
+	assert.Contains(t, html, "database-stored")
+}

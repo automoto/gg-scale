@@ -242,7 +242,7 @@ func (q *Queries) GetPlayerVerificationState(ctx context.Context, arg GetPlayerV
 }
 
 const getSessionByRefreshHash = `-- name: GetSessionByRefreshHash :one
-SELECT s.id, s.player_id, s.project_id, s.expires_at, s.revoked_at
+SELECT s.id, s.player_id, s.project_id, s.expires_at, s.revoked_at, s.revoked_reason
 FROM sessions s
 JOIN project_players u ON u.id = s.player_id
 WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -258,15 +258,17 @@ type GetSessionByRefreshHashParams struct {
 }
 
 type GetSessionByRefreshHashRow struct {
-	ID        int64
-	PlayerID  int64
-	ProjectID int64
-	ExpiresAt pgtype.Timestamptz
-	RevokedAt pgtype.Timestamptz
+	ID            int64
+	PlayerID      int64
+	ProjectID     int64
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+	RevokedReason *string
 }
 
 // Joined to project_players so refresh fails for disabled / deleted accounts
-// even if the refresh token is still otherwise valid.
+// even if the refresh token is still otherwise valid. revoked_reason lets the
+// refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
 func (q *Queries) GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error) {
 	row := q.db.QueryRow(ctx, getSessionByRefreshHash, arg.ProjectID, arg.RefreshHash)
 	var i GetSessionByRefreshHashRow
@@ -276,6 +278,7 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, arg GetSessionByR
 		&i.ProjectID,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.RevokedReason,
 	)
 	return i, err
 }
@@ -370,14 +373,41 @@ func (q *Queries) ReservePlayerVerifyAttempt(ctx context.Context, arg ReservePla
 	return i, err
 }
 
+const revokeActivePlayerSessions = `-- name: RevokeActivePlayerSessions :execrows
+UPDATE sessions
+SET revoked_at = now(), revoked_reason = 'reuse_detected'
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND player_id = $2
+  AND revoked_at IS NULL
+`
+
+type RevokeActivePlayerSessionsParams struct {
+	ProjectID int64
+	PlayerID  int64
+}
+
+// Reuse-detection response: nuke every live session for the player in this
+// project. Paired with BumpPlayerSessionEpoch so outstanding access tokens die
+// at the epoch gate immediately, not just at TTL.
+func (q *Queries) RevokeActivePlayerSessions(ctx context.Context, arg RevokeActivePlayerSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeActivePlayerSessions, arg.ProjectID, arg.PlayerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeSession = `-- name: RevokeSession :exec
 UPDATE sessions
-SET revoked_at = now()
+SET revoked_at = now(), revoked_reason = 'rotated'
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL
 `
 
+// Rotation path: the token is being superseded by a freshly-issued one, so a
+// later replay of this hash is a reuse (theft) signal.
 func (q *Queries) RevokeSession(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, revokeSession, id)
 	return err
@@ -385,13 +415,15 @@ func (q *Queries) RevokeSession(ctx context.Context, id int64) error {
 
 const revokeSessionByRefreshHash = `-- name: RevokeSessionByRefreshHash :one
 UPDATE sessions
-SET revoked_at = now()
+SET revoked_at = now(), revoked_reason = 'logout'
 WHERE refresh_hash = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL
 RETURNING player_id
 `
 
+// Logout path: a later replay of this hash is a benign stale-client retry, not
+// reuse, so it must NOT trip the family kill.
 func (q *Queries) RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error) {
 	row := q.db.QueryRow(ctx, revokeSessionByRefreshHash, refreshHash)
 	var player_id int64

@@ -2517,7 +2517,7 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dt>CORS origins</dt>
 				<dd>{ orDash(joinComma(vm.Snapshot.CORSAllowedOrigins)) }</dd>
 				<dt>JWT signing key</dt>
-				<dd>@configuredBadge(vm.Snapshot.JWTConfigured)</dd>
+				<dd>@jwtKeyBadge(vm.Snapshot.JWTConfigured)</dd>
 				<dt>Relay shared secret</dt>
 				<dd>@configuredBadge(vm.Snapshot.RelaySecretSet)</dd>
 				<dt>Database</dt>
@@ -2540,5 +2540,16 @@ templ configuredBadge(set bool) {
 		<span class="badge badge-active">configured</span>
 	} else {
 		<span class="badge badge-revoked">not set</span>
+	}
+}
+
+// An unset JWT env key is not a missing secret: the auto-generated key
+// persists in server_secrets, so sessions survive restarts. Setting
+// JWT_SIGNING_KEY keeps it out of DB backups.
+templ jwtKeyBadge(envSet bool) {
+	if envSet {
+		<span class="badge badge-active">configured</span>
+	} else {
+		<span class="badge">database-stored</span>
 	}
 }

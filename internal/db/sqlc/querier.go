@@ -295,7 +295,8 @@ type Querier interface {
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
-	// even if the refresh token is still otherwise valid.
+	// even if the refresh token is still otherwise valid. revoked_reason lets the
+	// refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
@@ -467,6 +468,10 @@ type Querier interface {
 	// didn't fit a group this pass simply go back to waiting.
 	ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
+	// Reuse-detection response: nuke every live session for the player in this
+	// project. Paired with BumpPlayerSessionEpoch so outstanding access tokens die
+	// at the epoch gate immediately, not just at TTL.
+	RevokeActivePlayerSessions(ctx context.Context, arg RevokeActivePlayerSessionsParams) (int64, error)
 	RevokeAllControlPanelSessionsForUser(ctx context.Context, controlPanelUserID int64) error
 	RevokeAllPlayerAccountSessions(ctx context.Context, playerAccountID pgtype.UUID) error
 	RevokeControlPanelInvitation(ctx context.Context, id int64) error
@@ -481,7 +486,11 @@ type Querier interface {
 	RevokePlayerAccountSession(ctx context.Context, refreshHash []byte) error
 	RevokePlayerInvitation(ctx context.Context, id int64) error
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
+	// Rotation path: the token is being superseded by a freshly-issued one, so a
+	// later replay of this hash is a reuse (theft) signal.
 	RevokeSession(ctx context.Context, id int64) error
+	// Logout path: a later replay of this hash is a benign stale-client retry, not
+	// reuse, so it must NOT trip the family kill.
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)
 	// Platform-admin search by email prefix. Bounded LIMIT keeps the scan cheap.
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)

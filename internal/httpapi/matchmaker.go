@@ -233,6 +233,7 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 	}, matchmakerCancelTicket(d))
 }
 
+// TODO: this function is massive and has tons of if else. Probably needs a refactor.
 func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
 	return func(ctx context.Context, in *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
 		tenantID, err := db.TenantFromContext(ctx)

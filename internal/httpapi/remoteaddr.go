@@ -155,6 +155,7 @@ func ownerRemoteAddrPut(d Deps) func(context.Context, *remoteAddrsPutInput) (*re
 // friendRemoteAddrGet lets an ACCEPTED friend read the target's remote
 // addresses. Non-friends, blocked players, and unlinked callers are denied,
 // and a non-friend is not distinguished from a blocker.
+// TODO: nested if else here hurts readability
 func friendRemoteAddrGet(d Deps) func(context.Context, *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
 	return func(ctx context.Context, in *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
 		me, err := callerAccountForRemoteAddr(ctx, d)

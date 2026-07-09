@@ -131,14 +131,6 @@ func run() error {
 		_ = store.Close(shutdownCtx)
 	}()
 
-	signer, err := auth.NewSignerFromHex(cfg.JWTSigningKey)
-	if err != nil {
-		return err
-	}
-	if cfg.JWTSigningKey == "" {
-		slog.Warn("JWT_SIGNING_KEY not set; using a random in-process key — sessions won't survive restart")
-	}
-
 	m, err := mailer.New(cfg.MailProvider, cfg.SMTPAddr, cfg.SMTPUser, cfg.SMTPPassword, cfg.MailFrom, cfg.SMTPTLS)
 	if err != nil {
 		return fmt.Errorf("mailer: %w", err)
@@ -152,6 +144,13 @@ func run() error {
 	// After migrations and pool setup: resolves TWO_FACTOR_ENC_KEY or the
 	// auto-generated database key, so 2FA works with zero configuration.
 	tfCipher, err := twofactor.Load(ctx, appPool, cfg.TwoFactorEncKey)
+	if err != nil {
+		return err
+	}
+	// Same zero-config pattern for the player-JWT key: JWT_SIGNING_KEY wins,
+	// otherwise the auto-generated database key keeps sessions valid across
+	// restarts and instances.
+	signer, err := auth.Load(ctx, appPool, cfg.JWTSigningKey)
 	if err != nil {
 		return err
 	}

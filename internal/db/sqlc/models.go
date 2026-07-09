@@ -619,14 +619,24 @@ type ServerSecret struct {
 }
 
 type Session struct {
-	ID          int64
-	TenantID    int64
-	PlayerID    int64
-	RefreshHash []byte
-	ExpiresAt   pgtype.Timestamptz
-	RevokedAt   pgtype.Timestamptz
-	CreatedAt   pgtype.Timestamptz
-	ProjectID   int64
+	ID            int64
+	TenantID      int64
+	PlayerID      int64
+	RefreshHash   []byte
+	ExpiresAt     pgtype.Timestamptz
+	RevokedAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	ProjectID     int64
+	RevokedReason *string
+}
+
+type StorageLimit struct {
+	ID            int64
+	TenantID      int64
+	ProjectID     *int64
+	MaxValueBytes int64
+	UpdatedBy     *int64
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type StorageObject struct {
@@ -662,6 +672,126 @@ type TenantPlayerBan struct {
 }
 
 type UsageSample struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202607 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202608 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202609 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202610 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202611 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202612 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202701 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202702 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202703 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202704 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202705 struct {
+	ID          int64
+	TenantID    int64
+	ProjectID   int64
+	Ts          pgtype.Timestamptz
+	Ccu         int32
+	Requests    int64
+	BytesEgress int64
+}
+
+type UsageSamples202706 struct {
 	ID          int64
 	TenantID    int64
 	ProjectID   int64

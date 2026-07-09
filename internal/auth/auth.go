@@ -24,6 +24,10 @@ var ErrTokenExpired = errors.New("auth: token expired")
 
 const minKeyLen = 32
 
+// leeway absorbs clock skew between the signing and verifying hosts in a
+// multi-region deployment; negligible next to the short token TTL.
+const leeway = 30 * time.Second
+
 // Claims are the application-meaningful fields the JWT carries. The
 // jti claim is filled with a random nonce in Sign so two tokens for the
 // same claims are distinguishable.
@@ -35,10 +39,14 @@ type Claims struct {
 	// verify rejects the token if the DB epoch has moved past it (disable /
 	// tenant ban), so revocation is immediate rather than TTL-bounded.
 	SessionEpoch int64
-	ExpiresAt    time.Time
+	// ExpiresAt must be in the future at Sign time; Sign rejects zero or
+	// past values.
+	ExpiresAt time.Time
 }
 
-type registeredClaims struct {
+// wireClaims is the on-the-wire JWT shape: the registered claims plus this
+// package's private claims (RFC 7519 §4.3).
+type wireClaims struct {
 	jwt.RegisteredClaims
 	PlayerID     int64 `json:"puid"`
 	TenantID     int64 `json:"tid"`
@@ -46,14 +54,15 @@ type registeredClaims struct {
 	SessionEpoch int64 `json:"sepoch,omitempty"`
 }
 
-// Signer issues and verifies HMAC-SHA256 JWTs.
+// Signer issues and verifies HMAC-SHA256 JWTs. A Signer is immutable after
+// construction and safe for concurrent use.
 type Signer struct {
 	key []byte
 }
 
 // NewSigner constructs a Signer from a raw HMAC key. The key must be at
-// least 32 bytes (matches the SHA-256 block size) — shorter keys are
-// rejected at construction so misconfiguration fails fast.
+// least 32 bytes (the SHA-256 output size, RFC 2104's recommended minimum) —
+// shorter keys are rejected at construction so misconfiguration fails fast.
 func NewSigner(key []byte) (*Signer, error) {
 	if len(key) < minKeyLen {
 		return nil, fmt.Errorf("auth: signing key must be at least %d bytes (got %d)", minKeyLen, len(key))
@@ -61,12 +70,12 @@ func NewSigner(key []byte) (*Signer, error) {
 	return &Signer{key: key}, nil
 }
 
-// NewSignerFromHex parses a hex-encoded key. Empty input falls through to
-// NewSignerRandom — callers may use this to make the env var optional in
-// dev. Production deploys should always supply a stable key.
+// NewSignerFromHex parses a hex-encoded key. The key must be non-empty and
+// decode to at least 32 bytes; zero-config deployments get a persistent key
+// through Load instead.
 func NewSignerFromHex(s string) (*Signer, error) {
 	if s == "" {
-		return NewSignerRandom()
+		return nil, errors.New("auth: signing key is empty")
 	}
 	key, err := hex.DecodeString(s)
 	if err != nil {
@@ -76,7 +85,7 @@ func NewSignerFromHex(s string) (*Signer, error) {
 }
 
 // NewSignerRandom generates a fresh random key. Tokens issued under it
-// don't survive process restarts; useful only for tests and dev.
+// don't survive process restarts; for tests and dev harnesses only.
 func NewSignerRandom() (*Signer, error) {
 	key := make([]byte, minKeyLen)
 	if _, err := rand.Read(key); err != nil {
@@ -88,17 +97,16 @@ func NewSignerRandom() (*Signer, error) {
 // Sign emits a JWT for the given claims. A random jti is added so two
 // otherwise-identical claim sets produce distinct tokens.
 func (s *Signer) Sign(c Claims) (string, error) {
-	nonce := make([]byte, 12)
-	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("auth: random nonce: %w", err)
+	now := time.Now()
+	if !c.ExpiresAt.After(now) {
+		return "", fmt.Errorf("auth: claims ExpiresAt must be in the future (got %v)", c.ExpiresAt)
 	}
 
-	now := time.Now()
-	rc := registeredClaims{
+	rc := wireClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(c.ExpiresAt),
-			ID:        hex.EncodeToString(nonce),
+			ID:        rand.Text(),
 		},
 		PlayerID:     c.PlayerID,
 		TenantID:     c.TenantID,
@@ -118,29 +126,29 @@ func (s *Signer) Sign(c Claims) (string, error) {
 // when the only failure was expiry — callers may distinguish this from
 // "broken signature" so the SDK can decide whether to refresh.
 func (s *Signer) Verify(token string) (Claims, error) {
-	rc := &registeredClaims{}
-	tok, err := jwt.ParseWithClaims(token, rc, func(t *jwt.Token) (any, error) {
+	rc := &wireClaims{}
+	_, err := jwt.ParseWithClaims(token, rc, func(t *jwt.Token) (any, error) {
 		return s.key, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired())
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithLeeway(leeway),
+	)
 	if errors.Is(err, jwt.ErrTokenExpired) {
 		return Claims{}, ErrTokenExpired
 	}
 	if err != nil {
 		return Claims{}, fmt.Errorf("auth: verify: %w", err)
 	}
-	if !tok.Valid {
-		return Claims{}, errors.New("auth: token invalid")
-	}
 
-	exp, _ := rc.GetExpirationTime()
 	out := Claims{
 		PlayerID:     rc.PlayerID,
 		TenantID:     rc.TenantID,
 		ProjectID:    rc.ProjectID,
 		SessionEpoch: rc.SessionEpoch,
 	}
-	if exp != nil {
-		out.ExpiresAt = exp.Time
+	if rc.ExpiresAt != nil {
+		out.ExpiresAt = rc.ExpiresAt.Time
 	}
 	return out, nil
 }

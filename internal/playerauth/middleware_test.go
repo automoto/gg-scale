@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -68,7 +69,12 @@ func TestMiddleware_returns_401_when_token_signature_invalid(t *testing.T) {
 
 func TestMiddleware_returns_401_when_token_expired(t *testing.T) {
 	signer := newSigner(t)
-	tok, err := signer.Sign(auth.Claims{PlayerID: 5, TenantID: 1, ExpiresAt: time.Now().Add(-time.Hour)})
+	// Hand-crafted: Sign refuses to mint already-expired tokens.
+	tok, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"puid": float64(5),
+		"tid":  float64(1),
+		"exp":  time.Now().Add(-time.Hour).Unix(),
+	}).SignedString([]byte("test-key-must-be-at-least-32-bytes-long"))
 	require.NoError(t, err)
 
 	rr := httptest.NewRecorder()
