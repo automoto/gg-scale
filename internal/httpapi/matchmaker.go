@@ -233,20 +233,91 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 	}, matchmakerCancelTicket(d))
 }
 
-// TODO: this function is massive and has tons of if else. Probably needs a refactor.
+// matchmakerContext holds the identifiers every ticket operation resolves from
+// the request context.
+type matchmakerContext struct {
+	tenantID  int64
+	projectID int64
+	playerID  int64
+}
+
+// resolveMatchmakerContext extracts the tenant, project, and player from the
+// request context, returning the same status codes the ticket routes expose.
+func resolveMatchmakerContext(ctx context.Context) (matchmakerContext, error) {
+	tenantID, err := db.TenantFromContext(ctx)
+	if err != nil {
+		return matchmakerContext{}, huma.Error500InternalServerError("internal error")
+	}
+	projectID, ok := db.ProjectFromContext(ctx)
+	if !ok {
+		return matchmakerContext{}, huma.Error400BadRequest("no project")
+	}
+	playerID, ok := playerauth.IDFromContext(ctx)
+	if !ok {
+		return matchmakerContext{}, huma.Error401Unauthorized("no player")
+	}
+	return matchmakerContext{tenantID: tenantID, projectID: projectID, playerID: playerID}, nil
+}
+
+// authorizeMatchmaker runs the player RBAC gate and the matchmaker feature
+// switch shared by every ticket the player creates.
+func authorizeMatchmaker(ctx context.Context, d Deps, mc matchmakerContext) error {
+	if d.RBAC == nil {
+		return huma.Error500InternalServerError("authorization unavailable")
+	}
+	allowed, err := d.RBAC.CanPlayer(mc.tenantID, mc.playerID, rbac.ProjectDedicatedMatchmakingObject(mc.projectID), rbac.ActionCreateTicket)
+	if err != nil {
+		return huma.Error500InternalServerError("authorization check failed")
+	}
+	if !allowed {
+		return huma.Error403Forbidden("forbidden")
+	}
+	enabled, err := d.RBAC.FeatureEnabled(ctx, mc.tenantID, mc.projectID, rbac.FeatureMatchmaker)
+	if err != nil {
+		return huma.Error500InternalServerError("feature check failed")
+	}
+	if !enabled {
+		return huma.Error403Forbidden("forbidden")
+	}
+	return nil
+}
+
+// resolveFleetForTicket gates and resolves the fleet a fleet_allocation ticket
+// targets. Fleet-backed tickets allocate dedicated servers, which stays behind
+// the fleet key scope and the dedicated_servers entitlement.
+func resolveFleetForTicket(ctx context.Context, d Deps, mc matchmakerContext, fleetName string) (int64, error) {
+	key, ok := tenant.APIKeyFromContext(ctx)
+	if !ok {
+		return 0, huma.Error401Unauthorized("unauthorized")
+	}
+	if !key.HasScope(tenant.ScopeFleet) {
+		return 0, huma.Error403Forbidden("forbidden")
+	}
+	dedicated, err := d.RBAC.FeatureEnabled(ctx, mc.tenantID, mc.projectID, rbac.FeatureDedicatedServers)
+	if err != nil {
+		return 0, huma.Error500InternalServerError("feature check failed")
+	}
+	if !dedicated {
+		return 0, huma.Error403Forbidden("forbidden")
+	}
+	if d.Fleet == nil {
+		return 0, huma.Error503ServiceUnavailable("fleet backend not configured")
+	}
+	f, err := d.Fleet.Fleets().GetByName(ctx, mc.projectID, fleetName)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		return 0, huma.Error400BadRequest("unknown fleet")
+	}
+	if err != nil {
+		return 0, huma.Error500InternalServerError("internal error")
+	}
+	return f.ID, nil
+}
+
 func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
 	return func(ctx context.Context, in *matchmakerCreateInput) (*matchmakerTicketOutput, error) {
-		tenantID, err := db.TenantFromContext(ctx)
+		mc, err := resolveMatchmakerContext(ctx)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("internal error")
-		}
-		projectID, ok := db.ProjectFromContext(ctx)
-		if !ok {
-			return nil, huma.Error400BadRequest("no project")
-		}
-		playerID, ok := playerauth.IDFromContext(ctx)
-		if !ok {
-			return nil, huma.Error401Unauthorized("no player")
+			return nil, err
 		}
 
 		req := in.Body
@@ -257,61 +328,25 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 		if problem != "" {
 			return nil, huma.Error400BadRequest(problem)
 		}
-		if d.RBAC == nil {
-			return nil, huma.Error500InternalServerError("authorization unavailable")
+		if aerr := authorizeMatchmaker(ctx, d, mc); aerr != nil {
+			return nil, aerr
 		}
-		allowed, aerr := d.RBAC.CanPlayer(tenantID, playerID, rbac.ProjectDedicatedMatchmakingObject(projectID), rbac.ActionCreateTicket)
-		if aerr != nil {
-			return nil, huma.Error500InternalServerError("authorization check failed")
-		}
-		if !allowed {
-			return nil, huma.Error403Forbidden("forbidden")
-		}
-		enabled, ferr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureMatchmaker)
-		if ferr != nil {
-			return nil, huma.Error500InternalServerError("feature check failed")
-		}
-		if !enabled {
-			return nil, huma.Error403Forbidden("forbidden")
-		}
+
 		var fleetID int64
 		if mode == matchmaker.ModeFleetAllocation {
-			// Fleet-backed tickets allocate dedicated servers, which stays
-			// behind the fleet key scope and the dedicated_servers
-			// entitlement.
-			key, ok := tenant.APIKeyFromContext(ctx)
-			if !ok {
-				return nil, huma.Error401Unauthorized("unauthorized")
+			fleetID, err = resolveFleetForTicket(ctx, d, mc, req.Fleet)
+			if err != nil {
+				return nil, err
 			}
-			if !key.HasScope(tenant.ScopeFleet) {
-				return nil, huma.Error403Forbidden("forbidden")
-			}
-			dedicated, derr := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureDedicatedServers)
-			if derr != nil {
-				return nil, huma.Error500InternalServerError("feature check failed")
-			}
-			if !dedicated {
-				return nil, huma.Error403Forbidden("forbidden")
-			}
-			if d.Fleet == nil {
-				return nil, huma.Error503ServiceUnavailable("fleet backend not configured")
-			}
-			f, gerr := d.Fleet.Fleets().GetByName(ctx, projectID, req.Fleet)
-			if errors.Is(gerr, fleet.ErrFleetNotFound) {
-				return nil, huma.Error400BadRequest("unknown fleet")
-			}
-			if gerr != nil {
-				return nil, huma.Error500InternalServerError("internal error")
-			}
-			fleetID = f.ID
 		}
-		if aerr := allowMatchmakerAction(ctx, d, tenantID, projectID, playerID, "create", matchmakerCreateRate, matchmakerCreateBurst); aerr != nil {
+
+		if aerr := allowMatchmakerAction(ctx, d, mc.tenantID, mc.projectID, mc.playerID, "create", matchmakerCreateRate, matchmakerCreateBurst); aerr != nil {
 			return nil, aerr
 		}
 		// d.Pool is required to mount the router; nil only in handler unit
 		// tests, where the ban check has nothing to consult anyway.
 		if d.Pool != nil {
-			if banned, berr := playerTenantBanned(ctx, d, playerID); berr != nil {
+			if banned, berr := playerTenantBanned(ctx, d, mc.playerID); berr != nil {
 				return nil, huma.Error500InternalServerError("internal error")
 			} else if banned {
 				return nil, huma.Error403Forbidden("account banned")
@@ -319,10 +354,10 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 		}
 
 		enq := matchmaker.EnqueueRequest{
-			TenantID:          tenantID,
-			ProjectID:         projectID,
+			TenantID:          mc.tenantID,
+			ProjectID:         mc.projectID,
 			FleetID:           fleetID,
-			PlayerID:          playerID,
+			PlayerID:          mc.playerID,
 			Mode:              mode,
 			Region:            req.Region,
 			GameMode:          req.GameMode,

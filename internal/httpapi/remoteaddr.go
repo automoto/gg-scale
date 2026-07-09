@@ -152,10 +152,19 @@ func ownerRemoteAddrPut(d Deps) func(context.Context, *remoteAddrsPutInput) (*re
 	}
 }
 
+// rowFound reports whether a lookup that signals absence with pgx.ErrNoRows
+// returned a row. Any other error is passed back unchanged. It lets callers
+// treat existence queries as a plain bool instead of an ErrNoRows branch.
+func rowFound[T any](_ T, err error) (bool, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // friendRemoteAddrGet lets an ACCEPTED friend read the target's remote
 // addresses. Non-friends, blocked players, and unlinked callers are denied,
 // and a non-friend is not distinguished from a blocker.
-// TODO: nested if else here hurts readability
 func friendRemoteAddrGet(d Deps) func(context.Context, *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
 	return func(ctx context.Context, in *friendRemoteAddrInput) (*remoteAddrsOutput, error) {
 		me, err := callerAccountForRemoteAddr(ctx, d)
@@ -166,25 +175,29 @@ func friendRemoteAddrGet(d Deps) func(context.Context, *friendRemoteAddrInput) (
 		var targetAcc pgtype.UUID
 		qerr := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			acc, e := q.GetPlayerLinkedAccountID(ctx, targetPlayer)
-			if e != nil {
-				return e
+			acc, err := q.GetPlayerLinkedAccountID(ctx, targetPlayer)
+			if err != nil {
+				return err
 			}
 			if !acc.Valid {
 				return errTargetNoAccount
 			}
 			targetAcc = acc
+
 			// Must be accepted friends AND not blocked in either direction.
-			if _, be := q.IsBlockedBetweenAccounts(ctx, sqlcgen.IsBlockedBetweenAccountsParams{A: me, B: targetAcc}); be == nil {
-				return errFriendBlocked
-			} else if !errors.Is(be, pgx.ErrNoRows) {
-				return be
+			blocked, err := rowFound(q.IsBlockedBetweenAccounts(ctx, sqlcgen.IsBlockedBetweenAccountsParams{A: me, B: targetAcc}))
+			if err != nil {
+				return err
 			}
-			if _, fe := q.AreAccountsFriendsAccepted(ctx, sqlcgen.AreAccountsFriendsAcceptedParams{A: me, B: targetAcc}); fe != nil {
-				if errors.Is(fe, pgx.ErrNoRows) {
-					return errNotFriends
-				}
-				return fe
+			if blocked {
+				return errFriendBlocked
+			}
+			friends, err := rowFound(q.AreAccountsFriendsAccepted(ctx, sqlcgen.AreAccountsFriendsAcceptedParams{A: me, B: targetAcc}))
+			if err != nil {
+				return err
+			}
+			if !friends {
+				return errNotFriends
 			}
 			return nil
 		})
