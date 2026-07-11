@@ -81,21 +81,99 @@ body {
   padding: 0.5rem 1.5rem;
   align-items: center;
 }
-.app-header ul { margin: 0; padding: 0; }
-.app-header li { padding: 0.5rem 0.75rem; }
+.app-nav {
+  display: flex;
+  gap: 1rem;
+}
+.app-nav .nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 0;
+}
 .app-header .brand {
   font-weight: 600;
   font-size: 1.1rem;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   text-decoration: none;
   color: var(--pico-color);
+  white-space: nowrap;
 }
 .app-header .brand:hover { text-decoration: none; }
 .app-header .user-email { font-size: 0.875rem; opacity: 0.5; }
 .app-header form { margin: 0; display: inline; }
-.app-header a { text-decoration: none; color: var(--pico-color); }
+.app-header a {
+  text-decoration: none;
+  color: var(--pico-color);
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  white-space: nowrap;
+}
 .app-header a:hover { text-decoration: underline; }
+.app-header a[aria-current="page"] {
+  color: var(--pico-primary);
+  background: rgba(129, 140, 248, 0.12);
+}
 .app-header .btn-inline { width: auto; padding: 4px 14px; font-size: 0.875rem; margin: 0; }
+.nav-menu {
+  position: relative;
+  margin: 0;
+}
+.nav-menu summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+.nav-menu summary::-webkit-details-marker { display: none; }
+.nav-menu summary::after {
+  content: "▾";
+  font-size: 0.65rem;
+  opacity: 0.55;
+}
+.nav-menu[open] summary,
+.nav-menu summary:hover {
+  background: rgba(129, 140, 248, 0.12);
+  color: var(--pico-primary);
+}
+.nav-menu-content {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 20;
+  min-width: 13rem;
+  padding: 0.35rem;
+  border: 1px solid var(--pico-border-color);
+  border-radius: 8px;
+  background: var(--pico-card-background-color);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
+}
+.nav-links .nav-menu-content {
+  left: 0;
+  right: auto;
+}
+.nav-menu-content a,
+.nav-menu-content button {
+  display: block;
+  width: 100%;
+  margin: 0;
+  text-align: left;
+}
+.account-menu {
+  margin-left: auto;
+  max-width: 18rem;
+}
+.account-menu > summary {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* === Main ================================================= */
 main.app-main {
@@ -119,7 +197,7 @@ main.app-main {
   margin: 0;
   font-size: 2rem;
   font-weight: 600;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   line-height: 1.15;
 }
 .page-header .subtitle { font-size: 0.9rem; opacity: 0.55; margin: 0.25rem 0 0; }
@@ -160,7 +238,7 @@ main.app-main {
   text-align: center;
   font-size: 1.5rem;
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   margin-bottom: 0.25rem;
 }
 .auth-shell .subtitle {
@@ -183,7 +261,14 @@ section.card > h2 { margin-top: 0; font-size: 1.1rem; font-weight: 600; }
 section.card > .card-subtitle { opacity: 0.55; font-size: 0.875rem; margin: 0 0 1rem; }
 
 /* === Forms ================================================ */
-.btn-inline { width: auto; }
+button.btn-inline,
+[role="button"].btn-inline,
+input.btn-inline {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .form-actions {
   display: flex;
   justify-content: flex-end;
@@ -192,6 +277,42 @@ section.card > .card-subtitle { opacity: 0.55; font-size: 0.875rem; margin: 0 0 
 }
 .form-actions button,
 .form-actions [role="button"] { width: auto; margin: 0; }
+.filter-form,
+.settings-form {
+  display: flex;
+  align-items: end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.filter-form label,
+.settings-form label {
+  margin: 0;
+  flex: 1 1 16rem;
+}
+.filter-form input,
+.settings-form input {
+  margin-bottom: 0;
+}
+.filter-form button,
+.filter-form [role="button"],
+.settings-form button,
+.settings-form [role="button"] {
+  width: auto;
+  margin: 0;
+}
+.rate-limit-row {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) repeat(2, minmax(10rem, 14rem)) auto;
+  gap: 0.75rem;
+  align-items: end;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--pico-border-color);
+}
+.rate-limit-row:first-of-type { border-top: 0; }
+.rate-limit-row label { margin: 0; }
+.rate-limit-row input { margin-bottom: 0; }
+.rate-limit-row button { width: auto; margin: 0; }
 /* Secondary action stacked below a primary form (e.g. the verify page's
    "Send a new code" under "Verify") — separate it so the two don't crowd. */
 .resend-form { margin-top: 1.5rem; }
@@ -217,7 +338,55 @@ section.card .data-table {
 .data-table tr:last-child td { border-bottom: none; }
 .data-table .actions-cell { white-space: nowrap; text-align: right; }
 .data-table .actions-cell form { margin: 0; display: inline-block; }
-.data-table .actions-cell button { width: auto; margin: 0 0 0 0.5rem; padding: 4px 14px; font-size: 0.8rem; }
+.data-table .actions-cell button,
+.data-table .actions-cell [role="button"] {
+  width: auto;
+  margin: 0 0 0 0.5rem;
+  padding: 4px 14px;
+  font-size: 0.8rem;
+}
+.row-menu {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+}
+.row-menu summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.85rem;
+  padding: 4px 12px;
+  border: 1px solid var(--pico-border-color);
+  border-radius: 999px;
+  color: var(--pico-color);
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.8rem;
+}
+.row-menu summary::-webkit-details-marker { display: none; }
+.row-menu[open] summary,
+.row-menu summary:hover {
+  color: var(--pico-primary);
+  border-color: var(--pico-primary);
+}
+.row-menu > div {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.35rem);
+  z-index: 15;
+  min-width: 10rem;
+  padding: 0.35rem;
+  border: 1px solid var(--pico-border-color);
+  border-radius: 8px;
+  background: var(--pico-card-background-color);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+}
+.row-menu a {
+  display: block;
+  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.row-menu a:hover { background: rgba(129, 140, 248, 0.12); }
 .data-table .label-cell details { display: inline-block; }
 .data-table .label-cell .label-edit-toggle {
   display: inline-flex; align-items: center; gap: 0.5rem;
@@ -232,6 +401,70 @@ section.card .data-table {
 .data-table .label-cell input { margin: 0; padding: 4px 8px; font-size: 0.85rem; flex: 1; min-width: 8rem; }
 .data-table .label-cell button { width: auto; margin: 0; padding: 4px 10px; font-size: 0.8rem; }
 .data-table code { font-size: 0.8rem; padding: 1px 5px; }
+
+.feature-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.feature-summary button { margin-left: 0.25rem; }
+.scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0.5rem 0.25rem 0;
+}
+.feature-dialog {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.feature-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+.feature-dialog form {
+  width: min(640px, calc(100vw - 2rem));
+  max-height: min(720px, calc(100vh - 2rem));
+  margin: 0;
+  padding: 1.25rem;
+  border: 1px solid var(--pico-border-color);
+  border-radius: 8px;
+  background: var(--pico-card-background-color);
+}
+.feature-dialog header {
+  margin-bottom: 1rem;
+}
+.feature-dialog h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.2rem;
+}
+.feature-dialog-body {
+  display: grid;
+  gap: 0.75rem;
+  max-height: min(430px, 58vh);
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+.feature-dialog-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--pico-border-color);
+  border-radius: 8px;
+}
+.feature-dialog-row input { margin: 0; }
+.feature-dialog-row small {
+  display: block;
+  margin: 0.2rem 0 0;
+  opacity: 0.6;
+}
 
 /* === Badges =============================================== */
 .badge {
@@ -351,8 +584,64 @@ dl.concept-list code { font-size: 0.85em; padding: 1px 5px; }
 /* === Responsive =========================================== */
 @media (max-width: 640px) {
   .app-header .user-email { display: none; }
+  .app-nav {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+  }
+  .app-nav .nav-links {
+    order: 2;
+    flex: 0 0 100%;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+  .account-menu > summary {
+    max-width: none;
+    font-size: 0;
+  }
+  .account-menu > summary::before {
+    content: "Account";
+    font-size: 1rem;
+  }
+  .nav-menu-content {
+    left: auto;
+    right: 0;
+  }
   main.app-main { padding: 1rem 1rem 2rem; }
   .page-header h1 { font-size: 1.5rem; }
   section.card { padding: 1rem; }
+  .filter-form,
+  .settings-form,
+  .rate-limit-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .filter-form button,
+  .filter-form [role="button"],
+  .settings-form button,
+  .settings-form [role="button"],
+  .rate-limit-row button {
+    width: 100%;
+  }
+  .players-table th:nth-child(2),
+  .players-table td:nth-child(2),
+  .players-table th:nth-child(3),
+  .players-table td:nth-child(3),
+  .players-table th:nth-child(4),
+  .players-table td:nth-child(4),
+  .players-table th:nth-child(5),
+  .players-table td:nth-child(5) {
+    display: none;
+  }
+  .players-table th,
+  .players-table td {
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
+  }
+  .players-table .actions-cell [role="button"] {
+    margin-left: 0;
+    padding: 4px 10px;
+  }
   dl.concept-list { grid-template-columns: 1fr; row-gap: 0.5rem; }
 }

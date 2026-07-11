@@ -434,6 +434,13 @@ type PlatformAuditLog struct {
 	OccurredAt  pgtype.Timestamptz
 }
 
+type PlatformSignupConfig struct {
+	ID                        int16
+	PublicTenantSignupEnabled bool
+	UpdatedBy                 *int64
+	UpdatedAt                 pgtype.Timestamptz
+}
+
 type PlayerAccount struct {
 	ID                                pgtype.UUID
 	Email                             string
@@ -669,6 +676,24 @@ type TenantPlayerBan struct {
 	Reason          *string
 	CreatedBy       *int64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type TenantSignupRequest struct {
+	ID                  int64
+	Email               string
+	RequestedTenantName string
+	FinalTenantName     *string
+	ProjectDescription  string
+	StudioName          *string
+	Status              string
+	CodeHash            []byte
+	CodeExpiresAt       pgtype.Timestamptz
+	ReviewedByUserID    *int64
+	ReviewedAt          pgtype.Timestamptz
+	ReviewReason        *string
+	TenantID            *int64
+	AcceptedAt          pgtype.Timestamptz
+	CreatedAt           pgtype.Timestamptz
 }
 
 type UsageSample struct {

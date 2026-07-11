@@ -9,7 +9,6 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -170,55 +169,31 @@ func TestPlayerAccount_epoch_bump_revokes_session(t *testing.T) {
 	assert.Equal(t, "/v1/players/account/login", post.Header.Get("Location"))
 }
 
-// TestPlayerAccount_public_join_respects_effective_policy proves a signed-in
-// account can publicly join a project only when the effective policy (tenant
-// AND project) allows it; a disabled toggle makes it invite-only.
-func TestPlayerAccount_public_join_respects_effective_policy(t *testing.T) {
+// TestPlayerAccount_direct_join_route_is_not_available proves players cannot
+// link themselves into a project by posting a project ID. Projects must link
+// players through invite acceptance or authenticated project/API-key flows.
+func TestPlayerAccount_direct_join_route_is_not_available(t *testing.T) {
 	c := startCluster(t)
 	srv, _ := newControlPanelAndPlayerServer(t, c)
 	base := srv.URL + "/v1/players/account"
 	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "join-key")
 
-	// Enabled project: the account joins and a player is linked.
 	const email = "joiner@example.com"
 	seedVerifiedPlayerAccount(t, c, email, "correct-horse-battery-staple")
 	client := loginPlayerAccount(t, base, email, "correct-horse-battery-staple")
 
 	csrf := getPlayerCSRF(t, client, base+"/")
-	resp, err := client.PostForm(base+"/join", url.Values{"_csrf": {csrf}, "project_id": {strconv.FormatInt(projectID, 10)}})
+	resp, err := client.PostForm(base+"/join", url.Values{"_csrf": {csrf}, "project_id": {"1"}})
 	require.NoError(t, err)
 	resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Contains(t, resp.Header.Get("Location"), "flash=")
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	var linked int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM project_players e
 		 JOIN player_accounts a ON a.id = e.player_account_id
 		 WHERE e.project_id = $1 AND a.email = $2`, projectID, email).Scan(&linked))
-	assert.Equal(t, 1, linked)
-
-	// Disable public joining for the project; a fresh account is refused.
-	_, err = c.bootstrapPool.Exec(context.Background(),
-		`UPDATE projects SET public_joining_enabled = false WHERE id = $1`, projectID)
-	require.NoError(t, err)
-
-	const email2 = "joiner2@example.com"
-	seedVerifiedPlayerAccount(t, c, email2, "correct-horse-battery-staple")
-	client2 := loginPlayerAccount(t, base, email2, "correct-horse-battery-staple")
-	csrf = getPlayerCSRF(t, client2, base+"/")
-	resp, err = client2.PostForm(base+"/join", url.Values{"_csrf": {csrf}, "project_id": {strconv.FormatInt(projectID, 10)}})
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Contains(t, resp.Header.Get("Location"), "error=")
-
-	var linked2 int
-	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM project_players e
-		 JOIN player_accounts a ON a.id = e.player_account_id
-		 WHERE e.project_id = $1 AND a.email = $2`, projectID, email2).Scan(&linked2))
-	assert.Equal(t, 0, linked2, "invite-only project must not create a link")
+	assert.Equal(t, 0, linked, "direct player join route must not create a link")
 }
 
 func loginPlayerAccount(t *testing.T, base, email, password string) *http.Client {

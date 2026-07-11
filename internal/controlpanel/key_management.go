@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +30,17 @@ var (
 	errKeyNotInTenant     = errors.New("control panel: api key not found in tenant")
 	errScopeNotGrantable  = errors.New("control panel: feature is not enabled for this key")
 )
+
+var managedAPIKeyScopes = []string{
+	tenant.ScopeMatchmaker,
+	tenant.ScopeFleet,
+	tenant.ScopeP2PRelay,
+}
+
+type scopeChange struct {
+	Scope string
+	Grant bool
+}
 
 type createKeyInput struct {
 	TenantID  int64
@@ -132,15 +145,83 @@ func scopeFeature(scope string) (rbac.Feature, bool) {
 	}
 }
 
-// setAPIKeyScope grants or revokes a single feature scope on a key. Granting
-// re-validates that the feature is enabled so a scope can never outlive its
-// feature_grant / env switch; revoking is always allowed.
-func (h *Handler) setAPIKeyScope(ctx context.Context, actorID, tenantID, apiKeyID int64, scope string, grant bool) error {
+func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
+	values := form["scopes"]
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, scope := range values {
+		if !isManagedAPIKeyScope(scope) {
+			return nil, errInvalidScope
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		out = append(out, scope)
+	}
+	return out, nil
+}
+
+func managedScopeChanges(current, desired []string) []scopeChange {
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, scope := range desired {
+		if isManagedAPIKeyScope(scope) {
+			desiredSet[scope] = struct{}{}
+		}
+	}
+	changes := make([]scopeChange, 0, len(managedAPIKeyScopes))
+	for _, scope := range managedAPIKeyScopes {
+		hasCurrent := slices.Contains(current, scope)
+		_, wants := desiredSet[scope]
+		if hasCurrent == wants {
+			continue
+		}
+		changes = append(changes, scopeChange{Scope: scope, Grant: wants})
+	}
+	return changes
+}
+
+func applyManagedScopes(current, desired []string) []string {
+	next := make([]string, 0, len(current)+len(desired))
+	desiredSet := make(map[string]struct{}, len(desired))
+	for _, scope := range desired {
+		if isManagedAPIKeyScope(scope) {
+			desiredSet[scope] = struct{}{}
+		}
+	}
+	for _, scope := range current {
+		if isManagedAPIKeyScope(scope) {
+			continue
+		}
+		if !slices.Contains(next, scope) {
+			next = append(next, scope)
+		}
+	}
+	for _, scope := range managedAPIKeyScopes {
+		if _, ok := desiredSet[scope]; ok {
+			next = append(next, scope)
+		}
+	}
+	return next
+}
+
+func isManagedAPIKeyScope(scope string) bool {
+	for _, managed := range managedAPIKeyScopes {
+		if scope == managed {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenantID, apiKeyID int64, desired []string) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	if _, ok := scopeFeature(scope); !ok {
-		return errInvalidScope
+	for _, scope := range desired {
+		if !isManagedAPIKeyScope(scope) {
+			return errInvalidScope
+		}
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
@@ -152,50 +233,39 @@ func (h *Handler) setAPIKeyScope(ctx context.Context, actorID, tenantID, apiKeyI
 		if err != nil {
 			return fmt.Errorf("get api key scopes: %w", err)
 		}
-		if grant && !h.scopeGrantable(ctx, tenantID, row.ProjectID, scope) {
-			return errScopeNotGrantable
+		changes := managedScopeChanges(row.Scopes, desired)
+		if len(changes) == 0 {
+			return nil
 		}
-		next := applyScope(row.Scopes, scope, grant)
+		for _, change := range changes {
+			if change.Grant && !h.scopeGrantable(ctx, tenantID, row.ProjectID, change.Scope) {
+				return errScopeNotGrantable
+			}
+		}
+		next := applyManagedScopes(row.Scopes, desired)
 		if err := q.SetAPIKeyScopes(ctx, sqlcgen.SetAPIKeyScopesParams{ID: apiKeyID, Scopes: next}); err != nil {
 			return fmt.Errorf("set api key scopes: %w", err)
 		}
-		action := "control_panel.api_key.scope_revoke"
-		if grant {
-			action = "control_panel.api_key.scope_grant"
+		for _, change := range changes {
+			action := "control_panel.api_key.scope_revoke"
+			if change.Grant {
+				action = "control_panel.api_key.scope_grant"
+			}
+			if err := auditlog.WritePlatform(ctx, tx, actorID, action, strconv.FormatInt(apiKeyID, 10), map[string]any{
+				"scope":     change.Scope,
+				"tenant_id": tenantID,
+			}); err != nil {
+				return err
+			}
 		}
-		return auditlog.WritePlatform(ctx, tx, actorID, action, strconv.FormatInt(apiKeyID, 10), map[string]any{
-			"scope":     scope,
-			"tenant_id": tenantID,
-		})
+		return nil
 	}); err != nil {
 		return err
 	}
 	if h.cache != nil {
-		// Drop any cached rate-limit bucket so the middleware re-reads the key
-		// (and its refreshed scopes) on the next request.
 		_ = h.cache.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
 	}
 	return nil
-}
-
-// applyScope returns scopes with scope added (grant) or removed (revoke),
-// preserving order and de-duplicating.
-func applyScope(scopes []string, scope string, grant bool) []string {
-	out := make([]string, 0, len(scopes)+1)
-	seen := false
-	for _, s := range scopes {
-		if s == scope {
-			seen = true
-			if !grant {
-				continue
-			}
-		}
-		out = append(out, s)
-	}
-	if grant && !seen {
-		out = append(out, scope)
-	}
-	return out
 }
 
 func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOption, error) {
@@ -214,7 +284,7 @@ func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOp
 		}
 		out = make([]ProjectOption, 0, len(rows))
 		for _, row := range rows {
-			opt := ProjectOption{ID: row.ID, Name: row.Name, PublicJoiningEnabled: row.PublicJoiningEnabled}
+			opt := ProjectOption{ID: row.ID, Name: row.Name}
 			if row.CreatedAt.Valid {
 				opt.CreatedAt = row.CreatedAt.Time
 			}

@@ -39,7 +39,7 @@ func (h *Handler) friendsPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
 		return
 	}
-	view := FriendsView{CSRFToken: h.csrf(r), Flash: r.URL.Query().Get("flash"), FlashError: r.URL.Query().Get("error")}
+	view := FriendsView{AccountEmail: sess.Email, CSRFToken: h.csrf(r), Flash: r.URL.Query().Get("flash"), FlashError: r.URL.Query().Get("error")}
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		var e error
 		view.Accepted, e = h.loadFriendGroup(r.Context(), tx, sess.AccountID, "accepted")

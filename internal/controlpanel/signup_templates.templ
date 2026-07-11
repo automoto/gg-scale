@@ -1,0 +1,157 @@
+package controlpanel
+
+// Public tenant sign-up: request form, closed/acknowledgement pages, the
+// platform-admin review page, and the invite-acceptance (set-password) page.
+
+templ TenantSignupPage(vm TenantSignupFormView) {
+	@authLayout("Request a ggscale tenant") {
+		<h1>Request a ggscale tenant</h1>
+		<p class="subtitle">Tell us about your game. A platform admin reviews every request; if approved, we'll email you a link to finish setting up.</p>
+		<form method="post" action="/v1/control-panel/request-access">
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<label>
+				Tenant name
+				<input name="tenant_name" value={ vm.TenantName } required autofocus aria-describedby="tenant_name-error"/>
+				@fieldError(vm.FieldErrors, "tenant_name")
+			</label>
+			<label>
+				Your email
+				<input name="email" type="email" value={ vm.Email } autocomplete="email" required aria-describedby="email-error"/>
+				@fieldError(vm.FieldErrors, "email")
+			</label>
+			<label>
+				Project / game description
+				<textarea name="project_description" rows="4" required aria-describedby="project_description-error">{ vm.ProjectDescription }</textarea>
+				@fieldError(vm.FieldErrors, "project_description")
+			</label>
+			<label>
+				Studio name <span class="muted">(optional)</span>
+				<input name="studio_name" value={ vm.StudioName } aria-describedby="studio_name-error"/>
+				@fieldError(vm.FieldErrors, "studio_name")
+			</label>
+			<div class="form-actions">
+				<button type="submit" class="btn-inline">Submit request</button>
+			</div>
+		</form>
+	}
+}
+
+templ TenantSignupClosedPage() {
+	@authLayout("Sign-ups closed — ggscale") {
+		<h1>Sign-ups are closed</h1>
+		<p class="subtitle">Public tenant sign-up isn't open right now. If you're expecting access, contact the platform administrator.</p>
+	}
+}
+
+templ TenantSignupAcknowledgePage() {
+	@authLayout("Request received — ggscale") {
+		<h1>Request received</h1>
+		<p class="subtitle">Thanks — your request is in. A platform admin will review it, and if approved you'll get an email with a link to finish setting up your tenant.</p>
+	}
+}
+
+templ TenantSignupRequestsPage(vm TenantSignupRequestsView) {
+	@appLayout("Tenant sign-ups — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSignups, IsPlatformAdmin: true}) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Tenant sign-ups</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Tenant sign-ups</p>
+				<h1>Tenant sign-ups</h1>
+				<p class="subtitle">Developers request a tenant at <code>/v1/control-panel/request-access</code>. Nothing is granted until you approve it here; approving emails an invite and the tenant is created when they accept.</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Public sign-up</h2>
+			if vm.SignupEnabled {
+				<p>Status: <span class="badge badge-active">enabled</span> — the request form is live.</p>
+				<form method="post" action="/v1/control-panel/admin/tenant-signups/config" data-confirm="Disable public tenant sign-up? The request form stops accepting submissions.">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="enabled" value=""/>
+					<button type="submit" class="contrast outline btn-inline">Disable public sign-up</button>
+				</form>
+			} else {
+				<p>Status: <span class="badge badge-revoked">disabled</span> — the request form is closed (default).</p>
+				<form method="post" action="/v1/control-panel/admin/tenant-signups/config">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="enabled" value="on"/>
+					<button type="submit" class="btn-inline">Enable public sign-up</button>
+				</form>
+			}
+		</section>
+		<section class="card">
+			<h2>Pending requests</h2>
+			if len(vm.Requests) == 0 {
+				<div class="empty-state"><p>No pending requests.</p></div>
+			} else {
+				for _, req := range vm.Requests {
+					<article class="card">
+						<dl class="kv">
+							<dt>Requested name</dt>
+							<dd>{ req.TenantName }</dd>
+							<dt>Email</dt>
+							<dd><code>{ req.Email }</code></dd>
+							if req.StudioName != "" {
+								<dt>Studio</dt>
+								<dd>{ req.StudioName }</dd>
+							}
+							<dt>Submitted</dt>
+							<dd>{ timeString(req.CreatedAt) }</dd>
+							<dt>Description</dt>
+							<dd>{ req.ProjectDescription }</dd>
+						</dl>
+						<form method="post" action={ templ.URL("/v1/control-panel/admin/tenant-signups/" + stringFromInt(req.ID) + "/approve") } class="settings-form">
+							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+							<label>
+								Tenant name (edit before approving if needed)
+								<input name="tenant_name" value={ req.TenantName } required/>
+							</label>
+							<button type="submit" class="btn-inline">Approve &amp; email invite</button>
+						</form>
+						<form method="post" action={ templ.URL("/v1/control-panel/admin/tenant-signups/" + stringFromInt(req.ID) + "/deny") } class="settings-form" data-confirm="Deny this request? The email is blocked from re-applying.">
+							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+							<label>
+								Reason <span class="muted">(optional, included in the email)</span>
+								<input name="reason"/>
+							</label>
+							<button type="submit" class="contrast outline btn-inline">Deny</button>
+						</form>
+					</article>
+				}
+			}
+		</section>
+	}
+}
+
+templ TenantSignupAcceptPage(vm TenantSignupAcceptView) {
+	@authLayout("Set up your tenant — ggscale") {
+		<h1>Set up your tenant</h1>
+		if vm.Error != "" {
+			<p role="alert">{ vm.Error }</p>
+		} else {
+			<p class="subtitle">Your request for <strong>{ vm.TenantName }</strong> was approved. Finish setting up your account to create it.</p>
+			<p>Email: <code>{ vm.Email }</code></p>
+			<form method="post" action="/v1/control-panel/request-access/accept">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<input type="hidden" name="code" value={ vm.Code }/>
+				if vm.NewUser {
+					<label>
+						Set a password (≥ 12 chars)
+						<input name="password" type="password" autocomplete="new-password" minlength="12" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				} else {
+					<p>You already have a ggscale account. Enter your existing password to confirm and create this tenant.</p>
+					<label>
+						Password
+						<input name="password" type="password" autocomplete="current-password" required aria-describedby="password-error"/>
+						@fieldError(vm.FieldErrors, "password")
+					</label>
+				}
+				<div class="form-actions">
+					<button type="submit" class="btn-inline">Create tenant</button>
+				</div>
+			</form>
+		}
+	}
+}

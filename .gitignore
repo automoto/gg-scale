@@ -45,3 +45,7 @@ ggscale-seed
 sdk-go
 .playwright-mcp/*
 node_modules*
+scripts/ui_playwright_audit.mjs
+scripts/ui_visual_screenshots.mjs
+package-lock.json
+package.json

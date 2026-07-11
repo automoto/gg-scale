@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	ApproveTenantSignupRequest(ctx context.Context, arg ApproveTenantSignupRequestParams) (int64, error)
 	// Edge id if an accepted friendship exists in either direction.
 	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
 	// Bump every player of an account within a tenant (tenant-ban path), so all
@@ -51,6 +52,7 @@ type Querier interface {
 	ConsumeControlPanelTOTPBackupCode(ctx context.Context, arg ConsumeControlPanelTOTPBackupCodeParams) (int64, error)
 	ConsumePlayerAccountTOTPBackupCode(ctx context.Context, arg ConsumePlayerAccountTOTPBackupCodeParams) (int64, error)
 	ControlPanelCreateTenant(ctx context.Context, arg ControlPanelCreateTenantParams) (ControlPanelCreateTenantRow, error)
+	ControlPanelCreateTenantBare(ctx context.Context, arg ControlPanelCreateTenantBareParams) (int64, error)
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
@@ -120,6 +122,7 @@ type Querier interface {
 	// filters tenant_id explicitly. Enforcement runs in both tenant Pool.Q and
 	// account BootstrapQ contexts.
 	CreateTenantPlayerBan(ctx context.Context, arg CreateTenantPlayerBanParams) error
+	CreateTenantSignupRequest(ctx context.Context, arg CreateTenantSignupRequestParams) (CreateTenantSignupRequestRow, error)
 	// Used by invite acceptance: creates a new user who is verified by
 	// definition (they had to click the invite link in their inbox).
 	CreateVerifiedControlPanelUser(ctx context.Context, arg CreateVerifiedControlPanelUserParams) (CreateVerifiedControlPanelUserRow, error)
@@ -170,6 +173,7 @@ type Querier interface {
 	// paired match row's retention window — otherwise a poll would 404 while the
 	// match is still recoverable.
 	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
+	DenyTenantSignupRequest(ctx context.Context, arg DenyTenantSignupRequestParams) (int64, error)
 	// TTL enforcement: unclaimed queued tickets past expires_at flip to
 	// 'failed'. Claimed tickets are left alone — the claim path settles them.
 	ExpireMatchmakerTickets(ctx context.Context) (int64, error)
@@ -293,6 +297,7 @@ type Querier interface {
 	// Project → tenant lookup (privileged; used by the player UI which knows
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
+	GetPublicSignupEnabled(ctx context.Context) (bool, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid. revoked_reason lets the
@@ -301,6 +306,9 @@ type Querier interface {
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error)
+	// Acceptance lookup: only an approved request with a live code is acceptable.
+	GetTenantSignupRequestByCodeHash(ctx context.Context, codeHash []byte) (GetTenantSignupRequestByCodeHashRow, error)
+	GetTenantSignupRequestByID(ctx context.Context, id int64) (GetTenantSignupRequestByIDRow, error)
 	// The tenant's billing tier, used to show the correct compiled default on the
 	// rate-limits page (enforcement keys off the same tier via the API key).
 	GetTenantTier(ctx context.Context, id int64) (string, error)
@@ -379,6 +387,7 @@ type Querier interface {
 	// Returns unexpired invites for the target user, enriched with the sender's
 	// email and optional xuid for display.
 	ListPendingGameInvites(ctx context.Context, toPlayerID int64) ([]ListPendingGameInvitesRow, error)
+	ListPendingTenantSignupRequests(ctx context.Context) ([]ListPendingTenantSignupRequestsRow, error)
 	ListPlatformAdminInvitations(ctx context.Context) ([]ListPlatformAdminInvitationsRow, error)
 	ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsRow, error)
 	ListPlayerInvitationsForProject(ctx context.Context, projectID int64) ([]ListPlayerInvitationsForProjectRow, error)
@@ -415,6 +424,8 @@ type Querier interface {
 	MarkPlayerInvitationAccepted(ctx context.Context, id int64) error
 	MarkPlayerVerified(ctx context.Context, id int64) error
 	MarkPlayerVerifiedByID(ctx context.Context, id int64) error
+	// Clears the code hash so the magic link can't be replayed after acceptance.
+	MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) error
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 	// page. Returns the tenant_id so the caller can SET app.tenant_id and
 	// continue under normal RLS enforcement.
@@ -521,6 +532,7 @@ type Querier interface {
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
 	SetPlayerVerificationCodeByID(ctx context.Context, arg SetPlayerVerificationCodeByIDParams) error
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
+	SetPublicSignupEnabled(ctx context.Context, arg SetPublicSignupEnabledParams) error
 	SetTenantPublicJoining(ctx context.Context, enabled bool) error
 	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error)
@@ -530,6 +542,10 @@ type Querier interface {
 	// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
 	// detached context so it isn't tied to any request lifetime.
 	SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (int64, error)
+	// A name is taken if an active tenant has it, or another live (pending/approved)
+	// signup request claims it. exclude_request_id lets the approve re-check ignore
+	// the request being approved; pass 0 at submit time.
+	TenantNameTaken(ctx context.Context, arg TenantNameTakenParams) (bool, error)
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
 	TouchControlPanelSession(ctx context.Context, arg TouchControlPanelSessionParams) error
 	// Returns rows affected (0 when the caller isn't a member of the session)

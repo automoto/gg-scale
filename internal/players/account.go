@@ -12,15 +12,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
@@ -87,13 +86,13 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view := AccountHomeView{
-		Email:          sess.Email,
-		DisplayName:    sess.DisplayName,
-		Projects:       projects,
-		CSRFToken:      h.csrf(r),
-		Flash:          r.URL.Query().Get("flash"),
-		FlashError:     r.URL.Query().Get("error"),
-		RemoteAddrRows: remoteAddrRows(addrs),
+		Email:           sess.Email,
+		DisplayName:     sess.DisplayName,
+		Projects:        projects,
+		CSRFToken:       h.csrf(r),
+		Flash:           r.URL.Query().Get("flash"),
+		FlashError:      r.URL.Query().Get("error"),
+		RemoteAddrCount: remoteAddrCount(addrs),
 	}
 	webutil.Render(r, w, AccountHomePage(view))
 }
@@ -102,9 +101,204 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 // per slot (LAN IP, public IP, DNS, iroh).
 const remoteAddrFormRows = 4
 
-// accountRemoteAddrUpdate is the player-site owner write path for remote
-// addresses. Validation matches the JSON API (internal/remoteaddr).
-func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request) {
+type connectionAddressSlot string
+
+const (
+	connectionSlotIPLAN    connectionAddressSlot = "ip-lan"
+	connectionSlotIPPublic connectionAddressSlot = "ip-public"
+	connectionSlotDNS      connectionAddressSlot = "dns"
+	connectionSlotIroh     connectionAddressSlot = "iroh"
+)
+
+func (h *Handler) getAccountRemoteAddrs(ctx context.Context, accountID uuid.UUID) (sqlcgen.GetPlayerAccountRemoteAddrsRow, error) {
+	var addrs sqlcgen.GetPlayerAccountRemoteAddrsRow
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		addrs, qerr = sqlcgen.New(tx).GetPlayerAccountRemoteAddrs(ctx, toPgUUID(accountID))
+		return qerr
+	})
+	return addrs, err
+}
+
+// errRemoteAddrSlotOccupied signals that a create/update would land on a slot
+// that already holds an address; handlers turn it into a 422, not a 500.
+var errRemoteAddrSlotOccupied = errors.New("players: connection address slot already set")
+
+// mutateAccountRemoteAddrs runs a read-modify-write over the four address
+// columns in a single transaction, locking the account row first so concurrent
+// per-slot edits serialize instead of clobbering each other's columns.
+func (h *Handler) mutateAccountRemoteAddrs(ctx context.Context, accountID uuid.UUID, mutate func(*sqlcgen.GetPlayerAccountRemoteAddrsRow) error) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if _, err := tx.Exec(ctx, `SELECT 1 FROM player_accounts WHERE id = $1 FOR UPDATE`, toPgUUID(accountID)); err != nil {
+			return err
+		}
+		addrs, err := q.GetPlayerAccountRemoteAddrs(ctx, toPgUUID(accountID))
+		if err != nil {
+			return err
+		}
+		if err := mutate(&addrs); err != nil {
+			return err
+		}
+		return q.SetPlayerAccountRemoteAddrs(ctx, sqlcgen.SetPlayerAccountRemoteAddrsParams{
+			ID:                 toPgUUID(accountID),
+			RemoteAddrIpLan:    addrs.RemoteAddrIpLan,
+			RemoteAddrIpPublic: addrs.RemoteAddrIpPublic,
+			RemoteAddrDns:      addrs.RemoteAddrDns,
+			RemoteAddrIroh:     addrs.RemoteAddrIroh,
+		})
+	})
+}
+
+func connectionAddressFromForm(form url.Values) (remoteaddr.Address, map[string]string, error) {
+	t, ok := remoteaddr.ParseType(form.Get("addr_type"))
+	if !ok {
+		return remoteaddr.Address{}, map[string]string{"addr_type": "Pick an address type"}, fmt.Errorf("pick an address type")
+	}
+	raw := strings.TrimSpace(form.Get("addr_value"))
+	addr, err := remoteaddr.Parse(t, raw)
+	if err != nil {
+		return remoteaddr.Address{}, map[string]string{"addr_value": err.Error()}, err
+	}
+	return addr, nil, nil
+}
+
+func parseConnectionAddressSlot(raw string) (connectionAddressSlot, bool) {
+	switch connectionAddressSlot(raw) {
+	case connectionSlotIPLAN, connectionSlotIPPublic, connectionSlotDNS, connectionSlotIroh:
+		return connectionAddressSlot(raw), true
+	default:
+		return "", false
+	}
+}
+
+func slotForConnectionAddress(addr remoteaddr.Address) connectionAddressSlot {
+	switch addr.Type {
+	case remoteaddr.TypeIP:
+		if addr.Scope == remoteaddr.ScopeLAN {
+			return connectionSlotIPLAN
+		}
+		return connectionSlotIPPublic
+	case remoteaddr.TypeDNS:
+		return connectionSlotDNS
+	default:
+		return connectionSlotIroh
+	}
+}
+
+func remoteAddrSlotType(slot connectionAddressSlot) remoteaddr.Type {
+	switch slot {
+	case connectionSlotDNS:
+		return remoteaddr.TypeDNS
+	case connectionSlotIroh:
+		return remoteaddr.TypeIroh
+	default:
+		return remoteaddr.TypeIP
+	}
+}
+
+func remoteAddrSlotLabel(slot connectionAddressSlot) string {
+	switch slot {
+	case connectionSlotIPLAN:
+		return "LAN IP address"
+	case connectionSlotIPPublic:
+		return "public IP address"
+	case connectionSlotDNS:
+		return "DNS name"
+	default:
+		return "Iroh endpoint ID"
+	}
+}
+
+func remoteAddrSlotValue(addrs sqlcgen.GetPlayerAccountRemoteAddrsRow, slot connectionAddressSlot) *string {
+	switch slot {
+	case connectionSlotIPLAN:
+		return addrs.RemoteAddrIpLan
+	case connectionSlotIPPublic:
+		return addrs.RemoteAddrIpPublic
+	case connectionSlotDNS:
+		return addrs.RemoteAddrDns
+	default:
+		return addrs.RemoteAddrIroh
+	}
+}
+
+func applyRemoteAddrSlot(addrs *sqlcgen.GetPlayerAccountRemoteAddrsRow, slot connectionAddressSlot, value *string) {
+	switch slot {
+	case connectionSlotIPLAN:
+		addrs.RemoteAddrIpLan = value
+	case connectionSlotIPPublic:
+		addrs.RemoteAddrIpPublic = value
+	case connectionSlotDNS:
+		addrs.RemoteAddrDns = value
+	case connectionSlotIroh:
+		addrs.RemoteAddrIroh = value
+	}
+}
+
+// remoteAddrCount counts configured address slots without materializing the
+// display rows (each non-nil column is exactly one connection address).
+func remoteAddrCount(row sqlcgen.GetPlayerAccountRemoteAddrsRow) int {
+	n := 0
+	for _, v := range []*string{row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh} {
+		if v != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func connectionAddressRows(row sqlcgen.GetPlayerAccountRemoteAddrsRow) []ConnectionAddressView {
+	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
+	rows := make([]ConnectionAddressView, 0, remoteAddrFormRows)
+	for _, addr := range set.List() {
+		slot := slotForConnectionAddress(addr)
+		rows = append(rows, ConnectionAddressView{
+			Slot:       string(slot),
+			TypeLabel:  remoteAddrSlotLabel(slot),
+			Value:      addr.Value,
+			ScopeLabel: remoteAddrScopeLabel(addr),
+		})
+	}
+	return rows
+}
+
+func (h *Handler) accountRemoteAddrListPage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	addrs, err := h.getAccountRemoteAddrs(r.Context(), sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account remote-addr list", err)
+		return
+	}
+	rows := connectionAddressRows(addrs)
+	webutil.Render(r, w, ConnectionAddressesPage(ConnectionAddressesView{
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Flash:        r.URL.Query().Get("flash"),
+		FlashError:   r.URL.Query().Get("error"),
+		Addresses:    rows,
+		CanAdd:       len(rows) < remoteAddrFormRows,
+	}))
+}
+
+func (h *Handler) accountRemoteAddrNewPage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		TypeValue:    string(remoteaddr.TypeIP),
+	}))
+}
+
+func (h *Handler) accountRemoteAddrCreate(w http.ResponseWriter, r *http.Request) {
 	sess, ok := h.accountSessionFromRequest(r)
 	if !ok {
 		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
@@ -113,64 +307,193 @@ func (h *Handler) accountRemoteAddrUpdate(w http.ResponseWriter, r *http.Request
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	set, err := remoteAddrsFromForm(r.Form)
+	addr, fieldErrors, err := connectionAddressFromForm(r.Form)
 	if err != nil {
-		h.redirectAccountHome(w, r, "", err.Error())
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+			AccountEmail: sess.Email,
+			CSRFToken:    h.csrf(r),
+			TypeValue:    r.Form.Get("addr_type"),
+			Value:        strings.TrimSpace(r.Form.Get("addr_value")),
+			Error:        "Fix the address and try again.",
+			FieldErrors:  fieldErrors,
+		}))
 		return
 	}
-	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerAccountRemoteAddrs(r.Context(), sqlcgen.SetPlayerAccountRemoteAddrsParams{
-			ID:                 toPgUUID(sess.AccountID),
-			RemoteAddrIpLan:    slotValue(set.IPLAN),
-			RemoteAddrIpPublic: slotValue(set.IPPublic),
-			RemoteAddrDns:      slotValue(set.DNS),
-			RemoteAddrIroh:     slotValue(set.Iroh),
-		})
-	}); err != nil {
+	slot := slotForConnectionAddress(addr)
+	err = h.mutateAccountRemoteAddrs(r.Context(), sess.AccountID, func(addrs *sqlcgen.GetPlayerAccountRemoteAddrsRow) error {
+		if remoteAddrSlotValue(*addrs, slot) != nil {
+			return errRemoteAddrSlotOccupied
+		}
+		applyRemoteAddrSlot(addrs, slot, &addr.Value)
+		return nil
+	})
+	if errors.Is(err, errRemoteAddrSlotOccupied) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+			AccountEmail: sess.Email,
+			CSRFToken:    h.csrf(r),
+			TypeValue:    string(addr.Type),
+			Value:        addr.Value,
+			Error:        "That connection address type is already set.",
+			FieldErrors:  map[string]string{"addr_type": remoteAddrSlotLabel(slot) + " is already set"},
+		}))
+		return
+	}
+	if err != nil {
+		webutil.InternalError(w, "account remote-addr create", err)
+		return
+	}
+	h.redirectRemoteAddrs(w, r, "Connection address added.", "")
+}
+
+func (h *Handler) accountRemoteAddrEditPage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	slot, ok := parseConnectionAddressSlot(chi.URLParam(r, "slot"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	addrs, err := h.getAccountRemoteAddrs(r.Context(), sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account remote-addr edit", err)
+		return
+	}
+	value := remoteAddrSlotValue(addrs, slot)
+	if value == nil {
+		http.NotFound(w, r)
+		return
+	}
+	webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Slot:         string(slot),
+		TypeValue:    string(remoteAddrSlotType(slot)),
+		Value:        *value,
+		Editing:      true,
+	}))
+}
+
+func (h *Handler) accountRemoteAddrUpdateSlot(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	slot, ok := parseConnectionAddressSlot(chi.URLParam(r, "slot"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	addr, fieldErrors, err := connectionAddressFromForm(r.Form)
+	if err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+			AccountEmail: sess.Email,
+			CSRFToken:    h.csrf(r),
+			Slot:         string(slot),
+			TypeValue:    r.Form.Get("addr_type"),
+			Value:        strings.TrimSpace(r.Form.Get("addr_value")),
+			Error:        "Fix the address and try again.",
+			FieldErrors:  fieldErrors,
+			Editing:      true,
+		}))
+		return
+	}
+	// The edited value may resolve to a different slot (e.g. a public IP
+	// corrected to a LAN IP): move it there when that slot is free rather than
+	// forcing a delete-then-add.
+	target := slotForConnectionAddress(addr)
+	err = h.mutateAccountRemoteAddrs(r.Context(), sess.AccountID, func(addrs *sqlcgen.GetPlayerAccountRemoteAddrsRow) error {
+		if target != slot && remoteAddrSlotValue(*addrs, target) != nil {
+			return errRemoteAddrSlotOccupied
+		}
+		if target != slot {
+			applyRemoteAddrSlot(addrs, slot, nil)
+		}
+		applyRemoteAddrSlot(addrs, target, &addr.Value)
+		return nil
+	})
+	if errors.Is(err, errRemoteAddrSlotOccupied) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		webutil.Render(r, w, ConnectionAddressFormPage(ConnectionAddressFormView{
+			AccountEmail: sess.Email,
+			CSRFToken:    h.csrf(r),
+			Slot:         string(slot),
+			TypeValue:    r.Form.Get("addr_type"),
+			Value:        strings.TrimSpace(r.Form.Get("addr_value")),
+			Error:        "You already have a " + remoteAddrSlotLabel(target) + ". Edit or remove it first.",
+			FieldErrors:  map[string]string{"addr_value": remoteAddrSlotLabel(target) + " is already set"},
+			Editing:      true,
+		}))
+		return
+	}
+	if err != nil {
 		webutil.InternalError(w, "account remote-addr update", err)
 		return
 	}
-	h.redirectAccountHome(w, r, "Remote addresses saved.", "")
+	h.redirectRemoteAddrs(w, r, "Connection address updated.", "")
 }
 
-// remoteAddrsFromForm reads the typed address rows (addr_type_N /
-// addr_value_N); rows with an empty value are ignored.
-func remoteAddrsFromForm(form url.Values) (remoteaddr.Set, error) {
-	var addrs []remoteaddr.Address
-	for i := 1; i <= remoteAddrFormRows; i++ {
-		value := strings.TrimSpace(form.Get(fmt.Sprintf("addr_value_%d", i)))
-		if value == "" {
-			continue
-		}
-		t, ok := remoteaddr.ParseType(form.Get(fmt.Sprintf("addr_type_%d", i)))
-		if !ok {
-			return remoteaddr.Set{}, fmt.Errorf("row %d: pick an address type", i)
-		}
-		a, err := remoteaddr.Parse(t, value)
-		if err != nil {
-			return remoteaddr.Set{}, fmt.Errorf("row %d: %s", i, err)
-		}
-		addrs = append(addrs, a)
+// accountRemoteAddrDeletePage renders a confirmation step before deletion. The
+// player site ships no JavaScript, so an in-place confirm dialog can't gate the
+// POST — a dedicated GET page is the JS-less equivalent.
+func (h *Handler) accountRemoteAddrDeletePage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
 	}
-	return remoteaddr.NewSet(addrs)
+	slot, ok := parseConnectionAddressSlot(chi.URLParam(r, "slot"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	addrs, err := h.getAccountRemoteAddrs(r.Context(), sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account remote-addr delete confirm", err)
+		return
+	}
+	value := remoteAddrSlotValue(addrs, slot)
+	if value == nil {
+		http.NotFound(w, r)
+		return
+	}
+	webutil.Render(r, w, ConnectionAddressDeletePage(ConnectionAddressDeleteView{
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Slot:         string(slot),
+		TypeLabel:    remoteAddrSlotLabel(slot),
+		Value:        *value,
+	}))
 }
 
-// remoteAddrRows maps stored slots to form rows: saved addresses first (slot
-// order), then empty rows defaulting to the IP type.
-func remoteAddrRows(row sqlcgen.GetPlayerAccountRemoteAddrsRow) []RemoteAddrRowView {
-	set := remoteaddr.SetFromValues(row.RemoteAddrIpLan, row.RemoteAddrIpPublic, row.RemoteAddrDns, row.RemoteAddrIroh)
-	rows := make([]RemoteAddrRowView, 0, remoteAddrFormRows)
-	for _, a := range set.List() {
-		rows = append(rows, RemoteAddrRowView{
-			TypeValue:  string(a.Type),
-			Value:      a.Value,
-			ScopeLabel: remoteAddrScopeLabel(a),
-		})
+func (h *Handler) accountRemoteAddrDelete(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
 	}
-	for len(rows) < remoteAddrFormRows {
-		rows = append(rows, RemoteAddrRowView{TypeValue: string(remoteaddr.TypeIP)})
+	slot, ok := parseConnectionAddressSlot(chi.URLParam(r, "slot"))
+	if !ok {
+		http.NotFound(w, r)
+		return
 	}
-	return rows
+	if err := h.mutateAccountRemoteAddrs(r.Context(), sess.AccountID, func(addrs *sqlcgen.GetPlayerAccountRemoteAddrsRow) error {
+		applyRemoteAddrSlot(addrs, slot, nil)
+		return nil
+	}); err != nil {
+		webutil.InternalError(w, "account remote-addr delete", err)
+		return
+	}
+	h.redirectRemoteAddrs(w, r, "Connection address removed.", "")
 }
 
 func remoteAddrScopeLabel(a remoteaddr.Address) string {
@@ -185,55 +508,8 @@ func remoteAddrScopeLabel(a remoteaddr.Address) string {
 	return ""
 }
 
-func slotValue(a *remoteaddr.Address) *string {
-	if a == nil {
-		return nil
-	}
-	return &a.Value
-}
-
-var (
-	errJoinDisabled   = errors.New("players: public joining disabled for this project")
-	errJoinNotFound   = errors.New("players: project not found")
-	errJoinOtherOwner = errors.New("players: project identity already linked to another account")
-)
-
-// accountJoin links the signed-in account into a project via the public-join
-// flow. Allowed only when the effective policy (tenant AND project) permits;
-// otherwise the project is invite-only. Idempotent for an already-linked
-// account.
-func (h *Handler) accountJoin(w http.ResponseWriter, r *http.Request) {
-	sess, ok := h.accountSessionFromRequest(r)
-	if !ok {
-		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
-		return
-	}
-	if !webutil.ParseForm(w, r) {
-		return
-	}
-	projectID, err := strconv.ParseInt(strings.TrimSpace(r.Form.Get("project_id")), 10, 64)
-	if err != nil || projectID <= 0 {
-		h.redirectAccountHome(w, r, "", "Enter a valid project ID.")
-		return
-	}
-	if err := h.linkAccountToProject(r.Context(), sess, projectID); err != nil {
-		switch {
-		case errors.Is(err, errJoinDisabled):
-			h.redirectAccountHome(w, r, "", "That game is invite-only. Ask the game's team for an invite.")
-		case errors.Is(err, errJoinNotFound):
-			h.redirectAccountHome(w, r, "", "That game could not be found.")
-		case errors.Is(err, errJoinOtherOwner):
-			h.redirectAccountHome(w, r, "", "That game profile is already linked to a different account.")
-		default:
-			webutil.InternalError(w, "account join", err)
-		}
-		return
-	}
-	h.redirectAccountHome(w, r, "Joined the game.", "")
-}
-
-func (h *Handler) redirectAccountHome(w http.ResponseWriter, r *http.Request, flash, flashErr string) {
-	target := accountBasePath + "/"
+func (h *Handler) redirectRemoteAddrs(w http.ResponseWriter, r *http.Request, flash, flashErr string) {
+	target := accountBasePath + "/remote-addrs"
 	switch {
 	case flash != "":
 		target += "?flash=" + url.QueryEscape(flash)
@@ -241,86 +517,6 @@ func (h *Handler) redirectAccountHome(w http.ResponseWriter, r *http.Request, fl
 		target += "?error=" + url.QueryEscape(flashErr)
 	}
 	http.Redirect(w, r, target, http.StatusSeeOther)
-}
-
-// linkAccountToProject enforces the effective public-join policy and links (or
-// creates) the account's player in the target project.
-func (h *Handler) linkAccountToProject(ctx context.Context, sess accountSession, projectID int64) error {
-	// Read the effective policy + tenant via the SECURITY DEFINER helper
-	// (BootstrapQ: no tenant context yet).
-	var (
-		tenantID  int64
-		effective bool
-		found     bool
-	)
-	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		row := tx.QueryRow(ctx,
-			`SELECT tenant_id, effective_enabled FROM project_join_context($1)`, projectID)
-		serr := row.Scan(&tenantID, &effective)
-		if errors.Is(serr, pgx.ErrNoRows) {
-			return nil
-		}
-		if serr != nil {
-			return serr
-		}
-		found = true
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !found {
-		return errJoinNotFound
-	}
-	if !effective {
-		return errJoinDisabled
-	}
-
-	accountUUID := toPgUUID(sess.AccountID)
-	tctx := db.WithTenant(ctx, tenantID)
-	return h.pool.Q(tctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		// A tenant-banned account cannot join / re-link.
-		if _, berr := q.IsAccountBannedInTenant(tctx, sqlcgen.IsAccountBannedInTenantParams{
-			TenantID: tenantID, PlayerAccountID: accountUUID,
-		}); berr == nil {
-			return errJoinDisabled
-		} else if !errors.Is(berr, pgx.ErrNoRows) {
-			return berr
-		}
-		emailPtr := &sess.Email
-		existing, err := q.GetPlayerForAccountLink(tctx, sqlcgen.GetPlayerForAccountLinkParams{
-			ProjectID: projectID,
-			Email:     emailPtr,
-		})
-		switch {
-		case err == nil:
-			// A row already exists for this email in the project.
-			if existing.PlayerAccountID.Valid {
-				if existing.PlayerAccountID == accountUUID {
-					return nil // idempotent: already linked to this account
-				}
-				return errJoinOtherOwner
-			}
-			return q.LinkPlayerToAccount(tctx, sqlcgen.LinkPlayerToAccountParams{
-				ID:              existing.ID,
-				PlayerAccountID: accountUUID,
-			})
-		case errors.Is(err, pgx.ErrNoRows):
-			externalID, gerr := webutil.RandomHex("user_", 16)
-			if gerr != nil {
-				return gerr
-			}
-			_, cerr := q.CreateLinkedPlayer(tctx, sqlcgen.CreateLinkedPlayerParams{
-				ProjectID:       projectID,
-				ExternalID:      externalID,
-				Email:           emailPtr,
-				PlayerAccountID: accountUUID,
-			})
-			return cerr
-		default:
-			return err
-		}
-	})
 }
 
 // --- mutating handlers -----------------------------------------------------

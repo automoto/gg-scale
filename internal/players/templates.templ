@@ -6,6 +6,14 @@ import "github.com/ggscale/ggscale/internal/webassets"
 
 func pid(n int64) string { return strconv.FormatInt(n, 10) }
 
+type playerNavDestination string
+
+const (
+	playerNavAccount playerNavDestination = "account"
+	playerNavFriends playerNavDestination = "friends"
+	playerNavSecurity playerNavDestination = "security"
+)
+
 templ playerHead(title string) {
 	<head>
 		<meta charset="utf-8"/>
@@ -17,18 +25,52 @@ templ playerHead(title string) {
 	</head>
 }
 
-// playerLayout is the wide content shell for signed-in account pages
-// (account home, friends). Auth forms use playerAuthLayout instead.
-templ playerLayout(title string) {
+// playerLayout is the wide content shell for signed-in account pages. Auth
+// forms use playerAuthLayout instead.
+func playerAccountNavLabel(email string) string {
+	if email == "" {
+		return "Account"
+	}
+	return email
+}
+
+templ playerLayout(title string, active playerNavDestination, csrfToken, accountEmail string) {
 	<!doctype html>
 	<html lang="en" data-theme="dark">
 		@playerHead(title)
 		<body>
+			<header class="app-header">
+				<nav class="app-nav" aria-label="Player account navigation">
+					<a class="brand" href="/v1/players/account/">ggscale</a>
+					<div class="nav-links">
+						@playerNavLink("/v1/players/account/friends", "Friends", active == playerNavFriends)
+						@playerNavLink("/v1/players/account/2fa", "Security", active == playerNavSecurity)
+					</div>
+					<details class="nav-menu account-menu">
+						<summary>Account</summary>
+						<div class="nav-menu-content">
+							@playerNavLink("/v1/players/account/", playerAccountNavLabel(accountEmail), active == playerNavAccount)
+							<form method="post" action="/v1/players/account/logout">
+								<input type="hidden" name="_csrf" value={ csrfToken }/>
+								<button type="submit" class="secondary outline btn-inline">Sign out</button>
+							</form>
+						</div>
+					</details>
+				</nav>
+			</header>
 			<main class="app-main">
 				{ children... }
 			</main>
 		</body>
 	</html>
+}
+
+templ playerNavLink(href, label string, active bool) {
+	if active {
+		<a href={ templ.URL(href) } aria-current="page">{ label }</a>
+	} else {
+		<a href={ templ.URL(href) }>{ label }</a>
+	}
 }
 
 // playerAuthLayout centers a single card, mirroring the control panel's

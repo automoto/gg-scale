@@ -2,6 +2,7 @@ package controlpanel
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -11,28 +12,6 @@ import (
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
-
-func TestApplyScope_grant_and_revoke(t *testing.T) {
-	cases := []struct {
-		name   string
-		start  []string
-		scope  string
-		grant  bool
-		expect []string
-	}{
-		{"grant to empty", nil, "fleet", true, []string{"fleet"}},
-		{"grant idempotent", []string{"fleet"}, "fleet", true, []string{"fleet"}},
-		{"grant second", []string{"fleet"}, "p2p_relay", true, []string{"fleet", "p2p_relay"}},
-		{"revoke present", []string{"fleet", "p2p_relay"}, "fleet", false, []string{"p2p_relay"}},
-		{"revoke absent", []string{"p2p_relay"}, "fleet", false, []string{"p2p_relay"}},
-		{"revoke last", []string{"fleet"}, "fleet", false, []string{}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.expect, applyScope(c.start, c.scope, c.grant))
-		})
-	}
-}
 
 func TestScopeGrantable_denies_by_default(t *testing.T) {
 	auth, err := rbac.NewMemoryAuthorizer()
@@ -62,6 +41,42 @@ func TestScopeFeature_maps_known_scopes(t *testing.T) {
 
 	_, ok = scopeFeature("mystery")
 	assert.False(t, ok)
+}
+
+func TestParseManagedAPIKeyScopes(t *testing.T) {
+	scopes, err := parseManagedAPIKeyScopes(url.Values{
+		"scopes": {tenant.ScopeMatchmaker, tenant.ScopeFleet, tenant.ScopeFleet},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{tenant.ScopeMatchmaker, tenant.ScopeFleet}, scopes)
+}
+
+func TestParseManagedAPIKeyScopes_rejects_unknown_scope(t *testing.T) {
+	_, err := parseManagedAPIKeyScopes(url.Values{"scopes": {"admin"}})
+
+	assert.ErrorIs(t, err, errInvalidScope)
+}
+
+func TestManagedScopeChanges_reports_grants_and_revokes(t *testing.T) {
+	changes := managedScopeChanges(
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []scopeChange{
+		{Scope: tenant.ScopeFleet, Grant: false},
+		{Scope: tenant.ScopeP2PRelay, Grant: true},
+	}, changes)
+}
+
+func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
+	next := applyManagedScopes(
+		[]string{"storage:read", tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
 }
 
 func TestRandomAPIKey_PrefixByType(t *testing.T) {

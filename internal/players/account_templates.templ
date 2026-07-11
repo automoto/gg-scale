@@ -124,6 +124,7 @@ templ AccountTwoFactorChallengePage(vm AccountTwoFactorChallengeView) {
 }
 
 type AccountTwoFactorView struct {
+	AccountEmail         string
 	CSRFToken            string
 	Available            bool
 	Enabled              bool
@@ -134,7 +135,7 @@ type AccountTwoFactorView struct {
 }
 
 templ AccountTwoFactorPage(vm AccountTwoFactorView) {
-	@playerLayout("Two-factor authentication") {
+	@playerLayout("Two-factor authentication", playerNavSecurity, vm.CSRFToken, vm.AccountEmail) {
 		<h1>Two-factor authentication</h1>
 		if vm.Message != "" {
 			<p class="flash-success">{ vm.Message }</p>
@@ -194,14 +195,15 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 }
 
 type AccountTwoFactorSetupView struct {
-	CSRFToken string
-	QRDataURI string
-	Secret    string
-	Error     string
+	AccountEmail string
+	CSRFToken    string
+	QRDataURI    string
+	Secret       string
+	Error        string
 }
 
 templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
-	@playerLayout("Set up two-factor") {
+	@playerLayout("Set up two-factor", playerNavSecurity, vm.CSRFToken, vm.AccountEmail) {
 		<h1>Set up two-factor authentication</h1>
 		<p class="subtitle">Scan the QR code with an authenticator app (Google Authenticator, Aegis, 1Password, …), then confirm with the 6-digit code it shows.</p>
 		if vm.Error != "" {
@@ -221,13 +223,14 @@ templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
 }
 
 type AccountTwoFactorBackupCodesView struct {
-	CSRFToken string
-	Message   string
-	Codes     []string
+	AccountEmail string
+	CSRFToken    string
+	Message      string
+	Codes        []string
 }
 
 templ AccountTwoFactorBackupCodesPage(vm AccountTwoFactorBackupCodesView) {
-	@playerLayout("Backup codes") {
+	@playerLayout("Backup codes", playerNavSecurity, vm.CSRFToken, vm.AccountEmail) {
 		<h1>Backup codes</h1>
 		if vm.Message != "" {
 			<p class="flash-success">{ vm.Message }</p>
@@ -250,86 +253,238 @@ type LinkedProject struct {
 	ExternalID  string
 }
 
-// RemoteAddrRowView is one typed address row on the account form. ScopeLabel
-// is the server-derived reachability hint ("LAN only", "Public", "LAN").
-type RemoteAddrRowView struct {
-	TypeValue  string
+type AccountHomeView struct {
+	Email           string
+	DisplayName     string
+	Projects        []LinkedProject
+	CSRFToken       string
+	Flash           string
+	FlashError      string
+	RemoteAddrCount int
+}
+
+type ConnectionAddressView struct {
+	Slot       string
+	TypeLabel  string
 	Value      string
 	ScopeLabel string
 }
 
-type AccountHomeView struct {
-	Email          string
-	DisplayName    string
-	Projects       []LinkedProject
-	CSRFToken      string
-	Flash          string
-	FlashError     string
-	RemoteAddrRows []RemoteAddrRowView
+type ConnectionAddressesView struct {
+	AccountEmail string
+	CSRFToken    string
+	Flash        string
+	FlashError   string
+	Addresses    []ConnectionAddressView
+	CanAdd       bool
+}
+
+type ConnectionAddressFormView struct {
+	AccountEmail string
+	CSRFToken    string
+	Slot         string
+	TypeValue    string
+	Value        string
+	Error        string
+	FieldErrors  map[string]string
+	Editing      bool
+}
+
+type ConnectionAddressDeleteView struct {
+	AccountEmail string
+	CSRFToken    string
+	Slot         string
+	TypeLabel    string
+	Value        string
 }
 
 templ AccountHomePage(vm AccountHomeView) {
-	@playerLayout("Account") {
-		<h1>Your gg-scale account</h1>
-		if vm.DisplayName != "" {
-			<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<code>{ vm.Email }</code>).</p>
-		} else {
-			<p class="subtitle">Signed in as <code>{ vm.Email }</code>.</p>
-		}
+	@playerLayout("Account", playerNavAccount, vm.CSRFToken, vm.Email) {
+		<div class="page-header">
+			<div>
+				<h1>Your ggscale account</h1>
+				if vm.DisplayName != "" {
+					<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<code>{ vm.Email }</code>).</p>
+				} else {
+					<p class="subtitle">Signed in as <code>{ vm.Email }</code>.</p>
+				}
+			</div>
+		</div>
 		if vm.Flash != "" {
 			<p class="flash-success">{ vm.Flash }</p>
 		}
 		if vm.FlashError != "" {
 			<p role="alert">{ vm.FlashError }</p>
 		}
-		<h2>Linked games</h2>
-		if len(vm.Projects) == 0 {
-			<p>No games linked yet.</p>
-		} else {
-			<ul>
-				for _, p := range vm.Projects {
-					<li>{ p.ProjectName }</li>
-				}
-			</ul>
-		}
-		<p><a href={ templ.URL("/v1/players/account/friends") }>Manage friends</a></p>
-		<h2>Security</h2>
-		<p><a href={ templ.URL("/v1/players/account/2fa") }>Two-factor authentication</a></p>
-		<h2>Remote addresses</h2>
-		<p class="subtitle">Share an IP address, DNS name, or Iroh endpoint with your accepted friends and the games you play. Never public. LAN addresses only work for friends on your network.</p>
-		<form method="post" action={ templ.URL("/v1/players/account/remote-addrs") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			for i, row := range vm.RemoteAddrRows {
-				<fieldset>
-					<label>Type
-						<select name={ fmt.Sprintf("addr_type_%d", i+1) }>
-							<option value="ip" selected?={ row.TypeValue == "ip" }>IP address</option>
-							<option value="dns" selected?={ row.TypeValue == "dns" }>DNS name</option>
-							<option value="iroh" selected?={ row.TypeValue == "iroh" }>Iroh Endpoint ID</option>
-						</select>
-					</label>
-					<label>Address
-						<input name={ fmt.Sprintf("addr_value_%d", i+1) } type="text" value={ row.Value } maxlength="255"/>
-					</label>
-					if row.ScopeLabel != "" {
-						<small>{ row.ScopeLabel }</small>
-					}
-				</fieldset>
+		<section class="card">
+			<h2>Linked games</h2>
+			if len(vm.Projects) == 0 {
+				<div class="empty-state"><p>No games linked yet.</p></div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Game</th>
+							<th>Player ID</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, p := range vm.Projects {
+							<tr>
+								<td>{ p.ProjectName }</td>
+								<td><code>{ p.ExternalID }</code></td>
+							</tr>
+						}
+					</tbody>
+				</table>
 			}
-			<button type="submit">Save addresses</button>
-		</form>
-		<h2>Join a game</h2>
-		<p class="subtitle">Enter a project ID to link your account. Invite-only games need an invite instead.</p>
-		<form method="post" action={ templ.URL("/v1/players/account/join") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Project ID
-				<input name="project_id" type="text" inputmode="numeric" required/>
-			</label>
-			<button type="submit">Join</button>
-		</form>
-		<form method="post" action={ templ.URL("/v1/players/account/logout") }>
-			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<button class="secondary" type="submit">Sign out</button>
-		</form>
+		</section>
+		<section class="card">
+			<h2>Connection addresses</h2>
+			if vm.RemoteAddrCount == 0 {
+				<p>No connection addresses added.</p>
+			} else {
+				<p>{ fmt.Sprintf("%d configured", vm.RemoteAddrCount) }</p>
+			}
+			<p><a href={ templ.URL("/v1/players/account/remote-addrs") } role="button" class="btn-inline">Manage addresses</a></p>
+		</section>
 	}
+}
+
+templ ConnectionAddressesPage(vm ConnectionAddressesView) {
+	@playerLayout("Connection addresses", playerNavAccount, vm.CSRFToken, vm.AccountEmail) {
+		<div class="page-header">
+			<div>
+				<h1>Connection addresses</h1>
+			</div>
+			if vm.CanAdd {
+				<a href={ templ.URL("/v1/players/account/remote-addrs/new") } role="button" class="btn-inline">Add address</a>
+			}
+		</div>
+		if vm.Flash != "" {
+			<p class="flash-success">{ vm.Flash }</p>
+		}
+		if vm.FlashError != "" {
+			<p role="alert">{ vm.FlashError }</p>
+		}
+		<section class="card">
+			if len(vm.Addresses) == 0 {
+				<div class="empty-state">
+					<p>No connection addresses added</p>
+					<p><a href={ templ.URL("/v1/players/account/remote-addrs/new") } role="button" class="btn-inline">Add address</a></p>
+				</div>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Type</th>
+							<th>Address</th>
+							<th>Reachability</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, addr := range vm.Addresses {
+							<tr>
+								<td>{ addr.TypeLabel }</td>
+								<td><code>{ addr.Value }</code></td>
+								<td>
+									if addr.ScopeLabel != "" {
+										<span class="badge">{ addr.ScopeLabel }</span>
+									} else {
+										<span class="muted">—</span>
+									}
+								</td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/players/account/remote-addrs/" + addr.Slot + "/edit") } role="button" class="secondary outline btn-inline">Edit</a>
+									<a href={ templ.URL("/v1/players/account/remote-addrs/" + addr.Slot + "/delete") } role="button" class="secondary outline btn-inline">Remove</a>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
+	}
+}
+
+templ ConnectionAddressDeletePage(vm ConnectionAddressDeleteView) {
+	@playerLayout("Remove connection address", playerNavAccount, vm.CSRFToken, vm.AccountEmail) {
+		<div class="page-header">
+			<div>
+				<h1>Remove connection address</h1>
+			</div>
+		</div>
+		<section class="card">
+			<p>Remove this connection address? This can't be undone.</p>
+			<table class="data-table">
+				<tbody>
+					<tr>
+						<th scope="row">Type</th>
+						<td>{ vm.TypeLabel }</td>
+					</tr>
+					<tr>
+						<th scope="row">Address</th>
+						<td><code>{ vm.Value }</code></td>
+					</tr>
+				</tbody>
+			</table>
+			<form method="post" action={ templ.URL("/v1/players/account/remote-addrs/" + vm.Slot + "/delete") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/players/account/remote-addrs") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="contrast btn-inline">Remove address</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+templ ConnectionAddressFormPage(vm ConnectionAddressFormView) {
+	@playerLayout("Connection address", playerNavAccount, vm.CSRFToken, vm.AccountEmail) {
+		<div class="page-header">
+			<div>
+				if vm.Editing {
+					<h1>Edit connection address</h1>
+				} else {
+					<h1>Add connection address</h1>
+				}
+			</div>
+		</div>
+		<section class="card">
+			if vm.Error != "" {
+				<p role="alert">{ vm.Error }</p>
+			}
+			<form method="post" action={ connectionAddressFormAction(vm) }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>Type
+					<select name="addr_type" aria-describedby="addr_type-error">
+						<option value="ip" selected?={ vm.TypeValue == "ip" || vm.TypeValue == "" }>IP address</option>
+						<option value="dns" selected?={ vm.TypeValue == "dns" }>DNS name</option>
+						<option value="iroh" selected?={ vm.TypeValue == "iroh" }>Iroh Endpoint ID</option>
+					</select>
+					if msg, ok := vm.FieldErrors["addr_type"]; ok {
+						<small class="field-error" id="addr_type-error">{ msg }</small>
+					}
+				</label>
+				<label>Address
+					<input name="addr_value" type="text" value={ vm.Value } maxlength="255" required aria-describedby="addr_value-error"/>
+					if msg, ok := vm.FieldErrors["addr_value"]; ok {
+						<small class="field-error" id="addr_value-error">{ msg }</small>
+					}
+				</label>
+				<div class="form-actions">
+					<a href={ templ.URL("/v1/players/account/remote-addrs") } role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="btn-inline">Save address</button>
+				</div>
+			</form>
+		</section>
+	}
+}
+
+func connectionAddressFormAction(vm ConnectionAddressFormView) templ.SafeURL {
+	if vm.Editing {
+		return templ.URL("/v1/players/account/remote-addrs/" + vm.Slot)
+	}
+	return templ.URL("/v1/players/account/remote-addrs")
 }

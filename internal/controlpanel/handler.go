@@ -184,13 +184,12 @@ func New(d Deps) http.Handler {
 			r.Get("/projects", h.projectsPage)
 			r.Get("/projects/new", h.newProjectPage)
 			r.Post("/projects", h.createProjectHandler)
-			r.Post("/public-joining", h.setTenantPublicJoiningHandler)
-			r.Post("/projects/{projectID}/public-joining", h.setProjectPublicJoiningHandler)
 			r.Get(segAPIKeys, h.apiKeys)
 			r.Get("/api-keys/new", h.newAPIKeyPage)
 			r.Post(segAPIKeys, h.createAPIKeyHandler)
+			r.Get("/api-keys/{apiKeyID}/features", h.apiKeyFeaturesDialog)
 			r.Post("/api-keys/{apiKeyID}/label", h.updateAPIKeyLabelHandler)
-			r.Post("/api-keys/{apiKeyID}/scopes", h.updateAPIKeyScopesHandler)
+			r.Post("/api-keys/{apiKeyID}/features", h.updateAPIKeyFeaturesHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
 			r.Get("/rate-limits", h.rateLimitsPage)
 			r.Post("/rate-limits/api", h.updateTenantAPILimitHandler)
@@ -255,6 +254,10 @@ func New(d Deps) http.Handler {
 			r.Get("/users", h.platformUsersPage)
 			r.Post("/users/{userID}/disable", h.disableControlPanelUserHandler)
 			r.Post("/users/{userID}/enable", h.enableControlPanelUserHandler)
+			r.Get("/tenant-signups", h.tenantSignupRequestsPage)
+			r.Post("/tenant-signups/config", h.setPublicSignupEnabledHandler)
+			r.Post("/tenant-signups/{id}/approve", h.approveTenantSignupHandler)
+			r.Post("/tenant-signups/{id}/deny", h.denyTenantSignupHandler)
 			r.Get("/player-accounts", h.platformPlayerAccountsPage)
 			r.Get("/player-accounts/{accountID}", h.platformPlayerAccountDetailPage)
 			r.Post("/player-accounts/{accountID}/disable", h.disablePlayerAccountHandler)
@@ -278,6 +281,25 @@ func New(d Deps) http.Handler {
 		r.Use(webutil.RequireCSRF)
 		r.Get("/invite/accept", h.acceptInvitePage)
 		r.Post("/invite/accept", h.acceptInviteHandler)
+	})
+
+	// Public tenant sign-up: unauthenticated request form + approved-invite
+	// acceptance. Rate-limited by IP (the submit is public) and CSRF-guarded
+	// via the same double-submit cookie as invite acceptance.
+	r.Group(func(r chi.Router) {
+		if d.Limiter != nil {
+			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+		}
+		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
+			Path:     pathControlPanel,
+			Secure:   h.cfg.CookieSecure,
+			SameSite: http.SameSiteLaxMode,
+		}))
+		r.Use(webutil.RequireCSRF)
+		r.Get("/request-access", h.tenantSignupPage)
+		r.Post("/request-access", h.tenantSignupHandler)
+		r.Get("/request-access/accept", h.tenantSignupAcceptPage)
+		r.Post("/request-access/accept", h.tenantSignupAcceptHandler)
 	})
 
 	return r
@@ -420,9 +442,13 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := http.StatusInternalServerError
 		msg := "tenant signup failed"
-		if err == errInvalidSignup {
+		switch {
+		case errors.Is(err, errInvalidSignup):
 			status = http.StatusUnprocessableEntity
 			msg = "Tenant name and project name are required"
+		case errors.Is(err, errDuplicateTenantName):
+			status = http.StatusConflict
+			msg = "A tenant with that name already exists"
 		}
 		w.WriteHeader(status)
 		webutil.Render(r, w, FormErrorFragment(msg))
@@ -460,6 +486,30 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		Message:   r.URL.Query().Get("created"),
 	}))
 
+}
+
+func (h *Handler) apiKeyFeaturesDialog(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	apiKeyID, ok := parsePathID(w, r, "apiKeyID")
+	if !ok {
+		return
+	}
+	keys, err := h.listAPIKeys(r.Context(), tenantID)
+	if err != nil {
+		http.Error(w, "api key load failed", http.StatusInternalServerError)
+		return
+	}
+	for _, key := range keys {
+		if key.ID == apiKeyID {
+			session, _ := sessionFromContext(r.Context())
+			webutil.Render(r, w, APIKeyFeaturesDialog(tenantID, session.CSRFToken, key))
+			return
+		}
+	}
+	http.NotFound(w, r)
 }
 
 func (h *Handler) newAPIKeyPage(w http.ResponseWriter, r *http.Request) {
@@ -595,7 +645,7 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 }
 
-func (h *Handler) updateAPIKeyScopesHandler(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) updateAPIKeyFeaturesHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, apiKeyID, ok := parseTenantAndAPIKeyIDs(w, r)
 	if !ok {
 		return
@@ -603,10 +653,13 @@ func (h *Handler) updateAPIKeyScopesHandler(w http.ResponseWriter, r *http.Reque
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	grant := r.Form.Get("action") == "grant"
-	scope := r.Form.Get("scope")
+	scopes, err := parseManagedAPIKeyScopes(r.Form)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
-	switch err := h.setAPIKeyScope(r.Context(), session.User.ID, tenantID, apiKeyID, scope, grant); {
+	switch err := h.updateAPIKeyManagedScopes(r.Context(), session.User.ID, tenantID, apiKeyID, scopes); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable):
@@ -614,7 +667,7 @@ func (h *Handler) updateAPIKeyScopesHandler(w http.ResponseWriter, r *http.Reque
 	case errors.Is(err, errKeyNotInTenant):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
-		http.Error(w, "api key scope update failed", http.StatusInternalServerError)
+		http.Error(w, "api key feature update failed", http.StatusInternalServerError)
 	}
 }
 

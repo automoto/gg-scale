@@ -11,6 +11,7 @@ type FriendRow struct {
 }
 
 type FriendsView struct {
+	AccountEmail    string
 	CSRFToken       string
 	Flash           string
 	FlashError      string
@@ -28,9 +29,8 @@ func friendLabel(f FriendRow) string {
 }
 
 templ FriendsPage(vm FriendsView) {
-	@playerLayout("Friends") {
+	@playerLayout("Friends", playerNavFriends, vm.CSRFToken, vm.AccountEmail) {
 		<h1>Friends</h1>
-		<p><a href={ templ.URL("/v1/players/account/") }>← Back to account</a></p>
 		if vm.Flash != "" {
 			<p class="flash-success">{ vm.Flash }</p>
 		}

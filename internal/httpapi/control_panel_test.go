@@ -39,7 +39,7 @@ func TestControlPanel_login_page_renders_under_v1(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, string(body), "ggscale Control panel")
 	assert.Contains(t, string(body), `name="email"`)
-	assert.Contains(t, string(body), `src="/v1/control-panel/assets/htmx.min.js"`)
+	assert.Contains(t, string(body), `src="/v1/control-panel/assets/htmx.min.js?v=`)
 }
 
 func TestControlPanel_setup_page_renders_when_bootstrap_pending(t *testing.T) {

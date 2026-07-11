@@ -17,8 +17,8 @@ import (
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-// tenantSettingsPage consolidates tenant-scoped configuration (public joining,
-// API rate limit, tenant facts) on one page. Gated by the tenant group's
+// tenantSettingsPage consolidates tenant-scoped configuration (API rate limit,
+// tenant facts) on one page. Gated by the tenant group's
 // requireTenantAccess(roleAdmin).
 func (h *Handler) tenantSettingsPage(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
@@ -39,8 +39,8 @@ func (h *Handler) tenantSettingsPage(w http.ResponseWriter, r *http.Request) {
 	webutil.Render(r, w, TenantSettingsPage(view))
 }
 
-// tenantSettingsView loads the tenant facts, public-joining switch, and API
-// override in a single bootstrap transaction — the page needs none of the
+// tenantSettingsView loads the tenant facts and API override in a single
+// bootstrap transaction — the page needs none of the
 // per-project rows the rate-limits view assembles.
 func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (TenantSettingsView, error) {
 	view := TenantSettingsView{TenantID: tenantID}
@@ -52,7 +52,6 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 		}
 		view.TenantName = facts.Name
 		view.Tier = facts.Tier
-		view.PublicJoining = facts.PublicJoiningEnabled
 		defaults := ratelimit.LimitsForTier(tenant.Tier(facts.Tier))
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst
@@ -75,8 +74,8 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 	return view, nil
 }
 
-// projectSettingsPage consolidates per-project configuration (public joining,
-// invite quotas, project facts).
+// projectSettingsPage consolidates per-project configuration (invite quotas,
+// project facts).
 func (h *Handler) projectSettingsPage(w http.ResponseWriter, r *http.Request) {
 	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
 	if !ok {
@@ -115,21 +114,15 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 		return ProjectSettingsView{}, errProjectNotInTenant
 	}
 	view := ProjectSettingsView{
-		TenantID:             tenantID,
-		ProjectID:            projectID,
-		ProjectName:          proj.Name,
-		CreatedAt:            proj.CreatedAt,
-		ProjectPublicJoining: proj.PublicJoiningEnabled,
-		DefaultInviterHour:   ratelimit.DefaultInviteLimits.InviterPerHour,
-		DefaultDomainDay:     ratelimit.DefaultInviteLimits.DomainPerDay,
+		TenantID:           tenantID,
+		ProjectID:          projectID,
+		ProjectName:        proj.Name,
+		CreatedAt:          proj.CreatedAt,
+		DefaultInviterHour: ratelimit.DefaultInviteLimits.InviterPerHour,
+		DefaultDomainDay:   ratelimit.DefaultInviteLimits.DomainPerDay,
 	}
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		facts, err := q.GetTenantFacts(ctx, tenantID)
-		if err != nil {
-			return err
-		}
-		view.TenantPublicJoining = facts.PublicJoiningEnabled
 		rows, err := q.ListAllRateLimitOverridesForTenant(ctx, tenantID)
 		if err != nil {
 			return err

@@ -143,8 +143,8 @@ func TestControlPanelHeadUsesExternalScriptsAndSafeHTMXConfig(t *testing.T) {
 	assert.Contains(t, html, "includeIndicatorStyles")
 	assert.Contains(t, html, "allowEval")
 	assert.Contains(t, html, "allowScriptTags")
-	assert.Contains(t, html, `src="/v1/control-panel/assets/htmx.min.js"`)
-	assert.Contains(t, html, `src="/v1/control-panel/assets/controlpanel.js"`)
+	assert.Contains(t, html, `src="/v1/control-panel/assets/htmx.min.js?v=`)
+	assert.Contains(t, html, `src="/v1/control-panel/assets/controlpanel.js?v=`)
 	assert.NotContains(t, html, `unsafe-inline`)
 }
 
@@ -194,6 +194,55 @@ func TestControlPanelConfirmFormsUseDataAttributes(t *testing.T) {
 	}
 }
 
+func TestHomePage_RendersPlatformMenuWhenAuthorized(t *testing.T) {
+	html := renderToString(t, HomePage(HomeView{
+		UserEmail:       "admin@example.com",
+		CSRFToken:       "tok",
+		IsPlatformAdmin: true,
+	}))
+
+	assert.Contains(t, html, "<summary>Platform</summary>")
+	assert.Contains(t, html, `href="/v1/control-panel/admin/users"`)
+	assert.Contains(t, html, `href="/v1/control-panel/admin/player-accounts"`)
+	assert.Contains(t, html, `aria-current="page">Tenants</a>`)
+}
+
+func TestHomePage_HidesPlatformMenuWhenNotAuthorized(t *testing.T) {
+	html := renderToString(t, HomePage(HomeView{UserEmail: "user@example.com"}))
+
+	assert.NotContains(t, html, "<summary>Platform</summary>")
+	assert.NotContains(t, html, `href="/v1/control-panel/admin/users"`)
+}
+
+func TestProjectsPage_RendersTenantNavigationAndNoSecondaryHeaderButtons(t *testing.T) {
+	html := renderToString(t, ProjectsPage(ProjectsView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		CSRFToken: "tok",
+	}))
+
+	assert.Contains(t, html, "<summary>Tenant</summary>")
+	assert.Contains(t, html, `href="/v1/control-panel/tenants/42/api-keys"`)
+	assert.Contains(t, html, `aria-current="page">Projects</a>`)
+	assert.NotContains(t, html, `role="button" class="secondary outline btn-inline">Settings</a>`)
+	assert.NotContains(t, html, `role="button" class="secondary outline btn-inline">Rate limits</a>`)
+}
+
+func TestPlayersPage_RendersProjectNavigationAndCompactTableAction(t *testing.T) {
+	html := renderToString(t, PlayersPage(PlayersView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		ProjectID: 7,
+		CSRFToken: "tok",
+		Players:   []PlayerView{{ID: 9, Email: "p@example.com"}},
+	}))
+
+	assert.Contains(t, html, "<summary>Project</summary>")
+	assert.Contains(t, html, `aria-current="page">Players</a>`)
+	assert.Contains(t, html, `class="filter-form"`)
+	assert.Contains(t, html, `role="button" class="secondary outline btn-inline">View</a>`)
+}
+
 func TestSignupSuccessPage_WrapsRevealInLimeColorBlock(t *testing.T) {
 	html := renderToString(t, SignupSuccessPage(SignupSuccessView{
 		TenantID: 1, ProjectID: 2, APIKeyID: 3, APIKey: "secret",
@@ -228,7 +277,7 @@ func TestProjectsPage_HasNewProjectButtonInHeader(t *testing.T) {
 	assert.NotContains(t, html, `<h2>Create project</h2>`, "the inline create form moved to its own page")
 }
 
-func TestAPIKeysPage_scope_controls_reflect_grantability(t *testing.T) {
+func TestAPIKeysPage_feature_dialog_reflects_grantability(t *testing.T) {
 	vm := APIKeysView{
 		UserEmail: "alice@example.com",
 		TenantID:  42,
@@ -240,15 +289,39 @@ func TestAPIKeysPage_scope_controls_reflect_grantability(t *testing.T) {
 		},
 	}
 	html := renderToString(t, APIKeysPage(vm))
-	// Key 1 already holds fleet → a revoke form to its scopes endpoint.
-	assert.Contains(t, html, `/api-keys/1/scopes"`)
-	assert.Contains(t, html, "Revoke")
-	// Key 2 can be granted relay.
-	assert.Contains(t, html, `/api-keys/2/scopes"`)
-	assert.Contains(t, html, "Grant Relay")
-	// Key 3 is dark on both features: no scope form, shows "no access".
-	assert.NotContains(t, html, `/api-keys/3/scopes"`)
-	assert.Contains(t, html, "no access")
+
+	assert.NotContains(t, html, "Grant Matchmaker")
+	assert.NotContains(t, html, "Grant Fleet")
+	assert.NotContains(t, html, "Grant Relay")
+	assert.Contains(t, html, `hx-get="/v1/control-panel/tenants/42/api-keys/1/features"`)
+	assert.Contains(t, html, `hx-target="#modal-root"`)
+	assert.NotContains(t, html, "<dialog")
+	assert.Contains(t, html, "Manage features")
+}
+
+func TestAPIKeyFeaturesDialog_reflects_grantability(t *testing.T) {
+	html := renderToString(t, APIKeyFeaturesDialog(42, "tok", APIKeyView{
+		ID: 2, Label: "grantable-relay", Scopes: []string{"fleet"}, RelayGrantable: true,
+	}))
+
+	assert.Contains(t, html, `<dialog class="feature-dialog">`)
+	assert.Contains(t, html, `/api-keys/2/features"`)
+	assert.Contains(t, html, "Dedicated servers")
+	assert.Contains(t, html, `value="fleet" checked`)
+	assert.Contains(t, html, `value="p2p_relay"`)
+	assert.Contains(t, html, "Available")
+	assert.Contains(t, html, "Not available for this project")
+}
+
+func TestAPIKeysPage_revocation_has_specific_confirmation(t *testing.T) {
+	html := renderToString(t, APIKeysPage(APIKeysView{
+		UserEmail: "alice@example.com",
+		TenantID:  42,
+		CSRFToken: "tok",
+		Keys:      []APIKeyView{{ID: 1, Label: "key"}},
+	}))
+
+	assert.Contains(t, html, `data-confirm="Revoke this API key? Clients using it will immediately lose access."`)
 }
 
 func TestTeamPage_fleet_operator_control_gated_on_feature(t *testing.T) {

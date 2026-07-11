@@ -108,6 +108,47 @@ type TenantView struct {
 	CreatedAt time.Time
 }
 
+type navDestination string
+
+const (
+	navTenants         navDestination = "tenants"
+	navProjects        navDestination = "projects"
+	navAPIKeys         navDestination = "api-keys"
+	navTeam            navDestination = "team"
+	navTenantSettings  navDestination = "tenant-settings"
+	navRateLimits      navDestination = "rate-limits"
+	navPlayers         navDestination = "players"
+	navLeaderboards    navDestination = "leaderboards"
+	navFleets          navDestination = "fleets"
+	navAllocations     navDestination = "allocations"
+	navMatchmaker      navDestination = "matchmaker"
+	navProjectSettings navDestination = "project-settings"
+	navPlatformUsers   navDestination = "platform-users"
+	navTenantSignups   navDestination = "tenant-signups"
+	navPlayerAccounts  navDestination = "player-accounts"
+	navPlatformTeam    navDestination = "platform-team"
+	navServerSettings  navDestination = "server-settings"
+	navPlugins         navDestination = "plugins"
+	navHelp            navDestination = "help"
+	navAccount         navDestination = "account"
+)
+
+// AppNav is the compact, context-aware control-panel navigation model used by
+// appLayout. Pages pass only the resource context they already know.
+type AppNav struct {
+	Active          navDestination
+	TenantID        int64
+	ProjectID       int64
+	IsPlatformAdmin bool
+	FleetEnabled    bool
+	PluginsEnabled  bool
+}
+
+// IsActive reports whether dest is the currently active nav destination.
+func (n AppNav) IsActive(dest navDestination) bool {
+	return n.Active == dest
+}
+
 // HomeView is the data rendered by the control panel landing page.
 type HomeView struct {
 	UserEmail       string
@@ -155,12 +196,21 @@ func (v APIKeyView) HasScope(scope string) bool {
 	return false
 }
 
+// HasManagedScope reports whether the key holds any managed feature scope.
+func (v APIKeyView) HasManagedScope() bool {
+	for _, scope := range managedAPIKeyScopes {
+		if v.HasScope(scope) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProjectOption is one project pickable in the API-key creation form.
 type ProjectOption struct {
-	ID                   int64
-	Name                 string
-	CreatedAt            time.Time
-	PublicJoiningEnabled bool
+	ID        int64
+	Name      string
+	CreatedAt time.Time
 }
 
 // NewTenantView is the data rendered by the create-tenant page.
@@ -314,8 +364,6 @@ type TenantSettingsView struct {
 	Tier            string
 	IsPlatformAdmin bool
 	Message         string
-	// Public-joining master switch (editable).
-	PublicJoining bool
 	// Tenant HTTP API limit (editable by platform admins, read-only otherwise).
 	APIOverridden   bool
 	APIRate         float64
@@ -333,19 +381,11 @@ type ProjectSettingsView struct {
 	ProjectName string
 	CreatedAt   time.Time
 	Message     string
-	// Effective join = tenant master AND project toggle.
-	TenantPublicJoining  bool
-	ProjectPublicJoining bool
 	// Per-project invite quotas (editable, 0 = default).
 	InviterPerHour     float64
 	DomainPerDay       float64
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
-}
-
-// EffectiveJoin reports whether players can currently self-join this project.
-func (v ProjectSettingsView) EffectiveJoin() bool {
-	return v.TenantPublicJoining && v.ProjectPublicJoining
 }
 
 // ServerSettingsView renders the read-only server settings page.
@@ -891,8 +931,8 @@ func joinComma(s []string) string {
 	return strings.Join(s, ", ")
 }
 
-// settingsPathTpl / projectSettingsPathTpl build the redirect_to targets so a
-// reused public-joining/rate-limit POST returns to the settings page.
+// tenantSettingsPathTpl / projectSettingsPathTpl build the redirect_to targets
+// so a reused settings POST (e.g. rate-limits) returns to the settings page.
 func tenantSettingsPathTpl(tenantID int64) string {
 	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/settings"
 }

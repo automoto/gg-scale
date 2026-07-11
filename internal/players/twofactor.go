@@ -347,8 +347,9 @@ func (h *Handler) accountTwoFactorChallenge(w http.ResponseWriter, r *http.Reque
 
 func (h *Handler) accountTwoFactorView(r *http.Request, sess accountSession) (AccountTwoFactorView, error) {
 	vm := AccountTwoFactorView{
-		CSRFToken: h.csrf(r),
-		Available: h.twoFactor != nil,
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Available:    h.twoFactor != nil,
 	}
 	accountID := toPgUUID(sess.AccountID)
 	row, found, err := h.getAccountTOTP(r.Context(), accountID)
@@ -431,10 +432,10 @@ func (h *Handler) accountTwoFactorSetup(w http.ResponseWriter, r *http.Request) 
 		webutil.InternalError(w, "account 2fa setup", err)
 		return
 	}
-	h.renderAccountTwoFactorSetup(w, r, key, http.StatusOK, "")
+	h.renderAccountTwoFactorSetup(w, r, sess.Email, key, http.StatusOK, "")
 }
 
-func (h *Handler) renderAccountTwoFactorSetup(w http.ResponseWriter, r *http.Request, key *otp.Key, status int, errMsg string) {
+func (h *Handler) renderAccountTwoFactorSetup(w http.ResponseWriter, r *http.Request, accountEmail string, key *otp.Key, status int, errMsg string) {
 	qr, err := twofactor.QRPNGDataURI(key)
 	if err != nil {
 		webutil.InternalError(w, "account 2fa setup", err)
@@ -444,10 +445,11 @@ func (h *Handler) renderAccountTwoFactorSetup(w http.ResponseWriter, r *http.Req
 		w.WriteHeader(status)
 	}
 	webutil.Render(r, w, AccountTwoFactorSetupPage(AccountTwoFactorSetupView{
-		CSRFToken: h.csrf(r),
-		QRDataURI: qr,
-		Secret:    twofactor.GroupSecret(key.Secret()),
-		Error:     errMsg,
+		AccountEmail: accountEmail,
+		CSRFToken:    h.csrf(r),
+		QRDataURI:    qr,
+		Secret:       twofactor.GroupSecret(key.Secret()),
+		Error:        errMsg,
 	}))
 }
 
@@ -486,7 +488,7 @@ func (h *Handler) accountTwoFactorConfirm(w http.ResponseWriter, r *http.Request
 			webutil.InternalError(w, "account 2fa confirm", kerr)
 			return
 		}
-		h.renderAccountTwoFactorSetup(w, r, key, http.StatusUnprocessableEntity, msgTwoFactorBadCode)
+		h.renderAccountTwoFactorSetup(w, r, sess.Email, key, http.StatusUnprocessableEntity, msgTwoFactorBadCode)
 		return
 	}
 	codes, err := twofactor.GenerateBackupCodes()
@@ -525,9 +527,10 @@ func (h *Handler) accountTwoFactorConfirm(w http.ResponseWriter, r *http.Request
 		return
 	}
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
-		CSRFToken: h.csrf(r),
-		Message:   "Two-factor authentication is enabled. Save these backup codes somewhere safe — they are shown only once and are the only way back in if you lose your authenticator.",
-		Codes:     codes,
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Message:      "Two-factor authentication is enabled. Save these backup codes somewhere safe — they are shown only once and are the only way back in if you lose your authenticator.",
+		Codes:        codes,
 	}))
 }
 
@@ -658,9 +661,10 @@ func (h *Handler) accountTwoFactorBackupCodes(w http.ResponseWriter, r *http.Req
 		return
 	}
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
-		CSRFToken: h.csrf(r),
-		Message:   "New backup codes generated. Your old codes no longer work.",
-		Codes:     codes,
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		Message:      "New backup codes generated. Your old codes no longer work.",
+		Codes:        codes,
 	}))
 }
 

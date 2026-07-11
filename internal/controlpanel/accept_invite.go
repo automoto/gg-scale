@@ -172,7 +172,7 @@ func (h *Handler) resolveInviteUser(ctx context.Context, q *sqlcgen.Queries, row
 // createInviteUser provisions a verified control_panel_user for a first-time
 // invitee, enforcing the password floor.
 func (h *Handler) createInviteUser(ctx context.Context, q *sqlcgen.Queries, row sqlcgen.GetControlPanelInvitationByCodeHashRow, in acceptInviteInput) (acceptInviteResult, error) {
-	if len(in.Password) < 12 {
+	if len(in.Password) < minControlPanelPassLen {
 		return acceptInviteResult{}, errWeakPassword
 	}
 	pwHash, hashErr := bcrypt.GenerateFromPassword([]byte(in.Password), bcryptCost)

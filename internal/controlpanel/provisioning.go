@@ -18,6 +18,7 @@ import (
 var (
 	errInvalidSignup        = errors.New("control panel: tenant name, project name, and password are required")
 	errBootstrapUnavailable = errors.New("control panel: bootstrap unavailable")
+	errDuplicateTenantName  = errors.New("control panel: a tenant with that name already exists")
 )
 
 type signupInput struct {
@@ -76,6 +77,9 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		return nil
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			return signupResult{}, errDuplicateTenantName
+		}
 		return signupResult{}, err
 	}
 	h.reloadRBACPolicy(ctx)

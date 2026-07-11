@@ -38,16 +38,16 @@ func TestSafeReturnPath(t *testing.T) {
 func TestTenantSettingsPage_renders_editable_forms_with_return_path(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
 		TenantID: 3, TenantName: "acme", Tier: "free",
-		IsPlatformAdmin: true, PublicJoining: true,
-		APIDefaultRate: 10, APIDefaultBurst: 20,
+		IsPlatformAdmin: true,
+		APIDefaultRate:  10, APIDefaultBurst: 20,
 	}))
-	// Public-joining master switch posts to the tenant endpoint...
-	assert.Contains(t, html, "/v1/control-panel/tenants/3/public-joining")
-	assert.Contains(t, html, "Disable for all projects")
+	// Players are linked by project admins, never self-join: no public-joining control.
+	assert.NotContains(t, html, "public-joining")
+	assert.NotContains(t, html, "Public joining")
 	// API limit form is present for platform admins.
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/rate-limits/api")
 	assert.Contains(t, html, "Save API limit")
-	// Both forms carry a redirect_to back to the settings page.
+	// The form carries a redirect_to back to the settings page.
 	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/settings"`)
 }
 
@@ -59,15 +59,14 @@ func TestTenantSettingsPage_hides_api_form_for_non_platform_admin(t *testing.T) 
 	assert.Contains(t, html, "Only platform admins")
 }
 
-func TestProjectSettingsPage_shows_effective_join_and_forms(t *testing.T) {
+func TestProjectSettingsPage_shows_invite_quota_forms(t *testing.T) {
 	html := renderToString(t, ProjectSettingsPage(ProjectSettingsView{
 		TenantID: 3, ProjectID: 8, ProjectName: "arcade",
-		TenantPublicJoining: true, ProjectPublicJoining: false,
 		DefaultInviterHour: 5, DefaultDomainDay: 50,
 	}))
-	// Tenant on + project off ⇒ invite only.
-	assert.Contains(t, html, "invite only")
-	assert.Contains(t, html, "/v1/control-panel/tenants/3/projects/8/public-joining")
+	// Players are linked by project admins, never self-join: no public-joining control.
+	assert.NotContains(t, html, "public-joining")
+	assert.NotContains(t, html, "Public joining")
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/rate-limits/projects/8/invites")
 	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/projects/8/settings"`)
 }
