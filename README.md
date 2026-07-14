@@ -13,7 +13,7 @@ curl -s localhost:8080/v1/healthz
 
 Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
-`make up` starts the **basic stack**: `ggscale-server`, Postgres, and MailHog (SMTP catcher with a web UI at `http://localhost:8025`).
+`make up` starts the basic stack: `ggscale-server`, Postgres, and MailHog (SMTP catcher with a web UI at `http://localhost:8025`).
 
 ## Onboarding (Control Panel Setup)
 
@@ -38,4 +38,4 @@ Run `make help` for the full list.
 
 Full documentation, including Architecture, Features, API Route descriptions, and Onboarding guides, has been moved to our GitHub Wiki:
 
-👉 **[ggscale GitHub Wiki Placeholder](https://github.com/automoto/gg-scale/wiki)**
+**[ggscale GitHub Wiki Placeholder](https://github.com/automoto/gg-scale/wiki)**
