@@ -29,6 +29,14 @@ type InviteLimits struct {
 	// RecipientCooldown is the minimum gap between invites to the same
 	// address within a scope.
 	RecipientCooldown time.Duration
+	// RecipientBurst is how many invites to the same address may be sent back
+	// to back before the cooldown applies. Set to 2 so an admin can immediately
+	// re-send to the same address once (e.g. when the first email doesn't
+	// arrive) without waiting out the cooldown; the third rapid send waits one
+	// RecipientCooldown. A mistyped address is a different recipient (its own
+	// bucket), so correcting one is never gated by this. Values < 1 are treated
+	// as 1 when a cooldown is set.
+	RecipientBurst float64
 }
 
 // DefaultInviteLimits are the built-in invite caps.
@@ -36,6 +44,7 @@ var DefaultInviteLimits = InviteLimits{
 	InviterPerHour:    10,
 	DomainPerDay:      100,
 	RecipientCooldown: 10 * time.Minute,
+	RecipientBurst:    2,
 }
 
 // InviteThrottle applies per-inviter, per-domain, and per-recipient token
@@ -122,7 +131,10 @@ type inviteBucket struct {
 func (t *InviteThrottle) buckets(ctx context.Context, a InviteAttempt) []inviteBucket {
 	recipientBurst := 0.0
 	if t.limits.RecipientCooldown > 0 {
-		recipientBurst = 1
+		recipientBurst = t.limits.RecipientBurst
+		if recipientBurst < 1 {
+			recipientBurst = 1
+		}
 	}
 	specs := []struct {
 		scope      string

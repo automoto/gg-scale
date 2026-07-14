@@ -41,9 +41,15 @@ type playerInviteResult struct {
 // invites against tenant-B projects.
 var errProjectNotInTenant = errors.New("control panel: project not in tenant")
 
-// createPlayerInvite mints a code, persists the row (privileged path),
-// and returns the plaintext code so the caller can email it.
-func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID int64, email string, invitedBy int64) (playerInviteResult, error) {
+// errPlayerEmailTaken means the email is already owned by a different player in
+// the project, so it can't be bound onto the "link player" target row.
+var errPlayerEmailTaken = errors.New("control panel: email already used by another player")
+
+// createPlayerInvite mints a code, persists the row (privileged path), and
+// returns the plaintext code so the caller can email it. A non-nil targetPlayer
+// makes this an admin "link player" invite: acceptance binds the proven email
+// onto that existing row, and any prior open invite for it is superseded.
+func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID int64, email string, invitedBy int64, targetPlayer *int64) (playerInviteResult, error) {
 	code, err := verifycode.GenerateInviteCode()
 	if err != nil {
 		return playerInviteResult{}, fmt.Errorf("invite code: %w", err)
@@ -74,12 +80,37 @@ func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID in
 		if proj.TenantID != tenantID {
 			return errProjectNotInTenant
 		}
+		if targetPlayer != nil {
+			// Reject if the email already belongs to a different player: the
+			// email unique index would block the bind on accept anyway, and a
+			// clear up-front error beats a late conflict.
+			existing, eerr := q.GetPlayerForAccountLink(ctx, sqlcgen.GetPlayerForAccountLinkParams{
+				ProjectID: projectID, Email: &email,
+			})
+			switch {
+			case eerr == nil && existing.ID != *targetPlayer:
+				return errPlayerEmailTaken
+			case eerr != nil && !errors.Is(eerr, pgx.ErrNoRows):
+				return eerr
+			}
+			// Supersede any prior open invite that would collide with this one —
+			// keyed on the target row or the (project_id, email) open-invite
+			// unique index — so the resend isn't rejected by that index.
+			if rerr := q.RevokeSupersededPlayerInvitations(ctx, sqlcgen.RevokeSupersededPlayerInvitationsParams{
+				ProjectID:       projectID,
+				ProjectPlayerID: targetPlayer,
+				Email:           email,
+			}); rerr != nil {
+				return rerr
+			}
+		}
 		r, qerr := q.CreatePlayerInvitation(ctx, sqlcgen.CreatePlayerInvitationParams{
 			ProjectID:       projectID,
 			Email:           email,
 			CodeHash:        codeHash,
 			ExpiresAt:       pgtype.Timestamptz{Time: expiresAt, Valid: true},
 			InvitedByUserID: invitedBy,
+			ProjectPlayerID: targetPlayer,
 		})
 		if qerr != nil {
 			return qerr
@@ -96,6 +127,33 @@ func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID in
 		Code:      code,
 		ExpiresAt: row.ExpiresAt.Time,
 	}, nil
+}
+
+// errInviteThrottled marks a send rejected by the per-recipient/inviter/domain
+// throttle so the caller can render its own 429 with the retry hint.
+var errInviteThrottled = errors.New("control panel: invite throttled")
+
+// createAndSendPlayerInvite is the throttle → create → refund-on-error →
+// metrics → email pipeline shared by the invite-player and link-player
+// handlers. targetPlayer is nil for a plain invite or the row id for a link
+// invite. On a throttle rejection it returns errInviteThrottled with the
+// retry-after seconds; on a create failure it refunds the debited token and
+// returns the underlying error. How the error is presented (full page vs
+// dialog fragment) is left to the caller.
+func (h *Handler) createAndSendPlayerInvite(r *http.Request, tenantID, projectID, inviterID int64, email string, targetPlayer *int64) (playerInviteResult, int, error) {
+	if retry, throttled := h.inviteThrottled(r.Context(), inviterID, tenantID, projectID, email); throttled {
+		return playerInviteResult{}, retry, errInviteThrottled
+	}
+	res, err := h.createPlayerInvite(r.Context(), tenantID, projectID, email, inviterID, targetPlayer)
+	if err != nil {
+		// The throttle already debited this send; the invite didn't happen, so
+		// return the tokens rather than charging a failed attempt against quota.
+		h.inviteRefund(r.Context(), inviterID, tenantID, projectID, email)
+		return playerInviteResult{}, 0, err
+	}
+	h.metrics.InviteSent(observability.InvitePlayer)
+	h.sendPlayerInviteEmail(r.Context(), res, projectID)
+	return res, 0, nil
 }
 
 // sendPlayerInviteEmail mails the invite recipient a magic link into the
@@ -132,6 +190,9 @@ type PlayerView struct {
 	AccountID    string
 	RemoteAddrs  []RemoteAddrView
 	TenantBanned bool
+	// InvitePending is true when an open "link player" invitation targets this
+	// row (awaiting the player's acceptance).
+	InvitePending bool
 }
 
 // RemoteAddrView is one typed remote address on the player detail card.
@@ -209,6 +270,16 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			hasNext = true
 			rows = rows[:playersPerPage]
 		}
+		targets, terr := q.ListOpenInvitationTargetsForProject(ctx, projectID)
+		if terr != nil {
+			return terr
+		}
+		pending := make(map[int64]bool, len(targets))
+		for _, id := range targets {
+			if id != nil {
+				pending[*id] = true
+			}
+		}
 		for _, row := range rows {
 			pv := PlayerView{
 				ID:         row.ID,
@@ -218,6 +289,7 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			pv.Email = row.Email
 			pv.EmailVerifiedAt = row.EmailVerifiedAt.Time
 			pv.DisabledAt = row.DisabledAt.Time
+			pv.InvitePending = pending[row.ID]
 			players = append(players, pv)
 		}
 		total = int64(offset) + int64(len(players))
@@ -337,26 +409,17 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	if retry, throttled := h.inviteThrottled(r.Context(), session.User.ID, tenantID, projectID, email); throttled {
-		w.Header().Set("Retry-After", strconv.Itoa(retry))
-		w.WriteHeader(http.StatusTooManyRequests)
-		webutil.Render(r, w, InvitePlayerPage(InvitePlayerView{
-			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
-			TenantID: tenantID, ProjectID: projectID, Email: email,
-			Error: "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s.",
-		}))
-		return
-	}
-	res, err := h.createPlayerInvite(r.Context(), tenantID, projectID, email, session.User.ID)
+	res, retry, err := h.createAndSendPlayerInvite(r, tenantID, projectID, session.User.ID, email, nil)
 	if err != nil {
-		// The throttle already debited this send; the invite didn't happen, so
-		// return the tokens rather than charging a failed attempt against quota.
-		h.inviteRefund(r.Context(), session.User.ID, tenantID, projectID, email)
 		view := InvitePlayerView{
 			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
 			TenantID: tenantID, ProjectID: projectID, Email: email,
 		}
 		switch {
+		case errors.Is(err, errInviteThrottled):
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			view.Error = "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s."
+			w.WriteHeader(http.StatusTooManyRequests)
 		case errors.Is(err, errProjectNotInTenant):
 			view.Error = "That project does not belong to this tenant."
 			w.WriteHeader(http.StatusNotFound)
@@ -371,12 +434,135 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, InvitePlayerPage(view))
 		return
 	}
-	h.metrics.InviteSent(observability.InvitePlayer)
-	h.sendPlayerInviteEmail(r.Context(), res, projectID)
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
 		"/players?flash=" + url.QueryEscape("Invite sent to "+res.Email)
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// LinkPlayerView is the data rendered by the "link player" dialog.
+type LinkPlayerView struct {
+	CSRFToken  string
+	TenantID   int64
+	ProjectID  int64
+	PlayerID   int64
+	ExternalID string
+	Email      string
+	// Error re-renders the dialog with an inline banner when a submit fails, so
+	// the admin keeps the form instead of navigating to a bare error page.
+	Error string
+}
+
+// linkPlayerDialog renders the modal fragment (loaded via hx-get into
+// #modal-root) with the player's read-only external ID and an email field.
+func (h *Handler) linkPlayerDialog(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projectID, ok := parsePathID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	playerID, ok := parsePathID(w, r, "playerID")
+	if !ok {
+		return
+	}
+	ctx := db.WithTenant(r.Context(), tenantID)
+	var row sqlcgen.GetPlayerForProjectRow
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		var err error
+		row, err = sqlcgen.New(tx).GetPlayerForProject(ctx, sqlcgen.GetPlayerForProjectParams{
+			TenantID: tenantID, ProjectID: projectID, ID: playerID,
+		})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "player lookup failed", http.StatusInternalServerError)
+		return
+	}
+	pv := playerViewFromDetail(row)
+	session, _ := sessionFromContext(r.Context())
+	webutil.Render(r, w, LinkPlayerDialog(LinkPlayerView{
+		CSRFToken:  session.CSRFToken,
+		TenantID:   tenantID,
+		ProjectID:  projectID,
+		PlayerID:   playerID,
+		ExternalID: pv.ExternalID,
+		Email:      pv.Email, // prefill any existing (unverified) email
+	}))
+}
+
+// linkPlayerHandler sends a "link player" invite targeting an existing row: on
+// accept the proven email + account bind onto that row (see createPlayerInvite).
+func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projectID, ok := parsePathID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	playerID, ok := parsePathID(w, r, "playerID")
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	email := normalizeEmail(r.Form.Get("email"))
+	// external_id round-trips as a hidden field so an error re-render keeps the
+	// read-only ID without a second lookup; it is display-only, never trusted.
+	vm := LinkPlayerView{
+		CSRFToken:  session.CSRFToken,
+		TenantID:   tenantID,
+		ProjectID:  projectID,
+		PlayerID:   playerID,
+		ExternalID: r.Form.Get("external_id"),
+		Email:      email,
+	}
+	if !validControlPanelEmail(email) {
+		h.renderLinkDialogError(w, r, vm, http.StatusUnprocessableEntity, "Enter a valid email.")
+		return
+	}
+	res, retry, err := h.createAndSendPlayerInvite(r, tenantID, projectID, session.User.ID, email, &playerID)
+	if err != nil {
+		switch {
+		case errors.Is(err, errInviteThrottled):
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+			h.renderLinkDialogError(w, r, vm, http.StatusTooManyRequests,
+				"Too many invites in a short time. Try again in "+strconv.Itoa(retry)+"s.")
+		case errors.Is(err, errProjectNotInTenant):
+			h.renderLinkDialogError(w, r, vm, http.StatusNotFound, "That project does not belong to this tenant.")
+		case errors.Is(err, errPlayerEmailTaken):
+			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "That email is already used by another player in this project.")
+		case isUniqueViolation(err):
+			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "An invite for that email is already pending.")
+		default:
+			slog.ErrorContext(r.Context(), "player link: create", "err", err)
+			h.renderLinkDialogError(w, r, vm, http.StatusInternalServerError, "Invite could not be sent.")
+		}
+		return
+	}
+	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+
+		"/projects/"+strconv.FormatInt(projectID, 10)+
+		"/players?flash="+url.QueryEscape("Invite sent to "+res.Email))
+}
+
+// renderLinkDialogError re-renders the Link dialog fragment with an inline
+// error banner and the given status. htmx swaps it back into #modal-root (the
+// htmx-config permits swapping 409/422); a non-htmx client still gets the
+// proper status code.
+func (h *Handler) renderLinkDialogError(w http.ResponseWriter, r *http.Request, vm LinkPlayerView, status int, msg string) {
+	vm.Error = msg
+	w.WriteHeader(status)
+	webutil.Render(r, w, LinkPlayerDialog(vm))
 }
 
 func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Request) {

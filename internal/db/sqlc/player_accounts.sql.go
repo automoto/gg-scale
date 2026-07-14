@@ -11,6 +11,42 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bindPlayerLinkedEmail = `-- name: BindPlayerLinkedEmail :execrows
+UPDATE project_players
+SET email = $1,
+    email_verified_at = now(),
+    player_account_id = $2
+WHERE id = $3
+  AND deleted_at IS NULL
+  AND (player_account_id IS NULL OR player_account_id = $2)
+  AND (email_verified_at IS NULL OR email = $1)
+`
+
+type BindPlayerLinkedEmailParams struct {
+	Email           *string
+	PlayerAccountID pgtype.UUID
+	ID              int64
+}
+
+// Tenant-scoped: admin "link player" accept binds a proven email + global
+// account onto an existing (external-id) row, marking it verified. Guards, any
+// of which affecting 0 rows makes the caller treat the accept as a conflict:
+//   - the email unique index may reject if another player already owns the
+//     address;
+//   - the account guard prevents clobbering a row already linked to a
+//     different account;
+//   - the verified-email guard refuses to overwrite an address the player has
+//     already verified under a different email — so a link invite accepted
+//     after the player self-verifies a different address can't silently
+//     replace (and re-mark verified) their real email.
+func (q *Queries) BindPlayerLinkedEmail(ctx context.Context, arg BindPlayerLinkedEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindPlayerLinkedEmail, arg.Email, arg.PlayerAccountID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const createLinkedPlayer = `-- name: CreateLinkedPlayer :one
 INSERT INTO project_players (
     tenant_id, project_id, external_id, email, email_verified_at, player_account_id
@@ -446,6 +482,24 @@ WHERE id = $1
 func (q *Queries) MarkPlayerAccountVerified(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markPlayerAccountVerified, id)
 	return err
+}
+
+const playerLinkTargetExists = `-- name: PlayerLinkTargetExists :one
+SELECT EXISTS (
+    SELECT 1 FROM project_players
+    WHERE id = $1
+      AND deleted_at IS NULL
+) AS row_exists
+`
+
+// Tenant-scoped existence probe used by the link-player accept path to tell a
+// vanished/soft-deleted target row (the invite is dead) apart from a genuine
+// conflict when BindPlayerLinkedEmail affects 0 rows.
+func (q *Queries) PlayerLinkTargetExists(ctx context.Context, id int64) (bool, error) {
+	row := q.db.QueryRow(ctx, playerLinkTargetExists, id)
+	var row_exists bool
+	err := row.Scan(&row_exists)
+	return row_exists, err
 }
 
 const reservePlayerAccountVerifyAttempt = `-- name: ReservePlayerAccountVerifyAttempt :one

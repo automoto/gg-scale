@@ -40,9 +40,11 @@ func finiteNonNegative(vs ...float64) bool {
 // compiled defaults so the operator sees what they're changing from.
 func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimitsView, error) {
 	view := RateLimitsView{
-		TenantID:           tenantID,
-		DefaultInviterHour: ratelimit.DefaultInviteLimits.InviterPerHour,
-		DefaultDomainDay:   ratelimit.DefaultInviteLimits.DomainPerDay,
+		TenantID:                     tenantID,
+		DefaultInviterHour:           ratelimit.DefaultInviteLimits.InviterPerHour,
+		DefaultDomainDay:             ratelimit.DefaultInviteLimits.DomainPerDay,
+		DefaultRecipientBurst:        ratelimit.DefaultInviteLimits.RecipientBurst,
+		DefaultRecipientCooldownSecs: ratelimit.DefaultInviteLimits.RecipientCooldown.Seconds(),
 	}
 
 	projects, err := h.listProjects(ctx, tenantID)
@@ -80,10 +82,15 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		}
 		for _, row := range rows {
 			if row.ProjectID == nil {
-				if row.Kind == ratelimit.OverrideKindAPI {
+				switch row.Kind {
+				case ratelimit.OverrideKindAPI:
 					view.APIOverridden = true
 					view.APIRate = row.Rate
 					view.APIBurst = row.Burst
+				case ratelimit.OverrideKindInviteRecipient:
+					view.RecipientOverridden = true
+					view.RecipientBurst = row.Burst
+					view.RecipientCooldownSecs = cooldownSecsFromRate(row.Rate)
 				}
 				continue
 			}
@@ -159,6 +166,60 @@ func (h *Handler) setTenantAPIOverride(ctx context.Context, actorID, tenantID in
 		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.rate_limit.set", strconv.FormatInt(tenantID, 10),
 			map[string]any{"kind": ratelimit.OverrideKindAPI, "tenant_id": tenantID, "rate": rate, "burst": burst})
+	})
+	if err != nil {
+		return err
+	}
+	h.invalidateOverrides(tenantID)
+	return nil
+}
+
+// cooldownSecsFromRate reverse-derives a per-recipient cooldown (seconds) from a
+// stored token-bucket refill rate for display, rounding away float noise.
+func cooldownSecsFromRate(rate float64) float64 {
+	if rate <= 0 {
+		return 0
+	}
+	return math.Round((1.0/rate)*1000) / 1000
+}
+
+// setTenantRecipientInviteOverride sets (or, when both values are 0, clears) the
+// tenant-wide per-recipient invite limit: burst is how many back-to-back invites
+// may go to the same address, cooldownSecs the window that gates them. Platform-
+// admin only. A one-sided zero is rejected — it would persist a nonsensical
+// bucket (zero burst never admits a send; zero cooldown never refills).
+func (h *Handler) setTenantRecipientInviteOverride(ctx context.Context, actorID, tenantID int64, burst, cooldownSecs float64) error {
+	if !finiteNonNegative(burst, cooldownSecs) {
+		return errInvalidLimit
+	}
+	if (burst == 0) != (cooldownSecs == 0) {
+		return errIncompleteLimit
+	}
+	// Recipient burst is a count of back-to-back sends, so it must be a whole
+	// number >= 1. A fractional value (e.g. 1.5) would persist a token-bucket
+	// cap that neither matches the displayed integer nor any documented rule.
+	if burst != 0 && (burst < 1 || burst != math.Trunc(burst)) {
+		return errInvalidLimit
+	}
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if burst == 0 {
+			if err := q.DeleteRateLimitOverride(ctx, sqlcgen.DeleteRateLimitOverrideParams{
+				TenantID: tenantID, Kind: ratelimit.OverrideKindInviteRecipient, ProjectID: nil,
+			}); err != nil {
+				return err
+			}
+			return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.rate_limit.clear", strconv.FormatInt(tenantID, 10),
+				map[string]any{"kind": ratelimit.OverrideKindInviteRecipient, "tenant_id": tenantID})
+		}
+		if err := q.UpsertRateLimitOverride(ctx, sqlcgen.UpsertRateLimitOverrideParams{
+			TenantID: tenantID, ProjectID: nil, Kind: ratelimit.OverrideKindInviteRecipient,
+			Rate: 1.0 / cooldownSecs, Burst: burst, UpdatedBy: &actorID,
+		}); err != nil {
+			return err
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.rate_limit.set", strconv.FormatInt(tenantID, 10),
+			map[string]any{"kind": ratelimit.OverrideKindInviteRecipient, "tenant_id": tenantID, "burst": burst, "cooldown_secs": cooldownSecs})
 	})
 	if err != nil {
 		return err

@@ -132,6 +132,37 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(r.Context(), "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(row.TenantID, 10)); err != nil {
 			return err
 		}
+		if row.ProjectPlayerID != 0 {
+			// Admin "link player" invite: bind the proven email + account onto
+			// the exact target row instead of find-or-create-by-email. A unique
+			// violation (email taken since invite) surfaces as a conflict.
+			n, berr := q.BindPlayerLinkedEmail(r.Context(), sqlcgen.BindPlayerLinkedEmailParams{
+				ID:              row.ProjectPlayerID,
+				Email:           &row.Email,
+				PlayerAccountID: accountID,
+			})
+			if berr != nil {
+				if webutil.IsUniqueViolation(berr) {
+					return errInvitePlayerExists
+				}
+				return berr
+			}
+			if n == 0 {
+				// 0 rows means the guards in BindPlayerLinkedEmail rejected the
+				// bind. Tell a vanished/soft-deleted target row (the invite is
+				// dead) apart from a live row that genuinely conflicts (already
+				// linked to another account, or verified under a different email).
+				exists, xerr := q.PlayerLinkTargetExists(r.Context(), row.ProjectPlayerID)
+				if xerr != nil {
+					return xerr
+				}
+				if !exists {
+					return errInviteNotFound
+				}
+				return errInvitePlayerExists
+			}
+			return q.MarkPlayerInvitationAccepted(r.Context(), row.ID)
+		}
 		emailPtr := &row.Email
 		existing, eerr := q.GetPlayerForAccountLink(r.Context(), sqlcgen.GetPlayerForAccountLinkParams{
 			ProjectID: projectID, Email: emailPtr,

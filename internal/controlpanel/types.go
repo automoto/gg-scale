@@ -285,6 +285,15 @@ type RateLimitsView struct {
 	Projects           []ProjectInviteLimitView
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
+	// Recipient invite limit (tenant-wide, platform-admin editable): how many
+	// back-to-back invites may go to the same address (burst) and the cooldown
+	// window (seconds) that gates them. RecipientOverridden is false when the
+	// compiled defaults apply.
+	RecipientOverridden          bool
+	RecipientBurst               float64
+	RecipientCooldownSecs        float64
+	DefaultRecipientBurst        float64
+	DefaultRecipientCooldownSecs float64
 	// Storage object value-size cap in bytes. StoragePlatformDefault is the
 	// config fallback; StorageTenantOverride (0 = none) is platform-admin
 	// editable; per-project overrides live on each ProjectInviteLimitView.

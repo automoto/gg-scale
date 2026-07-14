@@ -14,6 +14,18 @@ type Querier interface {
 	ApproveTenantSignupRequest(ctx context.Context, arg ApproveTenantSignupRequestParams) (int64, error)
 	// Edge id if an accepted friendship exists in either direction.
 	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
+	// Tenant-scoped: admin "link player" accept binds a proven email + global
+	// account onto an existing (external-id) row, marking it verified. Guards, any
+	// of which affecting 0 rows makes the caller treat the accept as a conflict:
+	//   * the email unique index may reject if another player already owns the
+	//     address;
+	//   * the account guard prevents clobbering a row already linked to a
+	//     different account;
+	//   * the verified-email guard refuses to overwrite an address the player has
+	//     already verified under a different email — so a link invite accepted
+	//     after the player self-verifies a different address can't silently
+	//     replace (and re-mark verified) their real email.
+	BindPlayerLinkedEmail(ctx context.Context, arg BindPlayerLinkedEmailParams) (int64, error)
 	// Bump every player of an account within a tenant (tenant-ban path), so all
 	// their live JWTs are rejected at server-verify immediately.
 	BumpAccountPlayerEpochsInTenant(ctx context.Context, arg BumpAccountPlayerEpochsInTenantParams) error
@@ -114,6 +126,8 @@ type Querier interface {
 	CreatePlayerAccountSession(ctx context.Context, arg CreatePlayerAccountSessionParams) (int64, error)
 	CreatePlayerAccountTrustedDevice(ctx context.Context, arg CreatePlayerAccountTrustedDeviceParams) error
 	// Player invitations.
+	// project_player_id is set only for admin "link player" invites, which bind the
+	// proven email onto that existing row on accept; NULL keeps find-or-create-by-email.
 	CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error)
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
@@ -384,6 +398,10 @@ type Querier interface {
 	// bucket for the current tenant's project, plus oldest queued ticket and
 	// the min/max count spread so operators can spot stuck buckets at a glance.
 	ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error)
+	// Target player IDs of open, unexpired invitations, for the "invite pending"
+	// list badge. Expired-but-unswept invites are excluded so the badge matches
+	// what the accept flow would actually honor.
+	ListOpenInvitationTargetsForProject(ctx context.Context, projectID int64) ([]*int64, error)
 	// Returns unexpired invites for the target user, enriched with the sender's
 	// email and optional xuid for display.
 	ListPendingGameInvites(ctx context.Context, toPlayerID int64) ([]ListPendingGameInvitesRow, error)
@@ -434,6 +452,10 @@ type Querier interface {
 	// SECURITY DEFINER table functions, so it would otherwise fall back to
 	// interface{} for every column.
 	PlayerInviteLookup(ctx context.Context, codeHash []byte) (PlayerInviteLookupRow, error)
+	// Tenant-scoped existence probe used by the link-player accept path to tell a
+	// vanished/soft-deleted target row (the invite is dead) apart from a genuine
+	// conflict when BindPlayerLinkedEmail affects 0 rows.
+	PlayerLinkTargetExists(ctx context.Context, id int64) (bool, error)
 	PromoteControlPanelUserToPlatformAdmin(ctx context.Context, id int64) error
 	PruneStaleGameSessionPeers(ctx context.Context, sessionID string) (int64, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
@@ -503,6 +525,13 @@ type Querier interface {
 	// Logout path: a later replay of this hash is a benign stale-client retry, not
 	// reuse, so it must NOT trip the family kill.
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)
+	// Link-player resend path: clear any open invite that would collide with the
+	// fresh one before it is inserted — either a prior invite for the same target
+	// row, or any open invite (targeted or plain) to the same (project_id, email).
+	// The open-invite unique index is keyed on (project_id, email) alone, so a
+	// pre-existing plain invite to the same address must be superseded too or the
+	// insert 409s.
+	RevokeSupersededPlayerInvitations(ctx context.Context, arg RevokeSupersededPlayerInvitationsParams) error
 	// Platform-admin search by email prefix. Bounded LIMIT keeps the scan cheap.
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
 	SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error

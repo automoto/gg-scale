@@ -511,6 +511,7 @@ type PlayerInvitation struct {
 	RevokedAt       pgtype.Timestamptz
 	InvitedByUserID int64
 	CreatedAt       pgtype.Timestamptz
+	ProjectPlayerID *int64
 }
 
 type Presence struct {

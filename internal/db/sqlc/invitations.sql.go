@@ -135,7 +135,7 @@ func (q *Queries) CreatePlayer(ctx context.Context, arg CreatePlayerParams) (Cre
 const createPlayerInvitation = `-- name: CreatePlayerInvitation :one
 
 INSERT INTO player_invitations (
-    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id
+    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id, project_player_id
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -143,7 +143,8 @@ VALUES (
     $2,
     $3,
     $4,
-    $5
+    $5,
+    $6
 )
 RETURNING id, created_at, expires_at
 `
@@ -154,6 +155,7 @@ type CreatePlayerInvitationParams struct {
 	CodeHash        []byte
 	ExpiresAt       pgtype.Timestamptz
 	InvitedByUserID int64
+	ProjectPlayerID *int64
 }
 
 type CreatePlayerInvitationRow struct {
@@ -163,6 +165,8 @@ type CreatePlayerInvitationRow struct {
 }
 
 // Player invitations.
+// project_player_id is set only for admin "link player" invites, which bind the
+// proven email onto that existing row on accept; NULL keeps find-or-create-by-email.
 func (q *Queries) CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error) {
 	row := q.db.QueryRow(ctx, createPlayerInvitation,
 		arg.ProjectID,
@@ -170,6 +174,7 @@ func (q *Queries) CreatePlayerInvitation(ctx context.Context, arg CreatePlayerIn
 		arg.CodeHash,
 		arg.ExpiresAt,
 		arg.InvitedByUserID,
+		arg.ProjectPlayerID,
 	)
 	var i CreatePlayerInvitationRow
 	err := row.Scan(&i.ID, &i.CreatedAt, &i.ExpiresAt)
@@ -402,6 +407,7 @@ SELECT
     i.revoked_at,
     i.invited_by_user_id,
     i.created_at,
+    i.project_player_id,
     p.name AS project_name
 FROM player_invitations i
 JOIN projects p ON p.id = i.project_id
@@ -420,6 +426,7 @@ type GetPlayerInvitationByCodeHashRow struct {
 	RevokedAt       pgtype.Timestamptz
 	InvitedByUserID int64
 	CreatedAt       pgtype.Timestamptz
+	ProjectPlayerID *int64
 	ProjectName     string
 }
 
@@ -436,6 +443,7 @@ func (q *Queries) GetPlayerInvitationByCodeHash(ctx context.Context, codeHash []
 		&i.RevokedAt,
 		&i.InvitedByUserID,
 		&i.CreatedAt,
+		&i.ProjectPlayerID,
 		&i.ProjectName,
 	)
 	return i, err
@@ -657,6 +665,40 @@ func (q *Queries) ListControlPanelMembersForTenant(ctx context.Context, tenantID
 	return items, nil
 }
 
+const listOpenInvitationTargetsForProject = `-- name: ListOpenInvitationTargetsForProject :many
+SELECT project_player_id
+FROM player_invitations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND project_player_id IS NOT NULL
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+  AND expires_at > now()
+`
+
+// Target player IDs of open, unexpired invitations, for the "invite pending"
+// list badge. Expired-but-unswept invites are excluded so the badge matches
+// what the accept flow would actually honor.
+func (q *Queries) ListOpenInvitationTargetsForProject(ctx context.Context, projectID int64) ([]*int64, error) {
+	rows, err := q.db.Query(ctx, listOpenInvitationTargetsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*int64
+	for rows.Next() {
+		var project_player_id *int64
+		if err := rows.Scan(&project_player_id); err != nil {
+			return nil, err
+		}
+		items = append(items, project_player_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformAdminInvitations = `-- name: ListPlatformAdminInvitations :many
 SELECT
     id,
@@ -848,18 +890,23 @@ SELECT
     (lookup.project_id)::bigint   AS project_id,
     (lookup.email)::text          AS email,
     (lookup.expires_at)::timestamptz AS expires_at,
-    (lookup.project_name)::text   AS project_name
+    (lookup.project_name)::text   AS project_name,
+    -- COALESCE to a 0 sentinel: the ::bigint cast makes sqlc treat the column
+    -- as NOT NULL, but it is NULL for non-targeted invites. Player IDs are
+    -- always >= 1, so 0 unambiguously means "no target row".
+    COALESCE(lookup.project_player_id, 0)::bigint AS project_player_id
 FROM player_invite_lookup($1)
-    AS lookup(id, tenant_id, project_id, email, expires_at, project_name)
+    AS lookup(id, tenant_id, project_id, email, expires_at, project_name, project_player_id)
 `
 
 type PlayerInviteLookupRow struct {
-	ID          int64
-	TenantID    int64
-	ProjectID   int64
-	Email       string
-	ExpiresAt   pgtype.Timestamptz
-	ProjectName string
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	Email           string
+	ExpiresAt       pgtype.Timestamptz
+	ProjectName     string
+	ProjectPlayerID int64
 }
 
 // Privileged (SECURITY DEFINER) lookup used by the player invite-accept
@@ -879,6 +926,7 @@ func (q *Queries) PlayerInviteLookup(ctx context.Context, codeHash []byte) (Play
 		&i.Email,
 		&i.ExpiresAt,
 		&i.ProjectName,
+		&i.ProjectPlayerID,
 	)
 	return i, err
 }
@@ -929,6 +977,33 @@ WHERE refresh_hash = $1 AND revoked_at IS NULL
 
 func (q *Queries) RevokePlayerSession(ctx context.Context, refreshHash []byte) error {
 	_, err := q.db.Exec(ctx, revokePlayerSession, refreshHash)
+	return err
+}
+
+const revokeSupersededPlayerInvitations = `-- name: RevokeSupersededPlayerInvitations :exec
+UPDATE player_invitations
+SET revoked_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+  AND (project_player_id = $2 OR email = $3)
+`
+
+type RevokeSupersededPlayerInvitationsParams struct {
+	ProjectID       int64
+	ProjectPlayerID *int64
+	Email           string
+}
+
+// Link-player resend path: clear any open invite that would collide with the
+// fresh one before it is inserted — either a prior invite for the same target
+// row, or any open invite (targeted or plain) to the same (project_id, email).
+// The open-invite unique index is keyed on (project_id, email) alone, so a
+// pre-existing plain invite to the same address must be superseded too or the
+// insert 409s.
+func (q *Queries) RevokeSupersededPlayerInvitations(ctx context.Context, arg RevokeSupersededPlayerInvitationsParams) error {
+	_, err := q.db.Exec(ctx, revokeSupersededPlayerInvitations, arg.ProjectID, arg.ProjectPlayerID, arg.Email)
 	return err
 }
 

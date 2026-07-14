@@ -142,8 +142,10 @@ WHERE id = sqlc.arg(id);
 -- Player invitations.
 
 -- name: CreatePlayerInvitation :one
+-- project_player_id is set only for admin "link player" invites, which bind the
+-- proven email onto that existing row on accept; NULL keeps find-or-create-by-email.
 INSERT INTO player_invitations (
-    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id
+    tenant_id, project_id, email, code_hash, expires_at, invited_by_user_id, project_player_id
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -151,7 +153,8 @@ VALUES (
     sqlc.arg(email),
     sqlc.arg(code_hash),
     sqlc.arg(expires_at),
-    sqlc.arg(invited_by_user_id)
+    sqlc.arg(invited_by_user_id),
+    sqlc.narg(project_player_id)
 )
 RETURNING id, created_at, expires_at;
 
@@ -166,6 +169,7 @@ SELECT
     i.revoked_at,
     i.invited_by_user_id,
     i.created_at,
+    i.project_player_id,
     p.name AS project_name
 FROM player_invitations i
 JOIN projects p ON p.id = i.project_id
@@ -201,6 +205,34 @@ WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND accepted_at IS NULL
   AND revoked_at IS NULL;
+
+-- name: RevokeSupersededPlayerInvitations :exec
+-- Link-player resend path: clear any open invite that would collide with the
+-- fresh one before it is inserted — either a prior invite for the same target
+-- row, or any open invite (targeted or plain) to the same (project_id, email).
+-- The open-invite unique index is keyed on (project_id, email) alone, so a
+-- pre-existing plain invite to the same address must be superseded too or the
+-- insert 409s.
+UPDATE player_invitations
+SET revoked_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+  AND (project_player_id = sqlc.arg(project_player_id) OR email = sqlc.arg(email));
+
+-- name: ListOpenInvitationTargetsForProject :many
+-- Target player IDs of open, unexpired invitations, for the "invite pending"
+-- list badge. Expired-but-unswept invites are excluded so the badge matches
+-- what the accept flow would actually honor.
+SELECT project_player_id
+FROM player_invitations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND project_player_id IS NOT NULL
+  AND accepted_at IS NULL
+  AND revoked_at IS NULL
+  AND expires_at > now();
 
 -- Project → tenant lookup (privileged; used by the player UI which knows
 -- the project from the URL but has no tenant context yet).
@@ -329,6 +361,10 @@ SELECT
     (lookup.project_id)::bigint   AS project_id,
     (lookup.email)::text          AS email,
     (lookup.expires_at)::timestamptz AS expires_at,
-    (lookup.project_name)::text   AS project_name
+    (lookup.project_name)::text   AS project_name,
+    -- COALESCE to a 0 sentinel: the ::bigint cast makes sqlc treat the column
+    -- as NOT NULL, but it is NULL for non-targeted invites. Player IDs are
+    -- always >= 1, so 0 unambiguously means "no target row".
+    COALESCE(lookup.project_player_id, 0)::bigint AS project_player_id
 FROM player_invite_lookup(sqlc.arg(code_hash))
-    AS lookup(id, tenant_id, project_id, email, expires_at, project_name);
+    AS lookup(id, tenant_id, project_id, email, expires_at, project_name, project_player_id);

@@ -193,6 +193,7 @@ func New(d Deps) http.Handler {
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
 			r.Get("/rate-limits", h.rateLimitsPage)
 			r.Post("/rate-limits/api", h.updateTenantAPILimitHandler)
+			r.Post("/rate-limits/invites/recipient", h.updateTenantRecipientInviteLimitHandler)
 			r.Post("/rate-limits/projects/{projectID}/invites", h.updateProjectInviteLimitHandler)
 			r.Post("/rate-limits/storage", h.updateTenantStorageLimitHandler)
 			r.Post("/rate-limits/projects/{projectID}/storage", h.updateProjectStorageLimitHandler)
@@ -208,6 +209,8 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/players/{playerID}/ban", h.playerToggleBanHandler)
 			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
 			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
+			r.Get("/projects/{projectID}/players/{playerID}/link", h.linkPlayerDialog)
+			r.Post("/projects/{projectID}/players/{playerID}/link", h.linkPlayerHandler)
 			// Leaderboard CRUD. Always-on (no feature gate); mutations are
 			// gated per-handler on project:*:leaderboard, manage.
 			r.Get("/projects/{projectID}/leaderboards", h.leaderboardsListPage)

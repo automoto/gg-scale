@@ -8,7 +8,7 @@ templ baseHead(title string) {
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<meta name="color-scheme" content="dark"/>
 		<title>{ title }</title>
-		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true}'/>
+		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'/>
 		<link rel="stylesheet" href={ webassets.URL("pico.min.css") }/>
 		<link rel="stylesheet" href={ webassets.URL("app.css") }/>
 		<script src={ controlPanelAssetURL("htmx.min.js") } defer></script>
@@ -694,6 +694,21 @@ templ RateLimitsPage(vm RateLimitsView) {
 				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour,
 				{ rlNum(vm.DefaultDomainDay) }/project/day).
 			</p>
+			if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/invites/recipient") } class="rate-limit-row">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<strong>Recipient limit</strong>
+					<label>Back-to-back invites to one address
+						<input name="recipient_burst" type="number" step="any" min="0" value={ rlValue(vm.RecipientBurst) } placeholder={ rlNum(vm.DefaultRecipientBurst) }/>
+					</label>
+					<label>Cooldown (seconds)
+						<input name="recipient_cooldown_secs" type="number" step="any" min="0" value={ rlValue(vm.RecipientCooldownSecs) } placeholder={ rlNum(vm.DefaultRecipientCooldownSecs) }/>
+					</label>
+					<button type="submit" class="btn-inline">Save</button>
+				</form>
+			} else if vm.RecipientOverridden {
+				<p class="card-subtitle">Recipient limit: { rlNum(vm.RecipientBurst) } per { rlNum(vm.RecipientCooldownSecs) }s (set by a platform admin).</p>
+			}
 			if len(vm.Projects) == 0 {
 				<div class="empty-state"><p>No projects yet.</p></div>
 			} else {
@@ -1212,6 +1227,8 @@ templ PlayersPage(vm PlayersView) {
 								<td>
 									if !p.EmailVerifiedAt.IsZero() {
 										<span class="badge">verified</span>
+									} else if p.InvitePending {
+										<span class="badge">invite pending</span>
 									} else {
 										<span class="badge">unverified</span>
 									}
@@ -1224,7 +1241,18 @@ templ PlayersPage(vm PlayersView) {
 									}
 								</td>
 								<td>{ timeString(p.CreatedAt) }</td>
-								<td class="actions-cell"><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(p.ID)) } role="button" class="secondary outline btn-inline">View</a></td>
+								<td class="actions-cell">
+									if p.EmailVerifiedAt.IsZero() {
+										<button
+											type="button"
+											class="secondary outline btn-inline"
+											hx-get={ "/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(p.ID) + "/link" }
+											hx-target="#modal-root"
+											hx-swap="innerHTML"
+										>Link</button>
+									}
+									<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(p.ID)) } role="button" class="secondary outline btn-inline">View</a>
+								</td>
 							</tr>
 						}
 					</tbody>
@@ -1233,6 +1261,40 @@ templ PlayersPage(vm PlayersView) {
 			}
 		</section>
 	}
+}
+
+templ LinkPlayerDialog(vm LinkPlayerView) {
+	<dialog class="feature-dialog">
+		<form
+			method="post"
+			action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.PlayerID) + "/link") }
+			hx-post={ "/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.PlayerID) + "/link" }
+			hx-target="#modal-root"
+			hx-swap="innerHTML"
+		>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<input type="hidden" name="external_id" value={ vm.ExternalID }/>
+			<header>
+				<h2>Link player</h2>
+				<p class="card-subtitle">Email an invite so this player can verify and link their account.</p>
+			</header>
+			<div class="feature-dialog-body">
+				@errorAlert(vm.Error)
+				<label>
+					External ID
+					<input type="text" value={ vm.ExternalID } readonly/>
+				</label>
+				<label>
+					Email
+					<input type="email" name="email" value={ vm.Email } placeholder="player@example.com" autocomplete="off" required/>
+				</label>
+			</div>
+			<footer class="form-actions">
+				<button type="button" class="secondary outline btn-inline" data-dialog-close>Cancel</button>
+				<button type="submit" class="btn-inline">Send invite</button>
+			</footer>
+		</form>
+	</dialog>
 }
 
 templ InvitePlayerPage(vm InvitePlayerView) {

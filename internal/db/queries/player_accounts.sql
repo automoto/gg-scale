@@ -178,6 +178,37 @@ SET player_account_id = NULL
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
+-- name: BindPlayerLinkedEmail :execrows
+-- Tenant-scoped: admin "link player" accept binds a proven email + global
+-- account onto an existing (external-id) row, marking it verified. Guards, any
+-- of which affecting 0 rows makes the caller treat the accept as a conflict:
+--   * the email unique index may reject if another player already owns the
+--     address;
+--   * the account guard prevents clobbering a row already linked to a
+--     different account;
+--   * the verified-email guard refuses to overwrite an address the player has
+--     already verified under a different email — so a link invite accepted
+--     after the player self-verifies a different address can't silently
+--     replace (and re-mark verified) their real email.
+UPDATE project_players
+SET email = sqlc.arg(email),
+    email_verified_at = now(),
+    player_account_id = sqlc.arg(player_account_id)
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND (player_account_id IS NULL OR player_account_id = sqlc.arg(player_account_id))
+  AND (email_verified_at IS NULL OR email = sqlc.arg(email));
+
+-- name: PlayerLinkTargetExists :one
+-- Tenant-scoped existence probe used by the link-player accept path to tell a
+-- vanished/soft-deleted target row (the invite is dead) apart from a genuine
+-- conflict when BindPlayerLinkedEmail affects 0 rows.
+SELECT EXISTS (
+    SELECT 1 FROM project_players
+    WHERE id = sqlc.arg(id)
+      AND deleted_at IS NULL
+) AS row_exists;
+
 -- name: GetPlayerForAccountLink :one
 -- Tenant-scoped: finds an existing (possibly unlinked) player by project +
 -- email so a public-join / invite can link it instead of creating a duplicate.

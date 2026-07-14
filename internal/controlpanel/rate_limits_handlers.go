@@ -55,6 +55,35 @@ func (h *Handler) updateTenantAPILimitHandler(w http.ResponseWriter, r *http.Req
 	h.redirectRateLimits(w, r, tenantID, "API limit updated.")
 }
 
+// updateTenantRecipientInviteLimitHandler sets the tenant-wide per-recipient
+// invite burst (back-to-back invites allowed to one address before the
+// cooldown). Platform-admin only — tenant admins can't relax their own abuse cap.
+func (h *Handler) updateTenantRecipientInviteLimitHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	if !session.User.IsPlatformAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	burst, berr := parseLimitField(r.Form.Get("recipient_burst"))
+	cooldown, cerr := parseLimitField(r.Form.Get("recipient_cooldown_secs"))
+	if berr != nil || cerr != nil {
+		h.redirectRateLimits(w, r, tenantID, "Recipient burst and cooldown must be non-negative numbers.")
+		return
+	}
+	if err := h.setTenantRecipientInviteOverride(r.Context(), session.User.ID, tenantID, burst, cooldown); err != nil {
+		h.rateLimitError(w, r, tenantID, err)
+		return
+	}
+	h.redirectRateLimits(w, r, tenantID, "Recipient burst updated.")
+}
+
 // updateProjectInviteLimitHandler sets per-project invite quotas (tenant admin).
 func (h *Handler) updateProjectInviteLimitHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
