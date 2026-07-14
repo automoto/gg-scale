@@ -53,6 +53,40 @@ func TestMigrations_seed_casbin_p_policy_matches_code(t *testing.T) {
 		"persisted casbin p-policy has drifted from rbac.defaultPolicyCSV; add a migration to reconcile it")
 }
 
+// TestMigrations_feature_grants_check_allows_every_code_feature guards the
+// feature_grants_feature_check constraint against drifting from the Feature
+// constants compiled into the binary. A feature the constraint rejects can
+// never be deprovisioned: default-on features (matchmaker) are turned off by
+// an explicit enabled=false row, which the constraint must accept.
+func TestMigrations_feature_grants_check_allows_every_code_feature(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	require.NoError(t, r.Up())
+
+	dbc := openDB(t, dsn)
+	var tenantID int64
+	require.NoError(t, dbc.QueryRow(
+		`INSERT INTO tenants (name, tier) VALUES ('feature-check', 'free') RETURNING id`).Scan(&tenantID))
+
+	features := []rbac.Feature{
+		rbac.FeatureP2PRelay,
+		rbac.FeatureDedicatedServers,
+		rbac.FeatureFleetDockerBackend,
+		rbac.FeatureFleetAgonesBackend,
+		rbac.FeatureFleetPluginBackend,
+		rbac.FeatureMatchmaker,
+	}
+	for _, feature := range features {
+		_, err := dbc.Exec(
+			`INSERT INTO feature_grants (tenant_id, feature, enabled, reason)
+			 VALUES ($1, $2, false, 'constraint guard')`, tenantID, string(feature))
+		assert.NoError(t, err, "feature %q must satisfy feature_grants_feature_check", feature)
+	}
+}
+
 // TestMigrations_grant_ggscale_app_dml_on_worker_tables guards the app-role
 // grants the background workers depend on. A missing grant surfaces at runtime
 // as "permission denied for table ..." rather than a test failure, so assert

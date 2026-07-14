@@ -139,6 +139,43 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 	assert.Equal(t, http.StatusForbidden, createTicket())
 }
 
+func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "mm-deprovision")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE api_keys
+		    SET key_type = 'publishable',
+		        scopes = ARRAY['matchmaker']::text[]
+		  WHERE tenant_id = $1 AND project_id = $2`,
+		tenantID, projectID)
+	require.NoError(t, err)
+
+	srv := newFleetMatchmakerServerForCluster(t, c, newStubBackend("stub"))
+	createTicket := func() int {
+		access := anonymousLogin(t, srv.URL, "mm-deprovision")
+		resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/matchmaker/tickets", "mm-deprovision", access, map[string]any{
+			"mode":      "match_only",
+			"game_mode": "ffa",
+			"min_count": 1,
+			"max_count": 2,
+		})
+		assert.NotContains(t, string(body), "panic")
+		return resp.StatusCode
+	}
+
+	// Matchmaker is default-on: with no grant row the ticket is accepted.
+	assert.Equal(t, http.StatusCreated, createTicket())
+
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO feature_grants (tenant_id, project_id, feature, enabled, reason)
+		 VALUES ($1, $2, $3, false, 'integration test deprovision')`,
+		tenantID, projectID, string(rbac.FeatureMatchmaker))
+	require.NoError(t, err, "an explicit enabled=false matchmaker row must be storable")
+
+	time.Sleep(6 * time.Second)
+	assert.Equal(t, http.StatusForbidden, createTicket())
+}
+
 func newRelayServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))

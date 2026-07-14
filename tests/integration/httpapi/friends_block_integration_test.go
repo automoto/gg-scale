@@ -11,6 +11,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestFriends_block_unknown_target_returns_not_found asserts block/unblock of
+// a player id that does not exist is an opaque 404 — the same deny a friend
+// request returns — never a 500.
+func TestFriends_block_unknown_target_returns_not_found(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k-block-404")
+	srv := newServerForCluster(t, c)
+
+	tokA, idA := anonymousLoginWithID(t, srv.URL, "k-block-404")
+	linkPlayerAccount(t, c, idA)
+
+	for _, action := range []string{"block", "unblock"} {
+		resp, body := authedReq(t, http.MethodPost,
+			fmt.Sprintf("%s/v1/friends/999999999/%s", srv.URL, action), "k-block-404", tokA, nil)
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode, "%s: %s", action, string(body))
+	}
+}
+
 // TestFriends_block_enforcement_e2e is the end-to-end blocking assertion:
 // request → accept → block → the blocked player's re-request is
 // refused and a game invite to them is rejected → unblock → interaction

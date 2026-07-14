@@ -344,7 +344,9 @@ func friendBlockToggle(ctx context.Context, d Deps, toUser int64, block bool) (*
 	switch {
 	case errors.Is(err, errNoAccount):
 		return nil, huma.Error403Forbidden(linkAccountMsg)
-	case errors.Is(err, errTargetNoAccount):
+	// A nonexistent target id (ErrNoRows) must be indistinguishable from an
+	// unlinked one.
+	case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
 		return nil, huma.Error404NotFound("target not found")
 	case errors.Is(err, errFriendSelf):
 		return nil, huma.Error400BadRequest("cannot block self")
