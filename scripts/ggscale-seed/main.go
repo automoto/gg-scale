@@ -207,7 +207,7 @@ func truncateAll(ctx context.Context, pool *pgxpool.Pool) error {
 type tenantSeed struct {
 	id       int64
 	name     string
-	tier     string
+	tier     int
 	projects []projectSeed
 }
 
@@ -243,7 +243,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	// 2. Tenants + first project via dashboard_create_tenant
 	var tenants []tenantSeed
 	for i, name := range studioNames[:4] {
-		tier := []string{"free", "payg", "premium", "payg"}[i]
+		tier := []int{0, 1, 2, 1}[i]
 		projectName := gameNames[i][0]
 		keyHash := randomHash()
 
@@ -271,7 +271,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 
 		t := tenantSeed{id: tid, name: name, tier: tier, projects: []projectSeed{{id: pid, name: projectName}}}
 		tenants = append(tenants, t)
-		log.Printf("created tenant id=%d name=%q tier=%q project=%q", tid, name, tier, projectName)
+		log.Printf("created tenant id=%d name=%q tier=%d project=%q", tid, name, tier, projectName)
 	}
 
 	// 3. Extra projects per tenant

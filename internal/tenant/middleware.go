@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/ggscale/ggscale/internal/db"
@@ -29,15 +30,37 @@ import (
 // it to 401 instead of 500.
 var ErrUnknownKey = errors.New("tenant: unknown api key")
 
-// Tier is the billing tier of the owning tenant.
-type Tier string
+// Tier is the tenant's numbered service class (0..3). Numbered classes carry
+// no price judgment; human labels and dollars live in the commercial layer,
+// never in this repo.
+type Tier int
 
-// Tier values mirror the CHECK constraint on tenants.tier.
+// Tier values mirror the CHECK constraint on tenants.tier (0..3).
 const (
-	TierFree    Tier = "free"
-	TierPAYG    Tier = "payg"
-	TierPremium Tier = "premium"
+	Tier0 Tier = 0
+	Tier1 Tier = 1
+	Tier2 Tier = 2
+	Tier3 Tier = 3
 )
+
+// ClampTier converts a raw integer class (as read from the DB) into a Tier,
+// clamping unknown/out-of-range values to Tier0. Fail-closed: a corrupt or
+// future class never grants more than the base tier.
+func ClampTier(v int) Tier {
+	if v < int(Tier0) || v > int(Tier3) {
+		return Tier0
+	}
+	return Tier(v)
+}
+
+// String renders the class as "tier_N". Out-of-range values render as tier_0,
+// consistent with ClampTier's fail-closed behaviour.
+func (t Tier) String() string {
+	if t < Tier0 || t > Tier3 {
+		return "tier_0"
+	}
+	return "tier_" + strconv.Itoa(int(t))
+}
 
 // KeyType splits Stripe-style publishable (embedded in shipped game
 // binaries) from secret (game-server / tenant-backend only). Sensitive

@@ -663,11 +663,27 @@ type StorageObject struct {
 type Tenant struct {
 	ID                   int64
 	Name                 string
-	Tier                 string
 	CreatedAt            pgtype.Timestamptz
 	DeletedAt            pgtype.Timestamptz
 	CustomTokenSecret    []byte
 	PublicJoiningEnabled bool
+	Tier                 int16
+	EnforceQuotas        bool
+}
+
+type TenantChangeRequest struct {
+	ID                int64
+	TenantID          int64
+	RequestedByUserID *int64
+	Kind              string
+	RequestedTier     *int16
+	Feature           *string
+	Note              string
+	Status            string
+	ReviewedByUserID  *int64
+	ReviewedAt        pgtype.Timestamptz
+	ReviewReason      *string
+	CreatedAt         pgtype.Timestamptz
 }
 
 type TenantPlayerBan struct {
@@ -695,6 +711,13 @@ type TenantSignupRequest struct {
 	TenantID            *int64
 	AcceptedAt          pgtype.Timestamptz
 	CreatedAt           pgtype.Timestamptz
+}
+
+type TenantStorageUsage struct {
+	TenantID              int64
+	TotalBytes            int64
+	LastNotifiedThreshold int16
+	UpdatedAt             pgtype.Timestamptz
 }
 
 type UsageSample struct {

@@ -84,9 +84,9 @@ SELECT tier FROM tenants WHERE id = $1
 
 // The tenant's billing tier, used to show the correct compiled default on the
 // rate-limits page (enforcement keys off the same tier via the API key).
-func (q *Queries) GetTenantTier(ctx context.Context, id int64) (string, error) {
+func (q *Queries) GetTenantTier(ctx context.Context, id int64) (int16, error) {
 	row := q.db.QueryRow(ctx, getTenantTier, id)
-	var tier string
+	var tier int16
 	err := row.Scan(&tier)
 	return tier, err
 }

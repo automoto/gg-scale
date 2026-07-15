@@ -1,11 +1,23 @@
 package controlpanel
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestSetTenantTier_rejects_out_of_range_class_before_database_access(t *testing.T) {
+	h := &Handler{}
+
+	for _, target := range []int16{-1, 4} {
+		changed, err := h.setTenantTier(context.Background(), 1, 2, target)
+
+		assert.False(t, changed, "target=%d", target)
+		assert.ErrorIs(t, err, errInvalidTenantTier, "target=%d", target)
+	}
+}
 
 func TestSafeReturnPath(t *testing.T) {
 	const fallback = "/v1/control-panel/tenants/1/projects"
@@ -37,7 +49,7 @@ func TestSafeReturnPath(t *testing.T) {
 
 func TestTenantSettingsPage_renders_editable_forms_with_return_path(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
-		TenantID: 3, TenantName: "acme", Tier: "free",
+		TenantID: 3, TenantName: "acme", Tier: "tier_0",
 		IsPlatformAdmin: true,
 		APIDefaultRate:  10, APIDefaultBurst: 20,
 	}))
@@ -47,6 +59,11 @@ func TestTenantSettingsPage_renders_editable_forms_with_return_path(t *testing.T
 	// API limit form is present for platform admins.
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/rate-limits/api")
 	assert.Contains(t, html, "Save API limit")
+	// Platform admins can directly move a tenant to any class, including down.
+	assert.Contains(t, html, `/v1/control-panel/tenants/3/settings/tier`)
+	assert.Contains(t, html, `name="tier"`)
+	assert.Contains(t, html, `<option value="0" selected>tier_0</option>`)
+	assert.Contains(t, html, `<option value="3">tier_3</option>`)
 	// The form carries a redirect_to back to the settings page.
 	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/settings"`)
 }
@@ -56,6 +73,8 @@ func TestTenantSettingsPage_hides_api_form_for_non_platform_admin(t *testing.T) 
 		TenantID: 3, IsPlatformAdmin: false,
 	}))
 	assert.NotContains(t, html, "Save API limit")
+	assert.NotContains(t, html, `name="tier"`)
+	assert.NotContains(t, html, "/settings/tier")
 	assert.Contains(t, html, "Only platform admins")
 }
 

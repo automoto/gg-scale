@@ -9,6 +9,7 @@ package players
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -17,6 +18,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/quota"
+	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -163,6 +166,10 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			return q.MarkPlayerInvitationAccepted(r.Context(), row.ID)
 		}
+		qc, qerr := q.GetTenantQuotaContext(r.Context())
+		if qerr != nil {
+			return fmt.Errorf("tenant quota context: %w", qerr)
+		}
 		emailPtr := &row.Email
 		existing, eerr := q.GetPlayerForAccountLink(r.Context(), sqlcgen.GetPlayerForAccountLinkParams{
 			ProjectID: projectID, Email: emailPtr,
@@ -178,6 +185,15 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 				return lerr
 			}
 		case errors.Is(eerr, pgx.ErrNoRows):
+			if qc.EnforceQuotas {
+				count, cerr := q.CountPlayersForTenant(r.Context())
+				if cerr != nil {
+					return fmt.Errorf("count players: %w", cerr)
+				}
+				if cerr := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckPlayers(count); cerr != nil {
+					return cerr
+				}
+			}
 			externalID, xerr := webutil.RandomHex("user_", 16)
 			if xerr != nil {
 				return xerr
@@ -218,6 +234,12 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
 		webutil.Render(r, w, InviteAcceptPage(view))
 		return
+	case playerQuotaExceeded(err):
+		h.metrics.QuotaRejection(quota.AxisPlayers)
+		view.Error = "This game has reached its registered-player limit."
+		w.WriteHeader(http.StatusForbidden)
+		webutil.Render(r, w, InviteAcceptPage(view))
+		return
 	case err != nil:
 		webutil.InternalError(w, "player invite: accept", err)
 		return
@@ -238,6 +260,11 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.finishAccountLogin(w, r, accountID, view.Email, epoch)
+}
+
+func playerQuotaExceeded(err error) bool {
+	var qe *quota.ErrQuotaExceeded
+	return errors.As(err, &qe) && qe.Axis == quota.AxisPlayers
 }
 
 var (

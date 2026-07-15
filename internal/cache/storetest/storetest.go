@@ -5,6 +5,8 @@ package storetest
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -102,6 +104,123 @@ func RunSuite(t *testing.T, f Factory) {
 		require.NoError(t, err)
 		assert.False(t, ok)
 		assert.Equal(t, int64(5), cur, "must roll back to limit, not 6")
+	})
+
+	t.Run("AcquireSlotBurst_admits_within_ceiling_and_walls_at_it", func(t *testing.T) {
+		store := f(t)
+		ctx := context.Background()
+
+		// Full budget at a single instant: connections up to the ceiling admit.
+		for i := 0; i < 4; i++ {
+			ok, _, err := store.AcquireSlotBurst(ctx, "burst:cap", 2, 4, 10*time.Minute, time.Hour)
+			require.NoError(t, err)
+			require.True(t, ok, "connection %d within burst envelope", i+1)
+		}
+		// Ceiling is a hard wall; current holds at the ceiling.
+		ok, cur, err := store.AcquireSlotBurst(ctx, "burst:cap", 2, 4, 10*time.Minute, time.Hour)
+		require.NoError(t, err)
+		assert.False(t, ok)
+		assert.Equal(t, int64(4), cur, "rejection reports the unchanged count at the ceiling")
+	})
+
+	t.Run("AcquireSlotBurst_is_atomic_under_contention", func(t *testing.T) {
+		store := f(t)
+		ctx := context.Background()
+		const (
+			callers = 64
+			ceiling = 8
+		)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var allowed atomic.Int64
+		errs := make(chan error, callers)
+		for range callers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				ok, _, err := store.AcquireSlotBurst(ctx, "burst:concurrent", ceiling/2, ceiling, 10*time.Minute, time.Hour)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if ok {
+					allowed.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			require.NoError(t, err)
+		}
+		assert.Equal(t, int64(ceiling), allowed.Load())
+	})
+
+	t.Run("ReleaseSlotBurst_frees_a_burst_slot", func(t *testing.T) {
+		store := f(t)
+		ctx := context.Background()
+
+		for i := 0; i < 4; i++ {
+			_, _, err := store.AcquireSlotBurst(ctx, "burst:rel", 2, 4, 10*time.Minute, time.Hour)
+			require.NoError(t, err)
+		}
+		require.NoError(t, store.ReleaseSlotBurst(ctx, "burst:rel"))
+		ok, cur, err := store.AcquireSlotBurst(ctx, "burst:rel", 2, 4, 10*time.Minute, time.Hour)
+		require.NoError(t, err)
+		assert.True(t, ok, "a released burst slot frees room under the ceiling")
+		assert.Equal(t, int64(4), cur)
+	})
+
+	t.Run("plain_and_burst_slots_are_independent_under_one_key", func(t *testing.T) {
+		store := f(t)
+		ctx := context.Background()
+
+		// Two plain slots and one burst slot, all under the SAME key.
+		_, _, err := store.AcquireSlot(ctx, "shared:key", 5, time.Hour)
+		require.NoError(t, err)
+		_, _, err = store.AcquireSlot(ctx, "shared:key", 5, time.Hour)
+		require.NoError(t, err)
+		_, _, err = store.AcquireSlotBurst(ctx, "shared:key", 2, 4, 10*time.Minute, time.Hour)
+		require.NoError(t, err)
+
+		// Releasing the burst counter (even spuriously) must leave the plain
+		// counter at 2 — the next plain acquire reads 3.
+		require.NoError(t, store.ReleaseSlotBurst(ctx, "shared:key"))
+		require.NoError(t, store.ReleaseSlotBurst(ctx, "shared:key"))
+		_, pcur, err := store.AcquireSlot(ctx, "shared:key", 5, time.Hour)
+		require.NoError(t, err)
+		assert.Equal(t, int64(3), pcur, "plain counter unaffected by ReleaseSlotBurst")
+
+		// And draining the plain counter must leave the burst counter (now 0
+		// after the two releases) untouched — the next burst acquire reads 1.
+		for i := 0; i < 5; i++ {
+			require.NoError(t, store.ReleaseSlot(ctx, "shared:key"))
+		}
+		_, bcur, err := store.AcquireSlotBurst(ctx, "shared:key", 2, 4, 10*time.Minute, time.Hour)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), bcur, "burst counter unaffected by ReleaseSlot")
+	})
+
+	t.Run("RefreshSlotBurst_does_not_resurrect_an_expired_slot", func(t *testing.T) {
+		store := f(t)
+		ctx := context.Background()
+
+		// A burst slot that lapses its short TTL.
+		_, _, err := store.AcquireSlotBurst(ctx, "burst:expire", 2, 4, 10*time.Minute, 40*time.Millisecond)
+		require.NoError(t, err)
+		time.Sleep(120 * time.Millisecond)
+
+		// Refreshing the lapsed slot must not revive it.
+		require.NoError(t, store.RefreshSlotBurst(ctx, "burst:expire", time.Hour))
+
+		// The next acquire sees a fresh counter (count resets to 1), proving the
+		// stale state was reclaimed rather than kept alive by the refresh.
+		_, cur, err := store.AcquireSlotBurst(ctx, "burst:expire", 2, 4, 10*time.Minute, time.Hour)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), cur, "expired slot reclaimed; refresh did not resurrect it")
 	})
 
 	t.Run("ReleaseSlot_frees_a_slot_and_clamps_at_zero", func(t *testing.T) {

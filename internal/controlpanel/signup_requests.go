@@ -588,6 +588,14 @@ func (h *Handler) acceptTenantSignup(ctx context.Context, in signupAcceptInput) 
 			}
 			return fmt.Errorf("create tenant bare: %w", cerr)
 		}
+		if h.cfg.EnforceNewTenantQuotas {
+			if err := q.SetTenantEnforceQuotas(ctx, sqlcgen.SetTenantEnforceQuotasParams{
+				TenantID:      tenantID,
+				EnforceQuotas: true,
+			}); err != nil {
+				return fmt.Errorf("set enforce_quotas: %w", err)
+			}
+		}
 		if h.rbac != nil {
 			if err := h.rbac.SetControlPanelMembershipRoleTx(ctx, tx, userID, tenantID, roleOwner); err != nil {
 				return fmt.Errorf("rbac signup owner: %w", err)

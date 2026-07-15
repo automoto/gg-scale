@@ -68,8 +68,10 @@ type Config struct {
 	K3sSAToken   string `env:"K3S_SA_TOKEN" envFile:"true"`
 	K3sCACertB64 string `env:"K3S_CA_CERT_B64" envFile:"true"`
 
-	// RealtimeMaxPerTenant caps concurrent /v1/ws connections per tenant.
-	// 0 disables the cap (the cache.Store layer is bypassed entirely).
+	// RealtimeMaxPerTenant overrides the per-tenant /v1/ws connection cap with
+	// a fixed hard limit (no burst). 0 (default) uses the tenant's tier-class
+	// envelope from ConnectionCapForClass; set a value only to pin a single
+	// fixed cap for all tenants (self-host escape hatch).
 	RealtimeMaxPerTenant int64 `env:"REALTIME_MAX_PER_TENANT" envDefault:"0"`
 	// RealtimeMaxPerPlayer caps concurrent /v1/ws connections from a
 	// single player so one misbehaving player can't drain the per-tenant
@@ -190,6 +192,13 @@ type Config struct {
 	// object's value. Per-tenant / per-project overrides (storage_limits) may
 	// raise or lower it; the effective limit is resolved per write.
 	StorageMaxValueBytes int64 `env:"STORAGE_MAX_VALUE_BYTES" envDefault:"1048576"`
+
+	// QuotasEnforceNewTenants makes tenant provisioning (control-panel create
+	// and signup-request acceptance) set enforce_quotas=true on the new tenant.
+	// Default false keeps zero-config self-host uncapped; the managed prod
+	// deploy sets it so all new tenants are enforced. Existing tenants are
+	// unaffected — flip them with a one-time UPDATE (operator runbook).
+	QuotasEnforceNewTenants bool `env:"QUOTAS_ENFORCE_NEW_TENANTS" envDefault:"false"`
 
 	// SMTPTLS selects how the mailer establishes TLS: "off", "starttls"
 	// (default; hard-fails if the server doesn't advertise it), or

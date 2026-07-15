@@ -1,0 +1,54 @@
+package controlpanel
+
+templ ChangeRequestsPage(vm ChangeRequestsView) {
+	@appLayout("Change requests — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navChangeRequests, IsPlatformAdmin: true}) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Change requests</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Change requests</p>
+				<h1>Change requests</h1>
+				<p class="subtitle">Tenants request tier upgrades and feature grants from their settings page. Approving auto-applies the change; denying can include a reason the tenant sees.</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		<section class="card">
+			<h2>Pending requests</h2>
+			if len(vm.Requests) == 0 {
+				<div class="empty-state"><p>No pending requests.</p></div>
+			} else {
+				for _, req := range vm.Requests {
+					<article class="card">
+						<dl class="kv">
+							<dt>Tenant</dt>
+							<dd>{ req.TenantName } <span class="muted">#{ stringFromInt(req.TenantID) }</span></dd>
+							<dt>Request</dt>
+							if req.Kind == "tier_upgrade" {
+								<dd>Tier upgrade: { req.CurrentTier } → { req.Target }</dd>
+							} else {
+								<dd>Feature: <code>{ req.Target }</code> (current tier { req.CurrentTier })</dd>
+							}
+							<dt>Submitted</dt>
+							<dd>{ timeString(req.CreatedAt) }</dd>
+							if req.Note != "" {
+								<dt>Note</dt>
+								<dd>{ req.Note }</dd>
+							}
+						</dl>
+						<form method="post" action={ templ.URL("/v1/control-panel/admin/change-requests/" + stringFromInt(req.ID) + "/approve") } class="settings-form">
+							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+							<button type="submit" class="btn-inline">Approve &amp; apply</button>
+						</form>
+						<form method="post" action={ templ.URL("/v1/control-panel/admin/change-requests/" + stringFromInt(req.ID) + "/deny") } class="settings-form" data-confirm="Deny this request?">
+							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+							<label>
+								Reason <span class="muted">(optional, included in the email)</span>
+								<input name="reason"/>
+							</label>
+							<button type="submit" class="contrast outline btn-inline">Deny</button>
+						</form>
+					</article>
+				}
+			}
+		</section>
+	}
+}

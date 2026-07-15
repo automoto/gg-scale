@@ -56,7 +56,8 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 	var row sqlcgen.ControlPanelCreateTenantRow
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var err error
-		row, err = sqlcgen.New(tx).ControlPanelCreateTenant(ctx, sqlcgen.ControlPanelCreateTenantParams{
+		q := sqlcgen.New(tx)
+		row, err = q.ControlPanelCreateTenant(ctx, sqlcgen.ControlPanelCreateTenantParams{
 			ActorUserID: in.ActorUserID,
 			TenantName:  in.TenantName,
 			ProjectName: in.ProjectName,
@@ -65,6 +66,14 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		})
 		if err != nil {
 			return fmt.Errorf("control panel create tenant: %w", err)
+		}
+		if h.cfg.EnforceNewTenantQuotas {
+			if err := q.SetTenantEnforceQuotas(ctx, sqlcgen.SetTenantEnforceQuotasParams{
+				TenantID:      row.TenantID,
+				EnforceQuotas: true,
+			}); err != nil {
+				return fmt.Errorf("set enforce_quotas: %w", err)
+			}
 		}
 		if h.rbac != nil {
 			if err := h.rbac.SetControlPanelMembershipRoleTx(ctx, tx, in.ActorUserID, row.TenantID, roleOwner); err != nil {

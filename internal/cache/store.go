@@ -36,14 +36,38 @@ type Store interface {
 	// current is the post-decision counter value (the limit on rejection).
 	AcquireSlot(ctx context.Context, key string, limit int64, ttl time.Duration) (acquired bool, current int64, err error)
 
-	// ReleaseSlot decrements the counter at key, clamped to zero (a release
-	// without a matching acquire is a no-op rather than going negative).
+	// AcquireSlotBurst reserves one slot under a burst model: connections up
+	// to sustained are always admitted; connections between sustained and
+	// ceiling are admitted only while burst budget remains; ceiling is a hard
+	// wall. The budget (burstBudget of full-2× wall time) drains above
+	// sustained and refills at/below it over BurstRefillWindow. ttl bounds idle
+	// survival as with AcquireSlot. See AdmitBurst for the exact semantics.
+	//
+	// current is the connection count after the decision; on rejection it is
+	// the unchanged count, so a caller can tell a ceiling rejection
+	// (current >= ceiling) from a budget-exhaustion one (current < ceiling).
+	AcquireSlotBurst(ctx context.Context, key string, sustained, ceiling int64, burstBudget, ttl time.Duration) (acquired bool, current int64, err error)
+
+	// ReleaseSlot decrements the plain counter at key (AcquireSlot), clamped
+	// to zero (a release without a matching acquire is a no-op rather than
+	// going negative). It does not touch burst slots — use ReleaseSlotBurst
+	// for those.
 	ReleaseSlot(ctx context.Context, key string) error
 
-	// RefreshSlot extends the counter's idle TTL without changing the
+	// RefreshSlot extends a plain counter's idle TTL without changing the
 	// value. Safe to call from a heartbeat goroutine on every active
-	// session; idempotent.
+	// session; idempotent. It does not touch burst slots.
 	RefreshSlot(ctx context.Context, key string, ttl time.Duration) error
+
+	// ReleaseSlotBurst decrements a burst counter (AcquireSlotBurst) at key,
+	// clamped to zero. The burst counterpart to ReleaseSlot; kept separate so
+	// plain and burst counters never depend on sharing a key namespace.
+	ReleaseSlotBurst(ctx context.Context, key string) error
+
+	// RefreshSlotBurst extends a live burst counter's idle TTL. It is a no-op
+	// on an absent or already-expired slot, so a stray refresh cannot
+	// resurrect a reaped counter. Safe to call from a heartbeat goroutine.
+	RefreshSlotBurst(ctx context.Context, key string, ttl time.Duration) error
 
 	// Get returns the value at key. ErrNotFound when absent.
 	Get(ctx context.Context, key string) ([]byte, error)

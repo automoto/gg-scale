@@ -23,6 +23,7 @@ type Metrics struct {
 	matchmakerQueryReject prometheus.Counter
 	relayCreds            prometheus.Counter
 	mailSends             *prometheus.CounterVec
+	quotaRejections       *prometheus.CounterVec
 }
 
 // Signup kinds.
@@ -142,11 +143,15 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_mail_sends_total",
 			Help: "Transactional mail sends by result.",
 		}, []string{"result"}),
+		quotaRejections: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ggscale_quota_rejections_total",
+			Help: "New-growth operations rejected by an enforced tenant quota, by axis (projects/players/storage).",
+		}, []string{"axis"}),
 	}
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
-		m.matchmakerQueryReject, m.relayCreds, m.mailSends,
+		m.matchmakerQueryReject, m.relayCreds, m.mailSends, m.quotaRejections,
 	)
 	return m
 }
@@ -254,4 +259,13 @@ func (m *Metrics) MailSend(result string) {
 		return
 	}
 	m.mailSends.WithLabelValues(result).Inc()
+}
+
+// QuotaRejection counts a new-growth operation rejected by an enforced tenant
+// quota, labelled by axis (quota.AxisProjects / AxisPlayers / AxisStorage).
+func (m *Metrics) QuotaRejection(axis string) {
+	if m == nil {
+		return
+	}
+	m.quotaRejections.WithLabelValues(axis).Inc()
 }

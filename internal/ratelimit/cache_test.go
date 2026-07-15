@@ -73,8 +73,8 @@ func TestRatelimit_fairness_under_load_does_not_starve_other_tenants(t *testing.
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	keyA := tenant.APIKey{ID: 1001, TenantID: 1, Tier: tenant.TierFree}
-	keyB := tenant.APIKey{ID: 2002, TenantID: 2, Tier: tenant.TierFree}
+	keyA := tenant.APIKey{ID: 1001, TenantID: 1, Tier: tenant.Tier0}
+	keyB := tenant.APIKey{ID: 2002, TenantID: 2, Tier: tenant.Tier0}
 
 	var aOK, a429, bOK, bDenied atomic.Int64
 	deadline := time.Now().Add(800 * time.Millisecond)
@@ -130,100 +130,106 @@ func TestRatelimit_fairness_under_load_does_not_starve_other_tenants(t *testing.
 }
 
 // -------- CacheConnectionCap --------
+//
+// These exercise the Acquire/Release/Refresh plumbing on the burst primitive.
+// Sustained==Ceiling gives a plain hard cap (no burst headroom); the time-based
+// burst behaviour is covered by cache.AdmitBurst's fake-clock tests and by
+// connection_cap_test.go.
+
+func hardCap(n int64) ratelimit.CapLimits {
+	return ratelimit.CapLimits{Sustained: n, Ceiling: n}
+}
 
 func TestCacheConnectionCap_acquire_within_limit_succeeds(t *testing.T) {
-	cap := ratelimit.NewCacheConnectionCap(memory.New())
-	dec, err := cap.Acquire(context.Background(), ratelimit.ConnectionCapKey(1001), 5)
+	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
+	dec, err := cap.Acquire(context.Background(), ratelimit.ConnectionCapKey(1001), hardCap(5))
 
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed)
 	assert.Equal(t, int64(1), dec.Current)
 }
 
-func TestCacheConnectionCap_acquire_at_limit_rejects_and_rolls_back(t *testing.T) {
-	cap := ratelimit.NewCacheConnectionCap(memory.New())
+func TestCacheConnectionCap_acquire_at_limit_rejects(t *testing.T) {
+	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
 	key := ratelimit.ConnectionCapKey(1002)
 
 	for i := 0; i < 5; i++ {
-		dec, err := cap.Acquire(context.Background(), key, 5)
+		dec, err := cap.Acquire(context.Background(), key, hardCap(5))
 		require.NoError(t, err)
 		require.True(t, dec.Allowed)
 	}
 
-	dec, err := cap.Acquire(context.Background(), key, 5)
+	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
 	require.NoError(t, err)
 	assert.False(t, dec.Allowed)
-	assert.Equal(t, int64(5), dec.Current, "counter must roll back to limit, not 6")
+	assert.Equal(t, int64(5), dec.Current, "counter holds at the limit, not 6")
 }
 
 func TestCacheConnectionCap_release_frees_a_slot(t *testing.T) {
-	cap := ratelimit.NewCacheConnectionCap(memory.New())
+	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
 	key := ratelimit.ConnectionCapKey(1003)
 
 	for i := 0; i < 3; i++ {
-		_, err := cap.Acquire(context.Background(), key, 3)
+		_, err := cap.Acquire(context.Background(), key, hardCap(3))
 		require.NoError(t, err)
 	}
-	dec, err := cap.Acquire(context.Background(), key, 3)
+	dec, err := cap.Acquire(context.Background(), key, hardCap(3))
 	require.NoError(t, err)
 	require.False(t, dec.Allowed, "fourth connection over limit is rejected")
 
 	require.NoError(t, cap.Release(context.Background(), key))
 
-	dec, err = cap.Acquire(context.Background(), key, 3)
+	dec, err = cap.Acquire(context.Background(), key, hardCap(3))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed, "after release a new connection fits")
 	assert.Equal(t, int64(3), dec.Current)
 }
 
 func TestCacheConnectionCap_isolates_counts_by_key(t *testing.T) {
-	cap := ratelimit.NewCacheConnectionCap(memory.New())
+	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
 	keyA := ratelimit.ConnectionCapKey(2001)
 	keyB := ratelimit.ConnectionCapKey(2002)
 
 	for i := 0; i < 5; i++ {
-		_, err := cap.Acquire(context.Background(), keyA, 5)
+		_, err := cap.Acquire(context.Background(), keyA, hardCap(5))
 		require.NoError(t, err)
 	}
-	dec, err := cap.Acquire(context.Background(), keyA, 5)
+	dec, err := cap.Acquire(context.Background(), keyA, hardCap(5))
 	require.NoError(t, err)
 	require.False(t, dec.Allowed)
 
-	dec, err = cap.Acquire(context.Background(), keyB, 5)
+	dec, err = cap.Acquire(context.Background(), keyB, hardCap(5))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed, "tenant B's counter is independent of A's")
 	assert.Equal(t, int64(1), dec.Current)
 }
 
-func TestCacheConnectionCap_refresh_keeps_counter_alive_past_idle_ttl(t *testing.T) {
+func TestCacheConnectionCap_refresh_keeps_counter_alive(t *testing.T) {
 	store := memory.New()
-	cap := ratelimit.NewCacheConnectionCap(store)
+	cap := ratelimit.NewCacheConnectionCap(store, nil)
 	key := ratelimit.ConnectionCapKey(3001)
 
-	// Acquire one slot — its idle TTL is 6h by default, so we cannot exercise
-	// expiry without manipulating the store directly. Instead, verify that
-	// Refresh against the live counter is a no-op error-free path.
-	_, err := cap.Acquire(context.Background(), key, 5)
+	_, err := cap.Acquire(context.Background(), key, hardCap(5))
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
 		require.NoError(t, cap.Refresh(context.Background(), key))
 	}
 
-	dec, err := cap.Acquire(context.Background(), key, 5)
+	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed)
 	assert.Equal(t, int64(2), dec.Current, "counter survived the refresh sequence")
 }
 
 func TestCacheConnectionCap_release_clamps_at_zero(t *testing.T) {
-	cap := ratelimit.NewCacheConnectionCap(memory.New())
+	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
 	key := ratelimit.ConnectionCapKey(4001)
 
 	require.NoError(t, cap.Release(context.Background(), key))
 	require.NoError(t, cap.Release(context.Background(), key))
 
-	dec, err := cap.Acquire(context.Background(), key, 5)
+	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed)
 	assert.Equal(t, int64(1), dec.Current, "double-release on empty must not push the counter negative")

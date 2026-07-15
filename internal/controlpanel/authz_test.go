@@ -82,3 +82,13 @@ func TestUpdateTenantStorageLimitHandler_non_platform_admin_denied(t *testing.T)
 
 	assert.Equal(t, http.StatusForbidden, rr.Code, "tenant storage ceiling is platform-admin only")
 }
+
+func TestUpdateTenantTierHandler_non_platform_admin_denied(t *testing.T) {
+	auth, req := adminHandlerRequest(t, url.Values{"tier": {"0"}})
+	h := &Handler{rbac: auth}
+
+	rr := httptest.NewRecorder()
+	h.updateTenantTierHandler(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code, "direct tenant tier changes are platform-admin only")
+}

@@ -49,7 +49,7 @@ func TestMiddleware_passes_through_when_decision_allowed(t *testing.T) {
 	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
-	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
 	mw(nopHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -62,7 +62,7 @@ func TestMiddleware_returns_429_with_retry_after_and_json_body_when_denied(t *te
 	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
-	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
 	mw(nopHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
@@ -84,7 +84,7 @@ func TestMiddleware_increments_throttled_counter_on_denial(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		rr := httptest.NewRecorder()
-		req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
+		req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
 		mw(nopHandler()).ServeHTTP(rr, req)
 	}
 
@@ -107,7 +107,7 @@ func TestMiddleware_returns_500_on_limiter_error(t *testing.T) {
 	mw := ratelimit.New(lim, nil, reg)
 
 	rr := httptest.NewRecorder()
-	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.TierFree})
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
 	mw(nopHandler()).ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusInternalServerError, rr.Code)
@@ -133,7 +133,7 @@ func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 
 	for _, id := range []int64{42, 43, 42} {
 		rr := httptest.NewRecorder()
-		req := reqWithKey(tenant.APIKey{ID: id, TenantID: 5, Tier: tenant.TierFree})
+		req := reqWithKey(tenant.APIKey{ID: id, TenantID: 5, Tier: tenant.Tier0})
 		mw(nopHandler()).ServeHTTP(rr, req)
 	}
 
@@ -145,20 +145,34 @@ func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 	assert.Equal(t, lim.keys[0], lim.keys[2])
 }
 
-func TestTierLimits_known_tiers_have_distinct_rates(t *testing.T) {
-	free := ratelimit.LimitsForTier(tenant.TierFree)
-	payg := ratelimit.LimitsForTier(tenant.TierPAYG)
-	premium := ratelimit.LimitsForTier(tenant.TierPremium)
-
-	assert.Equal(t, float64(60), free.RatePerSecond)
-	assert.Equal(t, float64(600), payg.RatePerSecond)
-	assert.Greater(t, premium.RatePerSecond, payg.RatePerSecond)
-	assert.Greater(t, free.Burst, float64(0))
+func TestTierLimits_ladder_values_per_class(t *testing.T) {
+	cases := []struct {
+		tier      tenant.Tier
+		wantRate  float64
+		wantBurst float64
+	}{
+		{tenant.Tier0, 150, 300},
+		{tenant.Tier1, 1000, 2000},
+		{tenant.Tier2, 5000, 10000},
+		{tenant.Tier3, 10000, 20000},
+	}
+	for _, tc := range cases {
+		got := ratelimit.LimitsForTier(tc.tier)
+		assert.Equal(t, tc.wantRate, got.RatePerSecond, "tier=%s rate", tc.tier)
+		assert.Equal(t, tc.wantBurst, got.Burst, "tier=%s burst", tc.tier)
+	}
 }
 
-func TestTierLimits_unknown_tier_falls_back_to_free(t *testing.T) {
-	got := ratelimit.LimitsForTier("never-heard-of-it")
-	free := ratelimit.LimitsForTier(tenant.TierFree)
+func TestTierLimits_burst_is_twice_the_sustained_rate(t *testing.T) {
+	for _, tier := range []tenant.Tier{tenant.Tier0, tenant.Tier1, tenant.Tier2, tenant.Tier3} {
+		got := ratelimit.LimitsForTier(tier)
+		assert.Equal(t, 2*got.RatePerSecond, got.Burst, "tier=%s", tier)
+	}
+}
 
-	assert.Equal(t, free, got)
+func TestTierLimits_unknown_class_falls_back_to_tier0(t *testing.T) {
+	got := ratelimit.LimitsForTier(tenant.Tier(99))
+	t0 := ratelimit.LimitsForTier(tenant.Tier0)
+
+	assert.Equal(t, t0, got)
 }

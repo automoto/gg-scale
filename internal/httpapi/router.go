@@ -315,7 +315,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
-					mountRealtimeRoutes(r, d)
+					mountRealtimeRoutes(r, d, reg)
 
 					if d.Matchmaker != nil {
 						r.Group(func(r chi.Router) {

@@ -62,6 +62,20 @@ func (s *Store) AcquireSlot(ctx context.Context, key string, limit int64, ttl ti
 	return acquired, current, err
 }
 
+// AcquireSlotBurst implements cache.Store.
+func (s *Store) AcquireSlotBurst(ctx context.Context, key string, sustained, ceiling int64, burstBudget, ttl time.Duration) (bool, int64, error) {
+	acquired, current, err := s.next.AcquireSlotBurst(ctx, key, sustained, ceiling, burstBudget, ttl)
+	switch {
+	case err != nil:
+		s.inc("acquire_slot_burst", "error")
+	case acquired:
+		s.inc("acquire_slot_burst", "ok")
+	default:
+		s.inc("acquire_slot_burst", "rejected")
+	}
+	return acquired, current, err
+}
+
 // ReleaseSlot implements cache.Store.
 func (s *Store) ReleaseSlot(ctx context.Context, key string) error {
 	err := s.next.ReleaseSlot(ctx, key)
@@ -80,6 +94,28 @@ func (s *Store) RefreshSlot(ctx context.Context, key string, ttl time.Duration) 
 		s.inc("refresh_slot", "error")
 	} else {
 		s.inc("refresh_slot", "ok")
+	}
+	return err
+}
+
+// ReleaseSlotBurst implements cache.Store.
+func (s *Store) ReleaseSlotBurst(ctx context.Context, key string) error {
+	err := s.next.ReleaseSlotBurst(ctx, key)
+	if err != nil {
+		s.inc("release_slot_burst", "error")
+	} else {
+		s.inc("release_slot_burst", "ok")
+	}
+	return err
+}
+
+// RefreshSlotBurst implements cache.Store.
+func (s *Store) RefreshSlotBurst(ctx context.Context, key string, ttl time.Duration) error {
+	err := s.next.RefreshSlotBurst(ctx, key, ttl)
+	if err != nil {
+		s.inc("refresh_slot_burst", "error")
+	} else {
+		s.inc("refresh_slot_burst", "ok")
 	}
 	return err
 }

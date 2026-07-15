@@ -28,10 +28,11 @@ type kvEntry struct {
 }
 
 type shard struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-	slots   map[string]*slot
-	kv      map[string]*kvEntry
+	mu         sync.Mutex
+	buckets    map[string]*bucket
+	slots      map[string]*slot
+	burstSlots map[string]*cache.BurstSlotState
+	kv         map[string]*kvEntry
 }
 
 // Store is a sharded in-memory implementation of cache.Store.
@@ -63,6 +64,7 @@ func New() *Store {
 	for i := range s.shards {
 		s.shards[i].buckets = make(map[string]*bucket)
 		s.shards[i].slots = make(map[string]*slot)
+		s.shards[i].burstSlots = make(map[string]*cache.BurstSlotState)
 		s.shards[i].kv = make(map[string]*kvEntry)
 	}
 	s.wg.Add(1)
@@ -107,6 +109,11 @@ func (s *Store) sweep() {
 		for k, sl := range sh.slots {
 			if sl.count == 0 && sl.expires.Before(now) {
 				delete(sh.slots, k)
+			}
+		}
+		for k, st := range sh.burstSlots {
+			if st.Count == 0 && st.Expires.Before(now) {
+				delete(sh.burstSlots, k)
 			}
 		}
 		for k, b := range sh.buckets {
@@ -172,33 +179,75 @@ func (s *Store) AcquireSlot(_ context.Context, key string, limit int64, ttl time
 	return true, sl.count, nil
 }
 
-// ReleaseSlot implements cache.Store.
+// AcquireSlotBurst implements cache.Store.
+func (s *Store) AcquireSlotBurst(_ context.Context, key string, sustained, ceiling int64, burstBudget, ttl time.Duration) (bool, int64, error) {
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+
+	now := s.now()
+	st, ok := sh.burstSlots[key]
+	// An expired slot is reclaimed here: past its idle TTL no live holder is
+	// refreshing it (a live connection heartbeats well inside the TTL), so any
+	// residual Count belongs to holders that vanished without releasing — reset
+	// to a fresh state rather than carry an orphaned count forward.
+	if !ok || st.Expires.Before(now) {
+		st = &cache.BurstSlotState{}
+		sh.burstSlots[key] = st
+	}
+
+	acquired := cache.AdmitBurst(st, sustained, ceiling, burstBudget, ttl, now)
+	return acquired, st.Count, nil
+}
+
+// ReleaseSlot implements cache.Store. Plain counters only.
 func (s *Store) ReleaseSlot(_ context.Context, key string) error {
 	sh := s.shardFor(key)
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 
-	sl, ok := sh.slots[key]
-	if !ok {
-		return nil
-	}
-	if sl.count > 0 {
+	if sl, ok := sh.slots[key]; ok && sl.count > 0 {
 		sl.count--
 	}
 	return nil
 }
 
-// RefreshSlot implements cache.Store.
+// RefreshSlot implements cache.Store. Plain counters only.
 func (s *Store) RefreshSlot(_ context.Context, key string, ttl time.Duration) error {
 	sh := s.shardFor(key)
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 
-	sl, ok := sh.slots[key]
-	if !ok {
-		return nil
+	if sl, ok := sh.slots[key]; ok {
+		sl.expires = s.now().Add(ttl)
 	}
-	sl.expires = s.now().Add(ttl)
+	return nil
+}
+
+// ReleaseSlotBurst implements cache.Store. Burst counters only.
+func (s *Store) ReleaseSlotBurst(_ context.Context, key string) error {
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+
+	if st, ok := sh.burstSlots[key]; ok && st.Count > 0 {
+		cache.ReleaseBurst(st, s.now())
+	}
+	return nil
+}
+
+// RefreshSlotBurst implements cache.Store. Extends a live burst slot's idle
+// TTL; a no-op on an absent or already-expired slot so a stray refresh cannot
+// revive a counter the sweep is about to reap.
+func (s *Store) RefreshSlotBurst(_ context.Context, key string, ttl time.Duration) error {
+	sh := s.shardFor(key)
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+
+	now := s.now()
+	if st, ok := sh.burstSlots[key]; ok && !st.Expires.Before(now) {
+		cache.RefreshBurst(st, ttl, now)
+	}
 	return nil
 }
 

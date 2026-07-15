@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"embed"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/storagelimit"
@@ -222,6 +224,8 @@ func New(d Deps) http.Handler {
 			// Consolidated settings pages (writes reuse the handlers above via
 			// a sanitized redirect_to).
 			r.Get("/settings", h.tenantSettingsPage)
+			r.Post("/settings/tier", h.updateTenantTierHandler)
+			r.Post("/settings/change-requests", h.submitChangeRequestHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
@@ -261,6 +265,9 @@ func New(d Deps) http.Handler {
 			r.Post("/tenant-signups/config", h.setPublicSignupEnabledHandler)
 			r.Post("/tenant-signups/{id}/approve", h.approveTenantSignupHandler)
 			r.Post("/tenant-signups/{id}/deny", h.denyTenantSignupHandler)
+			r.Get("/change-requests", h.changeRequestsPage)
+			r.Post("/change-requests/{id}/approve", h.approveChangeRequestHandler)
+			r.Post("/change-requests/{id}/deny", h.denyChangeRequestHandler)
 			r.Get("/player-accounts", h.platformPlayerAccountsPage)
 			r.Get("/player-accounts/{accountID}", h.platformPlayerAccountDetailPage)
 			r.Post("/player-accounts/{accountID}/disable", h.disablePlayerAccountHandler)
@@ -412,15 +419,20 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			Error:     "project create failed",
 		}
 		status := http.StatusInternalServerError
-		switch err {
-		case errInvalidProjectName:
+		var qe *quota.ErrQuotaExceeded
+		switch {
+		case errors.Is(err, errInvalidProjectName):
 			status = http.StatusUnprocessableEntity
 			view.Error = ""
 			view.FieldErrors = map[string]string{"name": "Project name is required"}
-		case errDuplicateProject:
+		case errors.Is(err, errDuplicateProject):
 			status = http.StatusConflict
 			view.Error = ""
 			view.FieldErrors = map[string]string{"name": "A project with that name already exists"}
+		case errors.As(err, &qe):
+			status = http.StatusConflict
+			view.Error = fmt.Sprintf("You've reached your plan's project limit (%d). "+
+				"Request a tier upgrade from tenant settings to add more.", qe.Limit)
 		}
 		w.WriteHeader(status)
 		webutil.Render(r, w, NewProjectPage(view))

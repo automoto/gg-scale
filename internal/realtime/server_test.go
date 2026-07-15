@@ -3,6 +3,7 @@ package realtime_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
 )
 
@@ -118,20 +120,22 @@ func TestServeWSIdleConnectionSurvivesPastReadTimeoutWindow(t *testing.T) {
 	assert.Equal(t, "match_ready", got.Type)
 }
 
-func TestServeWSRejectsWhenTenantSlotCapExceeded(t *testing.T) {
+func TestServeWSRejectsWhenTenantCapExceeded(t *testing.T) {
 	hub := realtime.NewHub()
-	cache := memory.New()
-	// Pre-fill the cap so the very first upgrade can't acquire a slot.
+	store := memory.New()
+	capKey := ratelimit.ConnectionCapKey(1)
+	// Pre-fill the fixed (override) envelope so the first upgrade can't acquire.
 	for i := 0; i < 3; i++ {
-		ok, _, err := cache.AcquireSlot(context.Background(), "realtime:tenant:1", 3, time.Minute)
+		ok, _, err := store.AcquireSlotBurst(context.Background(), capKey, 3, 3, time.Minute, time.Hour)
 		require.NoError(t, err)
 		require.True(t, ok)
 	}
 
 	srv := httptest.NewServer(wrap(1, 42, realtime.ServeWS(realtime.Options{
-		Hub:          hub,
-		Cache:        cache,
-		MaxPerTenant: 3,
+		Hub:             hub,
+		Cache:           store,
+		TenantCap:       ratelimit.NewCacheConnectionCap(store, nil),
+		EnvMaxPerTenant: 3,
 	})))
 	defer srv.Close()
 
@@ -140,14 +144,35 @@ func TestServeWSRejectsWhenTenantSlotCapExceeded(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.NotEmpty(t, resp.Header.Get("Retry-After"), "rejected client is told when to retry")
 }
 
-func TestServeWSReleasesSlotOnDisconnect(t *testing.T) {
+func TestServeWSTenantCapFailsOpenOnCacheError(t *testing.T) {
 	hub := realtime.NewHub()
-	cache := memory.New()
+	// A cap that always errors stands in for an unavailable cache backend.
 	url, stop := newTestServer(t, hub, realtime.Options{
-		Cache:             cache,
-		MaxPerTenant:      3,
+		TenantCap:         errCap{},
+		HeartbeatInterval: time.Hour,
+	}, 1, 42)
+	defer stop()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, url, nil)
+	require.NoError(t, err, "cap-check error must not block the connection (fail-open)")
+	defer conn.CloseNow()
+
+	require.Eventually(t, func() bool { return hub.Count() == 1 }, time.Second, 10*time.Millisecond)
+}
+
+func TestServeWSReleasesTenantCapOnDisconnect(t *testing.T) {
+	hub := realtime.NewHub()
+	store := memory.New()
+	capKey := ratelimit.ConnectionCapKey(1)
+	url, stop := newTestServer(t, hub, realtime.Options{
+		Cache:             store,
+		TenantCap:         ratelimit.NewCacheConnectionCap(store, nil),
+		EnvMaxPerTenant:   3,
 		HeartbeatInterval: time.Hour,
 	}, 1, 42)
 	defer stop()
@@ -157,19 +182,27 @@ func TestServeWSReleasesSlotOnDisconnect(t *testing.T) {
 	conn, _, err := websocket.Dial(ctx, url, nil)
 	require.NoError(t, err)
 
-	// Slot must be reserved while connected.
+	// Slot reserved while connected: a probe acquire sees count >= 1.
 	require.Eventually(t, func() bool {
-		ok, current, _ := cache.AcquireSlot(ctx, "realtime:tenant:1", 3, time.Minute)
+		ok, current, _ := store.AcquireSlotBurst(ctx, capKey, 3, 3, time.Minute, time.Hour)
 		if ok {
-			_ = cache.ReleaseSlot(ctx, "realtime:tenant:1")
+			_ = store.ReleaseSlotBurst(ctx, capKey)
 		}
 		return current >= 1
 	}, time.Second, 10*time.Millisecond)
 
 	require.NoError(t, conn.Close(websocket.StatusNormalClosure, ""))
 
-	// Slot must be released after the server observes the close.
-	require.Eventually(t, func() bool {
-		return hub.Count() == 0
-	}, 2*time.Second, 10*time.Millisecond)
+	// Slot released after the server observes the close.
+	require.Eventually(t, func() bool { return hub.Count() == 0 }, 2*time.Second, 10*time.Millisecond)
 }
+
+// errCap is a ratelimit.ConnectionCap whose Acquire always fails, used to
+// exercise the fail-open path.
+type errCap struct{}
+
+func (errCap) Acquire(context.Context, string, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
+	return ratelimit.CapDecision{}, errors.New("cache unavailable")
+}
+func (errCap) Release(context.Context, string) error { return nil }
+func (errCap) Refresh(context.Context, string) error { return nil }

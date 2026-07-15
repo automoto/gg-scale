@@ -82,7 +82,7 @@ func (q *Queries) CreateProjectForTenant(ctx context.Context, name string) (Crea
 }
 
 const getTenantFacts = `-- name: GetTenantFacts :one
-SELECT name, tier, public_joining_enabled
+SELECT name, tier, enforce_quotas, public_joining_enabled
 FROM tenants
 WHERE id = $1
   AND deleted_at IS NULL
@@ -90,14 +90,20 @@ WHERE id = $1
 
 type GetTenantFactsRow struct {
 	Name                 string
-	Tier                 string
+	Tier                 int16
+	EnforceQuotas        bool
 	PublicJoiningEnabled bool
 }
 
 func (q *Queries) GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error) {
 	row := q.db.QueryRow(ctx, getTenantFacts, id)
 	var i GetTenantFactsRow
-	err := row.Scan(&i.Name, &i.Tier, &i.PublicJoiningEnabled)
+	err := row.Scan(
+		&i.Name,
+		&i.Tier,
+		&i.EnforceQuotas,
+		&i.PublicJoiningEnabled,
+	)
 	return i, err
 }
 
@@ -169,4 +175,41 @@ WHERE id = current_setting('app.tenant_id', true)::bigint
 func (q *Queries) SetTenantPublicJoining(ctx context.Context, enabled bool) error {
 	_, err := q.db.Exec(ctx, setTenantPublicJoining, enabled)
 	return err
+}
+
+const setTenantTierByID = `-- name: SetTenantTierByID :one
+WITH current_tenant AS MATERIALIZED (
+    SELECT tenants.id, tenants.tier AS old_tier
+    FROM tenants
+    WHERE tenants.id = $1
+      AND tenants.deleted_at IS NULL
+    FOR UPDATE
+), updated AS (
+    UPDATE tenants AS t
+    SET tier = $2
+    FROM current_tenant AS current
+    WHERE t.id = current.id
+    RETURNING current.old_tier, t.tier AS new_tier
+)
+SELECT old_tier, new_tier FROM updated
+`
+
+type SetTenantTierByIDParams struct {
+	TenantID int64
+	Tier     int16
+}
+
+type SetTenantTierByIDRow struct {
+	OldTier int16
+	NewTier int16
+}
+
+// Platform-admin direct tier changes may move in either direction. Capture the
+// prior tier under the same row lock so the audit record cannot race another
+// administrator's update.
+func (q *Queries) SetTenantTierByID(ctx context.Context, arg SetTenantTierByIDParams) (SetTenantTierByIDRow, error) {
+	row := q.db.QueryRow(ctx, setTenantTierByID, arg.TenantID, arg.Tier)
+	var i SetTenantTierByIDRow
+	err := row.Scan(&i.OldTier, &i.NewTier)
+	return i, err
 }

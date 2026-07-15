@@ -110,7 +110,7 @@ type GetAPIKeyByHashRow struct {
 	KeyType   string
 	Scopes    []string
 	RevokedAt pgtype.Timestamptz
-	Tier      string
+	Tier      int16
 }
 
 // Bootstrap query used by the tenant middleware to resolve a Bearer token

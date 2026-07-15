@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/ggscale/ggscale/internal/auditlog"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -44,6 +47,7 @@ func (h *Handler) tenantSettingsPage(w http.ResponseWriter, r *http.Request) {
 // per-project rows the rate-limits view assembles.
 func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (TenantSettingsView, error) {
 	view := TenantSettingsView{TenantID: tenantID}
+	var currentTier tenant.Tier
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		facts, err := q.GetTenantFacts(ctx, tenantID)
@@ -51,10 +55,29 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 			return err
 		}
 		view.TenantName = facts.Name
-		view.Tier = facts.Tier
-		defaults := ratelimit.LimitsForTier(tenant.Tier(facts.Tier))
+		tier := tenant.ClampTier(int(facts.Tier))
+		currentTier = tier
+		view.Tier = tier.String()
+		view.TierClass = int(tier)
+		view.QuotasEnforced = facts.EnforceQuotas
+		defaults := ratelimit.LimitsForTier(tier)
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst
+		if facts.EnforceQuotas {
+			used, err := q.GetTenantStorageUsageByID(ctx, tenantID)
+			if err != nil {
+				return err
+			}
+			limit := quota.LimitsForClass(tier).StorageBytes
+			view.StorageUsedBytes = used
+			view.StorageLimitBytes = limit
+			view.StorageUsedLabel = formatBytes(used)
+			view.StorageLimitLabel = formatBytes(limit)
+			if limit > 0 {
+				view.StoragePercent = int(used * 100 / limit)
+				view.StorageWarn = used*100 >= limit*80
+			}
+		}
 		rows, err := q.ListAllRateLimitOverridesForTenant(ctx, tenantID)
 		if err != nil {
 			return err
@@ -71,7 +94,80 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 	if err != nil {
 		return TenantSettingsView{}, err
 	}
+	if err := h.loadChangeRequestSection(ctx, tenantID, currentTier, &view); err != nil {
+		return TenantSettingsView{}, err
+	}
 	return view, nil
+}
+
+var errInvalidTenantTier = errors.New("control panel: invalid tenant tier")
+
+// updateTenantTierHandler applies a direct platform-admin tier change. Tenant
+// upgrade requests remain separately constrained to upward-only transitions.
+func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	if !session.User.IsPlatformAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	target, err := parseRequestedTier(r.Form.Get("tier"))
+	if err != nil {
+		h.redirectTenantSettings(w, r, tenantID, "Choose a valid tenant tier.")
+		return
+	}
+	changed, err := h.setTenantTier(r.Context(), session.User.ID, tenantID, target)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		webutil.InternalError(w, "tenant tier: update", err)
+		return
+	}
+	if !changed {
+		h.redirectTenantSettings(w, r, tenantID, "Tenant is already on "+tenant.Tier(target).String()+".")
+		return
+	}
+	h.redirectTenantSettings(w, r, tenantID, "Tenant tier changed to "+tenant.Tier(target).String()+".")
+}
+
+func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, target int16) (bool, error) {
+	if target < int16(tenant.Tier0) || target > int16(tenant.Tier3) {
+		return false, errInvalidTenantTier
+	}
+	var changed bool
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		row, err := sqlcgen.New(tx).SetTenantTierByID(ctx, sqlcgen.SetTenantTierByIDParams{
+			TenantID: tenantID,
+			Tier:     target,
+		})
+		if err != nil {
+			return err
+		}
+		if row.OldTier == row.NewTier {
+			return nil
+		}
+		changed = true
+		direction := "upgrade"
+		if row.NewTier < row.OldTier {
+			direction = "downgrade"
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.tenant.tier_change",
+			strconv.FormatInt(tenantID, 10), map[string]any{
+				"tenant_id": tenantID,
+				"old_tier":  row.OldTier,
+				"new_tier":  row.NewTier,
+				"direction": direction,
+			})
+	})
+	return changed, err
 }
 
 // projectSettingsPage consolidates per-project configuration (invite quotas,
@@ -156,6 +252,26 @@ func (h *Handler) serverSettingsPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: session.CSRFToken,
 		Snapshot:  h.cfg.ServerSettings,
 	}))
+}
+
+// formatBytes renders a byte count as GB/MB/KB with one decimal for the
+// storage-usage display.
+func formatBytes(b int64) string {
+	const (
+		kb = int64(1) << 10
+		mb = int64(1) << 20
+		gb = int64(1) << 30
+	)
+	switch {
+	case b >= gb:
+		return strconv.FormatFloat(float64(b)/float64(gb), 'f', 1, 64) + " GB"
+	case b >= mb:
+		return strconv.FormatFloat(float64(b)/float64(mb), 'f', 1, 64) + " MB"
+	case b >= kb:
+		return strconv.FormatFloat(float64(b)/float64(kb), 'f', 1, 64) + " KB"
+	default:
+		return strconv.FormatInt(b, 10) + " B"
+	}
 }
 
 // safeReturnPath returns raw when it is a same-origin control panel-relative path

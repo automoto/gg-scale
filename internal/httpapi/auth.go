@@ -23,6 +23,8 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/quota"
+	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -226,6 +228,9 @@ func authAnonymous(d Deps) func(context.Context, *struct{}) (*anonymousOutput, e
 		var playerID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
+			if err := checkPlayerQuota(ctx, q); err != nil {
+				return err
+			}
 			user, err := q.CreateAnonymousPlayer(ctx, sqlcgen.CreateAnonymousPlayerParams{
 				ProjectID:  projectID,
 				ExternalID: externalID,
@@ -240,6 +245,11 @@ func authAnonymous(d Deps) func(context.Context, *struct{}) (*anonymousOutput, e
 			return auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID})
 		})
 		if err != nil {
+			var qe *quota.ErrQuotaExceeded
+			if errors.As(err, &qe) {
+				d.Metrics.QuotaRejection(qe.Axis)
+				return nil, huma.Error403Forbidden("player creation is disabled: the tenant has reached its registered-player limit")
+			}
 			return nil, serverError(ctx, "anonymous: tx", err)
 		}
 
@@ -291,6 +301,9 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
+			if err := checkPlayerQuota(ctx, q); err != nil {
+				return err
+			}
 			email := in.Body.Email
 			expires := pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true}
 			id, err := q.CreateEmailPlayer(ctx, sqlcgen.CreateEmailPlayerParams{
@@ -308,6 +321,11 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 			return auditlog.Write(ctx, tx, id, "auth.signup", email, nil)
 		})
 		if err != nil {
+			var qe *quota.ErrQuotaExceeded
+			if errors.As(err, &qe) {
+				d.Metrics.QuotaRejection(qe.Axis)
+				return nil, huma.Error403Forbidden("player registration is disabled: the tenant has reached its registered-player limit")
+			}
 			if webutil.IsUniqueViolation(err) {
 				// Uniform 202 on both insert and conflict so the response
 				// status doesn't disclose whether the email already has an
@@ -682,12 +700,29 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 			if err != nil {
 				return err
 			}
-			id, err := q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
-				ProjectID:  projectID,
-				ExternalID: parsed.External,
-			})
+			qc, err := playerQuotaContext(ctx, q)
 			if err != nil {
-				return fmt.Errorf("upsert player: %w", err)
+				return err
+			}
+			existing, err := q.GetPlayerByExternalID(ctx, sqlcgen.GetPlayerByExternalIDParams{
+				ProjectID: projectID, ExternalID: parsed.External,
+			})
+			var id int64
+			switch {
+			case err == nil:
+				id = existing.ID
+			case errors.Is(err, pgx.ErrNoRows):
+				if err := checkPlayerQuotaLocked(ctx, q, qc); err != nil {
+					return err
+				}
+				id, err = q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
+					ProjectID: projectID, ExternalID: parsed.External,
+				})
+				if err != nil {
+					return fmt.Errorf("upsert player: %w", err)
+				}
+			default:
+				return fmt.Errorf("find player: %w", err)
 			}
 			playerID = id
 			if err := playerBanCheck(ctx, q, id); err != nil {
@@ -708,6 +743,9 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 			return nil, huma.Error401Unauthorized("invalid custom token")
 		case errors.Is(err, errPlayerBanned):
 			return nil, huma.Error403Forbidden("account banned")
+		case isPlayerQuotaError(err):
+			d.Metrics.QuotaRejection(quota.AxisPlayers)
+			return nil, huma.Error403Forbidden("player creation is disabled: the tenant has reached its registered-player limit")
 		case err != nil:
 			return nil, serverError(ctx, "custom-token: tx", err)
 		}
@@ -839,6 +877,42 @@ func playerBanCheck(ctx context.Context, q *sqlcgen.Queries, playerID int64) err
 		return err
 	}
 	return nil
+}
+
+// checkPlayerQuota rejects registering a new player when the tenant enforces
+// quotas and is already at its class registered-player limit. A no-op for
+// unenforced tenants (zero-config self-host stays uncapped). Existing players
+// are never affected. Runs inside the signup tx (app.tenant_id set).
+func checkPlayerQuota(ctx context.Context, q *sqlcgen.Queries) error {
+	qc, err := playerQuotaContext(ctx, q)
+	if err != nil {
+		return err
+	}
+	return checkPlayerQuotaLocked(ctx, q, qc)
+}
+
+func playerQuotaContext(ctx context.Context, q *sqlcgen.Queries) (sqlcgen.GetTenantQuotaContextRow, error) {
+	qc, err := q.GetTenantQuotaContext(ctx)
+	if err != nil {
+		return sqlcgen.GetTenantQuotaContextRow{}, fmt.Errorf("tenant quota context: %w", err)
+	}
+	return qc, nil
+}
+
+func checkPlayerQuotaLocked(ctx context.Context, q *sqlcgen.Queries, qc sqlcgen.GetTenantQuotaContextRow) error {
+	if !qc.EnforceQuotas {
+		return nil
+	}
+	count, err := q.CountPlayersForTenant(ctx)
+	if err != nil {
+		return fmt.Errorf("count players: %w", err)
+	}
+	return quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckPlayers(count)
+}
+
+func isPlayerQuotaError(err error) bool {
+	var qe *quota.ErrQuotaExceeded
+	return errors.As(err, &qe) && qe.Axis == quota.AxisPlayers
 }
 
 // playerEpoch reads the player's session epoch, widening the generated int32

@@ -11,6 +11,11 @@ import (
 )
 
 type Querier interface {
+	// Adjust the current tenant's storage counter by delta (bytes; negative on
+	// delete/shrink), clamped at zero. Called in the write tx after a successful
+	// object write so the counter stays in lockstep. Runs in tenant context.
+	ApplyTenantStorageDelta(ctx context.Context, delta int64) error
+	ApproveTenantChangeRequest(ctx context.Context, arg ApproveTenantChangeRequestParams) (int64, error)
 	ApproveTenantSignupRequest(ctx context.Context, arg ApproveTenantSignupRequestParams) (int64, error)
 	// Edge id if an accepted friendship exists in either direction.
 	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
@@ -85,6 +90,11 @@ type Querier interface {
 	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
 	CountPlayerAccountTOTPBackupCodesRemaining(ctx context.Context, playerAccountID pgtype.UUID) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
+	// Registered (non-soft-deleted) player count for the current tenant, across
+	// all its projects.
+	CountPlayersForTenant(ctx context.Context) (int64, error)
+	// Live (non-soft-deleted) project count for the current tenant.
+	CountProjectsForTenant(ctx context.Context) (int64, error)
 	// Concurrent-ticket cap: how many live queued tickets the player already has
 	// in the project. Expired-but-unswept tickets don't count against the cap.
 	CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueuedTicketsForPlayerParams) (int64, error)
@@ -132,6 +142,9 @@ type Querier interface {
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
+	// Submit a tenant change request. The pending-unique index rejects a second
+	// open request of the same kind/feature (surfaced as a friendly message).
+	CreateTenantChangeRequest(ctx context.Context, arg CreateTenantChangeRequestParams) (int64, error)
 	// Tenant-wide player bans. tenant_player_bans has no RLS, so every query
 	// filters tenant_id explicitly. Enforcement runs in both tenant Pool.Q and
 	// account BootstrapQ contexts.
@@ -187,6 +200,7 @@ type Querier interface {
 	// paired match row's retention window — otherwise a poll would 404 while the
 	// match is still recoverable.
 	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
+	DenyTenantChangeRequest(ctx context.Context, arg DenyTenantChangeRequestParams) (int64, error)
 	DenyTenantSignupRequest(ctx context.Context, arg DenyTenantSignupRequestParams) (int64, error)
 	// TTL enforcement: unclaimed queued tickets past expires_at flip to
 	// 'failed'. Claimed tickets are left alone — the claim path settles them.
@@ -318,14 +332,21 @@ type Querier interface {
 	// refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
+	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error)
+	// The current tenant's class and quota-enforcement flag. Read inside an
+	// RLS-scoped tx (app.tenant_id set) before a quota-gated growth operation.
+	GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error)
 	// Acceptance lookup: only an approved request with a live code is acceptable.
 	GetTenantSignupRequestByCodeHash(ctx context.Context, codeHash []byte) (GetTenantSignupRequestByCodeHashRow, error)
 	GetTenantSignupRequestByID(ctx context.Context, id int64) (GetTenantSignupRequestByIDRow, error)
+	// Metered storage total for a tenant by id (0 if never written). Read in a
+	// bootstrap tx by the control-panel settings page for the used/limit display.
+	GetTenantStorageUsageByID(ctx context.Context, tenantID int64) (int64, error)
 	// The tenant's billing tier, used to show the correct compiled default on the
 	// rate-limits page (enforcement keys off the same tier via the API key).
-	GetTenantTier(ctx context.Context, id int64) (string, error)
+	GetTenantTier(ctx context.Context, id int64) (int16, error)
 	IncrementControlPanelVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttemptsByID(ctx context.Context, id int64) (int32, error)
@@ -383,6 +404,9 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
+	// Name, usage, class, and last-notified threshold for every quota-enforced
+	// tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
+	ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforcedTenantStorageRow, error)
 	// Control panel list. Soft-deleted rows are excluded; include_deleted is reserved
 	// for a future "archive" view but not wired through the UI yet.
 	ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
@@ -405,6 +429,9 @@ type Querier interface {
 	// Returns unexpired invites for the target user, enriched with the sender's
 	// email and optional xuid for display.
 	ListPendingGameInvites(ctx context.Context, toPlayerID int64) ([]ListPendingGameInvitesRow, error)
+	// Platform-admin review queue: pending requests with tenant name + current
+	// class. Read cross-tenant (bootstrap tx).
+	ListPendingTenantChangeRequests(ctx context.Context) ([]ListPendingTenantChangeRequestsRow, error)
 	ListPendingTenantSignupRequests(ctx context.Context) ([]ListPendingTenantSignupRequestsRow, error)
 	ListPlatformAdminInvitations(ctx context.Context) ([]ListPlatformAdminInvitationsRow, error)
 	ListPlatformAdmins(ctx context.Context) ([]ListPlatformAdminsRow, error)
@@ -420,6 +447,15 @@ type Querier interface {
 	// bucket and the worker applies the soft-region grouping rules in Go.
 	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
+	// Verified emails of a tenant's owner/admin members, for operational notices
+	// (e.g. storage-quota warnings). Read cross-tenant by background jobs.
+	ListTenantAdminEmails(ctx context.Context, tenantID int64) ([]string, error)
+	// The tenant's own requests (any status) for the settings page. Filters by
+	// explicit tenant_id (the table has no RLS).
+	ListTenantChangeRequests(ctx context.Context, tenantID int64) ([]ListTenantChangeRequestsRow, error)
+	// Tenant-level features the tenant already holds, to exclude from the request
+	// dropdown. Reads feature_grants in tenant RLS context.
+	ListTenantEnabledFeatures(ctx context.Context) ([]string, error)
 	// Control panel list for a tenant, enriched with the banned account's email.
 	ListTenantPlayerBans(ctx context.Context, tenantID int64) ([]ListTenantPlayerBansRow, error)
 	// Set the lockout window on an account that just tipped over
@@ -434,6 +470,10 @@ type Querier interface {
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
+	// Transaction-scoped advisory lock serializing concurrent writes (put/delete)
+	// to a single storage object so the read-modify-write of the tenant byte
+	// counter can't be raced past. Released on commit/rollback.
+	LockStorageObjectForWrite(ctx context.Context, arg LockStorageObjectForWriteParams) error
 	MarkAllocationFailed(ctx context.Context, id int64) error
 	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
 	MarkControlPanelInvitationAccepted(ctx context.Context, id int64) error
@@ -562,10 +602,30 @@ type Querier interface {
 	SetPlayerVerificationCodeByID(ctx context.Context, arg SetPlayerVerificationCodeByIDParams) error
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
 	SetPublicSignupEnabled(ctx context.Context, arg SetPublicSignupEnabledParams) error
+	// Flip the per-tenant enforcement flag. Used by provisioning when the operator
+	// has enabled quota enforcement for new tenants. Runs in a bootstrap tx.
+	SetTenantEnforceQuotas(ctx context.Context, arg SetTenantEnforceQuotasParams) error
 	SetTenantPublicJoining(ctx context.Context, enabled bool) error
+	SetTenantStorageNotifiedThreshold(ctx context.Context, arg SetTenantStorageNotifiedThresholdParams) error
+	// Platform-admin direct tier changes may move in either direction. Capture the
+	// prior tier under the same row lock so the audit record cannot race another
+	// administrator's update.
+	SetTenantTierByID(ctx context.Context, arg SetTenantTierByIDParams) (SetTenantTierByIDRow, error)
+	// Auto-applied on tier-upgrade approval. The direction check and write are one
+	// atomic operation so a stale request can never lower the current tier.
+	SetTenantTierIfUpgrade(ctx context.Context, tier int16) (int64, error)
 	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error)
-	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error
+	// Soft-deletes and returns the freed byte count (octet_length(value::text)) so
+	// the caller can decrement the tenant storage counter in the same tx. Returns
+	// no rows when the object is already absent (delete is idempotent).
+	SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) (int64, error)
+	// One-shot inputs for the pre-write storage-quota check: the tenant's current
+	// metered total, the existing object's size (0 if new), and the incoming
+	// value's size — all measured as octet_length(value::text) so they match the
+	// counter maintained by ApplyTenantStorageDelta. Runs in the write tx
+	// (app.tenant_id set), serialized per object by LockStorageObjectForWrite.
+	StorageUsageForWrite(ctx context.Context, arg StorageUsageForWriteParams) (StorageUsageForWriteRow, error)
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	// Release every claim whose lease has expired. Same accounting as
 	// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
@@ -610,6 +670,9 @@ type Querier interface {
 	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error)
 	UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error
 	UpsertRateLimitOverride(ctx context.Context, arg UpsertRateLimitOverrideParams) error
+	// Auto-applied on feature-request approval. Tenant-level grant (project_id
+	// NULL); runs in tenant RLS context.
+	UpsertTenantFeatureGrant(ctx context.Context, arg UpsertTenantFeatureGrantParams) error
 	WriteAudit(ctx context.Context, arg WriteAuditParams) error
 	WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error
 }

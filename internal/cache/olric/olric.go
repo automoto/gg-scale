@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,12 +44,14 @@ type Config struct {
 
 // Store is a cache.Store backed by an embedded Olric node.
 type Store struct {
-	db        *olricpkg.Olric
-	client    *olricpkg.EmbeddedClient
-	buckets   olricpkg.DMap
-	slots     olricpkg.DMap
-	kv        olricpkg.DMap
-	closeOnce sync.Once
+	db         *olricpkg.Olric
+	client     *olricpkg.EmbeddedClient
+	buckets    olricpkg.DMap
+	slots      olricpkg.DMap
+	burstSlots olricpkg.DMap
+	burstLocks olricpkg.DMap
+	kv         olricpkg.DMap
+	closeOnce  sync.Once
 }
 
 // New starts an embedded Olric node and returns a Store wrapping its
@@ -111,6 +114,16 @@ func New(ctx context.Context, c Config) (*Store, error) {
 		shutdownOlric(db)
 		return nil, fmt.Errorf("olric: dmap slots: %w", err)
 	}
+	burstSlots, err := client.NewDMap("burst_slots")
+	if err != nil {
+		shutdownOlric(db)
+		return nil, fmt.Errorf("olric: dmap burst_slots: %w", err)
+	}
+	burstLocks, err := client.NewDMap("burst_slot_locks")
+	if err != nil {
+		shutdownOlric(db)
+		return nil, fmt.Errorf("olric: dmap burst_slot_locks: %w", err)
+	}
 	kv, err := client.NewDMap("kv")
 	if err != nil {
 		shutdownOlric(db)
@@ -118,11 +131,13 @@ func New(ctx context.Context, c Config) (*Store, error) {
 	}
 
 	return &Store{
-		db:      db,
-		client:  client,
-		buckets: buckets,
-		slots:   slots,
-		kv:      kv,
+		db:         db,
+		client:     client,
+		buckets:    buckets,
+		slots:      slots,
+		burstSlots: burstSlots,
+		burstLocks: burstLocks,
+		kv:         kv,
 	}, nil
 }
 
@@ -231,36 +246,169 @@ func (s *Store) AcquireSlot(ctx context.Context, key string, limit int64, ttl ti
 	return true, int64(cur), nil
 }
 
-// ReleaseSlot implements cache.Store. Reads-then-decrements; clamps at zero
-// to avoid going negative on spurious extra releases. Race window is bounded
-// by the per-key partition owner — see AcquireSlot's self-heal.
-func (s *Store) ReleaseSlot(ctx context.Context, key string) error {
-	resp, err := s.slots.Get(ctx, key)
+// AcquireSlotBurst implements cache.Store as an atomic per-key transition of
+// the shared burst model. The dedicated distributed lock spans the state Get
+// and Put so concurrent callers cannot overwrite one another's increments.
+func (s *Store) AcquireSlotBurst(ctx context.Context, key string, sustained, ceiling int64, burstBudget, ttl time.Duration) (bool, int64, error) {
+	var acquired bool
+	var current int64
+	err := s.withBurstLock(ctx, key, func() error {
+		st, err := s.loadBurst(ctx, key)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		if !st.Expires.IsZero() && st.Expires.Before(now) {
+			st = cache.BurstSlotState{}
+		}
+		acquired = cache.AdmitBurst(&st, sustained, ceiling, burstBudget, ttl, now)
+		current = st.Count
+		if err := s.burstSlots.Put(ctx, key, encodeBurst(st), olricpkg.EX(ttl)); err != nil {
+			return fmt.Errorf("olric: burst put: %w", err)
+		}
+		return nil
+	})
+	return acquired, current, err
+}
+
+const (
+	burstLockLease    = 15 * time.Second
+	burstLockDeadline = 5 * time.Second
+	burstUnlockLimit  = 2 * time.Second
+)
+
+// withBurstLock serializes every read-modify-write of one distributed burst
+// slot. DMap commands are individually atomic, but the state transition spans
+// Get and Put and therefore needs an explicit per-key lock.
+func (s *Store) withBurstLock(ctx context.Context, key string, fn func() error) (err error) {
+	lock, err := s.burstLocks.LockWithTimeout(ctx, key, burstLockLease, burstLockDeadline)
+	if err != nil {
+		return fmt.Errorf("olric: burst lock: %w", err)
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), burstUnlockLimit)
+		defer cancel()
+		if unlockErr := lock.Unlock(unlockCtx); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("olric: burst unlock: %w", unlockErr))
+		}
+	}()
+	return fn()
+}
+
+// loadBurst reads and decodes the burst state at key, returning a zero state
+// when absent or undecodable (self-heal).
+func (s *Store) loadBurst(ctx context.Context, key string) (cache.BurstSlotState, error) {
+	resp, err := s.burstSlots.Get(ctx, key)
 	if errors.Is(err, olricpkg.ErrKeyNotFound) {
-		return nil
+		return cache.BurstSlotState{}, nil
 	}
 	if err != nil {
-		return fmt.Errorf("olric: release get: %w", err)
+		return cache.BurstSlotState{}, fmt.Errorf("olric: burst get: %w", err)
 	}
-	cur, err := resp.Int()
+	raw, err := resp.Byte()
 	if err != nil {
-		return fmt.Errorf("olric: release decode: %w", err)
+		return cache.BurstSlotState{}, fmt.Errorf("olric: burst decode: %w", err)
 	}
-	if cur <= 0 {
+	st, ok := decodeBurst(raw)
+	if !ok {
+		return cache.BurstSlotState{}, nil
+	}
+	return st, nil
+}
+
+// releaseBurst decrements a burst slot's count, clamped at zero. A no-op when
+// no burst slot exists at key.
+func (s *Store) releaseBurstLocked(ctx context.Context, key string) error {
+	st, err := s.loadBurst(ctx, key)
+	if err != nil {
+		return err
+	}
+	if st.Count <= 0 {
 		return nil
 	}
-	if _, err := s.slots.Decr(ctx, key, 1); err != nil {
-		return fmt.Errorf("olric: release decr: %w", err)
+	now := time.Now()
+	ttl := st.Expires.Sub(now)
+	if ttl <= 0 {
+		if _, derr := s.burstSlots.Delete(ctx, key); derr != nil && !errors.Is(derr, olricpkg.ErrKeyNotFound) {
+			return fmt.Errorf("olric: burst release delete: %w", derr)
+		}
+		return nil
+	}
+	cache.ReleaseBurst(&st, now)
+	if err := s.burstSlots.Put(ctx, key, encodeBurst(st), olricpkg.EX(ttl)); err != nil {
+		return fmt.Errorf("olric: burst release put: %w", err)
 	}
 	return nil
 }
 
-// RefreshSlot implements cache.Store.
+// ReleaseSlot implements cache.Store. Plain counters only. Reads-then-
+// decrements; clamps at zero to avoid going negative on spurious extra
+// releases. Race window is bounded by the per-key partition owner — see
+// AcquireSlot's self-heal.
+func (s *Store) ReleaseSlot(ctx context.Context, key string) error {
+	resp, err := s.slots.Get(ctx, key)
+	switch {
+	case errors.Is(err, olricpkg.ErrKeyNotFound):
+		return nil
+	case err != nil:
+		return fmt.Errorf("olric: release get: %w", err)
+	default:
+		cur, derr := resp.Int()
+		if derr != nil {
+			return fmt.Errorf("olric: release decode: %w", derr)
+		}
+		if cur > 0 {
+			if _, derr := s.slots.Decr(ctx, key, 1); derr != nil {
+				return fmt.Errorf("olric: release decr: %w", derr)
+			}
+		}
+	}
+	return nil
+}
+
+// ReleaseSlotBurst implements cache.Store. Burst counters only.
+func (s *Store) ReleaseSlotBurst(ctx context.Context, key string) error {
+	return s.withBurstLock(ctx, key, func() error {
+		return s.releaseBurstLocked(ctx, key)
+	})
+}
+
+// RefreshSlot implements cache.Store. Extends a plain counter's idle TTL; the
+// absent-key not-found is expected and ignored.
 func (s *Store) RefreshSlot(ctx context.Context, key string, ttl time.Duration) error {
-	if err := s.slots.Expire(ctx, key, ttl); err != nil && !errors.Is(err, olricpkg.ErrKeyNotFound) {
+	if err := s.slots.Expire(ctx, key, ttl); !isKeyNotFound(err) {
 		return fmt.Errorf("olric: refresh: %w", err)
 	}
 	return nil
+}
+
+// RefreshSlotBurst implements cache.Store. Extends a live burst slot's idle
+// TTL. A no-op on an absent, expired, or already-released (Count<=0) slot so a
+// stray refresh cannot revive a counter about to be reaped.
+func (s *Store) RefreshSlotBurst(ctx context.Context, key string, ttl time.Duration) error {
+	return s.withBurstLock(ctx, key, func() error {
+		st, err := s.loadBurst(ctx, key)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		if st.Count <= 0 || (!st.Expires.IsZero() && st.Expires.Before(now)) {
+			return nil
+		}
+		cache.RefreshBurst(&st, ttl, now)
+		if err := s.burstSlots.Put(ctx, key, encodeBurst(st), olricpkg.EX(ttl)); err != nil {
+			return fmt.Errorf("olric: refresh burst put: %w", err)
+		}
+		return nil
+	})
+}
+
+// isKeyNotFound reports whether err is nil or an Olric key-not-found. DMap.Expire
+// surfaces a not-found that errors.Is doesn't match against the top-level
+// sentinel, so fall back to the message.
+func isKeyNotFound(err error) bool {
+	return err == nil || errors.Is(err, olricpkg.ErrKeyNotFound) ||
+		strings.Contains(err.Error(), "key not found")
 }
 
 // Get implements cache.Store.
@@ -294,9 +442,10 @@ func (s *Store) Set(ctx context.Context, key string, value []byte, ttl time.Dura
 // Delete implements cache.Store.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	for name, dmap := range map[string]olricpkg.DMap{
-		"ratelimit": s.buckets,
-		"slots":     s.slots,
-		"kv":        s.kv,
+		"ratelimit":   s.buckets,
+		"slots":       s.slots,
+		"burst_slots": s.burstSlots,
+		"kv":          s.kv,
 	} {
 		if _, err := dmap.Delete(ctx, key); err != nil && !errors.Is(err, olricpkg.ErrKeyNotFound) {
 			return fmt.Errorf("olric: delete %s: %w", name, err)
@@ -332,6 +481,63 @@ func decodeBucket(raw []byte) (float64, time.Time, bool) {
 	// originated as int64 in encodeBucket.
 	last := time.Unix(0, int64(binary.LittleEndian.Uint64(raw[8:16])))
 	return tokens, last, true
+}
+
+// encodeBurst serialises a burst slot as six little-endian int64s: count,
+// remaining budget (ns), last-assessed (UnixNano), expires (UnixNano),
+// sustained count, and configured budget (ns). Fixed width keeps state
+// identical across nodes; decodeBurst also accepts the previous four-field
+// shape so a rolling deploy self-heals on the next acquire.
+func encodeBurst(st cache.BurstSlotState) []byte {
+	out := make([]byte, 48)
+	putInt64(out[0:8], st.Count)
+	putInt64(out[8:16], int64(st.BurstRemaining))
+	putInt64(out[16:24], unixNanoOrZero(st.LastAssessed))
+	putInt64(out[24:32], unixNanoOrZero(st.Expires))
+	putInt64(out[32:40], st.Sustained)
+	putInt64(out[40:48], int64(st.BurstBudget))
+	return out
+}
+
+func decodeBurst(raw []byte) (cache.BurstSlotState, bool) {
+	if len(raw) != 32 && len(raw) != 48 {
+		return cache.BurstSlotState{}, false
+	}
+	st := cache.BurstSlotState{
+		Count:          readInt64(raw[0:8]),
+		BurstRemaining: time.Duration(readInt64(raw[8:16])),
+		LastAssessed:   timeFromUnixNano(readInt64(raw[16:24])),
+		Expires:        timeFromUnixNano(readInt64(raw[24:32])),
+	}
+	if len(raw) == 48 {
+		st.Sustained = readInt64(raw[32:40])
+		st.BurstBudget = time.Duration(readInt64(raw[40:48]))
+	}
+	return st, true
+}
+
+func putInt64(dst []byte, value int64) {
+	//nolint:gosec // Preserve the signed value's bit pattern in an unsigned container.
+	binary.LittleEndian.PutUint64(dst, uint64(value))
+}
+
+func readInt64(src []byte) int64 {
+	//nolint:gosec // Restore the signed bit pattern written by putInt64.
+	return int64(binary.LittleEndian.Uint64(src))
+}
+
+func unixNanoOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UnixNano()
+}
+
+func timeFromUnixNano(n int64) time.Time {
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }
 
 // bucketTTL keeps a bucket alive long enough to refill twice from empty,

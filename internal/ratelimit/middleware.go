@@ -124,7 +124,7 @@ func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(h
 					"error":               "rate_limit_exceeded",
 					"retry_after_seconds": retrySec,
 				})
-				throttled.WithLabelValues(string(key.Tier), routeClassDefault).Inc()
+				throttled.WithLabelValues(key.Tier.String(), routeClassDefault).Inc()
 				return
 			}
 

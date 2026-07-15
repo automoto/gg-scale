@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -14,16 +15,27 @@ import (
 	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 // Options configures ServeWS. Hub is required; everything else is optional.
 type Options struct {
 	Hub *Hub
 
-	// Cache + MaxPerTenant enable a per-tenant concurrent-connection cap.
-	// When MaxPerTenant is 0 the cap is disabled and Cache is unused.
-	Cache        cache.Store
-	MaxPerTenant int64
+	// Cache backs the per-player connection cap. Unused when MaxPerPlayer is 0.
+	Cache cache.Store
+
+	// TenantCap enforces the per-tenant CCU cap using the tier-aware burst
+	// model (ConnectionCapForClass). nil disables the per-tenant cap. The
+	// tenant's class is read from the request's API key; the limit is the
+	// class envelope unless EnvMaxPerTenant overrides it.
+	TenantCap ratelimit.ConnectionCap
+
+	// EnvMaxPerTenant, when > 0, overrides the tier-derived per-tenant cap
+	// with a fixed hard limit (no burst) — an operator escape hatch for
+	// self-host. 0 means use the tenant's class envelope.
+	EnvMaxPerTenant int64
 
 	// MaxPerPlayer caps simultaneous connections from a single player
 	// (one player). Stops a single player from opening N sockets and
@@ -107,28 +119,35 @@ func ServeWS(opts Options) http.HandlerFunc {
 			})
 		}
 
-		slotKey := slotKeyForTenant(tenantID)
-		if opts.MaxPerTenant > 0 && opts.Cache != nil {
-			acquired, _, slotErr := opts.Cache.AcquireSlot(r.Context(), slotKey, opts.MaxPerTenant, slotTTL)
-			if slotErr != nil {
-				logger.Error("realtime: AcquireSlot failed", "err", slotErr, "tenant_id", tenantID)
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			if !acquired {
+		// Per-tenant CCU cap: tier-aware burst envelope, enforced in the shared
+		// cache so it is one global limit across app hosts (approximate on the
+		// distributed backend — CCU caps are guardrails, not exact promises).
+		if opts.TenantCap != nil {
+			caps := tenantCapLimits(tenantTierFromContext(r.Context()), opts.EnvMaxPerTenant)
+			capKey := ratelimit.ConnectionCapKey(tenantID)
+			decision, capErr := opts.TenantCap.Acquire(r.Context(), capKey, caps)
+			switch {
+			case capErr != nil:
+				// Fail open: a cache blip must not drop players. Log + carry on
+				// without a tenant slot (nothing to release or refresh).
+				logger.Error("realtime: tenant cap acquire failed; allowing connection (fail-open)",
+					"err", capErr, "tenant_id", tenantID)
+			case !decision.Allowed:
+				w.Header().Set("Retry-After", strconv.Itoa(int(tenantCapRetryAfter.Seconds())))
 				http.Error(w, "too many connections", http.StatusServiceUnavailable)
 				return
+			default:
+				defer func() {
+					if rerr := opts.TenantCap.Release(context.Background(), capKey); rerr != nil {
+						logger.Warn("realtime: tenant cap release failed", "err", rerr, "tenant_id", tenantID)
+					}
+				}()
+				refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
+					if rerr := opts.TenantCap.Refresh(ctx, capKey); rerr != nil {
+						logger.Warn("realtime: tenant cap refresh failed", "err", rerr, "tenant_id", tenantID)
+					}
+				})
 			}
-			defer func() {
-				if rerr := opts.Cache.ReleaseSlot(context.Background(), slotKey); rerr != nil {
-					logger.Warn("realtime: ReleaseSlot failed", "err", rerr, "tenant_id", tenantID)
-				}
-			}()
-			refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
-				if rerr := opts.Cache.RefreshSlot(ctx, slotKey, slotTTL); rerr != nil {
-					logger.Warn("realtime: RefreshSlot failed", "err", rerr, "tenant_id", tenantID)
-				}
-			})
 		}
 
 		conn, err := websocket.Accept(w, r, nil)
@@ -214,22 +233,60 @@ func isExpectedCloseErr(err error) bool {
 	return closeStatus == websocket.StatusNormalClosure || closeStatus == websocket.StatusGoingAway
 }
 
+// writeTimeout bounds a single frame write so a stuck or slow-draining socket
+// (full send buffer, half-dead peer) can't block the sender — the matchmaker or
+// invite goroutine — indefinitely. The write fails fast and the read loop reaps
+// the connection.
+const writeTimeout = 10 * time.Second
+
+// wsWriter adapts a *websocket.Conn to the Hub's Writer seam. coder/websocket
+// forbids concurrent writes to one connection, and a single player can be
+// targeted by several subsystems at once (matchmaker, invites, presence), so
+// mu serializes frames and Close on this socket.
 type wsWriter struct {
+	mu sync.Mutex
 	ws *websocket.Conn
 }
 
 func (w *wsWriter) Write(ctx context.Context, data []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.ws.Write(ctx, websocket.MessageText, data)
 }
 
 func (w *wsWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	return w.ws.Close(websocket.StatusNormalClosure, "")
-}
-
-func slotKeyForTenant(tenantID int64) string {
-	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10)
 }
 
 func slotKeyForPlayer(tenantID, playerID int64) string {
 	return "realtime:tenant:" + strconv.FormatInt(tenantID, 10) + ":user:" + strconv.FormatInt(playerID, 10)
+}
+
+// tenantCapRetryAfter is advertised to a rejected client so its SDK backs off
+// before retrying, per the "try again later" semantics of the CCU cap.
+const tenantCapRetryAfter = 5 * time.Second
+
+// tenantTierFromContext reads the tenant's service class from the request's API
+// key. Behind the tenant middleware the key is always present; the Tier0
+// fallback (smallest envelope) is a fail-safe for the can't-happen case.
+func tenantTierFromContext(ctx context.Context) tenant.Tier {
+	key, ok := tenant.APIKeyFromContext(ctx)
+	if !ok {
+		return tenant.Tier0
+	}
+	return key.Tier
+}
+
+// tenantCapLimits resolves the per-tenant connection envelope: the tenant's
+// class limits by default, or a fixed hard cap (no burst) when an operator
+// pins EnvMaxPerTenant.
+func tenantCapLimits(tier tenant.Tier, envOverride int64) ratelimit.CapLimits {
+	if envOverride > 0 {
+		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}
+	}
+	return ratelimit.ConnectionCapForClass(tier)
 }

@@ -6,10 +6,29 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY name;
 
 -- name: GetTenantFacts :one
-SELECT name, tier, public_joining_enabled
+SELECT name, tier, enforce_quotas, public_joining_enabled
 FROM tenants
 WHERE id = $1
   AND deleted_at IS NULL;
+
+-- name: SetTenantTierByID :one
+-- Platform-admin direct tier changes may move in either direction. Capture the
+-- prior tier under the same row lock so the audit record cannot race another
+-- administrator's update.
+WITH current_tenant AS MATERIALIZED (
+    SELECT tenants.id, tenants.tier AS old_tier
+    FROM tenants
+    WHERE tenants.id = sqlc.arg(tenant_id)
+      AND tenants.deleted_at IS NULL
+    FOR UPDATE
+), updated AS (
+    UPDATE tenants AS t
+    SET tier = sqlc.arg(tier)
+    FROM current_tenant AS current
+    WHERE t.id = current.id
+    RETURNING current.old_tier, t.tier AS new_tier
+)
+SELECT old_tier, new_tier FROM updated;
 
 -- name: SetTenantPublicJoining :exec
 UPDATE tenants

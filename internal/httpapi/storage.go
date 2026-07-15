@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/storagelimit"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 const storageListMaxLimit = 100
@@ -129,11 +132,15 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		}
 
 		version, updatedAt, err := putStorageObject(ctx, d, projectID, ownerID, in)
+		var qe *quota.ErrQuotaExceeded
 		switch {
 		case errors.Is(err, errIfMatchInvalid):
 			return nil, huma.Error400BadRequest("If-Match must be an integer version")
 		case errors.Is(err, pgx.ErrNoRows):
 			return nil, huma.Error412PreconditionFailed("version mismatch")
+		case errors.As(err, &qe):
+			d.Metrics.QuotaRejection(qe.Axis)
+			return nil, huma.Error403Forbidden(fmt.Sprintf("storage quota exceeded: tenant storage limit is %d bytes", qe.Limit))
 		case err != nil:
 			return nil, serverError(ctx, "storage put: tx", err)
 		}
@@ -157,7 +164,9 @@ func resolveStorageLimit(ctx context.Context, d Deps, projectID int64) (int64, e
 }
 
 // putStorageObject upserts the object in a transaction, honoring an optional
-// If-Match version precondition, and returns the new version and timestamp.
+// If-Match version precondition, and returns the new version and timestamp. It
+// enforces the tenant storage quota before writing and adjusts the tenant's
+// byte counter in the same tx so the counter cannot drift from the object rows.
 func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in *storagePutInput) (int64, time.Time, error) {
 	var (
 		version   int64
@@ -165,31 +174,65 @@ func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in 
 	)
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if in.IfMatch == "" {
-			row, qerr := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: in.RawBody,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			version, updatedAt = row.Version, row.UpdatedAt.Time
-			return nil
-		}
-		expected, perr := strconv.ParseInt(in.IfMatch, 10, 64)
-		if perr != nil {
-			return errIfMatchInvalid
-		}
-		row, qerr := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
+		if lerr := q.LockStorageObjectForWrite(ctx, sqlcgen.LockStorageObjectForWriteParams{
 			ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
-			Version: expected, Value: in.RawBody,
-		})
+		}); lerr != nil {
+			return fmt.Errorf("storage write lock: %w", lerr)
+		}
+		delta, qerr := storageWriteDelta(ctx, q, projectID, ownerID, in.Key, in.RawBody)
 		if qerr != nil {
 			return qerr
 		}
-		version, updatedAt = row.Version, row.UpdatedAt.Time
-		return nil
+		if in.IfMatch == "" {
+			row, err := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: in.RawBody,
+			})
+			if err != nil {
+				return err
+			}
+			version, updatedAt = row.Version, row.UpdatedAt.Time
+		} else {
+			expected, perr := strconv.ParseInt(in.IfMatch, 10, 64)
+			if perr != nil {
+				return errIfMatchInvalid
+			}
+			row, err := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
+				Version: expected, Value: in.RawBody,
+			})
+			if err != nil {
+				return err
+			}
+			version, updatedAt = row.Version, row.UpdatedAt.Time
+		}
+		return q.ApplyTenantStorageDelta(ctx, delta)
 	})
 	return version, updatedAt, err
+}
+
+// storageWriteDelta returns the byte delta a pending write will apply to the
+// tenant storage counter (new size − old size). When the tenant enforces
+// quotas it also rejects a growing write that would exceed the class limit;
+// reads, deletes, and shrinking overwrites (delta<=0) always pass. The
+// per-value max_value_bytes cap in storagePut is orthogonal (abuse guard).
+func storageWriteDelta(ctx context.Context, q *sqlcgen.Queries, projectID, ownerID int64, key string, value []byte) (int64, error) {
+	qc, err := q.GetTenantQuotaContext(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("tenant quota context: %w", err)
+	}
+	u, err := q.StorageUsageForWrite(ctx, sqlcgen.StorageUsageForWriteParams{
+		ProjectID: projectID, OwnerUserID: ownerID, Key: key, NewValue: value,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("storage usage for write: %w", err)
+	}
+	delta := u.NewBytes - u.OldBytes
+	if qc.EnforceQuotas {
+		if err := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckStorage(u.TotalBytes, delta); err != nil {
+			return 0, err
+		}
+	}
+	return delta, nil
 }
 
 func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectOutput, error) {
@@ -239,9 +282,22 @@ func storageDelete(d Deps) func(context.Context, *storageKeyInput) (*struct{}, e
 		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			return sqlcgen.New(tx).SoftDeleteStorageObject(ctx, sqlcgen.SoftDeleteStorageObjectParams{
+			q := sqlcgen.New(tx)
+			if lerr := q.LockStorageObjectForWrite(ctx, sqlcgen.LockStorageObjectForWriteParams{
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
+			}); lerr != nil {
+				return fmt.Errorf("storage write lock: %w", lerr)
+			}
+			freed, derr := q.SoftDeleteStorageObject(ctx, sqlcgen.SoftDeleteStorageObjectParams{
 				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
 			})
+			if errors.Is(derr, pgx.ErrNoRows) {
+				return nil // already absent; delete is idempotent
+			}
+			if derr != nil {
+				return derr
+			}
+			return q.ApplyTenantStorageDelta(ctx, -freed)
 		})
 		if err != nil {
 			return nil, serverError(ctx, "storage delete: tx", err)

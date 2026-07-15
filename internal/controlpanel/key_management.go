@@ -16,6 +16,7 @@ import (
 	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -309,7 +310,11 @@ func (h *Handler) createProject(ctx context.Context, tenantID int64, name string
 	var out ProjectOption
 	ctx = db.WithTenant(ctx, tenantID)
 	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		row, err := sqlcgen.New(tx).CreateProjectForTenant(ctx, name)
+		q := sqlcgen.New(tx)
+		if err := checkProjectQuota(ctx, q); err != nil {
+			return err
+		}
+		row, err := q.CreateProjectForTenant(ctx, name)
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -323,7 +328,33 @@ func (h *Handler) createProject(ctx context.Context, tenantID int64, name string
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		var qe *quota.ErrQuotaExceeded
+		if errors.As(err, &qe) {
+			h.metrics.QuotaRejection(qe.Axis)
+		}
+		return ProjectOption{}, err
+	}
+	return out, nil
+}
+
+// checkProjectQuota rejects a new project when the tenant enforces quotas and
+// is already at its class project limit. A no-op for unenforced tenants
+// (zero-config self-host stays uncapped). Runs inside the create tx.
+func checkProjectQuota(ctx context.Context, q *sqlcgen.Queries) error {
+	qc, err := q.GetTenantQuotaContext(ctx)
+	if err != nil {
+		return fmt.Errorf("tenant quota context: %w", err)
+	}
+	if !qc.EnforceQuotas {
+		return nil
+	}
+	count, err := q.CountProjectsForTenant(ctx)
+	if err != nil {
+		return fmt.Errorf("count projects: %w", err)
+	}
+	limits := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
+	return limits.CheckProjects(count)
 }
 
 func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyInput) (createKeyResult, error) {

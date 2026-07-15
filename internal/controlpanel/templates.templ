@@ -59,6 +59,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 								<div class="nav-menu-content">
 									@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))
 									@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))
+									@navLink("/v1/control-panel/admin/change-requests", "Change requests", nav.IsActive(navChangeRequests))
 									@navLink("/v1/control-panel/admin/player-accounts", "Player accounts", nav.IsActive(navPlayerAccounts))
 									@navLink("/v1/control-panel/admin/team", "Platform admins", nav.IsActive(navPlatformTeam))
 									@navLink("/v1/control-panel/admin/settings", "Server settings", nav.IsActive(navServerSettings))
@@ -2477,7 +2478,99 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 				<dt>Tier</dt>
 				<dd>{ vm.Tier }</dd>
 			</dl>
+			if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/tier") } class="settings-form" data-confirm="Change this tenant's tier?">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>
+						Tier
+						<select name="tier" required>
+							<option value="0" selected?={ vm.TierClass == 0 }>tier_0</option>
+							<option value="1" selected?={ vm.TierClass == 1 }>tier_1</option>
+							<option value="2" selected?={ vm.TierClass == 2 }>tier_2</option>
+							<option value="3" selected?={ vm.TierClass == 3 }>tier_3</option>
+						</select>
+					</label>
+					<button type="submit" class="btn-inline">Save tier</button>
+				</form>
+			}
 			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
+		</section>
+		if vm.QuotasEnforced {
+			<section class="card">
+				<h2>Object storage</h2>
+				if vm.StorageWarn {
+					<p role="alert">
+						Using { vm.StorageUsedLabel } of { vm.StorageLimitLabel } ({ stringFromInt(int64(vm.StoragePercent)) }%).
+						New writes are blocked at 100%. Request a tier upgrade to raise the limit.
+					</p>
+				} else {
+					<p>Using { vm.StorageUsedLabel } of { vm.StorageLimitLabel } ({ stringFromInt(int64(vm.StoragePercent)) }%).</p>
+				}
+			</section>
+		}
+		<section class="card">
+			<h2>Plan &amp; feature requests</h2>
+			<p class="card-subtitle">Request a tier upgrade or a feature grant. A platform admin reviews each request; approvals apply automatically.</p>
+			if vm.CanRequestUpgrade {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="kind" value="tier_upgrade"/>
+					<label>
+						Upgrade to
+						<select name="requested_tier" required>
+							for _, opt := range vm.UpgradeTargets {
+								<option value={ opt.Value }>{ opt.Label }</option>
+							}
+						</select>
+					</label>
+					<label>
+						Note <span class="muted">(optional)</span>
+						<input name="note"/>
+					</label>
+					<button type="submit" class="btn-inline">Request tier upgrade</button>
+				</form>
+			}
+			if len(vm.FeatureOptions) > 0 {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="kind" value="feature"/>
+					<label>
+						Feature
+						<select name="feature" required>
+							for _, opt := range vm.FeatureOptions {
+								<option value={ opt.Value }>{ opt.Label }</option>
+							}
+						</select>
+					</label>
+					<label>
+						Note <span class="muted">(optional)</span>
+						<input name="note"/>
+					</label>
+					<button type="submit" class="btn-inline">Request feature</button>
+				</form>
+			}
+			if len(vm.ChangeRequests) > 0 {
+				<h3>Your requests</h3>
+				<table>
+					<thead><tr><th>Type</th><th>Detail</th><th>Status</th><th>Reason</th></tr></thead>
+					<tbody>
+						for _, req := range vm.ChangeRequests {
+							<tr>
+								<td>{ req.Kind }</td>
+								<td>{ req.Detail }</td>
+								<td>{ req.Status }</td>
+								<td>
+									if req.Status == "denied" && req.ReviewReason != "" {
+										{ req.ReviewReason }
+									} else {
+										—
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
 		</section>
 	}
 }

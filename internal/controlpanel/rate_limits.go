@@ -72,7 +72,7 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		if err != nil {
 			return err
 		}
-		defaults := ratelimit.LimitsForTier(tenant.Tier(tier))
+		defaults := ratelimit.LimitsForTier(tenant.ClampTier(int(tier)))
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst
 

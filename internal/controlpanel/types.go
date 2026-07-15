@@ -35,6 +35,10 @@ type Config struct {
 	// StorageMaxValueBytes is the platform default storage value cap, shown on
 	// the rate-limits page as the fallback when no tenant/project override is set.
 	StorageMaxValueBytes int64
+	// EnforceNewTenantQuotas mirrors QUOTAS_ENFORCE_NEW_TENANTS. When true,
+	// tenant provisioning sets enforce_quotas=true on the new tenant so the
+	// class ladder is enforced from creation.
+	EnforceNewTenantQuotas bool
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this
@@ -125,6 +129,7 @@ const (
 	navProjectSettings navDestination = "project-settings"
 	navPlatformUsers   navDestination = "platform-users"
 	navTenantSignups   navDestination = "tenant-signups"
+	navChangeRequests  navDestination = "change-requests"
 	navPlayerAccounts  navDestination = "player-accounts"
 	navPlatformTeam    navDestination = "platform-team"
 	navServerSettings  navDestination = "server-settings"
@@ -371,6 +376,7 @@ type TenantSettingsView struct {
 	TenantID        int64
 	TenantName      string
 	Tier            string
+	TierClass       int
 	IsPlatformAdmin bool
 	Message         string
 	// Tenant HTTP API limit (editable by platform admins, read-only otherwise).
@@ -379,6 +385,59 @@ type TenantSettingsView struct {
 	APIBurst        float64
 	APIDefaultRate  float64
 	APIDefaultBurst float64
+	// Storage quota (shown only when the tenant is quota-enforced).
+	QuotasEnforced    bool
+	StorageUsedBytes  int64
+	StorageLimitBytes int64
+	StorageUsedLabel  string
+	StorageLimitLabel string
+	StoragePercent    int
+	// StorageWarn is set when usage is at/over 80% of the limit.
+	StorageWarn bool
+	// Change requests (tier upgrades / feature grants) — tenant self-service.
+	ChangeRequests    []ChangeRequestView
+	UpgradeTargets    []FeatureOptionView // class targets above the current tier
+	FeatureOptions    []FeatureOptionView
+	CanRequestUpgrade bool
+}
+
+// FeatureOptionView is one requestable feature offered in the change-request
+// form (grant-able env switch on, not already held).
+type FeatureOptionView struct {
+	Value string
+	Label string
+}
+
+// ChangeRequestView is one of the tenant's own change requests, rendered on the
+// tenant settings page with its status and (if denied) the review reason.
+type ChangeRequestView struct {
+	Kind         string
+	Detail       string
+	Note         string
+	Status       string
+	ReviewReason string
+	CreatedAt    time.Time
+}
+
+// ChangeRequestsView is the platform-admin pending-review queue.
+type ChangeRequestsView struct {
+	UserEmail string
+	CSRFToken string
+	Requests  []PendingChangeRequestView
+	Message   string
+}
+
+// PendingChangeRequestView is one row in the platform-admin change-request
+// queue.
+type PendingChangeRequestView struct {
+	ID          int64
+	TenantID    int64
+	TenantName  string
+	CurrentTier string
+	Kind        string
+	Target      string
+	Note        string
+	CreatedAt   time.Time
 }
 
 // ProjectSettingsView consolidates project-scoped configuration on one page.

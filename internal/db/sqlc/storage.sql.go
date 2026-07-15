@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyTenantStorageDelta = `-- name: ApplyTenantStorageDelta :exec
+INSERT INTO tenant_storage_usage (tenant_id, total_bytes, updated_at)
+VALUES (current_setting('app.tenant_id', true)::bigint, GREATEST(0, $1::bigint), now())
+ON CONFLICT (tenant_id) DO UPDATE
+    SET total_bytes = GREATEST(0, tenant_storage_usage.total_bytes + $1::bigint),
+        updated_at = now()
+`
+
+// Adjust the current tenant's storage counter by delta (bytes; negative on
+// delete/shrink), clamped at zero. Called in the write tx after a successful
+// object write so the counter stays in lockstep. Runs in tenant context.
+func (q *Queries) ApplyTenantStorageDelta(ctx context.Context, delta int64) error {
+	_, err := q.db.Exec(ctx, applyTenantStorageDelta, delta)
+	return err
+}
+
 const getStorageObject = `-- name: GetStorageObject :one
 SELECT id, value, version, updated_at
 FROM storage_objects
@@ -44,6 +60,64 @@ func (q *Queries) GetStorageObject(ctx context.Context, arg GetStorageObjectPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getTenantStorageUsageByID = `-- name: GetTenantStorageUsageByID :one
+SELECT COALESCE((SELECT total_bytes FROM tenant_storage_usage
+                 WHERE tenant_id = $1), 0)::bigint
+`
+
+// Metered storage total for a tenant by id (0 if never written). Read in a
+// bootstrap tx by the control-panel settings page for the used/limit display.
+func (q *Queries) GetTenantStorageUsageByID(ctx context.Context, tenantID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, getTenantStorageUsageByID, tenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const listEnforcedTenantStorage = `-- name: ListEnforcedTenantStorage :many
+SELECT u.tenant_id, t.name, t.tier, u.total_bytes, u.last_notified_threshold
+FROM tenant_storage_usage u
+JOIN tenants t ON t.id = u.tenant_id
+WHERE t.enforce_quotas = true
+  AND t.deleted_at IS NULL
+`
+
+type ListEnforcedTenantStorageRow struct {
+	TenantID              int64
+	Name                  string
+	Tier                  int16
+	TotalBytes            int64
+	LastNotifiedThreshold int16
+}
+
+// Name, usage, class, and last-notified threshold for every quota-enforced
+// tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
+func (q *Queries) ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforcedTenantStorageRow, error) {
+	rows, err := q.db.Query(ctx, listEnforcedTenantStorage)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEnforcedTenantStorageRow
+	for rows.Next() {
+		var i ListEnforcedTenantStorageRow
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.Name,
+			&i.Tier,
+			&i.TotalBytes,
+			&i.LastNotifiedThreshold,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listStorageObjects = `-- name: ListStorageObjects :many
@@ -105,6 +179,60 @@ func (q *Queries) ListStorageObjects(ctx context.Context, arg ListStorageObjects
 		return nil, err
 	}
 	return items, nil
+}
+
+const listTenantAdminEmails = `-- name: ListTenantAdminEmails :many
+SELECT u.email
+FROM control_panel_memberships m
+JOIN control_panel_users u ON u.id = m.control_panel_user_id
+WHERE m.tenant_id = $1
+  AND m.role IN ('owner', 'admin')
+  AND u.email_verified_at IS NOT NULL
+ORDER BY u.email
+`
+
+// Verified emails of a tenant's owner/admin members, for operational notices
+// (e.g. storage-quota warnings). Read cross-tenant by background jobs.
+func (q *Queries) ListTenantAdminEmails(ctx context.Context, tenantID int64) ([]string, error) {
+	rows, err := q.db.Query(ctx, listTenantAdminEmails, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var email string
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockStorageObjectForWrite = `-- name: LockStorageObjectForWrite :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+    current_setting('app.tenant_id', true) || ':' ||
+    $1::bigint::text || ':' ||
+    $2::bigint::text || ':' ||
+    $3::text, 0))
+`
+
+type LockStorageObjectForWriteParams struct {
+	ProjectID   int64
+	OwnerUserID int64
+	Key         string
+}
+
+// Transaction-scoped advisory lock serializing concurrent writes (put/delete)
+// to a single storage object so the read-modify-write of the tenant byte
+// counter can't be raced past. Released on commit/rollback.
+func (q *Queries) LockStorageObjectForWrite(ctx context.Context, arg LockStorageObjectForWriteParams) error {
+	_, err := q.db.Exec(ctx, lockStorageObjectForWrite, arg.ProjectID, arg.OwnerUserID, arg.Key)
+	return err
 }
 
 const putStorageObject = `-- name: PutStorageObject :one
@@ -192,7 +320,23 @@ func (q *Queries) PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObj
 	return i, err
 }
 
-const softDeleteStorageObject = `-- name: SoftDeleteStorageObject :exec
+const setTenantStorageNotifiedThreshold = `-- name: SetTenantStorageNotifiedThreshold :exec
+UPDATE tenant_storage_usage
+SET last_notified_threshold = $1
+WHERE tenant_id = $2
+`
+
+type SetTenantStorageNotifiedThresholdParams struct {
+	Threshold int16
+	TenantID  int64
+}
+
+func (q *Queries) SetTenantStorageNotifiedThreshold(ctx context.Context, arg SetTenantStorageNotifiedThresholdParams) error {
+	_, err := q.db.Exec(ctx, setTenantStorageNotifiedThreshold, arg.Threshold, arg.TenantID)
+	return err
+}
+
+const softDeleteStorageObject = `-- name: SoftDeleteStorageObject :one
 UPDATE storage_objects
 SET deleted_at = now(),
     updated_at = now()
@@ -201,6 +345,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND owner_user_id = $2
   AND key = $3
   AND deleted_at IS NULL
+RETURNING octet_length(value::text)::bigint AS freed_bytes
 `
 
 type SoftDeleteStorageObjectParams struct {
@@ -209,7 +354,53 @@ type SoftDeleteStorageObjectParams struct {
 	Key         string
 }
 
-func (q *Queries) SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) error {
-	_, err := q.db.Exec(ctx, softDeleteStorageObject, arg.ProjectID, arg.OwnerUserID, arg.Key)
-	return err
+// Soft-deletes and returns the freed byte count (octet_length(value::text)) so
+// the caller can decrement the tenant storage counter in the same tx. Returns
+// no rows when the object is already absent (delete is idempotent).
+func (q *Queries) SoftDeleteStorageObject(ctx context.Context, arg SoftDeleteStorageObjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, softDeleteStorageObject, arg.ProjectID, arg.OwnerUserID, arg.Key)
+	var freed_bytes int64
+	err := row.Scan(&freed_bytes)
+	return freed_bytes, err
+}
+
+const storageUsageForWrite = `-- name: StorageUsageForWrite :one
+SELECT
+    COALESCE((SELECT total_bytes FROM tenant_storage_usage
+              WHERE tenant_id = current_setting('app.tenant_id', true)::bigint), 0)::bigint AS total_bytes,
+    COALESCE((SELECT octet_length(value::text) FROM storage_objects
+              WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+                AND project_id = $1 AND owner_user_id = $2 AND key = $3
+                AND deleted_at IS NULL), 0)::bigint AS old_bytes,
+    octet_length($4::jsonb::text)::bigint AS new_bytes
+`
+
+type StorageUsageForWriteParams struct {
+	ProjectID   int64
+	OwnerUserID int64
+	Key         string
+	NewValue    []byte
+}
+
+type StorageUsageForWriteRow struct {
+	TotalBytes int64
+	OldBytes   int64
+	NewBytes   int64
+}
+
+// One-shot inputs for the pre-write storage-quota check: the tenant's current
+// metered total, the existing object's size (0 if new), and the incoming
+// value's size — all measured as octet_length(value::text) so they match the
+// counter maintained by ApplyTenantStorageDelta. Runs in the write tx
+// (app.tenant_id set), serialized per object by LockStorageObjectForWrite.
+func (q *Queries) StorageUsageForWrite(ctx context.Context, arg StorageUsageForWriteParams) (StorageUsageForWriteRow, error) {
+	row := q.db.QueryRow(ctx, storageUsageForWrite,
+		arg.ProjectID,
+		arg.OwnerUserID,
+		arg.Key,
+		arg.NewValue,
+	)
+	var i StorageUsageForWriteRow
+	err := row.Scan(&i.TotalBytes, &i.OldBytes, &i.NewBytes)
+	return i, err
 }
