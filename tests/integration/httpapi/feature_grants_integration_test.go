@@ -25,7 +25,7 @@ import (
 
 func TestFeatureEnabled_disabledGrantOverridesEnabledGrantAfterCacheRefresh(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "feature-cache")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "feature-cache")
 	pool := db.NewPool(c.appPool)
 	authorizer, err := rbac.NewAuthorizer(pool)
 	require.NoError(t, err)
@@ -60,7 +60,7 @@ func TestFeatureEnabled_disabledGrantOverridesEnabledGrantAfterCacheRefresh(t *t
 
 func TestRelayCredentials_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "relay-deprovision")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "relay-deprovision")
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`UPDATE api_keys
 		    SET key_type = 'publishable',
@@ -98,7 +98,7 @@ func TestRelayCredentials_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testi
 
 func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-deprovision")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-deprovision")
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`UPDATE api_keys
 		    SET key_type = 'publishable',
@@ -141,7 +141,7 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 
 func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "mm-deprovision")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "mm-deprovision")
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`UPDATE api_keys
 		    SET key_type = 'publishable',

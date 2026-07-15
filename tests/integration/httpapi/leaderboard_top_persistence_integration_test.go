@@ -28,7 +28,7 @@ import (
 func TestLeaderboard_hundred_scores_from_ten_users_top_order_survives_fresh_app_cache(t *testing.T) {
 	c := startCluster(t)
 	// Premium tier avoids rate-limit denials while posting 100 scores in quick succession.
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "premium", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 2, "k")
 
 	var leaderboardID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),

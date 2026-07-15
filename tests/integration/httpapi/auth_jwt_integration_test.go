@@ -18,7 +18,7 @@ import (
 
 func TestLogin_access_token_verifies_with_hmac_signer(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",

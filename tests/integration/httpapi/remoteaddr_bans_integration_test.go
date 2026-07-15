@@ -29,7 +29,7 @@ type remoteAddrsBody struct {
 // unlinked-player 403 — plus server-side scope detection.
 func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -79,7 +79,7 @@ func TestRemoteAddr_owner_and_friend_acl(t *testing.T) {
 // validation and the one-address-per-slot rule.
 func TestRemoteAddr_rejects_invalid_and_duplicate_slots(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
 	linkPlayerAccount(t, c, id)
@@ -120,7 +120,7 @@ func TestRemoteAddr_rejects_invalid_and_duplicate_slots(t *testing.T) {
 // list becomes the account's complete address set.
 func TestRemoteAddr_put_is_full_replace(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
 	linkPlayerAccount(t, c, id)
@@ -147,7 +147,7 @@ func TestRemoteAddr_put_is_full_replace(t *testing.T) {
 // server-derived scope field) must succeed.
 func TestRemoteAddr_get_scope_field_roundtrips_into_put(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
 	linkPlayerAccount(t, c, id)
@@ -165,7 +165,7 @@ func TestRemoteAddr_get_scope_field_roundtrips_into_put(t *testing.T) {
 // TestTenantBan_blocks_login is the tenant-ban enforcement at the login point.
 func TestTenantBan_blocks_login(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	// Sign up an email/password player, then link + ban their account.

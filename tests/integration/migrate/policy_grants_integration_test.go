@@ -113,7 +113,7 @@ func TestMigrations_feature_grants_check_allows_every_code_feature(t *testing.T)
 	dbc := openDB(t, dsn)
 	var tenantID int64
 	require.NoError(t, dbc.QueryRow(
-		`INSERT INTO tenants (name, tier) VALUES ('feature-check', 'free') RETURNING id`).Scan(&tenantID))
+		`INSERT INTO tenants (name, tier) VALUES ('feature-check', 0) RETURNING id`).Scan(&tenantID))
 
 	features := []rbac.Feature{
 		rbac.FeatureP2PRelay,

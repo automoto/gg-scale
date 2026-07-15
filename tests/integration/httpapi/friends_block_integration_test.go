@@ -16,7 +16,7 @@ import (
 // request returns — never a 500.
 func TestFriends_block_unknown_target_returns_not_found(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k-block-404")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k-block-404")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k-block-404")
@@ -35,7 +35,7 @@ func TestFriends_block_unknown_target_returns_not_found(t *testing.T) {
 // restored. Blocking never reveals itself to the blockee.
 func TestFriends_block_enforcement_e2e(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")

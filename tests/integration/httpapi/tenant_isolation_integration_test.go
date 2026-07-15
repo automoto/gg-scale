@@ -18,8 +18,8 @@ import (
 
 func TestTenantIsolation_storage_object_not_readable_across_tenants(t *testing.T) {
 	c := startCluster(t)
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "ka")
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "kb")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "ka")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "kb")
 	srv := newServerForCluster(t, c)
 
 	tokA := anonymousLogin(t, srv.URL, "ka")
@@ -36,8 +36,8 @@ func TestTenantIsolation_storage_object_not_readable_across_tenants(t *testing.T
 
 func TestTenantIsolation_leaderboard_cross_tenant_fetch_returns_404(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "ka")
-	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "kb")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "ka")
+	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "kb")
 	srv := newServerForCluster(t, c)
 
 	var lbA int64
@@ -88,8 +88,8 @@ func TestTenantIsolation_leaderboard_cross_tenant_fetch_returns_404(t *testing.T
 
 func TestTenantIsolation_session_JWT_rejected_with_wrong_tenant_api_key(t *testing.T) {
 	c := startCluster(t)
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "ka")
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "kb")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "ka")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "kb")
 	srv := newServerForCluster(t, c)
 
 	tokA := anonymousLogin(t, srv.URL, "ka")

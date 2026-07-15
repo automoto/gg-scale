@@ -136,7 +136,7 @@ func extractVerifyToken(t *testing.T, body string) string {
 
 func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -181,7 +181,7 @@ func TestSignup_then_verify_then_login_then_refresh_then_logout(t *testing.T) {
 
 func TestLogin_before_verification_is_denied(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -197,7 +197,7 @@ func TestLogin_before_verification_is_denied(t *testing.T) {
 
 func TestSignup_responds_uniformly_on_duplicate(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -212,7 +212,7 @@ func TestSignup_responds_uniformly_on_duplicate(t *testing.T) {
 
 func TestLogin_with_wrong_password_returns_401(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -229,7 +229,7 @@ func TestLogin_with_wrong_password_returns_401(t *testing.T) {
 
 func TestLogin_with_nonexistent_email_returns_401_with_bcrypt_timing(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	start := time.Now()
@@ -244,7 +244,7 @@ func TestLogin_with_nonexistent_email_returns_401_with_bcrypt_timing(t *testing.
 
 func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	secret := []byte("tenant-custom-token-shared-secret")
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`UPDATE tenants SET custom_token_secret = $1 WHERE id = $2`, secret, tenantID)
@@ -280,7 +280,7 @@ func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 
 func TestStorage_put_get_delete_round_trip(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 	access := anonymousLogin(t, srv.URL, "k")
 
@@ -317,7 +317,7 @@ func TestStorage_put_get_delete_round_trip(t *testing.T) {
 
 func TestStorageLimit_resolution_precedence(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	store := storagelimit.NewStore(db.NewPool(c.appPool))
 	ctx := context.Background()
 
@@ -371,7 +371,7 @@ func TestStorageLimit_resolution_precedence(t *testing.T) {
 
 func TestStorage_respects_tenant_limit_override(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	// A 1 KiB tenant-level override, so the test needn't send a 1 MiB payload to
 	// exceed the platform default — and it exercises the override resolution.
 	_, err := c.bootstrapPool.Exec(context.Background(),
@@ -396,7 +396,7 @@ func TestStorage_respects_tenant_limit_override(t *testing.T) {
 
 func TestStorage_if_match_blocks_stale_writes(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 	access := anonymousLogin(t, srv.URL, "k")
 
@@ -420,7 +420,7 @@ func TestStorage_if_match_blocks_stale_writes(t *testing.T) {
 
 func TestLeaderboard_submit_then_top_returns_best_score_per_user(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	var leaderboardID int64
@@ -458,7 +458,7 @@ func TestLeaderboard_submit_then_top_returns_best_score_per_user(t *testing.T) {
 
 func TestLeaderboard_ascendingSortUsesLowestScorePerUser(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	var leaderboardID int64
@@ -498,7 +498,7 @@ func TestLeaderboard_ascendingSortUsesLowestScorePerUser(t *testing.T) {
 
 func TestFriends_request_accept_list(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -529,7 +529,7 @@ func TestFriends_request_accept_list(t *testing.T) {
 
 func TestFriends_re_request_after_rejection_transitions_to_pending(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -556,7 +556,7 @@ func TestFriends_re_request_after_rejection_transitions_to_pending(t *testing.T)
 
 func TestProfile_get_returns_calling_user(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, _ := newFullStackServer(t, c)
 
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")

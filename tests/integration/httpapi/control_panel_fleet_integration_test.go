@@ -140,7 +140,7 @@ func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend,
 
 func TestControlPanelFleet_list_then_allocate_then_appears_in_table(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-a")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-a")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
@@ -190,7 +190,7 @@ func TestControlPanelFleet_list_then_allocate_then_appears_in_table(t *testing.T
 
 func TestControlPanelFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-events")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-events")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
@@ -228,7 +228,7 @@ func TestControlPanelFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 
 func TestControlPanelFleet_deallocate_rejects_wrong_typed_id_then_succeeds(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-d")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-d")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
@@ -293,8 +293,8 @@ func TestControlPanelFleet_deallocate_rejects_wrong_typed_id_then_succeeds(t *te
 
 func TestControlPanelFleet_RLS_isolates_allocations_across_tenants(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-rls-a")
-	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-rls-b")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-rls-a")
+	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-rls-b")
 	aliceID := seedControlPanelUser(t, c, "alice@example.com", "correct-horse-battery-staple", false)
 	bobID := seedControlPanelUser(t, c, "bob@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, aliceID, tenantA, "owner")
@@ -350,7 +350,7 @@ func TestControlPanelFleet_RLS_isolates_allocations_across_tenants(t *testing.T)
 
 func TestControlPanelFleet_backends_page_surfaces_unreachable_backend(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "fleet-token-h")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-h")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
@@ -371,7 +371,7 @@ func TestControlPanelFleet_backends_page_surfaces_unreachable_backend(t *testing
 
 func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "mm-token")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "mm-token")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 

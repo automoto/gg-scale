@@ -176,7 +176,7 @@ func TestPlayerAccount_direct_join_route_is_not_available(t *testing.T) {
 	c := startCluster(t)
 	srv, _ := newControlPanelAndPlayerServer(t, c)
 	base := srv.URL + "/v1/players/account"
-	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "join-key")
+	_, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "join-key")
 
 	const email = "joiner@example.com"
 	seedVerifiedPlayerAccount(t, c, email, "correct-horse-battery-staple")

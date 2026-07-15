@@ -21,7 +21,7 @@ import (
 // and returns the tenant id. Uses the bootstrap (superuser) pool, bypassing RLS.
 func seedGCFixtures(t *testing.T, c *cluster, token string) int64 {
 	t.Helper()
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", token)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, token)
 	ctx := context.Background()
 
 	var hostID int64

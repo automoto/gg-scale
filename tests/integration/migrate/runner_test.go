@@ -5,7 +5,10 @@ package migrate_test
 import (
 	"context"
 	"database/sql"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,6 +47,29 @@ func migrationsDir(t *testing.T) string {
 	abs, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
 	require.NoError(t, err)
 	return abs
+}
+
+// latestMigrationVersion returns the highest migration number in the directory
+// (e.g. 12 for 0012_*.up.sql), so version assertions track new migrations
+// instead of hardcoding a number that goes stale.
+func latestMigrationVersion(t *testing.T) uint {
+	t.Helper()
+	entries, err := os.ReadDir(migrationsDir(t))
+	require.NoError(t, err)
+	var latest uint
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		num, err := strconv.ParseUint(strings.SplitN(name, "_", 2)[0], 10, 32)
+		require.NoError(t, err, "migration filename %q must start with a number", name)
+		if uint(num) > latest {
+			latest = uint(num)
+		}
+	}
+	require.NotZero(t, latest, "no migrations found")
+	return latest
 }
 
 func openDB(t *testing.T, dsn string) *sql.DB {
@@ -135,7 +161,7 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(8), v)
+	assert.Equal(t, latestMigrationVersion(t), v)
 	assert.False(t, dirty)
 }
 
@@ -148,6 +174,13 @@ func TestForce_clears_dirty_flag_and_sets_version(t *testing.T) {
 
 	require.NoError(t, r.Up())
 
+	// The last good version is whatever Up() just reached; capturing it keeps
+	// this test correct as new migrations are added. Re-running some migrations
+	// (e.g. the destructive tier rename) is not idempotent, so force back to the
+	// fully-applied version rather than an earlier one.
+	lastGood, _, err := r.Version()
+	require.NoError(t, err)
+
 	// Simulate a failed migration that left the schema marked dirty:
 	// golang-migrate then refuses every Up/Down until the flag is cleared.
 	db := openDB(t, dsn)
@@ -159,11 +192,11 @@ func TestForce_clears_dirty_flag_and_sets_version(t *testing.T) {
 
 	// Forcing to the last good version clears the dirty flag without
 	// running any migration SQL.
-	require.NoError(t, r.Force(8))
+	require.NoError(t, r.Force(int(lastGood)))
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(8), v)
+	assert.Equal(t, lastGood, v)
 	assert.False(t, dirty, "force must clear the dirty flag")
 
 	// And migrations run again afterwards (no-op here, but must not error).

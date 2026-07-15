@@ -29,7 +29,7 @@ func seedAPIKey(t *testing.T, pool *pgxpool.Pool, tenantID int64, projectID *int
 
 func TestKeyType_publishable_blocked_from_leaderboard_submit(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "secret-k")
 	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "publishable-k", "publishable")
 
 	var leaderboardID int64
@@ -49,7 +49,7 @@ func TestKeyType_publishable_blocked_from_leaderboard_submit(t *testing.T) {
 
 func TestKeyType_secret_allowed_for_leaderboard_submit(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "secret-k")
 
 	var leaderboardID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
@@ -68,7 +68,7 @@ func TestKeyType_secret_allowed_for_leaderboard_submit(t *testing.T) {
 
 func TestKeyType_publishable_allowed_for_leaderboard_top(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "secret-k")
 	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "publishable-k", "publishable")
 
 	var leaderboardID int64
@@ -93,7 +93,7 @@ func TestKeyType_publishable_allowed_for_leaderboard_top(t *testing.T) {
 
 func TestKeyType_publishable_allowed_for_anonymous_login(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "secret-k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "secret-k")
 	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "publishable-k", "publishable")
 	srv, _ := newFullStackServer(t, c)
 

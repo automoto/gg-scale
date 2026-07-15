@@ -119,7 +119,7 @@ func assertOpaqueInvalidSession(t *testing.T, resp *http.Response) {
 
 func TestPlayersVerify_returns_user_info_for_valid_session_token(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-valid")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-valid")
 	playerID := insertPlayer(t, c, tenantID, projectID, "player-42")
 	srv := newServerForCluster(t, c)
 
@@ -193,7 +193,7 @@ func TestPlayersVerify_rejects_invalid_sessions(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := startCluster(t)
-			tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-"+tc.name)
+			tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-"+tc.name)
 			playerID := insertPlayer(t, c, tenantID, projectID, "player-"+tc.name)
 			srv := newServerForCluster(t, c)
 
@@ -222,7 +222,7 @@ func TestPlayersVerify_rejects_bad_request_bodies(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c := startCluster(t)
-			seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-"+tc.name)
+			seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-"+tc.name)
 			srv := newServerForCluster(t, c)
 
 			req, err := http.NewRequest(http.MethodPost,
@@ -241,7 +241,7 @@ func TestPlayersVerify_rejects_bad_request_bodies(t *testing.T) {
 
 func TestPlayersVerify_rejects_oversized_body(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-toobig")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-toobig")
 	srv := newServerForCluster(t, c)
 
 	// 16 KiB > the 8 KiB handler cap.
@@ -253,8 +253,8 @@ func TestPlayersVerify_rejects_oversized_body(t *testing.T) {
 
 func TestPlayersVerify_rejects_cross_tenant_token(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-xtenant-a")
-	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-xtenant-b")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-xtenant-a")
+	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-xtenant-b")
 	playerB := insertPlayer(t, c, tenantB, projectB, "player-b")
 	srv := newServerForCluster(t, c)
 
@@ -269,7 +269,7 @@ func TestPlayersVerify_rejects_cross_tenant_token(t *testing.T) {
 // project A, token is for project B's player. Must be rejected.
 func TestPlayersVerify_rejects_cross_project_token_within_tenant(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-xproj-a")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-xproj-a")
 	// Second project under the same tenant.
 	var projectB int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
@@ -287,7 +287,7 @@ func TestPlayersVerify_rejects_cross_project_token_within_tenant(t *testing.T) {
 
 func TestPlayersVerify_requires_api_key_auth(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-nokey")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-nokey")
 	playerID := insertPlayer(t, c, tenantID, projectID, "player-anon")
 	srv := newServerForCluster(t, c)
 
@@ -302,7 +302,7 @@ func TestPlayersVerify_requires_api_key_auth(t *testing.T) {
 // as a session-validity oracle.
 func TestPlayersVerify_rejects_publishable_key(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "verify-secret")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "verify-secret")
 	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "verify-pub", "publishable")
 	playerID := insertPlayer(t, c, tenantID, projectID, "player-pub")
 	srv := newServerForCluster(t, c)

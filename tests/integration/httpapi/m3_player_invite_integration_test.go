@@ -72,9 +72,9 @@ func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
 	c := startCluster(t)
 
 	// Tenant A with project A — actor is admin here.
-	tenantA, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	// Tenant B with project B — actor must NOT be able to invite into.
-	_, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-b")
+	_, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-b")
 
 	adminID := seedControlPanelUser(t, c, "admin-a@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
@@ -114,7 +114,7 @@ func TestPlayerInvite_rejects_project_belonging_to_other_tenant(t *testing.T) {
 // player, marks them verified, and issues a player session.
 func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 

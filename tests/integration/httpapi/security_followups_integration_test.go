@@ -134,7 +134,7 @@ func TestH14_ControlPanelLoginFailures_AreAtomicUnderConcurrency(t *testing.T) {
 // middleware blocks anonymous form posts that don't carry the cookie/field.
 func TestH6_PlayerSitePOST_RejectsRequestWithoutCSRF(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "csrf-h6")
 	srv := newPlayersServerForCluster(t, c)
 
 	form := url.Values{"email": {"someone@example.com"}, "password": {"hunter22"}}
@@ -156,7 +156,7 @@ func TestH6_PlayerSitePOST_RejectsRequestWithoutCSRF(t *testing.T) {
 // GET the page (cookie set + token rendered), POST back with both → 200/303.
 func TestH6_PlayerSitePOST_AcceptsRequestWithMatchingCSRF(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "csrf-h6-ok")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "csrf-h6-ok")
 	srv := newPlayersServerForCluster(t, c)
 
 	jar, err := cookiejar.New(nil)
@@ -195,8 +195,8 @@ func TestH6_PlayerSitePOST_AcceptsRequestWithMatchingCSRF(t *testing.T) {
 // layer — even with a forged URL targeting the wrong tenant.
 func TestH5_ControlPanelPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "h5-tenant-a")
-	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "h5-tenant-b")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "h5-tenant-a")
+	tenantB, projectB := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "h5-tenant-b")
 	aliceID := seedControlPanelUser(t, c, "alice-h5@example.com", "correct-horse-battery-staple", false)
 	bobID := seedControlPanelUser(t, c, "bob-h5@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, aliceID, tenantA, "owner")
@@ -240,7 +240,7 @@ func TestH5_ControlPanelPlayers_AcrossTenants_IsolatedByRLS(t *testing.T) {
 // the actor and the action.
 func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "m5-audit")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "m5-audit")
 	ownerID := seedControlPanelUser(t, c, "owner-m5@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
@@ -269,7 +269,7 @@ func TestM5_APIKeyCreate_EmitsPlatformAuditRow(t *testing.T) {
 // TestM5_APIKeyRevoke_EmitsPlatformAuditRow covers the api-key revoke audit row.
 func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "m5-audit-revoke")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "m5-audit-revoke")
 	ownerID := seedControlPanelUser(t, c, "owner-m5r@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
@@ -306,7 +306,7 @@ func TestM5_APIKeyRevoke_EmitsPlatformAuditRow(t *testing.T) {
 // which would otherwise throttle a real burst of 20+ verify POSTs.
 func TestH13_LifetimeLockout_SurvivesResend(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "h13-lockout")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "h13-lockout")
 	srv, rec := newFullStackServer(t, c)
 
 	signupResp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "h13-lockout",

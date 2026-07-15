@@ -32,7 +32,7 @@ func seedExternalIDOnlyPlayer(t *testing.T, c *cluster, tenantID, projectID int6
 // + verified account onto THAT row (no new row) and marks it verified.
 func TestLinkPlayer_binds_email_onto_existing_row(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-linktest-1")
@@ -103,7 +103,7 @@ func TestLinkPlayer_binds_email_onto_existing_row(t *testing.T) {
 // already belongs to a different player in the project is a 409, no invite sent.
 func TestLinkPlayer_rejects_email_owned_by_another_player(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	targetPlayer := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-linktest-2")
@@ -147,7 +147,7 @@ func TestLinkPlayer_rejects_email_owned_by_another_player(t *testing.T) {
 // of colliding on the (project_id, email) open-invite unique index.
 func TestLinkPlayer_supersedes_prior_plain_open_invite(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-plain-super")
@@ -190,7 +190,7 @@ func TestLinkPlayer_supersedes_prior_plain_open_invite(t *testing.T) {
 // invite is minted, accepting the invite must NOT clobber that verified email.
 func TestLinkPlayer_accept_rejected_when_row_self_verified_other_email(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-selfverify")
@@ -225,7 +225,7 @@ func TestLinkPlayer_accept_rejected_when_row_self_verified_other_email(t *testin
 // (the invite is dead) rather than a misleading "already linked" conflict.
 func TestLinkPlayer_accept_notfound_when_row_soft_deleted(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-softdel")
@@ -251,7 +251,7 @@ func TestLinkPlayer_accept_notfound_when_row_soft_deleted(t *testing.T) {
 // would reject it.
 func TestLinkPlayer_expired_invite_hides_pending_badge(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-expired")
@@ -354,7 +354,7 @@ func postLink(t *testing.T, srvURL string, cookie *http.Cookie, csrf string, ten
 // the (project_id, email) open-invite unique index.
 func TestLinkPlayer_resend_supersedes_prior_open_invite(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-resend")
@@ -387,7 +387,7 @@ func TestLinkPlayer_resend_supersedes_prior_open_invite(t *testing.T) {
 // invite, and shows no Link button for an already-verified row.
 func TestLinkPlayer_list_shows_pending_badge_and_gates_button(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 
@@ -431,7 +431,7 @@ func TestLinkPlayer_list_shows_pending_badge_and_gates_button(t *testing.T) {
 // left untouched (the BindPlayerLinkedEmail account guard).
 func TestLinkPlayer_accept_conflicts_when_row_linked_to_other_account(t *testing.T) {
 	c := startCluster(t)
-	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "key-a")
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
 	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-guard")

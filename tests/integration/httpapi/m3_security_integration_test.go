@@ -28,7 +28,7 @@ func disablePlayer(t *testing.T, c *cluster, playerID int64) {
 // issued a session+JWT regardless of disabled_at.
 func TestLogin_rejects_disabled_player(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -58,7 +58,7 @@ func TestLogin_rejects_disabled_player(t *testing.T) {
 // session once the underlying account is disabled.
 func TestRefresh_rejects_disabled_player(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -94,7 +94,7 @@ func TestRefresh_rejects_disabled_player(t *testing.T) {
 // bcrypt) already pay. Sessions never come from verify regardless.
 func TestVerify_replay_for_verified_user_returns_uniform_400(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -120,7 +120,7 @@ func TestVerify_replay_for_verified_user_returns_uniform_400(t *testing.T) {
 // should still happily produce codes that the verify endpoint accepts.
 func TestSignup_then_verify_with_wrong_code_then_correct_code(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -148,7 +148,7 @@ func TestSignup_then_verify_with_wrong_code_then_correct_code(t *testing.T) {
 // throttled with 429 rather than granting more tries.
 func TestVerify_wrong_codes_burn_attempts_and_exhaust(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -187,7 +187,7 @@ func TestVerify_wrong_codes_burn_attempts_and_exhaust(t *testing.T) {
 // pre-staged via SQL so the per-IP limiter stays out of the picture.
 func TestVerify_correct_code_rejected_once_attempts_exhausted(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -211,7 +211,7 @@ func TestVerify_correct_code_rejected_once_attempts_exhausted(t *testing.T) {
 // duplicate POSTs into an email flood against a known address.
 func TestSignup_duplicate_notice_email_is_throttled(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	const email = "flood@example.com"
@@ -243,7 +243,7 @@ func TestSignup_duplicate_notice_email_is_throttled(t *testing.T) {
 // outstanding access tokens), not merely 401 the stale token.
 func TestRefresh_reuse_of_rotated_token_revokes_all_sessions(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",
@@ -295,7 +295,7 @@ func TestRefresh_reuse_of_rotated_token_revokes_all_sessions(t *testing.T) {
 // retry, so replaying it must 401 WITHOUT nuking the player's other sessions.
 func TestRefresh_replay_after_logout_leaves_other_sessions(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv, rec := newFullStackServer(t, c)
 
 	_, _ = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/signup", "k",

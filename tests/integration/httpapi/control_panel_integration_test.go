@@ -202,7 +202,7 @@ func TestControlPanelCreateTenant_makes_creator_owner_and_writes_membership_and_
 
 func TestControlPanelTenantIsolation_second_user_cannot_see_first_users_tenant(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	otherID := seedControlPanelUser(t, c, "other@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
@@ -222,7 +222,7 @@ func TestControlPanelTenantIsolation_second_user_cannot_see_first_users_tenant(t
 
 func TestControlPanelRBAC_member_cannot_manage_tenant_admin_routes(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "member-key")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "member-key")
 	memberID := seedControlPanelUser(t, c, "member@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, memberID, tenantID, "member")
 	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
@@ -241,7 +241,7 @@ func TestControlPanelRBAC_member_cannot_manage_tenant_admin_routes(t *testing.T)
 
 func TestControlPanelPlatformAdmin_sees_all_tenants(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")
 	seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", true)
 	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
 	cookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
@@ -262,7 +262,7 @@ func TestControlPanelPlatformAdmin_sees_all_tenants(t *testing.T) {
 
 func TestControlPanelPlatformAdmin_manages_foreign_tenant_team_and_keys(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")
 	// Platform admin with no membership in any tenant: tenant-scope access
 	// must come entirely from the Casbin platform_admin policy.
 	seedControlPanelUser(t, c, "platform@example.com", "correct-horse-battery-staple", true)
@@ -337,8 +337,8 @@ func TestControlPanelPlatformAdmin_manages_foreign_tenant_team_and_keys(t *testi
 
 func TestControlPanelTenantAdmin_cannot_manage_other_tenants_team(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "target-key")
-	otherTenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "other-key")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "target-key")
+	otherTenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "other-key")
 	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, otherTenantID, "admin")
 	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
@@ -391,7 +391,7 @@ func TestControlPanelLogout_revokes_session_and_subsequent_request_redirects(t *
 
 func TestControlPanelAPIKeys_create_label_and_revoke(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())

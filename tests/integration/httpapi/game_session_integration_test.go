@@ -88,7 +88,7 @@ func createSession(t *testing.T, baseURL, apiKey, token string, maxPlayers int) 
 
 func TestGameSession_host_create_sees_self_as_peer(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
@@ -103,7 +103,7 @@ func TestGameSession_host_create_sees_self_as_peer(t *testing.T) {
 
 func TestGameSession_negative_max_players_rejected(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -114,7 +114,7 @@ func TestGameSession_negative_max_players_rejected(t *testing.T) {
 
 func TestGameSession_join_sees_both_peers(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -132,7 +132,7 @@ func TestGameSession_join_sees_both_peers(t *testing.T) {
 
 func TestGameSession_resolve_by_join_code(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -150,7 +150,7 @@ func TestGameSession_resolve_by_join_code(t *testing.T) {
 
 func TestGameSession_max_players_enforced(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -171,7 +171,7 @@ func TestGameSession_max_players_enforced(t *testing.T) {
 
 func TestGameSession_host_leave_ends_session(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -190,7 +190,7 @@ func TestGameSession_host_leave_ends_session(t *testing.T) {
 
 func TestGameSession_heartbeat_non_member_rejected(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -212,7 +212,7 @@ func TestGameSession_heartbeat_non_member_rejected(t *testing.T) {
 
 func TestGameSession_expired_not_joinable(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	ctx := context.Background()
@@ -235,7 +235,7 @@ func TestGameSession_expired_not_joinable(t *testing.T) {
 
 func TestGameSession_cap_rejects_overflow(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	ctx := context.Background()
@@ -261,7 +261,7 @@ func TestGameSession_cap_rejects_overflow(t *testing.T) {
 
 func TestPresence_accepts_custom_status_rejects_empty(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -285,7 +285,7 @@ func TestPresence_accepts_custom_status_rejects_empty(t *testing.T) {
 
 func TestGameInvite_requires_friendship(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -300,7 +300,7 @@ func TestGameInvite_requires_friendship(t *testing.T) {
 
 func TestGameInvite_requires_sender_membership(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -319,7 +319,7 @@ func TestGameInvite_requires_sender_membership(t *testing.T) {
 
 func TestGameInvite_happy_path_by_email(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -366,7 +366,7 @@ func TestGameInvite_happy_path_by_email(t *testing.T) {
 
 func TestGameInvite_unknown_email_404(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -381,7 +381,7 @@ func TestGameInvite_unknown_email_404(t *testing.T) {
 
 func TestFriends_enriched_with_email_xuid_presence(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -420,7 +420,7 @@ func TestFriends_enriched_with_email_xuid_presence(t *testing.T) {
 
 func TestFriends_empty_returns_array_not_null(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
@@ -434,7 +434,7 @@ func TestFriends_empty_returns_array_not_null(t *testing.T) {
 // is told to link a gg-scale account before using friends.
 func TestFriends_unlinked_player_gets_403(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -445,7 +445,7 @@ func TestFriends_unlinked_player_gets_403(t *testing.T) {
 
 func TestProfile_xuid_uniqueness_conflict(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, _ := anonymousLoginWithID(t, srv.URL, "k")

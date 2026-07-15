@@ -208,7 +208,7 @@ func postgresDSNForDatabase(dsn, dbName string) (string, error) {
 	return u.String(), nil
 }
 
-func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier, token string) (tenantID, projectID int64) {
+func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier int16, token string) (tenantID, projectID int64) {
 	t.Helper()
 	ctx := context.Background()
 	require.NoError(t, pool.QueryRow(ctx,
@@ -251,7 +251,7 @@ func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 
 func TestAuthAnonymous_creates_player_signs_jwt_persists_session(t *testing.T) {
 	c := startCluster(t)
-	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "test-token")
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "test-token")
 	srv := newServerForCluster(t, c)
 
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/auth/anonymous", nil)

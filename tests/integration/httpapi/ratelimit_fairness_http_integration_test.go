@@ -19,8 +19,8 @@ import (
 
 func TestRatelimit_bursting_tenant_throttled_other_tenant_unaffected(t *testing.T) {
 	c := startCluster(t)
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "ka")
-	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, "free", "kb")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "ka")
+	_, _ = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "kb")
 	srv := newServerForCluster(t, c)
 
 	jwtA := anonymousLogin(t, srv.URL, "ka")

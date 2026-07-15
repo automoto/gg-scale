@@ -49,7 +49,7 @@ func accountSignup(t *testing.T, baseURL, email, password string) (int, string) 
 // response as a fresh signup (redirect to verify), not a distinguishing 409.
 func TestAccountSignup_duplicate_email_indistinguishable(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "sk")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "sk")
 	srv, _ := newControlPanelAndPlayerServer(t, c)
 
 	// Fresh signup creates the account and redirects to verify.
@@ -100,7 +100,7 @@ func bumpPlayerEpoch(t *testing.T, c *cluster, playerID int64) {
 // live JWT is rejected on player routes immediately, not after the token TTL.
 func TestPlayerAuth_stale_epoch_rejected(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tok, id := anonymousLoginWithID(t, srv.URL, "k")
@@ -123,7 +123,7 @@ func TestPlayerAuth_stale_epoch_rejected(t *testing.T) {
 // unfriend, so the block stays in force.
 func TestFriends_blockee_cannot_unfriend_away_block(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -153,7 +153,7 @@ func TestFriends_blockee_cannot_unfriend_away_block(t *testing.T) {
 // presence.
 func TestFriends_pending_list_hides_presence(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k")
@@ -191,7 +191,7 @@ func TestFriends_pending_list_hides_presence(t *testing.T) {
 // a session's peer roster (public IP:port) — only the host/members can.
 func TestGameSession_get_roster_requires_membership(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
@@ -215,7 +215,7 @@ func TestGameSession_get_roster_requires_membership(t *testing.T) {
 // projects).
 func TestGameSession_cross_project_isolation(t *testing.T) {
 	c := startCluster(t)
-	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k1")
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k1")
 	seedProjectWithAPIKey(t, c, tenantID, "k2") // second project, same tenant
 	srv := newServerForCluster(t, c)
 
@@ -244,7 +244,7 @@ func TestGameSession_cross_project_isolation(t *testing.T) {
 // resolved by join code or joined by a non-member/non-invitee.
 func TestGameSession_private_not_discoverable(t *testing.T) {
 	c := startCluster(t)
-	seedTenantWithAPIKey(t, c.bootstrapPool, "free", "k")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
 	tokH, _ := anonymousLoginWithID(t, srv.URL, "k")
