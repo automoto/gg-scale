@@ -185,12 +185,21 @@ func (h *Handler) createFirstAdmin(r *http.Request, in setupInput) (controlPanel
 		if errors.Is(qerr, pgx.ErrNoRows) {
 			return errBootstrapUnavailable
 		}
-		return qerr
+		if qerr != nil {
+			return qerr
+		}
+		if h.rbac != nil {
+			if gerr := h.rbac.AddPlatformAdminTx(r.Context(), tx, created.ID); gerr != nil {
+				return fmt.Errorf("setup platform admin grant: %w", gerr)
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return controlPanelUser{}, err
 	}
 	h.bootstrap.complete()
+	h.reloadRBACPolicy(r.Context())
 	h.metrics.Signup(observability.SignupControlPanelUser)
 	return controlPanelUser{ID: created.ID, Email: created.Email, IsPlatformAdmin: created.IsPlatformAdmin}, nil
 }

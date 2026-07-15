@@ -12,6 +12,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestParseMigrateArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    migrateCmd
+		wantErr bool
+	}{
+		{"version", []string{"version"}, migrateCmd{action: "version"}, false},
+		{"force with version", []string{"force", "7"}, migrateCmd{action: "force", version: 7}, false},
+		{"force version zero", []string{"force", "0"}, migrateCmd{action: "force", version: 0}, false},
+		{"no args", nil, migrateCmd{}, true},
+		{"unknown subcommand", []string{"bogus"}, migrateCmd{}, true},
+		{"force without version", []string{"force"}, migrateCmd{}, true},
+		{"force non-numeric", []string{"force", "abc"}, migrateCmd{}, true},
+		{"force negative", []string{"force", "-1"}, migrateCmd{}, true},
+		{"force extra args", []string{"force", "7", "8"}, migrateCmd{}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseMigrateArgs(tt.args)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestServer_listens_and_responds_to_v1_healthz(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)

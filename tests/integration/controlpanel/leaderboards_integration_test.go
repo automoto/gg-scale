@@ -36,6 +36,11 @@ func createPlatformAdminUser(t *testing.T, raw *pgxpool.Pool, email string) int6
 	require.NoError(t, raw.QueryRow(context.Background(),
 		`INSERT INTO control_panel_users (email, password_hash, is_platform_admin, email_verified_at)
 		 VALUES ($1, $2, true, now()) RETURNING id`, email, hash).Scan(&id))
+	_, err = raw.Exec(context.Background(),
+		`INSERT INTO casbin_rule (ptype, v0, v1, v2)
+		 VALUES ('g', 'control_panel:user:' || $1::bigint, 'role:platform_admin', '*')
+		 ON CONFLICT DO NOTHING`, id)
+	require.NoError(t, err)
 	return id
 }
 
@@ -59,8 +64,8 @@ func boardID(t *testing.T, raw *pgxpool.Pool, projectID int64, name string) int6
 // newLeaderboardServer brings up a migrated Postgres seeded with one
 // platform-admin control panel user and two projects under the same tenant,
 // then mounts the real control panel router in front of it. Platform admins
-// bypass tenant membership/RBAC checks entirely (rbac.CanControlPanel), so no
-// casbin rows or memberships need seeding.
+// get tenant-scope access from their "*"-domain casbin grouping row, so no
+// membership rows need seeding.
 func newLeaderboardServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Pool, userID, tenantID, projectA, projectB int64) {
 	t.Helper()
 	pool, raw := startTwoFactorDB(t)

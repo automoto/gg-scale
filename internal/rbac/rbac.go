@@ -121,12 +121,6 @@ func featureDefault(feature Feature) bool {
 	return feature == FeatureMatchmaker
 }
 
-// ControlPanelUser is the authorization-relevant view of a control panel user.
-type ControlPanelUser struct {
-	ID              int64
-	IsPlatformAdmin bool
-}
-
 // Authorizer wraps the Casbin enforcer and feature-grant checks.
 type Authorizer struct {
 	enforcer     *casbin.SyncedEnforcer
@@ -214,22 +208,15 @@ func newEnforcer(adapter any, autoSave bool) (*casbin.SyncedEnforcer, error) {
 	return e, nil
 }
 
-// CanControlPanel reports whether a control panel user can perform act on obj.
-func (a *Authorizer) CanControlPanel(user ControlPanelUser, tenantID int64, obj, act string) (bool, error) {
+// CanControlPanel reports whether a control panel user can perform act on obj
+// in a tenant's control panel. All capability comes from policy: platform
+// admins are granted through the role:platform_admin grouping row in domain
+// "*", not a code-level bypass.
+func (a *Authorizer) CanControlPanel(userID, tenantID int64, obj, act string) (bool, error) {
 	if a == nil {
 		return false, nil
 	}
-	dom := TenantDomain(tenantID)
-	allowed, err := a.enforce(ControlPanelSubject(user.ID), dom, obj, act)
-	if err != nil || allowed {
-		return allowed, err
-	}
-	if user.IsPlatformAdmin {
-		// Platform admins manage every tenant's control panel, independent of
-		// membership. A per-tenant opt-out may be added later.
-		return true, nil
-	}
-	return false, nil
+	return a.enforce(ControlPanelSubject(userID), TenantDomain(tenantID), obj, act)
 }
 
 // CanAPIKey reports whether an API key can perform act on obj.
@@ -425,6 +412,25 @@ func (a *Authorizer) AddPlatformAdminTx(ctx context.Context, tx pgx.Tx, userID i
 		return ErrAuthorizerUnavailable
 	}
 	return insertRule(ctx, tx, "g", []string{ControlPanelSubject(userID), RolePlatformAdmin, "*"})
+}
+
+// RemovePlatformAdmin revokes the global platform-admin role from a control
+// panel user. Callers that also maintain control_panel_users.is_platform_admin
+// must flip the column in the same transaction (use the Tx variant).
+func (a *Authorizer) RemovePlatformAdmin(userID int64) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	_, err := a.enforcer.RemoveFilteredNamedGroupingPolicy("g", 0, ControlPanelSubject(userID), RolePlatformAdmin, "*")
+	return err
+}
+
+// RemovePlatformAdminTx revokes the global platform-admin role in tx.
+func (a *Authorizer) RemovePlatformAdminTx(ctx context.Context, tx pgx.Tx, userID int64) error {
+	if a == nil {
+		return ErrAuthorizerUnavailable
+	}
+	return removeFilteredRule(ctx, tx, "g", 0, ControlPanelSubject(userID), RolePlatformAdmin, "*")
 }
 
 // AddAPIKeyRole replaces an API key's tenant role based on its key type.

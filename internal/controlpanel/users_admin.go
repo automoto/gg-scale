@@ -133,6 +133,7 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 		flashMsg = "User disabled. Sessions and pending invitations revoked."
 	}
 
+	var mirroredPlatformAdmin bool
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		target, err := q.GetControlPanelUserByID(r.Context(), userID)
@@ -168,6 +169,19 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 				return err
 			}
 		}
+		// Mirror the platform-admin capability in casbin so a disabled
+		// admin loses the cross-tenant grant and a re-enabled one regains
+		// it, keeping the g-row in lockstep with who can actually act.
+		if target.IsPlatformAdmin && h.rbac != nil {
+			mirroredPlatformAdmin = true
+			if disable {
+				if err := h.rbac.RemovePlatformAdminTx(r.Context(), tx, userID); err != nil {
+					return err
+				}
+			} else if err := h.rbac.AddPlatformAdminTx(r.Context(), tx, userID); err != nil {
+				return err
+			}
+		}
 		return auditlog.WritePlatform(r.Context(), tx, session.User.ID, action,
 			"user:"+strconv.FormatInt(userID, 10),
 			map[string]any{
@@ -189,6 +203,10 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 		slog.ErrorContext(r.Context(), "control panel user toggle", "err", err, "user_id", userID, "disable", disable)
 		webutil.InternalError(w, "user toggle", err)
 		return
+	}
+
+	if mirroredPlatformAdmin {
+		h.reloadRBACPolicy(r.Context())
 	}
 
 	htmxRedirect(w, r, pathAdminUsersFlash+url.QueryEscape(flashMsg))

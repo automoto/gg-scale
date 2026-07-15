@@ -3,6 +3,8 @@
 package migrate_test
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,6 +53,48 @@ func TestMigrations_seed_casbin_p_policy_matches_code(t *testing.T) {
 
 	assert.ElementsMatch(t, want, got,
 		"persisted casbin p-policy has drifted from rbac.defaultPolicyCSV; add a migration to reconcile it")
+}
+
+// TestMigrations_platform_admin_backfill_is_idempotent guards migration 0008:
+// re-applying its SQL against a database that already holds an identical
+// platform-admin grouping row (the invite-promotion path writes them at
+// runtime) must not error, and admins without a row must be backfilled. The
+// runner can only migrate all the way down, so re-execute the migration file
+// directly against the fully migrated schema.
+func TestMigrations_platform_admin_backfill_is_idempotent(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+	require.NoError(t, r.Up())
+
+	dbc := openDB(t, dsn)
+	var withRow, withoutRow int64
+	require.NoError(t, dbc.QueryRow(
+		`INSERT INTO control_panel_users (email, password_hash, is_platform_admin)
+		 VALUES ('pa-with-row@example.com', '\x00'::bytea, true) RETURNING id`).Scan(&withRow))
+	require.NoError(t, dbc.QueryRow(
+		`INSERT INTO control_panel_users (email, password_hash, is_platform_admin)
+		 VALUES ('pa-without-row@example.com', '\x00'::bytea, true) RETURNING id`).Scan(&withoutRow))
+	_, err = dbc.Exec(
+		`INSERT INTO casbin_rule (ptype, v0, v1, v2)
+		 VALUES ('g', 'control_panel:user:' || $1::bigint, 'role:platform_admin', '*')`, withRow)
+	require.NoError(t, err)
+
+	sqlBytes, err := os.ReadFile(filepath.Join(migrationsDir(t), "0008_platform_admin_policy.up.sql"))
+	require.NoError(t, err)
+	_, err = dbc.Exec(string(sqlBytes))
+	require.NoError(t, err, "0008 must apply cleanly over existing identical p- and g-rows")
+
+	for _, userID := range []int64{withRow, withoutRow} {
+		var count int
+		require.NoError(t, dbc.QueryRow(
+			`SELECT count(*) FROM casbin_rule
+			 WHERE ptype = 'g' AND v0 = 'control_panel:user:' || $1::bigint
+			   AND v1 = 'role:platform_admin' AND v2 = '*'`, userID).Scan(&count))
+		assert.Equal(t, 1, count, "user %d must hold exactly one platform-admin grouping row", userID)
+	}
 }
 
 // TestMigrations_feature_grants_check_allows_every_code_feature guards the

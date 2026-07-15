@@ -733,10 +733,7 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 				return
 			}
 			obj, act := tenantAccessPermission(minRole)
-			allowed, err := h.rbac.CanControlPanel(rbac.ControlPanelUser{
-				ID:              session.User.ID,
-				IsPlatformAdmin: session.User.IsPlatformAdmin,
-			}, tenantID, obj, act)
+			allowed, err := h.rbac.CanControlPanel(session.User.ID, tenantID, obj, act)
 			if err != nil {
 				http.Error(w, "tenant access check failed", http.StatusInternalServerError)
 				return

@@ -48,6 +48,17 @@ func (r *Runner) Down() error {
 	return nil
 }
 
+// Force sets the recorded migration version and clears the dirty flag without
+// running any migration SQL. It exists to recover from a failed migration: when
+// an Up() aborts mid-way, golang-migrate marks the version dirty and then
+// refuses every subsequent Up/Down. Point the version at the last
+// successfully-applied migration, then redeploy so Up() re-runs the fixed one.
+// Forcing does NOT undo schema changes — our migrations are transactional, so a
+// failed one has already rolled itself back; this only repairs the bookkeeping.
+func (r *Runner) Force(version int) error {
+	return r.m.Force(version)
+}
+
 // Version returns the current schema version and whether the schema is dirty.
 // A pristine database returns (0, false, nil).
 func (r *Runner) Version() (uint, bool, error) {

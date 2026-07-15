@@ -40,10 +40,7 @@ func (h *Handler) requireControlPanelPermission(w http.ResponseWriter, r *http.R
 		http.Error(w, "missing session", http.StatusUnauthorized)
 		return false
 	}
-	allowed, err := h.rbac.CanControlPanel(rbac.ControlPanelUser{
-		ID:              session.User.ID,
-		IsPlatformAdmin: session.User.IsPlatformAdmin,
-	}, tenantID, obj, act)
+	allowed, err := h.rbac.CanControlPanel(session.User.ID, tenantID, obj, act)
 	if err != nil {
 		http.Error(w, "authorization check failed", http.StatusInternalServerError)
 		return false

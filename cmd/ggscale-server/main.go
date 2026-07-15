@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -53,9 +54,92 @@ import (
 var commit = "unknown"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := runMigrateCommand(os.Args[2:]); err != nil {
+			slog.Error("migrate command failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("server exited with error", "error", err)
 		os.Exit(1)
+	}
+}
+
+// migrateCmd is a parsed `ggscale-server migrate ...` invocation.
+type migrateCmd struct {
+	action  string // "version" | "force"
+	version int    // target version for "force"
+}
+
+// parseMigrateArgs validates the arguments after `migrate`. It is pure so the
+// argument handling can be unit-tested without a database.
+func parseMigrateArgs(args []string) (migrateCmd, error) {
+	if len(args) == 0 {
+		return migrateCmd{}, errors.New("usage: ggscale-server migrate <version|force <n>>")
+	}
+	switch args[0] {
+	case "version":
+		if len(args) != 1 {
+			return migrateCmd{}, errors.New("usage: ggscale-server migrate version")
+		}
+		return migrateCmd{action: "version"}, nil
+	case "force":
+		if len(args) != 2 {
+			return migrateCmd{}, errors.New("usage: ggscale-server migrate force <version>")
+		}
+		v, err := strconv.Atoi(args[1])
+		if err != nil {
+			return migrateCmd{}, fmt.Errorf("migrate force: invalid version %q", args[1])
+		}
+		if v < 0 {
+			return migrateCmd{}, fmt.Errorf("migrate force: version must be >= 0, got %d", v)
+		}
+		return migrateCmd{action: "force", version: v}, nil
+	default:
+		return migrateCmd{}, fmt.Errorf("unknown migrate subcommand %q", args[0])
+	}
+}
+
+// runMigrateCommand implements the `migrate` maintenance subcommands so an
+// operator can inspect and repair migration state without booting the server.
+// `version` reports the current version and dirty flag; `force <n>` clears a
+// dirty flag by pinning the version to the last good migration (see
+// migrate.Runner.Force).
+func runMigrateCommand(args []string) error {
+	cmd, err := parseMigrateArgs(args)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	slog.SetDefault(newLogger(cfg.LogLevel))
+
+	mr, err := migraterunner.New(cfg.DatabaseURL, cfg.MigrationsDir)
+	if err != nil {
+		return fmt.Errorf("migrate init: %w", err)
+	}
+	defer func() { _ = mr.Close() }()
+
+	switch cmd.action {
+	case "version":
+		v, dirty, err := mr.Version()
+		if err != nil {
+			return fmt.Errorf("migrate version: %w", err)
+		}
+		fmt.Printf("version=%d dirty=%t\n", v, dirty)
+		return nil
+	case "force":
+		if err := mr.Force(cmd.version); err != nil {
+			return fmt.Errorf("migrate force %d: %w", cmd.version, err)
+		}
+		slog.Info("migration version forced", "version", cmd.version)
+		return nil
+	default:
+		return fmt.Errorf("unknown migrate action %q", cmd.action)
 	}
 }
 

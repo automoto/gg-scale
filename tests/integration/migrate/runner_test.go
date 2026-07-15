@@ -135,8 +135,39 @@ func TestVersion_reports_current_schema_version(t *testing.T) {
 
 	v, dirty, err := r.Version()
 	require.NoError(t, err)
-	assert.Equal(t, uint(7), v)
+	assert.Equal(t, uint(8), v)
 	assert.False(t, dirty)
+}
+
+func TestForce_clears_dirty_flag_and_sets_version(t *testing.T) {
+	dsn := startPostgres(t)
+
+	r, err := migrate.New(dsn, migrationsDir(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	require.NoError(t, r.Up())
+
+	// Simulate a failed migration that left the schema marked dirty:
+	// golang-migrate then refuses every Up/Down until the flag is cleared.
+	db := openDB(t, dsn)
+	_, err = db.Exec(`UPDATE schema_migrations SET dirty = true`)
+	require.NoError(t, err)
+	_, dirty, err := r.Version()
+	require.NoError(t, err)
+	require.True(t, dirty, "precondition: schema should read dirty")
+
+	// Forcing to the last good version clears the dirty flag without
+	// running any migration SQL.
+	require.NoError(t, r.Force(8))
+
+	v, dirty, err := r.Version()
+	require.NoError(t, err)
+	assert.Equal(t, uint(8), v)
+	assert.False(t, dirty, "force must clear the dirty flag")
+
+	// And migrations run again afterwards (no-op here, but must not error).
+	assert.NoError(t, r.Up())
 }
 
 func TestUp_creates_all_phase1_tables(t *testing.T) {

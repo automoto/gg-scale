@@ -6,6 +6,20 @@ p, role:platform_admin, *, tenant, read
 p, role:platform_admin, *, control_panel_user, read
 p, role:platform_admin, *, control_panel_user, disable
 p, role:platform_admin, *, platform:plugins, read
+p, role:platform_admin, *, tenant, manage
+p, role:platform_admin, *, project, manage
+p, role:platform_admin, *, project, read
+p, role:platform_admin, *, project:*:players, *
+p, role:platform_admin, *, project:*:config, *
+p, role:platform_admin, *, project:*:fleet, *
+p, role:platform_admin, *, project:*:allocation, *
+p, role:platform_admin, *, project:*:matchmaker, *
+p, role:platform_admin, *, project:*:relay, *
+p, role:platform_admin, *, project:*:matchmaking:dedicated, *
+p, role:platform_admin, *, project:*:leaderboard, manage
+p, role:platform_admin, *, api_key:*, manage
+p, role:platform_admin, *, team, manage
+p, role:platform_admin, *, audit, read
 p, role:platform_support, *, tenant, read
 p, role:platform_support, *, control_panel_user, read
 

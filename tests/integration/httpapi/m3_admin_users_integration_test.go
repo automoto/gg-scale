@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/controlpanel"
+	"github.com/ggscale/ggscale/internal/rbac"
 )
 
 func TestPlatformUsers_lists_for_platform_admin(t *testing.T) {
@@ -217,6 +218,26 @@ func TestPlatformUsers_enable_clears_disabled_at_does_not_revive_invites(t *test
 	assert.Equal(t, "control_panel.user.enabled", auditAction)
 }
 
+func TestPlatformUsers_disable_platform_admin_revokes_and_enable_restores_casbin_grant(t *testing.T) {
+	c := startCluster(t)
+	seedControlPanelUser(t, c, "admin@example.test", "correct-horse-battery-staple", true)
+	// A second platform admin so the last-admin guard lets us disable the target.
+	targetID := seedControlPanelUser(t, c, "coadmin@example.test", "correct-horse-battery-staple", true)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	adminCookie, adminCSRF := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.test", "correct-horse-battery-staple")
+
+	// Precondition: the target holds the *-domain platform-admin grouping row.
+	require.Equal(t, int64(1), platformAdminGrantCount(t, c, targetID), "seed should grant the casbin g-row")
+
+	postAdminUserToggle(t, srv.URL, targetID, "disable", adminCookie, adminCSRF)
+	assert.Equal(t, int64(0), platformAdminGrantCount(t, c, targetID),
+		"disabling a platform admin must revoke the cross-tenant casbin grant")
+
+	postAdminUserToggle(t, srv.URL, targetID, "enable", adminCookie, adminCSRF)
+	assert.Equal(t, int64(1), platformAdminGrantCount(t, c, targetID),
+		"re-enabling a platform admin must restore the cross-tenant casbin grant")
+}
+
 func TestPlatformUsers_self_disable_blocked(t *testing.T) {
 	c := startCluster(t)
 	adminID := seedControlPanelUser(t, c, "admin@example.test", "correct-horse-battery-staple", true)
@@ -307,6 +328,34 @@ func seedControlPanelInvitation(t *testing.T, c *cluster, inviterID int64, email
 		 RETURNING id`,
 		email, role, codeHash[:], inviterID, revoked, accepted).Scan(&id))
 	return id
+}
+
+// platformAdminGrantCount returns how many *-domain platform-admin grouping
+// rows the given user holds in the casbin store (0 or 1).
+func platformAdminGrantCount(t *testing.T, c *cluster, userID int64) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM casbin_rule WHERE ptype = 'g' AND v0 = $1 AND v1 = $2 AND v2 = '*'`,
+		rbac.ControlPanelSubject(userID), rbac.RolePlatformAdmin).Scan(&n))
+	return n
+}
+
+// postAdminUserToggle POSTs the disable/enable form for a control panel user
+// and asserts the 303 redirect.
+func postAdminUserToggle(t *testing.T, baseURL string, userID int64, action string, cookie *http.Cookie, csrf string) {
+	t.Helper()
+	form := url.Values{"_csrf": {csrf}}
+	req, err := http.NewRequest(http.MethodPost,
+		baseURL+"/v1/control-panel/admin/users/"+strconv.FormatInt(userID, 10)+"/"+action,
+		strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	resp, err := noRedirectClient().Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 }
 
 // disableControlPanelUser flips disabled_at to now() for the given user.

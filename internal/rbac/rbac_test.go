@@ -22,9 +22,7 @@ func TestDefaultPolicy_allows_tenant_admin_in_own_domain(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 7, rbac.ObjectProject, rbac.ActionManage)
+	allowed, err := a.CanControlPanel(42, 7, rbac.ObjectProject, rbac.ActionManage)
 
 	require.NoError(t, err)
 	assert.True(t, allowed)
@@ -34,9 +32,7 @@ func TestDefaultPolicy_denies_tenant_admin_in_other_domain(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 8, rbac.ObjectProject, rbac.ActionManage)
+	allowed, err := a.CanControlPanel(42, 8, rbac.ObjectProject, rbac.ActionManage)
 
 	require.NoError(t, err)
 	assert.False(t, allowed)
@@ -46,9 +42,7 @@ func TestDefaultPolicy_treats_current_member_as_read_only_analyst(t *testing.T) 
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 7, rbac.ObjectProject, rbac.ActionManage)
+	allowed, err := a.CanControlPanel(42, 7, rbac.ObjectProject, rbac.ActionManage)
 
 	require.NoError(t, err)
 	assert.False(t, allowed)
@@ -58,9 +52,7 @@ func TestDefaultPolicy_glob_matches_colon_delimited_project_objects(t *testing.T
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 7, rbac.ProjectPlayersObject(99), rbac.ActionManage)
+	allowed, err := a.CanControlPanel(42, 7, rbac.ProjectPlayersObject(99), rbac.ActionManage)
 
 	require.NoError(t, err)
 	assert.True(t, allowed)
@@ -70,9 +62,7 @@ func TestDefaultPolicy_allows_tenant_owner_to_allocate_project_fleet(t *testing.
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "owner"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 7, rbac.ProjectAllocationObject(99), rbac.ActionAllocate)
+	allowed, err := a.CanControlPanel(42, 7, rbac.ProjectAllocationObject(99), rbac.ActionAllocate)
 
 	require.NoError(t, err)
 	assert.True(t, allowed)
@@ -84,9 +74,7 @@ func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *t
 			a := newAuthorizer(t)
 			require.NoError(t, a.SetControlPanelMembershipRole(42, 7, role))
 
-			allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-				ID: 42,
-			}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
+			allowed, err := a.CanControlPanel(42, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
 
 			require.NoError(t, err)
 			assert.True(t, allowed)
@@ -98,9 +86,7 @@ func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
 
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{
-		ID: 42,
-	}, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
+	allowed, err := a.CanControlPanel(42, 7, rbac.ProjectLeaderboardObject(99), rbac.ActionManage)
 
 	require.NoError(t, err)
 	assert.False(t, allowed)
@@ -108,32 +94,70 @@ func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
 
 func TestPlatformAdmin_manages_any_tenant_control_panel(t *testing.T) {
 	a := newAuthorizer(t)
-	// Platform admin with no membership in tenant 7.
-	pa := rbac.ControlPanelUser{ID: 99, IsPlatformAdmin: true}
+	// Platform admin granted via the "*"-domain grouping row, with no
+	// membership in tenant 7. Every permission the control panel enforces
+	// must come from policy — there is no code-level bypass.
+	require.NoError(t, a.AddPlatformAdmin(99))
 
 	cases := []struct {
 		name     string
 		obj, act string
 	}{
 		{"project manage", rbac.ObjectProject, rbac.ActionManage},
+		{"project read", rbac.ObjectProject, rbac.ActionRead},
 		{"tenant manage", rbac.ObjectTenant, rbac.ActionManage},
+		{"tenant read", rbac.ObjectTenant, rbac.ActionRead},
+		{"team manage", rbac.ObjectTeam, rbac.ActionManage},
+		{"secret key manage", rbac.ObjectAPIKeySecret, rbac.ActionManage},
+		{"publishable key manage", rbac.ObjectAPIKeyPublic, rbac.ActionManage},
 		{"players manage", rbac.ProjectPlayersObject(99), rbac.ActionManage},
+		{"fleet manage", rbac.ProjectFleetObject(99), rbac.ActionManage},
+		{"allocation allocate", rbac.ProjectAllocationObject(99), rbac.ActionAllocate},
+		{"leaderboard manage", rbac.ProjectLeaderboardObject(99), rbac.ActionManage},
+		{"audit read", rbac.ObjectAudit, rbac.ActionRead},
+		{"control panel user disable", rbac.ObjectControlPanelUser, rbac.ActionDisable},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			allowed, err := a.CanControlPanel(pa, 7, tc.obj, tc.act)
+			allowed, err := a.CanControlPanel(99, 7, tc.obj, tc.act)
 			require.NoError(t, err)
 			assert.True(t, allowed)
 		})
 	}
 }
 
-func TestNonPlatformAdmin_without_membership_denied(t *testing.T) {
+func TestPlatformAdmin_revocation_denies(t *testing.T) {
 	a := newAuthorizer(t)
-	allowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 99, IsPlatformAdmin: false},
-		7, rbac.ObjectProject, rbac.ActionManage)
+	require.NoError(t, a.AddPlatformAdmin(99))
+	allowed, err := a.CanControlPanel(99, 7, rbac.ObjectProject, rbac.ActionManage)
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	require.NoError(t, a.RemovePlatformAdmin(99))
+
+	allowed, err = a.CanControlPanel(99, 7, rbac.ObjectProject, rbac.ActionManage)
 	require.NoError(t, err)
 	assert.False(t, allowed)
+}
+
+func TestUser_without_platform_role_denied(t *testing.T) {
+	a := newAuthorizer(t)
+	allowed, err := a.CanControlPanel(99, 7, rbac.ObjectProject, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.False(t, allowed)
+}
+
+func TestPlatformAdmin_survives_leaving_a_tenant(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.AddPlatformAdmin(42))
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
+
+	// Removing tenant-scoped roles must not touch the "*"-domain grant.
+	require.NoError(t, a.RemoveControlPanelRoles(42, 7))
+
+	allowed, err := a.CanControlPanel(42, 8, rbac.ObjectProject, rbac.ActionManage)
+	require.NoError(t, err)
+	assert.True(t, allowed)
 }
 
 func TestTenantOwner_manages_both_api_key_types(t *testing.T) {
@@ -141,7 +165,7 @@ func TestTenantOwner_manages_both_api_key_types(t *testing.T) {
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "owner"))
 
 	for _, obj := range []string{rbac.ObjectAPIKeySecret, rbac.ObjectAPIKeyPublic} {
-		allowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, obj, rbac.ActionManage)
+		allowed, err := a.CanControlPanel(42, 7, obj, rbac.ActionManage)
 		require.NoError(t, err)
 		assert.True(t, allowed, "owner manages %s", obj)
 	}
@@ -151,11 +175,11 @@ func TestTenantAdmin_manages_only_publishable_api_keys(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
 
-	pub, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, rbac.ObjectAPIKeyPublic, rbac.ActionManage)
+	pub, err := a.CanControlPanel(42, 7, rbac.ObjectAPIKeyPublic, rbac.ActionManage)
 	require.NoError(t, err)
 	assert.True(t, pub, "admin manages publishable keys")
 
-	sec, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 42}, 7, rbac.ObjectAPIKeySecret, rbac.ActionManage)
+	sec, err := a.CanControlPanel(42, 7, rbac.ObjectAPIKeySecret, rbac.ActionManage)
 	require.NoError(t, err)
 	assert.False(t, sec, "admin must not create/manage secret keys")
 }
@@ -165,11 +189,11 @@ func TestTeamManagement_is_owner_only(t *testing.T) {
 	require.NoError(t, a.SetControlPanelMembershipRole(1, 7, "owner"))
 	require.NoError(t, a.SetControlPanelMembershipRole(2, 7, "admin"))
 
-	ownerAllowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 1}, 7, rbac.ObjectTeam, rbac.ActionManage)
+	ownerAllowed, err := a.CanControlPanel(1, 7, rbac.ObjectTeam, rbac.ActionManage)
 	require.NoError(t, err)
 	assert.True(t, ownerAllowed, "owner manages the team")
 
-	adminAllowed, err := a.CanControlPanel(rbac.ControlPanelUser{ID: 2}, 7, rbac.ObjectTeam, rbac.ActionManage)
+	adminAllowed, err := a.CanControlPanel(2, 7, rbac.ObjectTeam, rbac.ActionManage)
 	require.NoError(t, err)
 	assert.False(t, adminAllowed, "team management (invites, role grants, removals) is owner-only")
 }
@@ -220,13 +244,12 @@ func TestFleetOperator_coexists_with_membership_role(t *testing.T) {
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
 	require.NoError(t, a.AddControlPanelRole(42, 7, rbac.RoleFleetOperator))
 
-	u := rbac.ControlPanelUser{ID: 42}
 	// fleet_operator capability now applies...
-	manage, err := a.CanControlPanel(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
+	manage, err := a.CanControlPanel(42, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
 	assert.True(t, manage, "fleet_operator grants fleet manage")
 	// ...and the analyst membership capability is still intact.
-	read, err := a.CanControlPanel(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	read, err := a.CanControlPanel(42, 7, rbac.ObjectProject, rbac.ActionRead)
 	require.NoError(t, err)
 	assert.True(t, read, "membership role survives the extra grant")
 
@@ -241,11 +264,10 @@ func TestFleetOperator_revoke_leaves_membership(t *testing.T) {
 	require.NoError(t, a.AddControlPanelRole(42, 7, rbac.RoleFleetOperator))
 	require.NoError(t, a.RemoveControlPanelRole(42, 7, rbac.RoleFleetOperator))
 
-	u := rbac.ControlPanelUser{ID: 42}
-	manage, err := a.CanControlPanel(u, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
+	manage, err := a.CanControlPanel(42, 7, rbac.ProjectFleetObject(99), rbac.ActionManage)
 	require.NoError(t, err)
 	assert.False(t, manage, "fleet manage gone after revoke")
-	read, err := a.CanControlPanel(u, 7, rbac.ObjectProject, rbac.ActionRead)
+	read, err := a.CanControlPanel(42, 7, rbac.ObjectProject, rbac.ActionRead)
 	require.NoError(t, err)
 	assert.True(t, read, "membership role untouched by revoke")
 }
@@ -273,6 +295,22 @@ func TestAddPlayerRole_rejects_non_player_role(t *testing.T) {
 	err := a.AddPlayerRole(123, 7, rbac.RolePlatformAdmin)
 
 	assert.Error(t, err)
+}
+
+func TestRoleAllowlists_reject_platform_roles(t *testing.T) {
+	// Platform roles must be unreachable through every tenant-scoped grant
+	// path; AddPlatformAdmin is the only writer of "*"-domain grants.
+	for _, role := range []string{
+		rbac.RolePlatformAdmin, rbac.RolePlatformOwner,
+		"platform_admin", "platform_owner",
+	} {
+		t.Run(role, func(t *testing.T) {
+			_, ok := rbac.ControlPanelMembershipRole(role)
+			assert.False(t, ok, "membership mapper must reject %q", role)
+			assert.False(t, rbac.GrantableControlPanelRole(role), "à-la-carte grant must reject %q", role)
+			assert.False(t, rbac.PlayerRole(role), "player grant must reject %q", role)
+		})
+	}
 }
 
 func TestRoleMutations_return_error_when_authorizer_unavailable(t *testing.T) {

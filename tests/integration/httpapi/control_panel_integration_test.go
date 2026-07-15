@@ -92,6 +92,16 @@ func TestControlPanelSetup_creates_first_platform_admin_then_returns_410(t *test
 		`SELECT is_platform_admin FROM control_panel_users WHERE email = $1`, "owner@example.com").Scan(&isAdmin))
 	assert.True(t, isAdmin)
 
+	// Tenant-scope platform-admin capability comes from the Casbin grouping
+	// row, so bootstrap must write it alongside the is_platform_admin column.
+	var groupingRows int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM casbin_rule
+		 WHERE ptype = 'g'
+		   AND v0 = 'control_panel:user:' || (SELECT id FROM control_panel_users WHERE email = $1)
+		   AND v1 = 'role:platform_admin' AND v2 = '*'`, "owner@example.com").Scan(&groupingRows))
+	assert.Equal(t, 1, groupingRows, "bootstrap admin must hold the platform-admin grouping row")
+
 	goneResp, err := http.Get(srv.URL + "/v1/control-panel/setup?token=setup-token")
 	require.NoError(t, err)
 	defer goneResp.Body.Close()
@@ -248,6 +258,108 @@ func TestControlPanelPlatformAdmin_sees_all_tenants(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, string(body), "tenant-existing-key")
 	assert.Contains(t, string(body), strconv.FormatInt(tenantID, 10))
+}
+
+func TestControlPanelPlatformAdmin_manages_foreign_tenant_team_and_keys(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "existing-key")
+	// Platform admin with no membership in any tenant: tenant-scope access
+	// must come entirely from the Casbin platform_admin policy.
+	seedControlPanelUser(t, c, "platform@example.com", "correct-horse-battery-staple", true)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "platform@example.com", "correct-horse-battery-staple")
+	noRedirect := noRedirectClient()
+	tenantPath := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10)
+
+	teamReq, err := http.NewRequest(http.MethodGet, tenantPath+"/team", nil)
+	require.NoError(t, err)
+	teamReq.AddCookie(cookie)
+	teamResp, err := http.DefaultClient.Do(teamReq)
+	require.NoError(t, err)
+	defer teamResp.Body.Close()
+	assert.Equal(t, http.StatusOK, teamResp.StatusCode, "platform admin loads a foreign tenant's team page")
+
+	inviteForm := url.Values{
+		"_csrf": {csrf},
+		"email": {"invitee@example.com"},
+		"role":  {"tenant_member"},
+	}
+	inviteReq, err := http.NewRequest(http.MethodPost, tenantPath+"/team/invite", strings.NewReader(inviteForm.Encode()))
+	require.NoError(t, err)
+	inviteReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	inviteReq.AddCookie(cookie)
+	inviteResp, err := noRedirect.Do(inviteReq)
+	require.NoError(t, err)
+	defer inviteResp.Body.Close()
+	assert.Equal(t, http.StatusSeeOther, inviteResp.StatusCode, "platform admin invites into a foreign tenant")
+
+	listReq, err := http.NewRequest(http.MethodGet, tenantPath+"/api-keys", nil)
+	require.NoError(t, err)
+	listReq.AddCookie(cookie)
+	listResp, err := http.DefaultClient.Do(listReq)
+	require.NoError(t, err)
+	defer listResp.Body.Close()
+	assert.Equal(t, http.StatusOK, listResp.StatusCode, "platform admin lists a foreign tenant's API keys")
+
+	createForm := url.Values{
+		"_csrf":      {csrf},
+		"project_id": {strconv.FormatInt(projectID, 10)},
+		"key_type":   {"secret"},
+		"label":      {"platform-created key"},
+	}
+	createReq, err := http.NewRequest(http.MethodPost, tenantPath+"/api-keys", strings.NewReader(createForm.Encode()))
+	require.NoError(t, err)
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.AddCookie(cookie)
+	createResp, err := http.DefaultClient.Do(createReq)
+	require.NoError(t, err)
+	defer createResp.Body.Close()
+	createBody, err := io.ReadAll(createResp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, createResp.StatusCode, string(createBody))
+	require.NotEmpty(t, regexp.MustCompile(`ggs_[A-Za-z0-9_-]+`).FindString(string(createBody)))
+
+	var newKeyID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT id FROM api_keys WHERE tenant_id = $1 AND label = $2`,
+		tenantID, "platform-created key").Scan(&newKeyID))
+
+	revokeForm := url.Values{"_csrf": {csrf}}
+	revokeReq, err := http.NewRequest(http.MethodPost, tenantPath+"/api-keys/"+strconv.FormatInt(newKeyID, 10)+"/revoke", strings.NewReader(revokeForm.Encode()))
+	require.NoError(t, err)
+	revokeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	revokeReq.AddCookie(cookie)
+	revokeResp, err := noRedirect.Do(revokeReq)
+	require.NoError(t, err)
+	defer revokeResp.Body.Close()
+	assert.Equal(t, http.StatusSeeOther, revokeResp.StatusCode, "platform admin revokes a foreign tenant's API key")
+}
+
+func TestControlPanelTenantAdmin_cannot_manage_other_tenants_team(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "target-key")
+	otherTenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, "free", "other-key")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, otherTenantID, "admin")
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+
+	inviteForm := url.Values{
+		"_csrf": {csrf},
+		"email": {"invitee@example.com"},
+		"role":  {"tenant_member"},
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		srv.URL+"/v1/control-panel/tenants/"+strconv.FormatInt(tenantID, 10)+"/team/invite",
+		strings.NewReader(inviteForm.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "tenant admin of one tenant must not manage another tenant's team")
 }
 
 func TestControlPanelLogout_revokes_session_and_subsequent_request_redirects(t *testing.T) {
