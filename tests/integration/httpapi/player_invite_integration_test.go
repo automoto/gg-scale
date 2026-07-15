@@ -32,6 +32,14 @@ import (
 // together so the cross-stack player-invite test can simulate the full
 // invite-accept flow.
 func newControlPanelAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
+	return newControlPanelAndPlayerServerWithConfig(t, c, controlpanel.Config{
+		Mount:    true,
+		BaseURL:  "http://app.example.test",
+		MailFrom: "no-reply@example.test",
+	})
+}
+
+func newControlPanelAndPlayerServerWithConfig(t *testing.T, c *cluster, cfg controlpanel.Config) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
@@ -42,21 +50,17 @@ func newControlPanelAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server,
 	t.Cleanup(authorizer.Close)
 
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:  "v1",
-		Commit:   "test",
-		Pool:     pool,
-		Lookup:   tenant.NewSQLLookup(c.appPool),
-		Limiter:  ratelimit.NewCacheLimiter(c.cache),
-		Signer:   signer,
-		Cache:    c.cache,
-		Mailer:   rec,
-		MailFrom: "no-reply@example.test",
-		RBAC:     authorizer,
-		ControlPanel: controlpanel.Config{
-			Mount:    true,
-			BaseURL:  "http://app.example.test",
-			MailFrom: "no-reply@example.test",
-		},
+		Version:               "v1",
+		Commit:                "test",
+		Pool:                  pool,
+		Lookup:                tenant.NewSQLLookup(c.appPool),
+		Limiter:               ratelimit.NewCacheLimiter(c.cache),
+		Signer:                signer,
+		Cache:                 c.cache,
+		Mailer:                rec,
+		MailFrom:              "no-reply@example.test",
+		RBAC:                  authorizer,
+		ControlPanel:          cfg,
 		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),
 		Players:               players.Config{Mount: true},
 	})

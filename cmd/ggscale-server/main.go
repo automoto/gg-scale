@@ -204,6 +204,7 @@ func run() error {
 		OlricMemberlistAddr: cfg.CacheOlricMemberlistAddr,
 		OlricMemberlistPort: cfg.CacheOlricMemberlistPort,
 		OlricPeers:          cfg.CacheOlricPeers,
+		OlricReplicaCount:   cfg.CacheOlricReplicaCount,
 		Registry:            registry,
 	})
 	if err != nil {

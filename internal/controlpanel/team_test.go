@@ -85,6 +85,7 @@ func TestIsUniqueViolation(t *testing.T) {
 		err  error
 		want bool
 	}{
+		{"nil", nil, false},
 		{"plain_error", assertError("oops"), false},
 		{"with_23505", assertError("ERROR: duplicate key value violates unique constraint (SQLSTATE 23505)"), true},
 		{"without_23505", assertError("ERROR: relation not found (SQLSTATE 42P01)"), false},

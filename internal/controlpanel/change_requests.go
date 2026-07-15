@@ -35,6 +35,8 @@ const (
 // this guard an approval would silently downgrade the tenant's quotas/caps.
 var errNotAnUpgrade = errors.New("requested tier is not above the current tier")
 
+var errFeatureAlreadyEnabled = errors.New("requested feature is already enabled")
+
 // tierIsUpgrade reports whether requested is a strictly higher class than the
 // tenant's current (clamped) class — the only valid direction for a
 // tier-upgrade request.
@@ -169,9 +171,11 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
+	tctx := db.WithTenant(r.Context(), tenantID)
+	err := h.pool.Q(tctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if kind == changeKindTierUpgrade {
+		switch kind {
+		case changeKindTierUpgrade:
 			facts, ferr := q.GetTenantFacts(r.Context(), tenantID)
 			if ferr != nil {
 				return ferr
@@ -179,12 +183,26 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 			if !tierIsUpgrade(*params.RequestedTier, facts.Tier) {
 				return errNotAnUpgrade
 			}
+		case changeKindFeature:
+			held, ferr := q.ListTenantEnabledFeatures(tctx)
+			if ferr != nil {
+				return ferr
+			}
+			for _, feature := range held {
+				if feature == *params.Feature {
+					return errFeatureAlreadyEnabled
+				}
+			}
 		}
-		_, cerr := q.CreateTenantChangeRequest(r.Context(), params)
+		_, cerr := q.CreateTenantChangeRequest(tctx, params)
 		return cerr
 	})
 	if errors.Is(err, errNotAnUpgrade) {
 		h.redirectTenantSettings(w, r, tenantID, "Choose a target class above your current class.")
+		return
+	}
+	if errors.Is(err, errFeatureAlreadyEnabled) {
+		h.redirectTenantSettings(w, r, tenantID, "That feature is already enabled for this tenant.")
 		return
 	}
 	if isUniqueViolation(err) {
@@ -252,6 +270,7 @@ func pendingChangeRequestView(row sqlcgen.ListPendingTenantChangeRequestsRow) Pe
 		CurrentTier: tenant.ClampTier(int(row.CurrentTier)).String(),
 		Kind:        row.Kind,
 		Note:        row.Note,
+		Requester:   row.RequesterEmail,
 		CreatedAt:   row.CreatedAt.Time,
 	}
 	switch {

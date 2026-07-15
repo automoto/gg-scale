@@ -29,6 +29,8 @@ templ ChangeRequestsPage(vm ChangeRequestsView) {
 							}
 							<dt>Submitted</dt>
 							<dd>{ timeString(req.CreatedAt) }</dd>
+							<dt>Requested by</dt>
+							<dd>{ req.Requester }</dd>
 							if req.Note != "" {
 								<dt>Note</dt>
 								<dd>{ req.Note }</dd>

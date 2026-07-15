@@ -119,24 +119,27 @@ func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (Get
 
 const listPendingTenantChangeRequests = `-- name: ListPendingTenantChangeRequests :many
 SELECT r.id, r.tenant_id, t.name AS tenant_name, t.tier AS current_tier,
-       r.kind, r.requested_tier, r.feature, r.note, r.created_at
+       r.kind, r.requested_tier, r.feature, r.note, r.created_at,
+       COALESCE(u.email::text, ''::text)::text AS requester_email
 FROM tenant_change_requests r
 JOIN tenants t ON t.id = r.tenant_id
+LEFT JOIN control_panel_users u ON u.id = r.requested_by_user_id
 WHERE r.status = 'pending'
   AND t.deleted_at IS NULL
 ORDER BY r.created_at ASC
 `
 
 type ListPendingTenantChangeRequestsRow struct {
-	ID            int64
-	TenantID      int64
-	TenantName    string
-	CurrentTier   int16
-	Kind          string
-	RequestedTier *int16
-	Feature       *string
-	Note          string
-	CreatedAt     pgtype.Timestamptz
+	ID             int64
+	TenantID       int64
+	TenantName     string
+	CurrentTier    int16
+	Kind           string
+	RequestedTier  *int16
+	Feature        *string
+	Note           string
+	CreatedAt      pgtype.Timestamptz
+	RequesterEmail string
 }
 
 // Platform-admin review queue: pending requests with tenant name + current
@@ -160,6 +163,7 @@ func (q *Queries) ListPendingTenantChangeRequests(ctx context.Context) ([]ListPe
 			&i.Feature,
 			&i.Note,
 			&i.CreatedAt,
+			&i.RequesterEmail,
 		); err != nil {
 			return nil, err
 		}

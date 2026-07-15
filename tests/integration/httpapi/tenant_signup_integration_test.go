@@ -120,6 +120,10 @@ func TestTenantSignup_happy_path_creates_bare_tenant(t *testing.T) {
 	var tenantID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT id FROM tenants WHERE name = 'Abyssal Depths Reborn' AND deleted_at IS NULL`).Scan(&tenantID))
+	var enforceQuotas bool
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT enforce_quotas FROM tenants WHERE id = $1`, tenantID).Scan(&enforceQuotas))
+	assert.False(t, enforceQuotas, "zero-config self-host tenant signups stay uncapped")
 
 	var ownerCount int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),

@@ -2,11 +2,16 @@ package ratelimit_test
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ggscale/ggscale/internal/cache"
 	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -69,6 +74,39 @@ func TestCacheConnectionCap_ceiling_rejects_with_reason(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, d.Allowed)
 	assert.Equal(t, ratelimit.CapRejectCeiling, d.Reason)
+}
+
+type deterministicCapRejectionStore struct {
+	cache.Store
+}
+
+func (deterministicCapRejectionStore) AcquireSlotBurst(_ context.Context, key string, _, ceiling int64, _, _ time.Duration) (bool, int64, error) {
+	if key == "ceiling" {
+		return false, ceiling, nil
+	}
+	return false, ceiling - 1, nil
+}
+
+func TestCacheConnectionCap_rejection_metrics_distinguish_ceiling_and_budget_without_ids(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	cap := ratelimit.NewCacheConnectionCap(deterministicCapRejectionStore{}, reg)
+	caps := ratelimit.CapLimits{Sustained: 2, Ceiling: 4}
+
+	ceiling, err := cap.Acquire(context.Background(), "ceiling", caps)
+	require.NoError(t, err)
+	budget, err := cap.Acquire(context.Background(), "budget", caps)
+	require.NoError(t, err)
+	assert.Equal(t, ratelimit.CapRejectCeiling, ceiling.Reason)
+	assert.Equal(t, ratelimit.CapRejectBudget, budget.Reason)
+
+	expected := `
+# HELP ggscale_connection_cap_rejections_total WebSocket connections rejected by the tenant CCU cap, by reason (ceiling vs exhausted burst budget).
+# TYPE ggscale_connection_cap_rejections_total counter
+ggscale_connection_cap_rejections_total{reason="budget"} 1
+ggscale_connection_cap_rejections_total{reason="ceiling"} 1
+`
+	require.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(expected),
+		"ggscale_connection_cap_rejections_total"))
 }
 
 func TestCloseCodeTenantConnectionCap_is_RFC_6455_try_again_later(t *testing.T) {

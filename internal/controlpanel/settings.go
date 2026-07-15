@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/auditlog"
+	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
@@ -143,7 +144,8 @@ func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, ta
 		return false, errInvalidTenantTier
 	}
 	var changed bool
-	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	tctx := db.WithTenant(ctx, tenantID)
+	err := h.pool.Q(tctx, func(tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).SetTenantTierByID(ctx, sqlcgen.SetTenantTierByIDParams{
 			TenantID: tenantID,
 			Tier:     target,
@@ -159,7 +161,7 @@ func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, ta
 		if row.NewTier < row.OldTier {
 			direction = "downgrade"
 		}
-		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.tenant.tier_change",
+		return auditlog.WritePlatform(tctx, tx, actorID, "control_panel.tenant.tier_change",
 			strconv.FormatInt(tenantID, 10), map[string]any{
 				"tenant_id": tenantID,
 				"old_tier":  row.OldTier,

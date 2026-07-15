@@ -173,6 +173,10 @@ type Config struct {
 	// CacheOlricPeers is the comma-separated host:port list of memberlist
 	// endpoints to join. Empty means a cluster of one.
 	CacheOlricPeers []string `env:"CACHE_OLRIC_PEERS"`
+	// CacheOlricReplicaCount controls how many members retain each distributed
+	// cache entry. Keep one for a single-node cache; use two or more in a
+	// multi-node cluster so live limiter/cap state survives one app restart.
+	CacheOlricReplicaCount int `env:"CACHE_OLRIC_REPLICA_COUNT" envDefault:"1"`
 
 	// CORSAllowedOrigins is the comma-separated list of origins permitted by
 	// the API router. Empty in dev allows "*"; in production an empty list

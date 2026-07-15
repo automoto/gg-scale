@@ -129,6 +129,10 @@ func TestMigrations_feature_grants_check_allows_every_code_feature(t *testing.T)
 			 VALUES ($1, $2, false, 'constraint guard')`, tenantID, string(feature))
 		assert.NoError(t, err, "feature %q must satisfy feature_grants_feature_check", feature)
 	}
+	_, err = dbc.Exec(
+		`INSERT INTO feature_grants (tenant_id, feature, enabled, reason)
+		 VALUES ($1, 'not_a_real_feature', false, 'constraint guard')`, tenantID)
+	assert.Error(t, err, "unknown features must remain constrained")
 }
 
 // TestMigrations_grant_ggscale_app_dml_on_worker_tables guards the app-role

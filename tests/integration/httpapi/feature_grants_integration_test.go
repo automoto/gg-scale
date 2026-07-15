@@ -137,6 +137,16 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 	assert.Equal(t, http.StatusCreated, createTicket(), "feature grants are cached briefly after revocation")
 	time.Sleep(6 * time.Second)
 	assert.Equal(t, http.StatusForbidden, createTicket())
+
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`UPDATE feature_grants
+		    SET enabled = true, updated_at = now(), reason = 'integration test reprovision'
+		  WHERE tenant_id = $1 AND project_id = $2 AND feature = $3`,
+		tenantID, projectID, string(rbac.FeatureDedicatedServers))
+	require.NoError(t, err)
+
+	time.Sleep(6 * time.Second)
+	assert.Equal(t, http.StatusCreated, createTicket())
 }
 
 func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *testing.T) {

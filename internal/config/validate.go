@@ -208,6 +208,7 @@ func (c *Config) checkFields() error {
 		{"MATCHMAKER_WORKER_COUNT", int64(c.MatchmakerWorkerCount)},
 		{"DB_MAX_CONNS", int64(c.DBMaxConns)},
 		{"STORAGE_MAX_VALUE_BYTES", c.StorageMaxValueBytes},
+		{"CACHE_OLRIC_REPLICA_COUNT", int64(c.CacheOlricReplicaCount)},
 	} {
 		if n.val <= 0 {
 			return fmt.Errorf("%s %d: must be a positive integer", n.name, n.val)

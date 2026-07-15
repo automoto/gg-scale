@@ -28,6 +28,7 @@ type Config struct {
 	OlricMemberlistAddr string
 	OlricMemberlistPort int
 	OlricPeers          []string
+	OlricReplicaCount   int
 	OlricStartTimeout   time.Duration
 	Registry            prometheus.Registerer
 }
@@ -47,6 +48,7 @@ func New(ctx context.Context, c Config) (cache.Store, error) {
 			MemberlistBindAddr: c.OlricMemberlistAddr,
 			MemberlistBindPort: c.OlricMemberlistPort,
 			Peers:              c.OlricPeers,
+			ReplicaCount:       c.OlricReplicaCount,
 			StartTimeout:       c.OlricStartTimeout,
 		})
 		if err != nil {

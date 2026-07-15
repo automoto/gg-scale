@@ -17,15 +17,20 @@ import (
 func TestFriends_block_unknown_target_returns_not_found(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k-block-404")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k-block-other-tenant")
 	srv := newServerForCluster(t, c)
 
 	tokA, idA := anonymousLoginWithID(t, srv.URL, "k-block-404")
 	linkPlayerAccount(t, c, idA)
+	_, otherTenantID := anonymousLoginWithID(t, srv.URL, "k-block-other-tenant")
+	linkPlayerAccount(t, c, otherTenantID)
 
-	for _, action := range []string{"block", "unblock"} {
-		resp, body := authedReq(t, http.MethodPost,
-			fmt.Sprintf("%s/v1/friends/999999999/%s", srv.URL, action), "k-block-404", tokA, nil)
-		assert.Equal(t, http.StatusNotFound, resp.StatusCode, "%s: %s", action, string(body))
+	for _, targetID := range []int64{999999999, otherTenantID} {
+		for _, action := range []string{"block", "unblock"} {
+			resp, body := authedReq(t, http.MethodPost,
+				fmt.Sprintf("%s/v1/friends/%d/%s", srv.URL, targetID, action), "k-block-404", tokA, nil)
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode, "%d/%s: %s", targetID, action, string(body))
+		}
 	}
 }
 

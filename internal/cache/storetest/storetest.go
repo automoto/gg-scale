@@ -127,8 +127,8 @@ func RunSuite(t *testing.T, f Factory) {
 		store := f(t)
 		ctx := context.Background()
 		const (
-			callers = 64
-			ceiling = 8
+			callers = 128
+			ceiling = 4
 		)
 
 		start := make(chan struct{})

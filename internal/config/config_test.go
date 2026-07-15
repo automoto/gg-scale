@@ -40,6 +40,7 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", cfg.CacheOlricMemberlistAddr)
 	assert.Equal(t, 3322, cfg.CacheOlricMemberlistPort)
 	assert.Empty(t, cfg.CacheOlricPeers)
+	assert.Equal(t, 1, cfg.CacheOlricReplicaCount)
 	assert.Empty(t, cfg.TrustedProxyCIDRs)
 	assert.Empty(t, cfg.FleetBackend)
 	assert.False(t, cfg.FeatureFleetEnabled)
@@ -79,6 +80,7 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		}},
 		{"CACHE_BACKEND", "olric", func(c *config.Config) string { return c.CacheBackend }},
 		{"CACHE_OLRIC_BIND_ADDR", "0.0.0.0", func(c *config.Config) string { return c.CacheOlricBindAddr }},
+		{"CACHE_OLRIC_REPLICA_COUNT", "2", func(c *config.Config) string { return strconv.Itoa(c.CacheOlricReplicaCount) }},
 		{"TRUSTED_PROXY_HEADER", "CF-Connecting-IP", func(c *config.Config) string { return c.TrustedProxyHeader }},
 	}
 	for _, c := range cases {
@@ -288,7 +290,7 @@ func clearEnv(t *testing.T) {
 		"CONTROL_PANEL_DISABLED", "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", "CONTROL_PANEL_COOKIE_SECURE",
 		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
 		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",
-		"CACHE_OLRIC_PEERS",
+		"CACHE_OLRIC_PEERS", "CACHE_OLRIC_REPLICA_COUNT",
 	} {
 		t.Setenv(k, "")
 	}

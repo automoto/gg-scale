@@ -437,6 +437,7 @@ type PendingChangeRequestView struct {
 	Kind        string
 	Target      string
 	Note        string
+	Requester   string
 	CreatedAt   time.Time
 }
 

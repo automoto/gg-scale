@@ -35,6 +35,10 @@ type Config struct {
 	// Peers is the list of host:port memberlist endpoints to join. Empty
 	// means start as a cluster of one.
 	Peers []string
+	// ReplicaCount is the number of cluster members that retain each DMap
+	// entry. Zero uses Olric's default of one; multi-node deployments should
+	// use at least two when cache state must survive one app restart.
+	ReplicaCount int
 	// LogLevel is one of "DEBUG", "INFO", "WARN", "ERROR". Default: "WARN".
 	LogLevel string
 	// StartTimeout bounds how long New blocks waiting for the node to
@@ -70,6 +74,9 @@ func New(ctx context.Context, c Config) (*Store, error) {
 		cfg.MemberlistConfig.BindPort = c.MemberlistBindPort
 	}
 	cfg.Peers = c.Peers
+	if c.ReplicaCount > 0 {
+		cfg.ReplicaCount = c.ReplicaCount
+	}
 
 	started := make(chan struct{})
 	cfg.Started = func() { close(started) }

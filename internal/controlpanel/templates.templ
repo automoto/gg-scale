@@ -2552,12 +2552,13 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 			if len(vm.ChangeRequests) > 0 {
 				<h3>Your requests</h3>
 				<table>
-					<thead><tr><th>Type</th><th>Detail</th><th>Status</th><th>Reason</th></tr></thead>
+					<thead><tr><th>Type</th><th>Detail</th><th>Note</th><th>Status</th><th>Reason</th></tr></thead>
 					<tbody>
 						for _, req := range vm.ChangeRequests {
 							<tr>
 								<td>{ req.Kind }</td>
 								<td>{ req.Detail }</td>
+								<td>{ req.Note }</td>
 								<td>{ req.Status }</td>
 								<td>
 									if req.Status == "denied" && req.ReviewReason != "" {
