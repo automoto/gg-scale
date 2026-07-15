@@ -301,7 +301,7 @@ func run() error {
 	// leader-elected periodic job, so it fires once across the fleet rather
 	// than once per instance. River failures are non-fatal — GC is best-effort
 	// and the server must boot without it.
-	if stopRiver := startRiverJobs(ctx, pool, appPool, logger); stopRiver != nil {
+	if stopRiver := startRiverJobs(ctx, pool, appPool, m, cfg.MailFrom, logger); stopRiver != nil {
 		defer stopRiver()
 	}
 
@@ -366,15 +366,16 @@ func run() error {
 		ServerList:                    serverListRegistry,
 		RelayIssuer:                   relayIssuer,
 		ControlPanel: controlpanel.Config{
-			Mount:                cfg.ControlPanelEnabled,
-			CookieSecure:         cfg.ControlPanelCookieSecure,
-			BaseURL:              cfg.ControlPanelBaseURL,
-			MailFrom:             cfg.MailFrom,
-			TrustedProxyHeader:   cfg.TrustedProxyHeader,
-			TrustedProxyCIDRs:    cfg.TrustedProxyCIDRs,
-			FleetEnabled:         cfg.FeatureFleetEnabled,
-			RelayEnabled:         cfg.FeatureP2PRelayEnabled,
-			StorageMaxValueBytes: cfg.StorageMaxValueBytes,
+			Mount:                  cfg.ControlPanelEnabled,
+			CookieSecure:           cfg.ControlPanelCookieSecure,
+			BaseURL:                cfg.ControlPanelBaseURL,
+			MailFrom:               cfg.MailFrom,
+			TrustedProxyHeader:     cfg.TrustedProxyHeader,
+			TrustedProxyCIDRs:      cfg.TrustedProxyCIDRs,
+			FleetEnabled:           cfg.FeatureFleetEnabled,
+			RelayEnabled:           cfg.FeatureP2PRelayEnabled,
+			StorageMaxValueBytes:   cfg.StorageMaxValueBytes,
+			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
 			// cross into the control panel package.
@@ -461,11 +462,12 @@ func (c queryRejectCounter) Inc() { c.m.MatchmakerQueryReject() }
 // returns a stop function, or nil if River couldn't start. River runs under
 // the app DB role via the pool's SET ROLE; its tables are granted in migration
 // 0055. Failures are logged and swallowed so a River problem never blocks boot.
-func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, logger *slog.Logger) func() {
+func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m mailer.Mailer, mailFrom string, logger *slog.Logger) func() {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,
@@ -487,6 +489,11 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, l
 			river.NewPeriodicJob(
 				river.PeriodicInterval(time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) { return jobs.MatchmakerGCArgs{}, nil },
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) { return jobs.StorageWarnArgs{}, nil },
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 		},
