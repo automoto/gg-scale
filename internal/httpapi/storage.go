@@ -247,7 +247,7 @@ func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectO
 		}
 
 		var resp storageObjectResponse
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			row, qerr := sqlcgen.New(tx).GetStorageObject(ctx, sqlcgen.GetStorageObjectParams{
 				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
 			})
@@ -322,7 +322,7 @@ func storageList(d Deps) func(context.Context, *storageListInput) (*storageListO
 
 		var items []storageObjectResponse
 		var lastID int64
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			rows, qerr := sqlcgen.New(tx).ListStorageObjects(ctx, sqlcgen.ListStorageObjectsParams{
 				ProjectID: projectID, OwnerUserID: ownerID,
 				Column3: in.KeyPrefix, ID: cursor, Limit: limit,

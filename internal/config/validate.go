@@ -99,6 +99,9 @@ func (c *Config) checkDBPool() error {
 	if c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS (%d) cannot exceed DB_MAX_CONNS (%d)", c.DBMinConns, c.DBMaxConns)
 	}
+	if c.DBReadURL != "" && c.DBReadMaxConns < 4 {
+		return fmt.Errorf("DB_READ_MAX_CONNS must be >= 4 when DB_READ_URL is set (got %d)", c.DBReadMaxConns)
+	}
 	return nil
 }
 

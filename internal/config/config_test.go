@@ -282,6 +282,40 @@ func TestLoad_rejects_nonpositive_db_max_conn_idle_time(t *testing.T) {
 	assert.Contains(t, err.Error(), "DB_MAX_CONN_IDLE_TIME")
 }
 
+func TestLoad_read_pool_off_by_default(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Empty(t, cfg.DBReadURL)
+	assert.Equal(t, 25, cfg.DBReadMaxConns)
+}
+
+func TestLoad_reads_db_read_url_when_set(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("DB_READ_URL", "postgres://replica/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, "postgres://replica/test", cfg.DBReadURL)
+}
+
+func TestLoad_rejects_small_read_pool_when_read_url_set(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("DB_READ_URL", "postgres://replica/test")
+	t.Setenv("DB_READ_MAX_CONNS", "2")
+
+	_, err := config.Load()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "DB_READ_MAX_CONNS")
+}
+
 func TestEnvExample_has_no_drift(t *testing.T) {
 	declared := config.DeclaredVars()
 

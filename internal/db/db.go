@@ -63,6 +63,7 @@ func ProjectFromContext(ctx context.Context) (int64, bool) {
 type Pool struct {
 	pool             *pgxpool.Pool
 	statementTimeout time.Duration
+	readOnly         bool
 }
 
 // NewPool constructs a Pool from an existing pgxpool. The caller retains
@@ -75,6 +76,13 @@ func NewPool(p *pgxpool.Pool) *Pool {
 // statement timeout. Zero means "leave the server default."
 func NewPoolWithTimeout(p *pgxpool.Pool, statementTimeout time.Duration) *Pool {
 	return &Pool{pool: p, statementTimeout: statementTimeout}
+}
+
+// NewReadPoolWithTimeout is like NewPoolWithTimeout but opens read-only
+// transactions in Q. Route only staleness-tolerant reads here; a write
+// accidentally sent through it is rejected by Postgres rather than run.
+func NewReadPoolWithTimeout(p *pgxpool.Pool, statementTimeout time.Duration) *Pool {
+	return &Pool{pool: p, statementTimeout: statementTimeout, readOnly: true}
 }
 
 // Stat exposes the underlying pgxpool statistics for pool-health metrics.
@@ -93,7 +101,11 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 		return err
 	}
 
-	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
+	txOpts := pgx.TxOptions{}
+	if p.readOnly {
+		txOpts.AccessMode = pgx.ReadOnly
+	}
+	tx, err := p.pool.BeginTx(ctx, txOpts)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}

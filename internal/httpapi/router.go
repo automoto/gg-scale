@@ -57,9 +57,13 @@ type Deps struct {
 	// middleware (used by unit-test fixtures). WebSocket paths are exempt.
 	RequestTimeout time.Duration
 
-	Pool    *db.Pool
-	Lookup  tenant.Lookup
-	Limiter ratelimit.Limiter
+	Pool *db.Pool
+	// ReadPool serves staleness-tolerant reads. nil defaults to Pool, so a
+	// deployment without a replica (or a test fixture) routes reads to the
+	// primary unchanged.
+	ReadPool *db.Pool
+	Lookup   tenant.Lookup
+	Limiter  ratelimit.Limiter
 	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
 	// overrides. Wrap the DB store in a CachedOverrideStore.
 	RateLimitOverrides ratelimit.OverrideStore
@@ -205,6 +209,11 @@ func NewRouter(d Deps) http.Handler {
 	// with the matchmaker worker matters.
 	if d.GameSessions == nil && d.Pool != nil {
 		d.GameSessions = gamesession.NewService(d.Pool)
+	}
+	// No replica configured (or a test fixture): read-heavy handlers fall back
+	// to the primary, so behavior is identical to a single-pool deployment.
+	if d.ReadPool == nil {
+		d.ReadPool = d.Pool
 	}
 
 	// humaCfg carries the single OpenAPI document every migrated /v1 group

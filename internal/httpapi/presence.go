@@ -96,7 +96,7 @@ func acceptedFriendPlayersInProject(ctx context.Context, d Deps, callerID, proje
 		return nil
 	}
 	var out []int64
-	if err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+	if err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		myAcc, err := q.GetPlayerLinkedAccountID(ctx, callerID)
 		if err != nil || !myAcc.Valid {

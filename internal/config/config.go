@@ -204,6 +204,14 @@ type Config struct {
 	// DBStatementTimeout bounds runaway queries. Set via SET LOCAL in Q().
 	DBStatementTimeout time.Duration `env:"DB_STATEMENT_TIMEOUT" envDefault:"30s"`
 
+	// DBReadURL, when set, points at a read replica for staleness-tolerant
+	// reads (leaderboard/friends/presence/storage GETs). Empty means the read
+	// pool aliases the primary, so every host runs identical code and only the
+	// hosts near a replica (e.g. west) set this. Supports the _FILE convention.
+	DBReadURL string `env:"DB_READ_URL" envFile:"true"`
+	// DBReadMaxConns sizes the read pool. Only consulted when DBReadURL is set.
+	DBReadMaxConns int `env:"DB_READ_MAX_CONNS" envDefault:"25"`
+
 	// StorageMaxValueBytes is the platform default cap on a single storage
 	// object's value. Per-tenant / per-project overrides (storage_limits) may
 	// raise or lower it; the effective limit is resolved per write.

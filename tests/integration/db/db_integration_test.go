@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,6 +68,38 @@ func TestQ_sets_app_tenant_id_GUC_inside_transaction(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "17", got)
+}
+
+func TestReadPool_allows_reads_and_sets_tenant_guc(t *testing.T) {
+	pool := startMigrated(t)
+	p := db.NewReadPoolWithTimeout(pool, 30*time.Second)
+
+	ctx := db.WithTenant(context.Background(), 42)
+
+	var got string
+	err := p.Q(ctx, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT current_setting('app.tenant_id', true)").Scan(&got)
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "42", got)
+}
+
+func TestReadPool_rejects_writes(t *testing.T) {
+	pool := startMigrated(t)
+	p := db.NewReadPoolWithTimeout(pool, 30*time.Second)
+
+	ctx := db.WithTenant(context.Background(), 1)
+
+	err := p.Q(ctx, func(tx pgx.Tx) error {
+		_, execErr := tx.Exec(ctx, "INSERT INTO tenants (id, name) VALUES (2, 'nope')")
+		return execErr
+	})
+
+	require.Error(t, err)
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	assert.Equal(t, "25006", pgErr.Code) // read_only_sql_transaction
 }
 
 func TestQ_returns_ErrNoTenant_when_context_missing_tenant(t *testing.T) {

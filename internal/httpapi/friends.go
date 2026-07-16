@@ -441,7 +441,7 @@ func friendsList(d Deps) func(context.Context, *friendsListInput) (*friendsListO
 
 		var items []friendEntry
 		var lastID int64
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			myAcc, err := callerAccount(ctx, tx, me)
 			if err != nil {

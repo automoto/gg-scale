@@ -199,7 +199,7 @@ func leaderboardAroundMe(d Deps) func(context.Context, *leaderboardAroundMeInput
 
 func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int32) ([]leaderboardEntry, error) {
 	out := make([]leaderboardEntry, 0)
-	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		rows, qerr := sqlcgen.New(tx).TopN(ctx, sqlcgen.TopNParams{
 			LeaderboardID: leaderboardID, Limit: limit,
 		})
@@ -220,7 +220,7 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, ra
 	entries := make([]leaderboardEntry, 0)
 	selfRank := int64(-1)
 
-	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		rank, rerr := q.LeaderboardUserRank(ctx, sqlcgen.LeaderboardUserRankParams{
 			LeaderboardID: leaderboardID, PlayerID: userID,
