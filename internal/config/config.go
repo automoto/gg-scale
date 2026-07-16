@@ -15,6 +15,13 @@ import "time"
 type Config struct {
 	HTTPAddr string `env:"HTTP_ADDR" envDefault:":8080"`
 
+	// HTTPRequestTimeout bounds how long a non-streaming request may run before
+	// the middleware cancels its context and returns 503 + Retry-After. It must
+	// stay below the server WriteTimeout so a saturated pool fails fast instead
+	// of queuing acquires until the connection is force-closed. WebSocket and
+	// other hijacked paths are exempt (they manage their own deadlines).
+	HTTPRequestTimeout time.Duration `env:"HTTP_REQUEST_TIMEOUT" envDefault:"15s"`
+
 	// MetricsAuthToken, when set, gates the /metrics endpoint behind a bearer
 	// token (Authorization: Bearer <token>); empty leaves /metrics open.
 	// Supports the _FILE convention. config.Validate requires it in production
@@ -189,6 +196,11 @@ type Config struct {
 	DBMaxConns        int           `env:"DB_MAX_CONNS" envDefault:"25"`
 	DBMinConns        int           `env:"DB_MIN_CONNS" envDefault:"2"`
 	DBMaxConnLifetime time.Duration `env:"DB_MAX_CONN_LIFETIME" envDefault:"1h"`
+	// DBMaxConnIdleTime returns idle connections after this long. A traffic
+	// spike grows the pool to DBMaxConns; without an idle cap those
+	// connections are held until DBMaxConnLifetime (1h). Trimming them frees
+	// pool slots on the shared write master within minutes of the spike.
+	DBMaxConnIdleTime time.Duration `env:"DB_MAX_CONN_IDLE_TIME" envDefault:"10m"`
 	// DBStatementTimeout bounds runaway queries. Set via SET LOCAL in Q().
 	DBStatementTimeout time.Duration `env:"DB_STATEMENT_TIMEOUT" envDefault:"30s"`
 

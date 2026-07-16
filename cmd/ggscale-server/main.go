@@ -182,6 +182,7 @@ func run() error {
 	poolCfg.MaxConns = int32(cfg.DBMaxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
 	poolCfg.MinConns = int32(cfg.DBMinConns) //nolint:gosec // operator config, validated >= 0
 	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
+	poolCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime
 	poolCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		if _, err := conn.Exec(ctx, "SET ROLE ggscale_app"); err != nil {
 			return fmt.Errorf("set app db role: %w", err)
@@ -341,6 +342,7 @@ func run() error {
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:                       "v1",
 		Commit:                        commit,
+		RequestTimeout:                cfg.HTTPRequestTimeout,
 		Pool:                          appPool,
 		Lookup:                        tenant.NewSQLLookup(pool),
 		Limiter:                       ratelimit.NewCacheLimiter(store),

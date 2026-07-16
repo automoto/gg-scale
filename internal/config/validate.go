@@ -50,7 +50,22 @@ func (c *Config) Validate() error {
 		}
 	}
 	c.warnLowDBPool()
+	c.warnRequestTimeout()
 	return nil
+}
+
+// serverWriteTimeout mirrors the http.Server WriteTimeout in
+// cmd/ggscale-server/main.go. A request deadline at or above it never fires
+// before the connection is force-closed, defeating the fast-fail behavior.
+const serverWriteTimeout = 30 * time.Second
+
+// warnRequestTimeout logs a non-fatal hint when the request deadline is not
+// comfortably below the server WriteTimeout.
+func (c *Config) warnRequestTimeout() {
+	if c.HTTPRequestTimeout >= serverWriteTimeout {
+		slog.Warn("HTTP_REQUEST_TIMEOUT is not below the server WriteTimeout; the deadline may never fire",
+			"value", c.HTTPRequestTimeout, "write_timeout", serverWriteTimeout)
+	}
 }
 
 // checkSecretLengths rejects shared secrets short enough to brute-force.
@@ -180,7 +195,9 @@ func (c *Config) checkFields() error {
 		{"MATCHMAKER_SWEEP_INTERVAL", c.MatchmakerSweepInterval},
 		{"RELAY_CRED_TTL", c.RelayCredTTL},
 		{"DB_MAX_CONN_LIFETIME", c.DBMaxConnLifetime},
+		{"DB_MAX_CONN_IDLE_TIME", c.DBMaxConnIdleTime},
 		{"DB_STATEMENT_TIMEOUT", c.DBStatementTimeout},
+		{"HTTP_REQUEST_TIMEOUT", c.HTTPRequestTimeout},
 	} {
 		if d.val <= 0 {
 			return fmt.Errorf("%s %q: must be a positive duration", d.name, d.val)

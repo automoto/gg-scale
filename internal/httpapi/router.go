@@ -53,6 +53,10 @@ type Deps struct {
 	Version string
 	Commit  string
 
+	// RequestTimeout bounds non-streaming requests; 0 disables the deadline
+	// middleware (used by unit-test fixtures). WebSocket paths are exempt.
+	RequestTimeout time.Duration
+
 	Pool    *db.Pool
 	Lookup  tenant.Lookup
 	Limiter ratelimit.Limiter
@@ -233,6 +237,9 @@ func NewRouter(d Deps) http.Handler {
 		r.Use(middleware.NewRequestID())
 		r.Use(middleware.NewVersion(d.Version, reg))
 		r.Use(middleware.NewObservability(reg))
+		if d.RequestTimeout > 0 {
+			r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
+		}
 		registerHealthz(groupAPI(r, humaCfg), d)
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
 		// control panel and player surfaces. Mounted unconditionally so player

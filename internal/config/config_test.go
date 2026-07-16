@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -247,6 +248,38 @@ func TestLoad_docker_require_digest_is_strict_bool(t *testing.T) {
 			assert.True(t, cfg.DockerRequireDigest)
 		}
 	})
+}
+
+func TestLoad_defaults_db_max_conn_idle_time_to_10m(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 10*time.Minute, cfg.DBMaxConnIdleTime)
+}
+
+func TestLoad_overrides_db_max_conn_idle_time(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("DB_MAX_CONN_IDLE_TIME", "30s")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 30*time.Second, cfg.DBMaxConnIdleTime)
+}
+
+func TestLoad_rejects_nonpositive_db_max_conn_idle_time(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("DB_MAX_CONN_IDLE_TIME", "0")
+
+	_, err := config.Load()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "DB_MAX_CONN_IDLE_TIME")
 }
 
 func TestEnvExample_has_no_drift(t *testing.T) {
