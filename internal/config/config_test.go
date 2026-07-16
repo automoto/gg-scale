@@ -316,6 +316,20 @@ func TestLoad_rejects_small_read_pool_when_read_url_set(t *testing.T) {
 	assert.Contains(t, err.Error(), "DB_READ_MAX_CONNS")
 }
 
+func TestLoad_migrate_url_defaults_empty_and_parses_when_set(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://app@localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Empty(t, cfg.DBMigrateURL, "empty falls back to DATABASE_URL at the call site")
+
+	t.Setenv("DB_MIGRATE_URL", "postgres://owner@localhost/test")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, "postgres://owner@localhost/test", cfg.DBMigrateURL)
+}
+
 func TestEnvExample_has_no_drift(t *testing.T) {
 	declared := config.DeclaredVars()
 

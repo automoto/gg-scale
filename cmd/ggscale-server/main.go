@@ -162,8 +162,13 @@ func run() error {
 
 	// Apply forward-only SQL migrations before anything else touches the DB.
 	// Runner returns ErrNoChange internally as a no-op so this is safe on
-	// every restart.
-	mr, err := migraterunner.New(cfg.DatabaseURL, cfg.MigrationsDir)
+	// every restart. Migrations need elevated rights (DDL, CREATE ROLE, RLS);
+	// DB_MIGRATE_URL supplies them so DATABASE_URL can stay least-privilege.
+	migrateURL := cfg.DatabaseURL
+	if cfg.DBMigrateURL != "" {
+		migrateURL = cfg.DBMigrateURL
+	}
+	mr, err := migraterunner.New(migrateURL, cfg.MigrationsDir)
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}

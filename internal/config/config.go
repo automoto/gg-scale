@@ -128,9 +128,15 @@ type Config struct {
 	RelaySharedSecret string        `env:"RELAY_SHARED_SECRET" envFile:"true"`
 	RelayCredTTL      time.Duration `env:"RELAY_CRED_TTL" envDefault:"5m"`
 	DatabaseURL       string        `env:"DATABASE_URL,required" envFile:"true"`
-	LogLevel          string        `env:"LOG_LEVEL" envDefault:"info"`
-	Env               string        `env:"ENV" envDefault:"dev"`
-	JWTSigningKey     string        `env:"JWT_SIGNING_KEY" envFile:"true"`
+	// DBMigrateURL is an optional elevated DSN used only to apply schema
+	// migrations at startup (DDL, CREATE ROLE, FORCE RLS, CREATE POLICY).
+	// Empty falls back to DATABASE_URL. Setting it lets DATABASE_URL be a
+	// least-privilege login role (member of ggscale_app, no superuser/DDL)
+	// while migrations run as the owner. Supports the _FILE convention.
+	DBMigrateURL  string `env:"DB_MIGRATE_URL" envFile:"true"`
+	LogLevel      string `env:"LOG_LEVEL" envDefault:"info"`
+	Env           string `env:"ENV" envDefault:"dev"`
+	JWTSigningKey string `env:"JWT_SIGNING_KEY" envFile:"true"`
 	// TwoFactorEncKey is an optional 32-byte hex AES key that encrypts TOTP
 	// secrets at rest and derives the 2FA pending-cookie HMAC key. When empty
 	// the server auto-generates and persists a key (zero-config self-host); set
