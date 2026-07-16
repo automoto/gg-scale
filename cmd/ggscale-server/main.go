@@ -174,22 +174,10 @@ func run() error {
 	_ = mr.Close()
 	logger.Info("migrations applied", "dir", cfg.MigrationsDir)
 
-	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-	if err != nil {
-		return err
-	}
-	poolCfg.ConnConfig.Tracer = observability.NewPgxTracer(registry)
-	poolCfg.MaxConns = int32(cfg.DBMaxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
-	poolCfg.MinConns = int32(cfg.DBMinConns) //nolint:gosec // operator config, validated >= 0
-	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
-	poolCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime
-	poolCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		if _, err := conn.Exec(ctx, "SET ROLE ggscale_app"); err != nil {
-			return fmt.Errorf("set app db role: %w", err)
-		}
-		return nil
-	}
-	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	// One tracer instance is shared by every pool: the query-duration
+	// histogram registers once, so a read pool cannot double-register it.
+	dbTracer := observability.NewPgxTracer(registry)
+	pool, err := newDBPool(ctx, cfg.DatabaseURL, cfg.DBMaxConns, cfg.DBMinConns, cfg, dbTracer)
 	if err != nil {
 		return err
 	}
@@ -226,7 +214,25 @@ func run() error {
 	m = mailer.Metered(m, metrics)
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
-	observability.RegisterPoolStats(registry, appPool.Stat)
+	observability.RegisterPoolStats(registry, "primary", appPool.Stat)
+
+	// Read pool: a distinct replica when DB_READ_URL is set, otherwise an alias
+	// of the primary so every host runs identical code (only replica-adjacent
+	// hosts set the var). Staleness-tolerant reads route here; see httpapi.
+	readPool := appPool
+	if cfg.DBReadURL != "" {
+		readPgxPool, rerr := newDBPool(ctx, cfg.DBReadURL, cfg.DBReadMaxConns, cfg.DBMinConns, cfg, dbTracer)
+		if rerr != nil {
+			return rerr
+		}
+		defer readPgxPool.Close()
+		if rerr := assertAppDBRole(ctx, readPgxPool); rerr != nil {
+			return rerr
+		}
+		readPool = db.NewReadPoolWithTimeout(readPgxPool, cfg.DBStatementTimeout)
+		observability.RegisterPoolStats(registry, "read", readPool.Stat)
+		slog.Info("read replica pool enabled", "max_conns", cfg.DBReadMaxConns)
+	}
 	// After migrations and pool setup: resolves TWO_FACTOR_ENC_KEY or the
 	// auto-generated database key, so 2FA works with zero configuration.
 	tfCipher, err := twofactor.Load(ctx, appPool, cfg.TwoFactorEncKey)
@@ -344,6 +350,7 @@ func run() error {
 		Commit:                        commit,
 		RequestTimeout:                cfg.HTTPRequestTimeout,
 		Pool:                          appPool,
+		ReadPool:                      readPool,
 		Lookup:                        tenant.NewSQLLookup(pool),
 		Limiter:                       ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:            ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
@@ -543,6 +550,28 @@ SELECT current_user,
 		return fmt.Errorf("db role assertion: ggscale_app must not own tenant tables")
 	}
 	return nil
+}
+
+// newDBPool builds a pgxpool with the shared app settings: the given size, the
+// common lifetime/idle trims, the query tracer, and the ggscale_app role hook.
+// Used for both the primary and the optional read pool.
+func newDBPool(ctx context.Context, url string, maxConns, minConns int, cfg *config.Config, tracer *observability.PgxTracer) (*pgxpool.Pool, error) {
+	poolCfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, err
+	}
+	poolCfg.ConnConfig.Tracer = tracer
+	poolCfg.MaxConns = int32(maxConns) //nolint:gosec // operator config, validated >= 4 by config.Validate
+	poolCfg.MinConns = int32(minConns) //nolint:gosec // operator config, validated >= 0
+	poolCfg.MaxConnLifetime = cfg.DBMaxConnLifetime
+	poolCfg.MaxConnIdleTime = cfg.DBMaxConnIdleTime
+	poolCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if _, err := conn.Exec(ctx, "SET ROLE ggscale_app"); err != nil {
+			return fmt.Errorf("set app db role: %w", err)
+		}
+		return nil
+	}
+	return pgxpool.NewWithConfig(ctx, poolCfg)
 }
 
 // buildFleet wires the configured fleet backend. Returns (nil, nil, nil) when
