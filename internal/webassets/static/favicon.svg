@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <!-- JetBrains Mono "g" glyph outline (OFL), font units, y-up -->
+    <path id="gg-mono" d="M161 -180V-98H316Q363 -98 390.0 -71.5Q417 -45 417 0V50L419 140H416Q408 91 369.0 64.5Q330 38 271 38Q186 38 137.0 92.0Q88 146 88 240V356Q88 450 137.0 505.0Q186 560 271 560Q330 560 369.0 532.0Q408 504 416 455H418V550H507V0Q507 -83 455.5 -131.5Q404 -180 315 -180ZM298 113Q354 113 386.0 148.0Q418 183 418 245V350Q418 412 386.0 447.0Q354 482 298 482Q241 482 209.5 449.0Q178 416 178 360V235Q178 179 209.5 146.0Q241 113 298 113Z"/>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#111827"/>
+  <g transform="translate(8.55 39.46) scale(0.0393)">
+    <g transform="scale(1 -1)" fill="#818cf8" stroke="#818cf8" stroke-width="55" stroke-linejoin="round">
+      <use href="#gg-mono"/>
+      <use href="#gg-mono" x="600"/>
+    </g>
+  </g>
+</svg>

@@ -12,7 +12,7 @@
 #   ggscale-server:  http://localhost:8080
 #   control panel:  http://localhost:8080/v1/control-panel
 #   prometheus:      http://localhost:9090
-#   mailhog UI:      http://localhost:8025
+#   mailpit UI:      http://localhost:8025
 
 name: ggscale
 

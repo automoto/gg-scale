@@ -99,7 +99,7 @@ seed: ## Seed dev data (destructive: -force)
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
-up: preflight ## Basic stack: server + Postgres + MailHog
+up: preflight ## Basic stack: server + Postgres + Mailpit
 	docker compose up -d --build --wait
 
 down: ## Stop the basic stack

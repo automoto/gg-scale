@@ -75,6 +75,22 @@ func TestSharedAssets_served_under_v1(t *testing.T) {
 	}
 }
 
+func TestLegacyFaviconRouteServesEmbeddedIcon(t *testing.T) {
+	srv := newControlPanelServer(t)
+
+	resp, err := http.Get(srv.URL + "/favicon.ico")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "image/svg+xml")
+	assert.Contains(t, resp.Header.Get("Cache-Control"), "immutable")
+	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
+	assert.NotEmpty(t, body)
+}
+
 func TestControlPanel_routes_outside_v1_return_404(t *testing.T) {
 	srv := newControlPanelServer(t)
 

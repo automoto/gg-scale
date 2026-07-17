@@ -10,6 +10,7 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,6 +33,11 @@ const (
 	accountSessionCookieName = "ggscale_account_session"
 	accountVerifyCookieName  = "ggscale_account_verify"
 	accountBasePath          = "/v1/players/account"
+)
+
+var (
+	errAccountVerificationDelivery = errors.New("player account: verification email delivery failed")
+	errAccountVerifyResendTooSoon  = errors.New("player account: verification resend too soon")
 )
 
 func toPgUUID(u uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: u, Valid: true} }
@@ -562,13 +568,14 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 		displayPtr = &displayName
 	}
 
+	codeHash := verifycode.Hash(salt, code)
 	var accountID pgtype.UUID
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).CreatePlayerAccount(r.Context(), sqlcgen.CreatePlayerAccountParams{
 			Email:        email,
 			PasswordHash: hash,
 			DisplayName:  displayPtr,
-			CodeHash:     verifycode.Hash(salt, code),
+			CodeHash:     codeHash,
 			CodeSalt:     salt,
 			ExpiresAt:    pgtype.Timestamptz{Time: h.now().Add(verifycode.CodeTTL), Valid: true},
 		})
@@ -585,7 +592,11 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 			// the real owner out of band and drop the caller into the same verify
 			// flow with a decoy id — every downstream code path (verify, resend)
 			// treats the unknown account as a wrong code / silent no-op.
-			h.sendAccountExistsEmail(r.Context(), email)
+			if sendErr := h.notifyDuplicateAccountSignup(r.Context(), email); sendErr != nil {
+				slog.ErrorContext(r.Context(), "player account duplicate signup notification delivery", "err", sendErr)
+				accountVerificationUnavailable(w)
+				return
+			}
 			h.setAccountVerifyCookie(w, uuid.New(), email)
 			http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 			return
@@ -595,7 +606,16 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 	}
 	h.metrics.Signup(observability.SignupAccount)
 
-	h.sendAccountVerifyEmail(r.Context(), email, code)
+	if sendErr := h.sendAccountVerifyEmail(r.Context(), email, code); sendErr != nil {
+		emptyState := sqlcgen.GetPlayerAccountVerificationStateRow{ID: accountID}
+		restoreErr := h.restorePlayerAccountVerification(r.Context(), emptyState, codeHash)
+		if restoreErr != nil {
+			sendErr = errors.Join(sendErr, fmt.Errorf("restore verification state: %w", restoreErr))
+		}
+		slog.ErrorContext(r.Context(), "player account signup verification delivery", "err", sendErr)
+		accountVerificationUnavailable(w)
+		return
+	}
 	h.setAccountVerifyCookie(w, fromPgUUID(accountID), email)
 	http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 }
@@ -639,9 +659,15 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if !row.EmailVerifiedAt.Valid {
 		// Same contract as the control panel / per-project login: forward to the
-		// verify screen with a fresh code. Cooldown (nil) and lockout are not
+		// verify screen with a fresh code. Cooldown and lockout are not
 		// 500s — the verify screen surfaces the lockout on submit.
-		if verr := h.startAccountVerification(r.Context(), row.ID, email); verr != nil && !errors.Is(verr, errVerifyAccountLocked) {
+		if verr := h.startAccountVerification(r.Context(), row.ID, email); verr != nil &&
+			!errors.Is(verr, errVerifyAccountLocked) && !errors.Is(verr, errAccountVerifyResendTooSoon) {
+			if errors.Is(verr, errAccountVerificationDelivery) {
+				slog.ErrorContext(r.Context(), "player account login verification delivery", "err", verr)
+				accountVerificationUnavailable(w)
+				return
+			}
 			webutil.InternalError(w, "account login: verification email", verr)
 			return
 		}
@@ -737,11 +763,18 @@ func (h *Handler) accountVerifyResend(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
 		return
 	}
-	if err := h.startAccountVerification(r.Context(), toPgUUID(p.AccountID), p.Email); err != nil && !errors.Is(err, errVerifyAccountLocked) {
+	err := h.startAccountVerification(r.Context(), toPgUUID(p.AccountID), p.Email)
+	switch {
+	case err == nil,
+		errors.Is(err, errVerifyAccountLocked),
+		errors.Is(err, errAccountVerifyResendTooSoon):
+		http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
+	case errors.Is(err, errAccountVerificationDelivery):
+		slog.ErrorContext(r.Context(), "player account verification resend delivery", "err", err)
+		accountVerificationUnavailable(w)
+	default:
 		webutil.InternalError(w, "account verify resend", err)
-		return
 	}
-	http.Redirect(w, r, accountBasePath+"/verify", http.StatusSeeOther)
 }
 
 func (h *Handler) accountLogout(w http.ResponseWriter, r *http.Request) {
@@ -774,7 +807,7 @@ func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype
 		return errVerifyAccountLocked
 	}
 	if !verifycode.CanResend(state.EmailVerificationLastSentAt.Time, h.now()) {
-		return nil // silent cooldown no-op
+		return errAccountVerifyResendTooSoon
 	}
 	code, err := verifycode.GenerateCode()
 	if err != nil {
@@ -784,18 +817,39 @@ func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype
 	if err != nil {
 		return err
 	}
+	codeHash := verifycode.Hash(salt, code)
 	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).SetPlayerAccountVerificationCode(ctx, sqlcgen.SetPlayerAccountVerificationCodeParams{
 			ID:        accountID,
-			CodeHash:  verifycode.Hash(salt, code),
+			CodeHash:  codeHash,
 			CodeSalt:  salt,
 			ExpiresAt: pgtype.Timestamptz{Time: h.now().Add(verifycode.CodeTTL), Valid: true},
 		})
 	}); err != nil {
 		return err
 	}
-	h.sendAccountVerifyEmail(ctx, email, code)
+	if sendErr := h.sendAccountVerifyEmail(ctx, email, code); sendErr != nil {
+		restoreErr := h.restorePlayerAccountVerification(ctx, state, codeHash)
+		if restoreErr != nil {
+			return errors.Join(sendErr, fmt.Errorf("restore verification state: %w", restoreErr))
+		}
+		return sendErr
+	}
 	return nil
+}
+
+func (h *Handler) restorePlayerAccountVerification(ctx context.Context, state sqlcgen.GetPlayerAccountVerificationStateRow, expectedCodeHash []byte) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).RestorePlayerAccountVerificationCode(ctx, sqlcgen.RestorePlayerAccountVerificationCodeParams{
+			PreviousCodeHash:   state.EmailVerificationCodeHash,
+			PreviousCodeSalt:   state.EmailVerificationSalt,
+			PreviousExpiresAt:  state.EmailVerificationExpiresAt,
+			PreviousAttempts:   state.EmailVerificationAttempts,
+			PreviousLastSentAt: state.EmailVerificationLastSentAt,
+			ID:                 state.ID,
+			ExpectedCodeHash:   expectedCodeHash,
+		})
+	})
 }
 
 func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID, code string) error {
@@ -858,31 +912,60 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 	return nil
 }
 
-func (h *Handler) sendAccountVerifyEmail(ctx context.Context, email, code string) {
+func (h *Handler) sendAccountVerifyEmail(ctx context.Context, email, code string) error {
 	if h.mailer == nil || h.mailFrom == "" {
-		return
+		return nil
 	}
-	_ = h.mailer.Send(ctx, mailer.Message{
+	if err := h.mailer.Send(ctx, mailer.Message{
 		From:    h.mailFrom,
 		To:      []string{email},
 		Subject: verifySubject,
 		Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
-	})
+	}); err != nil {
+		return fmt.Errorf("%w: %v", errAccountVerificationDelivery, err)
+	}
+	return nil
 }
 
 // sendAccountExistsEmail notifies the owner of an existing account that someone
 // tried to sign up with their email. Paired with the decoy verify flow so the
 // signup form can't be used to enumerate registered emails.
-func (h *Handler) sendAccountExistsEmail(ctx context.Context, email string) {
+func (h *Handler) sendAccountExistsEmail(ctx context.Context, email string) error {
 	if h.mailer == nil || h.mailFrom == "" {
-		return
+		return nil
 	}
-	_ = h.mailer.Send(ctx, mailer.Message{
+	if err := h.mailer.Send(ctx, mailer.Message{
 		From:    h.mailFrom,
 		To:      []string{email},
 		Subject: "ggscale account",
 		Body:    "Someone tried to sign up with this email, but an account already exists. If this was you, log in or reset your password instead.",
-	})
+	}); err != nil {
+		return fmt.Errorf("%w: %v", errAccountVerificationDelivery, err)
+	}
+	return nil
+}
+
+func (h *Handler) notifyDuplicateAccountSignup(ctx context.Context, email string) error {
+	var account sqlcgen.GetPlayerAccountByEmailRow
+	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		account, qerr = sqlcgen.New(tx).GetPlayerAccountByEmail(ctx, email)
+		return qerr
+	}); err != nil {
+		return fmt.Errorf("lookup duplicate player account: %w", err)
+	}
+	if account.EmailVerifiedAt.Valid {
+		return h.sendAccountExistsEmail(ctx, email)
+	}
+	err := h.startAccountVerification(ctx, account.ID, email)
+	if errors.Is(err, errVerifyAccountLocked) || errors.Is(err, errAccountVerifyResendTooSoon) {
+		return h.sendAccountExistsEmail(ctx, email)
+	}
+	return err
+}
+
+func accountVerificationUnavailable(w http.ResponseWriter) {
+	http.Error(w, "verification email is temporarily unavailable; try again", http.StatusServiceUnavailable)
 }
 
 // --- account sessions ------------------------------------------------------

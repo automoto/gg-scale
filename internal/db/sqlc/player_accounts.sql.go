@@ -529,6 +529,43 @@ func (q *Queries) ReservePlayerAccountVerifyAttempt(ctx context.Context, arg Res
 	return i, err
 }
 
+const restorePlayerAccountVerificationCode = `-- name: RestorePlayerAccountVerificationCode :exec
+UPDATE player_accounts
+SET email_verification_code_hash    = $1::bytea,
+    email_verification_salt         = $2::bytea,
+    email_verification_expires_at   = $3::timestamptz,
+    email_verification_attempts     = $4,
+    email_verification_last_sent_at = $5::timestamptz,
+    updated_at                      = now()
+WHERE id = $6
+  AND email_verification_code_hash = $7::bytea
+`
+
+type RestorePlayerAccountVerificationCodeParams struct {
+	PreviousCodeHash   []byte
+	PreviousCodeSalt   []byte
+	PreviousExpiresAt  pgtype.Timestamptz
+	PreviousAttempts   int32
+	PreviousLastSentAt pgtype.Timestamptz
+	ID                 pgtype.UUID
+	ExpectedCodeHash   []byte
+}
+
+// Undo a code reservation only when it is still the code whose delivery
+// failed. A concurrent request that installed a newer code must win.
+func (q *Queries) RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error {
+	_, err := q.db.Exec(ctx, restorePlayerAccountVerificationCode,
+		arg.PreviousCodeHash,
+		arg.PreviousCodeSalt,
+		arg.PreviousExpiresAt,
+		arg.PreviousAttempts,
+		arg.PreviousLastSentAt,
+		arg.ID,
+		arg.ExpectedCodeHash,
+	)
+	return err
+}
+
 const revokeAllPlayerAccountSessions = `-- name: RevokeAllPlayerAccountSessions :exec
 UPDATE player_account_sessions
 SET revoked_at = now()

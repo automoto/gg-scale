@@ -145,6 +145,7 @@ func TestControlPanelHeadUsesExternalScriptsAndSafeHTMXConfig(t *testing.T) {
 	assert.Contains(t, html, "allowScriptTags")
 	assert.Contains(t, html, `src="/v1/control-panel/assets/htmx.min.js?v=`)
 	assert.Contains(t, html, `src="/v1/control-panel/assets/controlpanel.js?v=`)
+	assert.Contains(t, html, `rel="icon" type="image/svg+xml" href="/v1/assets/favicon.svg?v=`)
 	assert.NotContains(t, html, `unsafe-inline`)
 }
 

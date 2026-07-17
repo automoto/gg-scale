@@ -7,7 +7,7 @@ templ baseHead(title string) {
 		<meta charset="utf-8"/>
 		<meta name="viewport" content="width=device-width, initial-scale=1"/>
 		<meta name="color-scheme" content="dark"/>
-		<title>{ title }</title>
+		<title>{ title }</title><link rel="icon" type="image/svg+xml" href={ webassets.URL("favicon.svg") }/>
 		<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"422","swap":true},{"code":"409","swap":true},{"code":"[45]..","swap":false,"error":true}]}'/>
 		<link rel="stylesheet" href={ webassets.URL("pico.min.css") }/>
 		<link rel="stylesheet" href={ webassets.URL("app.css") }/>

@@ -247,10 +247,10 @@ type Config struct {
 	// External providers register via mailer.Register in their init().
 	MailProvider string `env:"MAIL_PROVIDER" envDefault:"smtp"`
 	// SMTPAddr is the SMTP server address (host:port). Default "localhost:1025"
-	// matches MailHog in the dev compose stack.
+	// matches Mailpit in the dev compose stack.
 	SMTPAddr string `env:"SMTP_ADDR" envDefault:"localhost:1025"`
 	// SMTPUser is the SMTP username. Leave empty for unauthenticated relays
-	// (e.g. MailHog in dev).
+	// (e.g. Mailpit in dev).
 	SMTPUser string `env:"SMTP_USER"`
 	// SMTPPassword is the SMTP password. Unused when SMTPUser is empty.
 	SMTPPassword string `env:"SMTP_PASSWORD"`

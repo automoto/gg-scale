@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -76,6 +77,11 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 		// start verification immediately, park the verify-pending cookie,
 		// and land them straight on the verify screen.
 		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
+			if errors.Is(startErr, errVerificationDelivery) {
+				slog.ErrorContext(r.Context(), "control panel setup verification delivery", "err", startErr)
+				verificationDeliveryUnavailable(w)
+				return
+			}
 			http.Error(w, "verification start failed", http.StatusInternalServerError)
 			return
 		}
@@ -124,6 +130,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		// and bounce them to the verify page instead of failing.
 		h.metrics.Login(observability.SurfaceControlPanel, observability.LoginUnverified)
 		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
+			if errors.Is(startErr, errVerificationDelivery) {
+				slog.ErrorContext(r.Context(), "control panel login verification delivery", "err", startErr)
+				verificationDeliveryUnavailable(w)
+				return
+			}
 			http.Error(w, "verification start failed", http.StatusInternalServerError)
 			return
 		}

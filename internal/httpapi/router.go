@@ -246,6 +246,7 @@ func NewRouter(d Deps) http.Handler {
 		metricsHandler = requireMetricsToken(d.MetricsAuthToken, metricsHandler)
 	}
 	r.Handle("/metrics", metricsHandler)
+	r.Get("/favicon.ico", webassets.FaviconHandler())
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.NewRequestID())

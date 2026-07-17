@@ -13,7 +13,7 @@ curl -s localhost:8080/v1/healthz
 
 Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
-`make up` starts the basic stack: `ggscale-server`, Postgres, and MailHog (SMTP catcher with a web UI at `http://localhost:8025`).
+`make up` starts the basic stack: `ggscale-server`, Postgres, and Mailpit (SMTP catcher with a web UI at `http://localhost:8025`). The published SMTP and HTTP ports can be overridden with `MAILPIT_SMTP_PORT` and `MAILPIT_HTTP_PORT` if they are already occupied.
 
 ## Onboarding (Control Panel Setup)
 
