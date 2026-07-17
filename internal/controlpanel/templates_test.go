@@ -201,7 +201,7 @@ func TestHomePage_RendersPlatformMenuWhenAuthorized(t *testing.T) {
 		IsPlatformAdmin: true,
 	}))
 
-	assert.Contains(t, html, "<summary>Platform</summary>")
+	assert.Contains(t, html, "<summary>Menu</summary>")
 	assert.Contains(t, html, `href="/v1/control-panel/admin/users"`)
 	assert.Contains(t, html, `href="/v1/control-panel/admin/player-accounts"`)
 	assert.Contains(t, html, `aria-current="page">Tenants</a>`)
@@ -210,7 +210,7 @@ func TestHomePage_RendersPlatformMenuWhenAuthorized(t *testing.T) {
 func TestHomePage_HidesPlatformMenuWhenNotAuthorized(t *testing.T) {
 	html := renderToString(t, HomePage(HomeView{UserEmail: "user@example.com"}))
 
-	assert.NotContains(t, html, "<summary>Platform</summary>")
+	assert.NotContains(t, html, "<summary>Menu</summary>")
 	assert.NotContains(t, html, `href="/v1/control-panel/admin/users"`)
 }
 

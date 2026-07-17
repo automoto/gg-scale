@@ -42,6 +42,49 @@
 		}
 	});
 
+	// Dropdown menus (<details class="nav-menu"> / "row-menu"): close on
+	// outside click or Escape, and keep at most one open at a time.
+	var menuSelector = "details.nav-menu, details.row-menu";
+
+	document.addEventListener("toggle", function (event) {
+		var menu = event.target;
+		if (!(menu instanceof HTMLDetailsElement) || !menu.open || !menu.matches(menuSelector)) {
+			return;
+		}
+		document.querySelectorAll(menuSelector + "[open]").forEach(function (other) {
+			if (other !== menu) {
+				other.open = false;
+			}
+		});
+	}, true);
+
+	document.addEventListener("click", function (event) {
+		var target = event.target;
+		if (!(target instanceof Element)) {
+			return;
+		}
+		document.querySelectorAll(menuSelector + "[open]").forEach(function (menu) {
+			if (!menu.contains(target)) {
+				menu.open = false;
+			}
+		});
+	});
+
+	document.addEventListener("keydown", function (event) {
+		if (event.key !== "Escape") {
+			return;
+		}
+		var open = document.querySelector(menuSelector + "[open]");
+		if (!(open instanceof HTMLDetailsElement)) {
+			return;
+		}
+		open.open = false;
+		var summary = open.querySelector("summary");
+		if (summary instanceof HTMLElement) {
+			summary.focus();
+		}
+	});
+
 	document.body.addEventListener("htmx:afterSwap", function (event) {
 		var target = event.target;
 		if (!(target instanceof HTMLElement) || target.id !== "modal-root") {

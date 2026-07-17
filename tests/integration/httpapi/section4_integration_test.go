@@ -32,6 +32,10 @@ import (
 )
 
 func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Recorder) {
+	return newFullStackServerWithStorageMax(t, c, 0)
+}
+
+func newFullStackServerWithStorageMax(t *testing.T, c *cluster, storageMaxValueBytes int64) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
 	// Surface server-side errors in test output.
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -46,18 +50,73 @@ func newFullStackServer(t *testing.T, c *cluster) (*httptest.Server, *mailer.Rec
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1", Commit: "test",
-		Pool:          pool,
-		Lookup:        tenant.NewSQLLookup(c.appPool),
-		Limiter:       ratelimit.NewCacheLimiter(c.cache),
-		Signer:        signer,
-		Mailer:        rec,
-		Cache:         c.cache,
-		RBAC:          authorizer,
-		StorageLimits: storagelimit.NewStore(pool),
+		Pool:                 pool,
+		Lookup:               tenant.NewSQLLookup(c.appPool),
+		Limiter:              ratelimit.NewCacheLimiter(c.cache),
+		Signer:               signer,
+		Mailer:               rec,
+		Cache:                c.cache,
+		RBAC:                 authorizer,
+		StorageMaxValueBytes: storageMaxValueBytes,
+		StorageLimits:        storagelimit.NewStore(pool),
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv, rec
+}
+
+func TestStorage_value_size_overrides_work_above_huma_default(t *testing.T) {
+	c := startCluster(t)
+	overriddenTenantID, overriddenProjectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-large-override")
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-default-limit")
+	store := storagelimit.NewStore(db.NewPool(c.appPool))
+	const overrideBytes = 2 << 20
+	require.NoError(t, store.Set(context.Background(), 0, overriddenTenantID, nil, overrideBytes))
+	require.NoError(t, store.Set(context.Background(), 0, overriddenTenantID, &overriddenProjectID, overrideBytes))
+
+	overrideServer, _ := newFullStackServerWithStorageMax(t, c, overrideBytes)
+	defaultServer, _ := newFullStackServer(t, c)
+	overrideAccess := anonymousLogin(t, overrideServer.URL, "storage-large-override")
+	defaultAccess := anonymousLogin(t, defaultServer.URL, "storage-default-limit")
+	allowedBody := map[string]string{"blob": strings.Repeat("a", (3<<20)/2)}
+	overrideTarget := overrideServer.URL + "/v1/storage/objects/large"
+
+	resp, body := authedReq(t, http.MethodPut, overrideTarget,
+		"storage-large-override", overrideAccess, allowedBody)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = authedReq(t, http.MethodGet, overrideTarget,
+		"storage-large-override", overrideAccess, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	exactLimitValue := []byte(`"` + strings.Repeat("a", overrideBytes-2) + `"`)
+	exactLimit := storageRequestStatus(http.MethodPut,
+		overrideServer.URL+"/v1/storage/objects/exact-limit",
+		"storage-large-override", overrideAccess, exactLimitValue, "")
+	require.NoError(t, exactLimit.err)
+	require.Equal(t, http.StatusOK, exactLimit.status, exactLimit.body)
+
+	resp, body = authedReq(t, http.MethodPut,
+		overrideServer.URL+"/v1/storage/objects/over-override",
+		"storage-large-override", overrideAccess,
+		map[string]string{"blob": strings.Repeat("a", overrideBytes)})
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode, string(body))
+
+	resp, body = authedReq(t, http.MethodPut,
+		defaultServer.URL+"/v1/storage/objects/no-override",
+		"storage-default-limit", defaultAccess, allowedBody)
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode, string(body))
+
+	frameworkRejected := storageRequestStatus(http.MethodPut,
+		defaultServer.URL+"/v1/storage/objects/framework-limit",
+		"storage-default-limit", defaultAccess,
+		[]byte(strings.Repeat("x", (3<<20)/2)), "")
+	require.NoError(t, frameworkRejected.err)
+	require.Equal(t, http.StatusRequestEntityTooLarge, frameworkRejected.status, frameworkRejected.body)
+
+	resp, body = authedReq(t, http.MethodDelete, overrideTarget,
+		"storage-large-override", overrideAccess, nil)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
 }
 
 func doJSON(t *testing.T, method, url, bearer string, body any) (*http.Response, []byte) {

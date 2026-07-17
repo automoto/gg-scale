@@ -185,7 +185,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 			}
 		}
 		if nav.IsPlatformAdmin {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<details class=\"nav-menu\"><summary>Platform</summary><div class=\"nav-menu-content\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<details class=\"nav-menu\"><summary>Menu</summary><div class=\"nav-menu-content\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -245,7 +245,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navLink("/v1/control-panel/account/password", "Account", nav.IsActive(navAccount)).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navLink("/v1/control-panel/account/password", "Account Settings", nav.IsActive(navAccount)).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

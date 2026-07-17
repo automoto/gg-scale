@@ -55,7 +55,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 						}
 						if nav.IsPlatformAdmin {
 							<details class="nav-menu">
-								<summary>Platform</summary>
+								<summary>Menu</summary>
 								<div class="nav-menu-content">
 									@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))
 									@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))
@@ -74,7 +74,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 					<details class="nav-menu account-menu">
 						<summary>{ userEmail }</summary>
 						<div class="nav-menu-content">
-							@navLink("/v1/control-panel/account/password", "Account", nav.IsActive(navAccount))
+							@navLink("/v1/control-panel/account/password", "Account Settings", nav.IsActive(navAccount))
 							<form method="post" action="/v1/control-panel/logout">
 								<input type="hidden" name="_csrf" value={ csrfToken }/>
 								<button type="submit" class="secondary outline btn-inline">Sign out</button>
