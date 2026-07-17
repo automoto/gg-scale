@@ -46,9 +46,56 @@
 	// outside click or Escape, and keep at most one open at a time.
 	var menuSelector = "details.nav-menu, details.row-menu";
 
+	// Row menus sit inside horizontally scrollable cards, where an absolutely
+	// positioned panel is clipped to the card's scroll box. While one is open,
+	// float its panel with position: fixed anchored to the summary, flipping
+	// above it when there is no room below.
+	var rowMenuGap = 6;
+
+	function positionRowMenu(menu) {
+		var summary = menu.querySelector("summary");
+		var panel = menu.querySelector(":scope > div");
+		if (!(summary instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
+			return;
+		}
+		var rect = summary.getBoundingClientRect();
+		panel.style.position = "fixed";
+		panel.style.right = "auto";
+		panel.style.margin = "0";
+		var left = Math.max(8, rect.right - panel.offsetWidth);
+		var top = rect.bottom + rowMenuGap;
+		if (top + panel.offsetHeight > window.innerHeight - 8 && rect.top - rowMenuGap - panel.offsetHeight > 8) {
+			top = rect.top - rowMenuGap - panel.offsetHeight;
+		}
+		panel.style.left = left + "px";
+		panel.style.top = top + "px";
+	}
+
+	function resetRowMenu(menu) {
+		var panel = menu.querySelector(":scope > div");
+		if (panel instanceof HTMLElement) {
+			panel.removeAttribute("style");
+		}
+	}
+
+	function closeOpenRowMenus() {
+		document.querySelectorAll("details.row-menu[open]").forEach(function (menu) {
+			menu.open = false;
+		});
+	}
+
+	// A fixed panel cannot track the summary through a scroll (the summary may
+	// slide under the card's clip edge), so close instead of repositioning.
+	window.addEventListener("resize", closeOpenRowMenus);
+	document.addEventListener("scroll", closeOpenRowMenus, true);
+
 	document.addEventListener("toggle", function (event) {
 		var menu = event.target;
-		if (!(menu instanceof HTMLDetailsElement) || !menu.open || !menu.matches(menuSelector)) {
+		if (!(menu instanceof HTMLDetailsElement) || !menu.matches(menuSelector)) {
+			return;
+		}
+		if (!menu.open) {
+			resetRowMenu(menu);
 			return;
 		}
 		document.querySelectorAll(menuSelector + "[open]").forEach(function (other) {
@@ -56,6 +103,9 @@
 				other.open = false;
 			}
 		});
+		if (menu.matches("details.row-menu")) {
+			positionRowMenu(menu);
+		}
 	}, true);
 
 	document.addEventListener("click", function (event) {

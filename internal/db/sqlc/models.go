@@ -567,6 +567,26 @@ type RateLimitOverride struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type RealtimeConnectionCapState struct {
+	TenantID         int64
+	Region           string
+	Sustained        int64
+	Ceiling          int64
+	BurstRemainingNs int64
+	LastAssessedAt   pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+type RealtimeConnectionGrant struct {
+	TenantID  int64
+	Region    string
+	HolderID  string
+	Allocated int64
+	Used      int64
+	ExpiresAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type RiverClient struct {
 	ID        string
 	CreatedAt pgtype.Timestamptz

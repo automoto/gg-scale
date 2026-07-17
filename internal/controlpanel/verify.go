@@ -30,12 +30,13 @@ const (
 )
 
 var (
-	errBadVerifyCode       = errors.New("control panel: bad verify code")
-	errVerifyExpired       = errors.New("control panel: verify code expired")
-	errVerifyLocked        = errors.New("control panel: verify attempts exhausted")
-	errVerifyResendTooSoon = errors.New("control panel: resend too soon")
-	errAlreadyVerified     = errors.New("control panel: account already verified")
-	errVerifyAccountLocked = errors.New("control panel: account locked after too many verification attempts")
+	errBadVerifyCode        = errors.New("control panel: bad verify code")
+	errVerifyExpired        = errors.New("control panel: verify code expired")
+	errVerifyLocked         = errors.New("control panel: verify attempts exhausted")
+	errVerifyResendTooSoon  = errors.New("control panel: resend too soon")
+	errAlreadyVerified      = errors.New("control panel: account already verified")
+	errVerifyAccountLocked  = errors.New("control panel: account locked after too many verification attempts")
+	errVerificationDelivery = errors.New("control panel: verification email delivery failed")
 )
 
 // VerifyView is the data rendered by the verification code page.
@@ -173,14 +174,39 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 		return err
 	}
 	if h.mailer != nil && h.cfg.MailFrom != "" {
-		_ = h.mailer.Send(ctx, mailer.Message{
+		if sendErr := h.mailer.Send(ctx, mailer.Message{
 			From:    h.cfg.MailFrom,
 			To:      []string{email},
 			Subject: verifyCodeSubject,
 			Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
-		})
+		}); sendErr != nil {
+			restoreErr := h.restoreControlPanelVerification(ctx, state, codeHash)
+			deliveryErr := fmt.Errorf("%w: %v", errVerificationDelivery, sendErr)
+			if restoreErr != nil {
+				return errors.Join(deliveryErr, fmt.Errorf("restore verification state: %w", restoreErr))
+			}
+			return deliveryErr
+		}
 	}
 	return nil
+}
+
+func (h *Handler) restoreControlPanelVerification(ctx context.Context, state sqlcgen.GetControlPanelUserVerificationStateRow, expectedCodeHash []byte) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).RestoreControlPanelUserVerificationCode(ctx, sqlcgen.RestoreControlPanelUserVerificationCodeParams{
+			PreviousCodeHash:   state.EmailVerificationCodeHash,
+			PreviousCodeSalt:   state.EmailVerificationSalt,
+			PreviousExpiresAt:  state.EmailVerificationExpiresAt,
+			PreviousAttempts:   state.EmailVerificationAttempts,
+			PreviousLastSentAt: state.EmailVerificationLastSentAt,
+			ID:                 state.ID,
+			ExpectedCodeHash:   expectedCodeHash,
+		})
+	})
+}
+
+func verificationDeliveryUnavailable(w http.ResponseWriter) {
+	http.Error(w, "verification email is temporarily unavailable; try again", http.StatusServiceUnavailable)
 }
 
 func (h *Handler) fetchControlPanelVerifyState(ctx context.Context, userID int64) (sqlcgen.GetControlPanelUserVerificationStateRow, error) {
@@ -337,6 +363,10 @@ func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errVerifyAccountLocked):
 		w.WriteHeader(http.StatusTooManyRequests)
 		webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Error: "This account is locked after too many verification attempts. Contact support to unlock."}))
+		return
+	case errors.Is(err, errVerificationDelivery):
+		slog.ErrorContext(r.Context(), "control panel verify resend delivery", "err", err)
+		verificationDeliveryUnavailable(w)
 		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "control panel verify resend", "err", err)

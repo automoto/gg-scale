@@ -22,7 +22,8 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ggscale/ggscale/internal/auth"
-	cachebuild "github.com/ggscale/ggscale/internal/cache/build"
+	"github.com/ggscale/ggscale/internal/cache/instrument"
+	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
@@ -188,19 +189,10 @@ func run() error {
 		return err
 	}
 
-	store, err := cachebuild.New(ctx, cachebuild.Config{
-		Backend:             cfg.CacheBackend,
-		OlricBindAddr:       cfg.CacheOlricBindAddr,
-		OlricBindPort:       cfg.CacheOlricBindPort,
-		OlricMemberlistAddr: cfg.CacheOlricMemberlistAddr,
-		OlricMemberlistPort: cfg.CacheOlricMemberlistPort,
-		OlricPeers:          cfg.CacheOlricPeers,
-		OlricReplicaCount:   cfg.CacheOlricReplicaCount,
-		Registry:            registry,
-	})
-	if err != nil {
-		return err
-	}
+	// Cacheable reads and request token buckets are deliberately process-local.
+	// Shared correctness lives in PostgreSQL; no app request depends on a
+	// distributed cache service.
+	store := instrument.New(memory.New(), registry)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -217,6 +209,14 @@ func run() error {
 
 	appPool := db.NewPoolWithTimeout(pool, cfg.DBStatementTimeout)
 	observability.RegisterPoolStats(registry, "primary", appPool.Stat)
+	tenantCap := ratelimit.NewPostgresConnectionCap(appPool, cfg.AppRegion, registry)
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if closeErr := tenantCap.Close(shutdownCtx); closeErr != nil {
+			logger.Warn("realtime connection-cap shutdown failed", "error", closeErr)
+		}
+	}()
 
 	// Read pool: a distinct replica when DB_READ_URL is set, otherwise an alias
 	// of the primary so every host runs identical code (only replica-adjacent
@@ -376,6 +376,7 @@ func run() error {
 		Hub:                           hub,
 		RealtimeMaxPerTenant:          cfg.RealtimeMaxPerTenant,
 		RealtimeMaxPerPlayer:          cfg.RealtimeMaxPerPlayer,
+		TenantConnectionCap:           tenantCap,
 		Matchmaker:                    mmQueue,
 		MatchmakerMaxTicketsPerPlayer: cfg.MatchmakerMaxTicketsPerPlayer,
 		MatchmakerTicketTTL:           cfg.MatchmakerTicketTTL,
@@ -475,7 +476,7 @@ type queryRejectCounter struct{ m *observability.Metrics }
 
 func (c queryRejectCounter) Inc() { c.m.MatchmakerQueryReject() }
 
-// startRiverJobs boots the River client (periodic game-session/invite GC) and
+// startRiverJobs boots the River client and its periodic maintenance jobs, then
 // returns a stop function, or nil if River couldn't start. River runs under
 // the app DB role via the pool's SET ROLE; its tables are granted in migration
 // 0055. Failures are logged and swallowed so a River problem never blocks boot.
@@ -483,6 +484,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewConnectionGrantGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool, matchReleaser))
 	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))
 
@@ -501,6 +503,11 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 			river.NewPeriodicJob(
 				river.PeriodicInterval(24*time.Hour),
 				func() (river.JobArgs, *river.InsertOpts) { return jobs.TrustedDeviceGCArgs{}, nil },
+				&river.PeriodicJobOpts{RunOnStart: true},
+			),
+			river.NewPeriodicJob(
+				river.PeriodicInterval(time.Hour),
+				func() (river.JobArgs, *river.InsertOpts) { return jobs.ConnectionGrantGCArgs{}, nil },
 				&river.PeriodicJobOpts{RunOnStart: true},
 			),
 			river.NewPeriodicJob(

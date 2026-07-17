@@ -1,5 +1,5 @@
 .PHONY: help build fmt test test-integration test-plugins e2e e2e-docker e2e-agones \
-	lint vulncheck test-vulncheck-wrapper check sqlc-gen templ-generate openapi \
+	lint check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-fleet-docker down-fleet-docker \
@@ -59,15 +59,7 @@ test-plugins: ## Plugin subprocess integration test in isolation
 lint: ## golangci-lint
 	golangci-lint run
 
-# Wrapper suppresses the accepted-vuln allowlist in scripts/govulncheck.sh.
-# Requires govulncheck and jq on $PATH.
-vulncheck: ## govulncheck with the accepted-vuln allowlist
-	@bash scripts/govulncheck.sh
-
-test-vulncheck-wrapper: ## Deterministic govulncheck wrapper protocol tests
-	@bash scripts/govulncheck_test.sh
-
-check: lint test test-vulncheck-wrapper ## Local CI mirror: lint + unit tests
+check: lint test ## Local CI mirror: lint + unit tests
 
 # ─── Codegen ────────────────────────────────────────────────────────────
 
@@ -107,7 +99,7 @@ seed: ## Seed dev data (destructive: -force)
 
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
-up: preflight ## Basic stack: server + Postgres + MailHog
+up: preflight ## Basic stack: server + Postgres + Mailpit
 	docker compose up -d --build --wait
 
 down: ## Stop the basic stack

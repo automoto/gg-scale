@@ -35,6 +35,16 @@ func TestHandlerServesFonts(t *testing.T) {
 	assert.NotZero(t, rec.Body.Len())
 }
 
+func TestHandlerServesVersionedFaviconWithSecurityHeaders(t *testing.T) {
+	rec := get(t, "/favicon.svg?v=ignored")
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "image/svg+xml")
+	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
+	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
+	assert.True(t, strings.HasPrefix(webassets.URL("favicon.svg"), "/v1/assets/favicon.svg?v="))
+}
+
 func TestHandlerRejectsUnknownAsset(t *testing.T) {
 	rec := get(t, "/does-not-exist.css")
 	assert.Equal(t, http.StatusNotFound, rec.Code)

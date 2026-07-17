@@ -121,6 +121,9 @@ func (c *Config) checkProductionPosture() error {
 	if !c.IsProduction() {
 		return nil
 	}
+	if c.AppRegion == "" || c.AppRegion == "local" {
+		return fmt.Errorf("APP_REGION must be set to an explicit deployment region in production")
+	}
 	migrateURL := strings.TrimSpace(c.DBMigrateURL)
 	if migrateURL == "" {
 		return fmt.Errorf("DB_MIGRATE_URL must be set in production")
@@ -250,7 +253,6 @@ func (c *Config) checkFields() error {
 		{"MATCHMAKER_WORKER_COUNT", int64(c.MatchmakerWorkerCount)},
 		{"DB_MAX_CONNS", int64(c.DBMaxConns)},
 		{"STORAGE_MAX_VALUE_BYTES", c.StorageMaxValueBytes},
-		{"CACHE_OLRIC_REPLICA_COUNT", int64(c.CacheOlricReplicaCount)},
 	} {
 		if n.val <= 0 {
 			return fmt.Errorf("%s %d: must be a positive integer", n.name, n.val)
@@ -280,11 +282,8 @@ func (c *Config) checkFields() error {
 	if c.RelayUDPPort <= 0 || c.RelayUDPPort > 65535 {
 		return fmt.Errorf("RELAY_UDP_PORT %d: must be 1..65535", c.RelayUDPPort)
 	}
-
-	switch c.CacheBackend {
-	case "memory", "olric":
-	default:
-		return fmt.Errorf("CACHE_BACKEND %q: must be one of memory|olric", c.CacheBackend)
+	if c.AppRegion == "" || strings.TrimSpace(c.AppRegion) != c.AppRegion || len(c.AppRegion) > 64 {
+		return fmt.Errorf("APP_REGION %q: must be 1..64 characters with no surrounding whitespace", c.AppRegion)
 	}
 
 	switch c.SMTPTLS {

@@ -142,7 +142,7 @@ func hardCap(n int64) ratelimit.CapLimits {
 
 func TestCacheConnectionCap_acquire_within_limit_succeeds(t *testing.T) {
 	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
-	dec, err := cap.Acquire(context.Background(), ratelimit.ConnectionCapKey(1001), hardCap(5))
+	dec, err := cap.Acquire(context.Background(), 1001, hardCap(5))
 
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed)
@@ -151,15 +151,15 @@ func TestCacheConnectionCap_acquire_within_limit_succeeds(t *testing.T) {
 
 func TestCacheConnectionCap_acquire_at_limit_rejects(t *testing.T) {
 	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
-	key := ratelimit.ConnectionCapKey(1002)
+	tenantID := int64(1002)
 
 	for i := 0; i < 5; i++ {
-		dec, err := cap.Acquire(context.Background(), key, hardCap(5))
+		dec, err := cap.Acquire(context.Background(), tenantID, hardCap(5))
 		require.NoError(t, err)
 		require.True(t, dec.Allowed)
 	}
 
-	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
+	dec, err := cap.Acquire(context.Background(), tenantID, hardCap(5))
 	require.NoError(t, err)
 	assert.False(t, dec.Allowed)
 	assert.Equal(t, int64(5), dec.Current, "counter holds at the limit, not 6")
@@ -167,19 +167,19 @@ func TestCacheConnectionCap_acquire_at_limit_rejects(t *testing.T) {
 
 func TestCacheConnectionCap_release_frees_a_slot(t *testing.T) {
 	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
-	key := ratelimit.ConnectionCapKey(1003)
+	tenantID := int64(1003)
 
 	for i := 0; i < 3; i++ {
-		_, err := cap.Acquire(context.Background(), key, hardCap(3))
+		_, err := cap.Acquire(context.Background(), tenantID, hardCap(3))
 		require.NoError(t, err)
 	}
-	dec, err := cap.Acquire(context.Background(), key, hardCap(3))
+	dec, err := cap.Acquire(context.Background(), tenantID, hardCap(3))
 	require.NoError(t, err)
 	require.False(t, dec.Allowed, "fourth connection over limit is rejected")
 
-	require.NoError(t, cap.Release(context.Background(), key))
+	require.NoError(t, cap.Release(context.Background(), tenantID))
 
-	dec, err = cap.Acquire(context.Background(), key, hardCap(3))
+	dec, err = cap.Acquire(context.Background(), tenantID, hardCap(3))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed, "after release a new connection fits")
 	assert.Equal(t, int64(3), dec.Current)
@@ -187,49 +187,31 @@ func TestCacheConnectionCap_release_frees_a_slot(t *testing.T) {
 
 func TestCacheConnectionCap_isolates_counts_by_key(t *testing.T) {
 	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
-	keyA := ratelimit.ConnectionCapKey(2001)
-	keyB := ratelimit.ConnectionCapKey(2002)
+	tenantA := int64(2001)
+	tenantB := int64(2002)
 
 	for i := 0; i < 5; i++ {
-		_, err := cap.Acquire(context.Background(), keyA, hardCap(5))
+		_, err := cap.Acquire(context.Background(), tenantA, hardCap(5))
 		require.NoError(t, err)
 	}
-	dec, err := cap.Acquire(context.Background(), keyA, hardCap(5))
+	dec, err := cap.Acquire(context.Background(), tenantA, hardCap(5))
 	require.NoError(t, err)
 	require.False(t, dec.Allowed)
 
-	dec, err = cap.Acquire(context.Background(), keyB, hardCap(5))
+	dec, err = cap.Acquire(context.Background(), tenantB, hardCap(5))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed, "tenant B's counter is independent of A's")
 	assert.Equal(t, int64(1), dec.Current)
 }
 
-func TestCacheConnectionCap_refresh_keeps_counter_alive(t *testing.T) {
-	store := memory.New()
-	cap := ratelimit.NewCacheConnectionCap(store, nil)
-	key := ratelimit.ConnectionCapKey(3001)
-
-	_, err := cap.Acquire(context.Background(), key, hardCap(5))
-	require.NoError(t, err)
-
-	for i := 0; i < 3; i++ {
-		require.NoError(t, cap.Refresh(context.Background(), key))
-	}
-
-	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
-	require.NoError(t, err)
-	assert.True(t, dec.Allowed)
-	assert.Equal(t, int64(2), dec.Current, "counter survived the refresh sequence")
-}
-
 func TestCacheConnectionCap_release_clamps_at_zero(t *testing.T) {
 	cap := ratelimit.NewCacheConnectionCap(memory.New(), nil)
-	key := ratelimit.ConnectionCapKey(4001)
+	tenantID := int64(4001)
 
-	require.NoError(t, cap.Release(context.Background(), key))
-	require.NoError(t, cap.Release(context.Background(), key))
+	require.NoError(t, cap.Release(context.Background(), tenantID))
+	require.NoError(t, cap.Release(context.Background(), tenantID))
 
-	dec, err := cap.Acquire(context.Background(), key, hardCap(5))
+	dec, err := cap.Acquire(context.Background(), tenantID, hardCap(5))
 	require.NoError(t, err)
 	assert.True(t, dec.Allowed)
 	assert.Equal(t, int64(1), dec.Current, "double-release on empty must not push the counter negative")

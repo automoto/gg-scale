@@ -21,15 +21,7 @@ const CloseCodeTenantConnectionCap = 1013
 // Phase-2 WebSocket handler will send alongside CloseCodeTenantConnectionCap.
 const CloseReasonTenantConnectionCap = "tenant_connection_cap"
 
-// ConnectionCapIdleTTL is how long an idle counter survives without any
-// Acquire/Refresh activity. Long-lived holders must call Refresh from a
-// heartbeat goroutine to keep the counter alive past this window.
-const ConnectionCapIdleTTL = 6 * time.Hour
-
-// ConnectionCapHeartbeat is the recommended interval for callers to invoke
-// Refresh on each held slot. Comfortably under ConnectionCapIdleTTL with
-// margin for one missed tick.
-const ConnectionCapHeartbeat = 30 * time.Minute
+const cacheConnectionCapTTL = 6 * time.Hour
 
 // ConnectionBurstBudget is how much full-2× wall time a tenant may sustain
 // above its sustained cap before the burst bucket clamps it back. Reconnect
@@ -68,8 +60,9 @@ func ConnectionCapForClass(t tenant.Tier) CapLimits {
 // Reject reasons distinguish which wall a connection hit, so operators can see
 // whether tenants are camping at the ceiling or burning their burst budget.
 const (
-	CapRejectCeiling = "ceiling"
-	CapRejectBudget  = "budget"
+	CapRejectCeiling     = "ceiling"
+	CapRejectBudget      = "budget"
+	CapRejectUnavailable = "unavailable"
 )
 
 // CapDecision is the outcome of a single Acquire call.
@@ -78,24 +71,23 @@ type CapDecision struct {
 	// Current is the post-decision counter value. Useful for logging and
 	// emitting "X-Open-Connections" headers.
 	Current int64
-	// Reason is set on rejection to CapRejectCeiling or CapRejectBudget.
+	// Reason is set on rejection to CapRejectCeiling, CapRejectBudget, or
+	// CapRejectUnavailable.
 	Reason string
+	// Emergency reports an admission made from the bounded process-local
+	// allowance while the shared grant store was unavailable.
+	Emergency bool
 }
 
-// ConnectionCap is the interface the Phase-2 WebSocket handler will call
-// before upgrading. Acquire reserves one slot under key (rejecting at the
-// per-tenant cap); Release decrements on close; Refresh is called by the
-// caller's heartbeat to keep the counter from expiring under long-lived
-// connections.
+// ConnectionCap is the interface the WebSocket handler calls before upgrade.
+// Implementations keep long-lived reservation renewal out of socket heartbeats.
 type ConnectionCap interface {
-	Acquire(ctx context.Context, key string, caps CapLimits) (CapDecision, error)
-	Release(ctx context.Context, key string) error
-	Refresh(ctx context.Context, key string) error
+	Acquire(ctx context.Context, tenantID int64, caps CapLimits) (CapDecision, error)
+	Release(ctx context.Context, tenantID int64) error
 }
 
-// CacheConnectionCap implements ConnectionCap on a cache.Store using the burst
-// slot primitive. Counter state lives in the burst-slots DMap of the configured
-// backend.
+// CacheConnectionCap is the single-process ConnectionCap implementation used
+// by focused tests. Managed production uses LeasedConnectionCap.
 type CacheConnectionCap struct {
 	store      cache.Store
 	rejections *prometheus.CounterVec
@@ -115,11 +107,11 @@ func NewCacheConnectionCap(store cache.Store, reg prometheus.Registerer) *CacheC
 	return c
 }
 
-// Acquire reserves one slot under key within the class burst envelope. On
-// success the caller must invoke Release exactly once and Refresh periodically
-// (every ConnectionCapHeartbeat) until close.
-func (c *CacheConnectionCap) Acquire(ctx context.Context, key string, caps CapLimits) (CapDecision, error) {
-	ok, current, err := c.store.AcquireSlotBurst(ctx, key, caps.Sustained, caps.Ceiling, ConnectionBurstBudget, ConnectionCapIdleTTL)
+// Acquire reserves one slot within the class burst envelope. On success the
+// caller must invoke Release exactly once.
+func (c *CacheConnectionCap) Acquire(ctx context.Context, tenantID int64, caps CapLimits) (CapDecision, error) {
+	key := ConnectionCapKey(tenantID)
+	ok, current, err := c.store.AcquireSlotBurst(ctx, key, caps.Sustained, caps.Ceiling, ConnectionBurstBudget, cacheConnectionCapTTL)
 	if err != nil {
 		return CapDecision{}, fmt.Errorf("connection cap acquire: %w", err)
 	}
@@ -138,18 +130,10 @@ func (c *CacheConnectionCap) Acquire(ctx context.Context, key string, caps CapLi
 
 // Release decrements the counter under key, clamped at zero so a spurious
 // double-release cannot drive the counter negative.
-func (c *CacheConnectionCap) Release(ctx context.Context, key string) error {
+func (c *CacheConnectionCap) Release(ctx context.Context, tenantID int64) error {
+	key := ConnectionCapKey(tenantID)
 	if err := c.store.ReleaseSlotBurst(ctx, key); err != nil {
 		return fmt.Errorf("connection cap release: %w", err)
-	}
-	return nil
-}
-
-// Refresh extends the counter's idle TTL. Safe to call on every heartbeat
-// from any active connection for the tenant; idempotent.
-func (c *CacheConnectionCap) Refresh(ctx context.Context, key string) error {
-	if err := c.store.RefreshSlotBurst(ctx, key, ConnectionCapIdleTTL); err != nil {
-		return fmt.Errorf("connection cap refresh: %w", err)
 	}
 	return nil
 }

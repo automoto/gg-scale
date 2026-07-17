@@ -46,7 +46,7 @@ type Options struct {
 	// uses 30s in production; tests pass a large value to disable.
 	HeartbeatInterval time.Duration
 
-	// SlotTTL bounds how long a per-tenant slot survives without
+	// SlotTTL bounds how long a per-player slot survives without
 	// refresh. Defaults to HeartbeatInterval*3 (so two missed refreshes
 	// before reap).
 	SlotTTL time.Duration
@@ -88,7 +88,7 @@ func ServeWS(opts Options) http.HandlerFunc {
 			return
 		}
 
-		var refreshSlots func(context.Context)
+		var refreshPlayerSlot func(context.Context)
 
 		// Per-player cap first: a single misbehaving player can't drain
 		// the per-tenant budget for everyone else. The order matters —
@@ -112,41 +112,38 @@ func ServeWS(opts Options) http.HandlerFunc {
 					logger.Warn("realtime: ReleaseSlot (player) failed", "err", rerr, "tenant_id", tenantID, "player_id", playerID)
 				}
 			}()
-			refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
+			refreshPlayerSlot = appendRefresh(refreshPlayerSlot, func(ctx context.Context) {
 				if rerr := opts.Cache.RefreshSlot(ctx, userKey, slotTTL); rerr != nil {
 					logger.Warn("realtime: RefreshSlot (player) failed", "err", rerr, "tenant_id", tenantID, "player_id", playerID)
 				}
 			})
 		}
 
-		// Per-tenant CCU cap: tier-aware burst envelope, enforced in the shared
-		// cache so it is one global limit across app hosts (approximate on the
-		// distributed backend — CCU caps are guardrails, not exact promises).
+		// Per-tenant CCU cap: tier-aware regional grants are leased from
+		// PostgreSQL and consumed from process memory on the hot path.
 		if opts.TenantCap != nil {
 			caps := tenantCapLimits(tenantTierFromContext(r.Context()), opts.EnvMaxPerTenant)
-			capKey := ratelimit.ConnectionCapKey(tenantID)
-			decision, capErr := opts.TenantCap.Acquire(r.Context(), capKey, caps)
+			decision, capErr := opts.TenantCap.Acquire(r.Context(), tenantID, caps)
 			switch {
 			case capErr != nil:
-				// Fail open: a cache blip must not drop players. Log + carry on
-				// without a tenant slot (nothing to release or refresh).
-				logger.Error("realtime: tenant cap acquire failed; allowing connection (fail-open)",
+				// The leased cap owns bounded emergency behavior. An error here is
+				// not a routine grant-sync failure, so reject instead of failing open
+				// without a reservation.
+				logger.Error("realtime: tenant cap acquire failed",
 					"err", capErr, "tenant_id", tenantID)
+				w.Header().Set("Retry-After", strconv.Itoa(int(tenantCapRetryAfter.Seconds())))
+				http.Error(w, "connection capacity unavailable", http.StatusServiceUnavailable)
+				return
 			case !decision.Allowed:
 				w.Header().Set("Retry-After", strconv.Itoa(int(tenantCapRetryAfter.Seconds())))
 				http.Error(w, "too many connections", http.StatusServiceUnavailable)
 				return
 			default:
 				defer func() {
-					if rerr := opts.TenantCap.Release(context.Background(), capKey); rerr != nil {
+					if rerr := opts.TenantCap.Release(context.Background(), tenantID); rerr != nil {
 						logger.Warn("realtime: tenant cap release failed", "err", rerr, "tenant_id", tenantID)
 					}
 				}()
-				refreshSlots = appendRefresh(refreshSlots, func(ctx context.Context) {
-					if rerr := opts.TenantCap.Refresh(ctx, capKey); rerr != nil {
-						logger.Warn("realtime: tenant cap refresh failed", "err", rerr, "tenant_id", tenantID)
-					}
-				})
 			}
 		}
 
@@ -162,7 +159,7 @@ func ServeWS(opts Options) http.HandlerFunc {
 		unregister := opts.Hub.Register(tenantID, playerID, writer)
 		defer unregister()
 
-		runConnection(r.Context(), conn, heartbeat, refreshSlots, logger)
+		runConnection(r.Context(), conn, heartbeat, refreshPlayerSlot, logger)
 	}
 }
 

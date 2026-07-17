@@ -14,6 +14,10 @@ import "time"
 // Config holds runtime configuration loaded from the environment.
 type Config struct {
 	HTTPAddr string `env:"HTTP_ADDR" envDefault:":8080"`
+	// AppRegion separates regional realtime connection-cap grants. All app
+	// instances in one load-balancer pool use the same value; different regions
+	// must use different values.
+	AppRegion string `env:"APP_REGION" envDefault:"local"`
 
 	// HTTPRequestTimeout bounds how long a non-streaming request may run before
 	// the middleware cancels its context and returns 503 + Retry-After. It must
@@ -170,32 +174,6 @@ type Config struct {
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`
 
-	// Cache backend selection. CacheBackend is one of "memory" or "olric".
-	// "memory" is the default and is appropriate for single-process
-	// self-host. "olric" links every app process into an embedded Olric
-	// cluster (or, with non-empty CacheOlricPeers, a multi-node cluster
-	// joined via memberlist gossip).
-	CacheBackend string `env:"CACHE_BACKEND" envDefault:"memory"`
-	// CacheOlricBindAddr is the Olric-protocol bind address. Default
-	// "127.0.0.1". Only consulted when CacheBackend is "olric".
-	CacheOlricBindAddr string `env:"CACHE_OLRIC_BIND_ADDR" envDefault:"127.0.0.1"`
-	// CacheOlricBindPort is the Olric-protocol port. 0 picks an ephemeral
-	// port. Default 3320.
-	CacheOlricBindPort int `env:"CACHE_OLRIC_BIND_PORT" envDefault:"3320"`
-	// CacheOlricMemberlistAddr is the gossip bind address. Default
-	// matches CacheOlricBindAddr.
-	CacheOlricMemberlistAddr string `env:"CACHE_OLRIC_MEMBERLIST_ADDR" envDefault:"127.0.0.1"`
-	// CacheOlricMemberlistPort is the gossip port. 0 picks an ephemeral
-	// port. Default 3322.
-	CacheOlricMemberlistPort int `env:"CACHE_OLRIC_MEMBERLIST_PORT" envDefault:"3322"`
-	// CacheOlricPeers is the comma-separated host:port list of memberlist
-	// endpoints to join. Empty means a cluster of one.
-	CacheOlricPeers []string `env:"CACHE_OLRIC_PEERS"`
-	// CacheOlricReplicaCount controls how many members retain each distributed
-	// cache entry. Keep one for a single-node cache; use two or more in a
-	// multi-node cluster so live limiter/cap state survives one app restart.
-	CacheOlricReplicaCount int `env:"CACHE_OLRIC_REPLICA_COUNT" envDefault:"1"`
-
 	// CORSAllowedOrigins is the comma-separated list of origins permitted by
 	// the API router. Empty in dev allows "*"; in production an empty list
 	// is rejected by Validate.
@@ -269,10 +247,10 @@ type Config struct {
 	// External providers register via mailer.Register in their init().
 	MailProvider string `env:"MAIL_PROVIDER" envDefault:"smtp"`
 	// SMTPAddr is the SMTP server address (host:port). Default "localhost:1025"
-	// matches MailHog in the dev compose stack.
+	// matches Mailpit in the dev compose stack.
 	SMTPAddr string `env:"SMTP_ADDR" envDefault:"localhost:1025"`
 	// SMTPUser is the SMTP username. Leave empty for unauthenticated relays
-	// (e.g. MailHog in dev).
+	// (e.g. Mailpit in dev).
 	SMTPUser string `env:"SMTP_USER"`
 	// SMTPPassword is the SMTP password. Unused when SMTPUser is empty.
 	SMTPPassword string `env:"SMTP_PASSWORD"`

@@ -4,9 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
@@ -37,21 +35,14 @@ func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Ha
 	}
 }
 
-func mountRealtimeRoutes(r chi.Router, d Deps, reg prometheus.Registerer) {
+func mountRealtimeRoutes(r chi.Router, d Deps) {
 	if d.Hub == nil {
 		return
-	}
-	// The per-tenant CCU cap needs a shared counter; with no cache it is
-	// disabled (per-player still works in-process). At scale run CACHE_BACKEND=
-	// olric so the count is global across app hosts rather than per-host.
-	var tenantCap ratelimit.ConnectionCap
-	if d.Cache != nil {
-		tenantCap = ratelimit.NewCacheConnectionCap(d.Cache, reg)
 	}
 	r.Get("/ws", realtime.ServeWS(realtime.Options{
 		Hub:             d.Hub,
 		Cache:           d.Cache,
-		TenantCap:       tenantCap,
+		TenantCap:       d.TenantConnectionCap,
 		EnvMaxPerTenant: d.RealtimeMaxPerTenant,
 		MaxPerPlayer:    d.RealtimeMaxPerPlayer,
 	}))

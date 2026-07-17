@@ -38,7 +38,15 @@ func baseHead(title string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</title><meta name=\"htmx-config\" content=\"{&#34;includeIndicatorStyles&#34;:false,&#34;allowEval&#34;:false,&#34;allowScriptTags&#34;:false,&#34;selfRequestsOnly&#34;:true,&#34;responseHandling&#34;:[{&#34;code&#34;:&#34;204&#34;,&#34;swap&#34;:false},{&#34;code&#34;:&#34;[23]..&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;422&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;409&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;[45]..&#34;,&#34;swap&#34;:false,&#34;error&#34;:true}]}\"><link rel=\"stylesheet\" href=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(webassets.URL("favicon.svg")))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><meta name=\"htmx-config\" content=\"{&#34;includeIndicatorStyles&#34;:false,&#34;allowEval&#34;:false,&#34;allowScriptTags&#34;:false,&#34;selfRequestsOnly&#34;:true,&#34;responseHandling&#34;:[{&#34;code&#34;:&#34;204&#34;,&#34;swap&#34;:false},{&#34;code&#34;:&#34;[23]..&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;422&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;409&#34;,&#34;swap&#34;:true},{&#34;code&#34;:&#34;[45]..&#34;,&#34;swap&#34;:false,&#34;error&#34;:true}]}\"><link rel=\"stylesheet\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

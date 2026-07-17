@@ -70,6 +70,13 @@ func Handler() http.Handler {
 // through it too, so the traversal guard and cache policy live in one place.
 func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string) {
 	name := chi.URLParam(r, "*")
+	ServeAsset(w, r, fsys, root, name)
+}
+
+// ServeAsset writes a named embedded asset with the shared immutable cache and
+// nosniff policy. It is also used by the legacy /favicon.ico route, whose URL
+// does not carry chi's wildcard parameter.
+func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name string) {
 	if name == "" || strings.Contains(name, "..") {
 		http.NotFound(w, r)
 		return
@@ -77,4 +84,11 @@ func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string) {
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFileFS(w, r, fsys, root+"/"+name)
+}
+
+// FaviconHandler serves the SVG icon at the conventional legacy URL.
+func FaviconHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ServeAsset(w, r, staticFS, "static", "favicon.svg")
+	}
 }

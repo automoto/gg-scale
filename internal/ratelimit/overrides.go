@@ -133,8 +133,8 @@ type OverrideInvalidator interface {
 // Freshness has two layers: the write path calls Invalidate to drop a tenant's
 // entries immediately on the process that served the write, and the TTL bounds
 // staleness everywhere else. The cache is per-process with no cross-node
-// invalidation, so in a multi-process (olric) deployment other nodes still
-// converge within DefaultOverrideCacheTTL rather than instantly.
+// invalidation, so other app instances converge within DefaultOverrideCacheTTL
+// rather than instantly.
 type CachedOverrideStore struct {
 	inner OverrideStore
 	ttl   time.Duration

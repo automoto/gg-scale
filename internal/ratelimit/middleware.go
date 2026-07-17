@@ -1,11 +1,8 @@
 // Package ratelimit applies a per-API-key token bucket to /v1/* requests.
 //
-// Tier limits are static defaults from LimitsForTier; the bucket itself
-// lives in cache.Store (see CacheLimiter). With CACHE_BACKEND=memory the
-// bucket is per-process; with CACHE_BACKEND=olric it is shared across
-// the regional cluster of app processes. The middleware is meant to be
-// mounted after internal/tenant.Middleware which installs the APIKey
-// in the request context.
+// Tier limits are static defaults from LimitsForTier; the process-local bucket
+// lives in cache.Store (see CacheLimiter). The middleware is mounted after internal/tenant.Middleware
+// injects the APIKey in the request context.
 //
 // Failure modes:
 //   - 429 Too Many Requests: bucket empty; Retry-After (seconds, rounded

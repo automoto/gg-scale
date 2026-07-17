@@ -72,6 +72,19 @@ SET email_verification_code_hash    = sqlc.arg(code_hash),
     updated_at                      = now()
 WHERE id = sqlc.arg(id);
 
+-- name: RestorePlayerAccountVerificationCode :exec
+-- Undo a code reservation only when it is still the code whose delivery
+-- failed. A concurrent request that installed a newer code must win.
+UPDATE player_accounts
+SET email_verification_code_hash    = sqlc.narg(previous_code_hash)::bytea,
+    email_verification_salt         = sqlc.narg(previous_code_salt)::bytea,
+    email_verification_expires_at   = sqlc.narg(previous_expires_at)::timestamptz,
+    email_verification_attempts     = sqlc.arg(previous_attempts),
+    email_verification_last_sent_at = sqlc.narg(previous_last_sent_at)::timestamptz,
+    updated_at                      = now()
+WHERE id = sqlc.arg(id)
+  AND email_verification_code_hash = sqlc.arg(expected_code_hash)::bytea;
+
 -- name: ReservePlayerAccountVerifyAttempt :one
 -- Atomic check-and-bump; returns 0 rows when already at the per-code cap.
 UPDATE player_accounts

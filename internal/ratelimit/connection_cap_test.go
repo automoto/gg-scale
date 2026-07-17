@@ -51,7 +51,7 @@ func TestCacheConnectionCap_admits_burst_up_to_ceiling(t *testing.T) {
 
 	// With a full budget at one instant, connections up to the ceiling admit.
 	for i := 0; i < 6; i++ {
-		d, err := cap.Acquire(context.Background(), "wsconn:1", caps)
+		d, err := cap.Acquire(context.Background(), 1, caps)
 		require.NoError(t, err)
 		assert.True(t, d.Allowed, "connection %d within burst envelope", i+1)
 	}
@@ -65,12 +65,12 @@ func TestCacheConnectionCap_ceiling_rejects_with_reason(t *testing.T) {
 
 	// Fill to the ceiling in one instant (budget is full, so burst is allowed).
 	for i := 0; i < 4; i++ {
-		d, err := cap.Acquire(context.Background(), "wsconn:2", caps)
+		d, err := cap.Acquire(context.Background(), 2, caps)
 		require.NoError(t, err)
 		require.True(t, d.Allowed)
 	}
 	// The next connection hits the hard ceiling.
-	d, err := cap.Acquire(context.Background(), "wsconn:2", caps)
+	d, err := cap.Acquire(context.Background(), 2, caps)
 	require.NoError(t, err)
 	assert.False(t, d.Allowed)
 	assert.Equal(t, ratelimit.CapRejectCeiling, d.Reason)
@@ -81,7 +81,7 @@ type deterministicCapRejectionStore struct {
 }
 
 func (deterministicCapRejectionStore) AcquireSlotBurst(_ context.Context, key string, _, ceiling int64, _, _ time.Duration) (bool, int64, error) {
-	if key == "ceiling" {
+	if key == ratelimit.ConnectionCapKey(1) {
 		return false, ceiling, nil
 	}
 	return false, ceiling - 1, nil
@@ -92,9 +92,9 @@ func TestCacheConnectionCap_rejection_metrics_distinguish_ceiling_and_budget_wit
 	cap := ratelimit.NewCacheConnectionCap(deterministicCapRejectionStore{}, reg)
 	caps := ratelimit.CapLimits{Sustained: 2, Ceiling: 4}
 
-	ceiling, err := cap.Acquire(context.Background(), "ceiling", caps)
+	ceiling, err := cap.Acquire(context.Background(), 1, caps)
 	require.NoError(t, err)
-	budget, err := cap.Acquire(context.Background(), "budget", caps)
+	budget, err := cap.Acquire(context.Background(), 2, caps)
 	require.NoError(t, err)
 	assert.Equal(t, ratelimit.CapRejectCeiling, ceiling.Reason)
 	assert.Equal(t, ratelimit.CapRejectBudget, budget.Reason)

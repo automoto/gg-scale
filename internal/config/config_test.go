@@ -32,16 +32,10 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, ":8080", cfg.HTTPAddr)
 	assert.Equal(t, "info", cfg.LogLevel)
 	assert.Equal(t, "dev", cfg.Env)
+	assert.Equal(t, "local", cfg.AppRegion)
 	assert.True(t, cfg.ControlPanelEnabled)
 	assert.Empty(t, cfg.ControlPanelBootstrapTokenFile)
 	assert.False(t, cfg.ControlPanelCookieSecure)
-	assert.Equal(t, "memory", cfg.CacheBackend)
-	assert.Equal(t, "127.0.0.1", cfg.CacheOlricBindAddr)
-	assert.Equal(t, 3320, cfg.CacheOlricBindPort)
-	assert.Equal(t, "127.0.0.1", cfg.CacheOlricMemberlistAddr)
-	assert.Equal(t, 3322, cfg.CacheOlricMemberlistPort)
-	assert.Empty(t, cfg.CacheOlricPeers)
-	assert.Equal(t, 1, cfg.CacheOlricReplicaCount)
 	assert.Empty(t, cfg.TrustedProxyCIDRs)
 	assert.Empty(t, cfg.FleetBackend)
 	assert.False(t, cfg.FeatureFleetEnabled)
@@ -70,6 +64,7 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		{"HTTP_ADDR", ":9090", func(c *config.Config) string { return c.HTTPAddr }},
 		{"LOG_LEVEL", "debug", func(c *config.Config) string { return c.LogLevel }},
 		{"ENV", "staging", func(c *config.Config) string { return c.Env }},
+		{"APP_REGION", "us-east", func(c *config.Config) string { return c.AppRegion }},
 		{"CONTROL_PANEL_DISABLED", "true", func(c *config.Config) string {
 			return strconv.FormatBool(!c.ControlPanelEnabled)
 		}},
@@ -79,9 +74,6 @@ func TestLoad_overrides_defaults_when_vars_set(t *testing.T) {
 		{"CONTROL_PANEL_COOKIE_SECURE", "true", func(c *config.Config) string {
 			return strconv.FormatBool(c.ControlPanelCookieSecure)
 		}},
-		{"CACHE_BACKEND", "olric", func(c *config.Config) string { return c.CacheBackend }},
-		{"CACHE_OLRIC_BIND_ADDR", "0.0.0.0", func(c *config.Config) string { return c.CacheOlricBindAddr }},
-		{"CACHE_OLRIC_REPLICA_COUNT", "2", func(c *config.Config) string { return strconv.Itoa(c.CacheOlricReplicaCount) }},
 		{"TRUSTED_PROXY_HEADER", "CF-Connecting-IP", func(c *config.Config) string { return c.TrustedProxyHeader }},
 	}
 	for _, c := range cases {
@@ -120,25 +112,13 @@ func TestLoad_rejects_invalid_trusted_proxy_cidr(t *testing.T) {
 	assert.Contains(t, err.Error(), "TRUSTED_PROXY_CIDRS")
 }
 
-func TestLoad_rejects_unknown_cache_backend(t *testing.T) {
+func TestLoad_rejects_blank_app_region(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("CACHE_BACKEND", "nope")
+	t.Setenv("APP_REGION", " ")
 
 	_, err := config.Load()
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "CACHE_BACKEND")
-}
-
-func TestLoad_parses_olric_peers_csv(t *testing.T) {
-	clearEnv(t)
-	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	t.Setenv("CACHE_OLRIC_PEERS", "node-1:3322, node-2:3322 ,node-3:3322")
-
-	cfg, err := config.Load()
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{"node-1:3322", "node-2:3322", "node-3:3322"}, cfg.CacheOlricPeers)
+	assert.ErrorContains(t, err, "APP_REGION")
 }
 
 func TestLoad_reads_DATABASE_URL_FILE_when_set(t *testing.T) {
@@ -400,14 +380,11 @@ func parseEnvFileKeys(content string) []string {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "LOG_LEVEL", "ENV",
+		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "APP_REGION", "LOG_LEVEL", "ENV",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
 		"EMAIL_VERIFY_SIGNING_KEY", "EMAIL_VERIFY_SIGNING_KEY_FILE",
 		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",
 		"CONTROL_PANEL_DISABLED", "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", "CONTROL_PANEL_COOKIE_SECURE",
-		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",
-		"CACHE_OLRIC_MEMBERLIST_ADDR", "CACHE_OLRIC_MEMBERLIST_PORT",
-		"CACHE_OLRIC_PEERS", "CACHE_OLRIC_REPLICA_COUNT",
 	} {
 		t.Setenv(k, "")
 	}

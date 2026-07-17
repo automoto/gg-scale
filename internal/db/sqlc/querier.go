@@ -547,6 +547,12 @@ type Querier interface {
 	// Tenant-scoped: maps a set of accounts back to their player in a specific
 	// project, for presence sharing and JSON-API user_id mapping.
 	ResolvePlayersForAccountsInProject(ctx context.Context, arg ResolvePlayersForAccountsInProjectParams) ([]ResolvePlayersForAccountsInProjectRow, error)
+	// Undo a code reservation only when it is still the code whose delivery
+	// failed. A concurrent request that installed a newer code must win.
+	RestoreControlPanelUserVerificationCode(ctx context.Context, arg RestoreControlPanelUserVerificationCodeParams) error
+	// Undo a code reservation only when it is still the code whose delivery
+	// failed. A concurrent request that installed a newer code must win.
+	RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error
 	// Un-claim whatever the claim still holds without penalty: tickets that
 	// didn't fit a group this pass simply go back to waiting.
 	ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error)

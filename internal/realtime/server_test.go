@@ -159,44 +159,38 @@ func TestServeWSRejectsWhenTenantCapExceeded(t *testing.T) {
 	assert.NotEmpty(t, resp.Header.Get("Retry-After"), "rejected client is told when to retry")
 }
 
-func TestServeWSTenantCapFailsOpenOnCacheError(t *testing.T) {
+func TestServeWSTenantCapErrorRejectsWithoutAnUnboundedFailOpen(t *testing.T) {
 	hub := realtime.NewHub()
-	// A cap that always errors stands in for an unavailable cache backend.
+	// The production leased cap handles grant-sync failures with a bounded local
+	// allowance. An unexpected error at this boundary must reject.
 	url, stop := newTestServer(t, hub, realtime.Options{
 		TenantCap:         errCap{},
 		HeartbeatInterval: time.Hour,
 	}, 1, 42)
 	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	conn, _, err := websocket.Dial(ctx, url, nil)
-	require.NoError(t, err, "cap-check error must not block the connection (fail-open)")
-	defer conn.CloseNow()
+	resp, err := http.Get("http" + strings.TrimPrefix(url, "ws"))
+	require.NoError(t, err)
+	defer resp.Body.Close()
 
-	require.Eventually(t, func() bool { return hub.Count() == 1 }, time.Second, 10*time.Millisecond)
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Zero(t, hub.Count())
 }
 
 type trackingCap struct {
 	acquires atomic.Int64
 	releases atomic.Int64
-	refresh  atomic.Int64
 	decision ratelimit.CapDecision
 	err      error
 }
 
-func (c *trackingCap) Acquire(context.Context, string, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
+func (c *trackingCap) Acquire(context.Context, int64, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
 	c.acquires.Add(1)
 	return c.decision, c.err
 }
 
-func (c *trackingCap) Release(context.Context, string) error {
+func (c *trackingCap) Release(context.Context, int64) error {
 	c.releases.Add(1)
-	return nil
-}
-
-func (c *trackingCap) Refresh(context.Context, string) error {
-	c.refresh.Add(1)
 	return nil
 }
 
@@ -269,15 +263,14 @@ func TestServeWSTenantCapErrorDoesNotScheduleUnmatchedRelease(t *testing.T) {
 	}, 1, 42)
 	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	conn, _, err := websocket.Dial(ctx, url, nil)
+	resp, err := http.Get("http" + strings.TrimPrefix(url, "ws"))
 	require.NoError(t, err)
-	require.NoError(t, conn.Close(websocket.StatusNormalClosure, ""))
-	require.Eventually(t, func() bool { return hub.Count() == 0 }, time.Second, 10*time.Millisecond)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+	assert.Zero(t, hub.Count())
 	assert.Equal(t, int64(1), cap.acquires.Load())
 	assert.Zero(t, cap.releases.Load())
-	assert.Zero(t, cap.refresh.Load())
 }
 
 func TestServeWSReleasesTenantCapOnDisconnect(t *testing.T) {
@@ -312,12 +305,10 @@ func TestServeWSReleasesTenantCapOnDisconnect(t *testing.T) {
 	require.Eventually(t, func() bool { return hub.Count() == 0 }, 2*time.Second, 10*time.Millisecond)
 }
 
-// errCap is a ratelimit.ConnectionCap whose Acquire always fails, used to
-// exercise the fail-open path.
+// errCap is a ratelimit.ConnectionCap whose Acquire always fails.
 type errCap struct{}
 
-func (errCap) Acquire(context.Context, string, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
+func (errCap) Acquire(context.Context, int64, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
 	return ratelimit.CapDecision{}, errors.New("cache unavailable")
 }
-func (errCap) Release(context.Context, string) error { return nil }
-func (errCap) Refresh(context.Context, string) error { return nil }
+func (errCap) Release(context.Context, int64) error { return nil }

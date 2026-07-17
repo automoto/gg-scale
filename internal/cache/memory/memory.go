@@ -1,6 +1,5 @@
-// Package memory is the in-process cache.Store backend. Suitable for
-// single-node self-host and as the unit-test backend for handlers that
-// depend on a Store. Multi-node deployments use the olric backend.
+// Package memory implements the process-local cache.Store used by every
+// deployment. Shared coordination belongs in PostgreSQL.
 package memory
 
 import (
@@ -72,9 +71,8 @@ func New() *Store {
 	return s
 }
 
-// janitor sweeps every interval until Close. Two-phase scan (collect keys
-// under the lock, delete in a follow-up critical section) keeps the
-// critical section short even for large maps.
+// janitor sweeps every interval until Close. Sharding bounds each critical
+// section so cleanup does not stop unrelated cache keys.
 func (s *Store) janitor(interval time.Duration) {
 	defer s.wg.Done()
 	t := time.NewTicker(interval)
@@ -91,7 +89,7 @@ func (s *Store) janitor(interval time.Duration) {
 
 // sweep removes:
 //   - kv entries past their expiry
-//   - slot entries whose count is 0 AND expires < now
+//   - slot entries past their expiry (a live holder refreshes before expiry)
 //   - buckets at full capacity that haven't been touched in 10× the
 //     sweep interval (idle bucket: the next request rebuilds it)
 func (s *Store) sweep() {
@@ -107,12 +105,12 @@ func (s *Store) sweep() {
 			}
 		}
 		for k, sl := range sh.slots {
-			if sl.count == 0 && sl.expires.Before(now) {
+			if sl.expires.Before(now) {
 				delete(sh.slots, k)
 			}
 		}
 		for k, st := range sh.burstSlots {
-			if st.Count == 0 && st.Expires.Before(now) {
+			if st.Expires.Before(now) {
 				delete(sh.burstSlots, k)
 			}
 		}
@@ -295,6 +293,7 @@ func (s *Store) Delete(_ context.Context, key string) error {
 
 	delete(sh.buckets, key)
 	delete(sh.slots, key)
+	delete(sh.burstSlots, key)
 	delete(sh.kv, key)
 	return nil
 }

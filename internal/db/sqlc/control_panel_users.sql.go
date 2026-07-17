@@ -747,6 +747,42 @@ func (q *Queries) ReserveControlPanelVerifyAttempt(ctx context.Context, arg Rese
 	return i, err
 }
 
+const restoreControlPanelUserVerificationCode = `-- name: RestoreControlPanelUserVerificationCode :exec
+UPDATE control_panel_users
+SET email_verification_code_hash    = $1::bytea,
+    email_verification_salt         = $2::bytea,
+    email_verification_expires_at   = $3::timestamptz,
+    email_verification_attempts     = $4,
+    email_verification_last_sent_at = $5::timestamptz
+WHERE id = $6
+  AND email_verification_code_hash = $7::bytea
+`
+
+type RestoreControlPanelUserVerificationCodeParams struct {
+	PreviousCodeHash   []byte
+	PreviousCodeSalt   []byte
+	PreviousExpiresAt  pgtype.Timestamptz
+	PreviousAttempts   int32
+	PreviousLastSentAt pgtype.Timestamptz
+	ID                 int64
+	ExpectedCodeHash   []byte
+}
+
+// Undo a code reservation only when it is still the code whose delivery
+// failed. A concurrent request that installed a newer code must win.
+func (q *Queries) RestoreControlPanelUserVerificationCode(ctx context.Context, arg RestoreControlPanelUserVerificationCodeParams) error {
+	_, err := q.db.Exec(ctx, restoreControlPanelUserVerificationCode,
+		arg.PreviousCodeHash,
+		arg.PreviousCodeSalt,
+		arg.PreviousExpiresAt,
+		arg.PreviousAttempts,
+		arg.PreviousLastSentAt,
+		arg.ID,
+		arg.ExpectedCodeHash,
+	)
+	return err
+}
+
 const revokeAllControlPanelSessionsForUser = `-- name: RevokeAllControlPanelSessionsForUser :exec
 UPDATE control_panel_sessions
 SET revoked_at = now()

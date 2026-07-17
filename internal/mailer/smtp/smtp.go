@@ -95,7 +95,7 @@ func (m *smtpMailer) Send(ctx context.Context, msg mailer.Message) error {
 
 // sendSTARTTLSOrPlain dials cleartext then upgrades via STARTTLS when
 // requireTLS is true. With requireTLS=false the connection stays in
-// cleartext (only acceptable for off-network MailHog and other dev relays).
+// cleartext (only acceptable for off-network Mailpit and other dev relays).
 func (m *smtpMailer) sendSTARTTLSOrPlain(ctx context.Context, from string, to []string, body []byte, requireTLS bool) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()

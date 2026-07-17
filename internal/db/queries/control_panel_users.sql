@@ -76,6 +76,18 @@ SET email_verification_code_hash    = sqlc.arg(code_hash),
     email_verification_last_sent_at = now()
 WHERE id = sqlc.arg(id);
 
+-- name: RestoreControlPanelUserVerificationCode :exec
+-- Undo a code reservation only when it is still the code whose delivery
+-- failed. A concurrent request that installed a newer code must win.
+UPDATE control_panel_users
+SET email_verification_code_hash    = sqlc.narg(previous_code_hash)::bytea,
+    email_verification_salt         = sqlc.narg(previous_code_salt)::bytea,
+    email_verification_expires_at   = sqlc.narg(previous_expires_at)::timestamptz,
+    email_verification_attempts     = sqlc.arg(previous_attempts),
+    email_verification_last_sent_at = sqlc.narg(previous_last_sent_at)::timestamptz
+WHERE id = sqlc.arg(id)
+  AND email_verification_code_hash = sqlc.arg(expected_code_hash)::bytea;
+
 -- name: IncrementControlPanelVerificationAttempts :one
 UPDATE control_panel_users
 SET email_verification_attempts = email_verification_attempts + 1

@@ -27,6 +27,7 @@ func TestAccountHomePage_renders_signed_in_header(t *testing.T) {
 	assert.Equal(t, 0, strings.Count(html, `>Account</a>`))
 	assert.Contains(t, html, `action="/v1/players/account/logout"`)
 	assert.Contains(t, html, `<input type="hidden" name="_csrf" value="tok">`)
+	assert.Contains(t, html, `rel="icon" type="image/svg+xml" href="/v1/assets/favicon.svg?v=`)
 }
 
 func TestFriendsPage_uses_header_navigation(t *testing.T) {

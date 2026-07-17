@@ -1,5 +1,5 @@
 // Package mailer sends transactional email. The dev compose stack runs
-// MailHog at :1025 (SMTP) / :8025 (web UI) which captures every send
+// Mailpit at :1025 (SMTP) / :8025 (web UI) which captures every send
 // without forwarding.
 //
 // Providers register themselves with Register in their package init, following
@@ -36,7 +36,7 @@ type Message struct {
 // ProviderFunc constructs a Mailer from connection parameters.
 // addr is the server address (host:port for SMTP, endpoint URL for managed
 // providers). user and password are credentials — may be empty for
-// unauthenticated relays like MailHog. from is the default sender address.
+// unauthenticated relays like Mailpit. from is the default sender address.
 // tlsMode selects the transport security policy: "off", "starttls"
 // (default; fails closed if the server doesn't advertise STARTTLS), or
 // "implicit" (TLS from connect, typically port 465).

@@ -1,9 +1,6 @@
-// Package cache is the vendor-neutral interface to the fast tier (rate-limit
-// buckets, connection-cap counters, short-lived memoised values).
-//
-// Implementations live in subpackages: memory (in-process, single node) and
-// olric (embedded or client-mode Olric cluster). Call sites depend only on
-// the Store interface here.
+// Package cache defines the process-local fast tier for rate-limit buckets,
+// per-player connection counters, and short-lived memoised values. Shared
+// correctness belongs in PostgreSQL.
 package cache
 
 import (
@@ -15,8 +12,8 @@ import (
 // ErrNotFound is returned by Get when the key is absent.
 var ErrNotFound = errors.New("cache: key not found")
 
-// Store is the data-plane abstraction backed by an in-memory or distributed
-// key/value store. All methods are safe for concurrent use.
+// Store is the process-local cache abstraction. All methods are safe for
+// concurrent use.
 type Store interface {
 	// TokenBucket consumes cost tokens from the bucket at key. capacity is
 	// the burst (and the initial fill); refillPerSec is the steady-state
@@ -78,7 +75,6 @@ type Store interface {
 	// Delete removes key from all cache namespaces. Missing keys are not an error.
 	Delete(ctx context.Context, key string) error
 
-	// Close releases backend resources. Implementations of clustered
-	// backends (Olric) trigger a clean leave/shutdown.
+	// Close stops background cleanup and releases backend resources.
 	Close(ctx context.Context) error
 }
