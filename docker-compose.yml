@@ -58,7 +58,6 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: postgres://ggscale:ggscale@postgres:5432/ggscale?sslmode=disable
-      CACHE_BACKEND: memory
       HTTP_ADDR: ":8080"
       LOG_LEVEL: info
       # ENV=dev so the production cross-validation (CORS, secure cookies,

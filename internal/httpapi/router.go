@@ -100,6 +100,9 @@ type Deps struct {
 	Hub                  *realtime.Hub
 	RealtimeMaxPerTenant int64
 	RealtimeMaxPerPlayer int64
+	// TenantConnectionCap coordinates regional capacity through PostgreSQL
+	// leases while keeping socket admission in process memory.
+	TenantConnectionCap ratelimit.ConnectionCap
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
@@ -335,7 +338,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
-					mountRealtimeRoutes(r, d, reg)
+					mountRealtimeRoutes(r, d)
 
 					if d.Matchmaker != nil {
 						r.Group(func(r chi.Router) {

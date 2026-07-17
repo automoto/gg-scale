@@ -1,5 +1,4 @@
-// Package storetest holds the cache.Store contract test suite. Each backend
-// (memory, olric) imports it and runs RunSuite against a fresh Store.
+// Package storetest holds the cache.Store contract test suite.
 package storetest
 
 import (
@@ -21,10 +20,6 @@ import (
 type Factory func(t *testing.T) cache.Store
 
 // RunSuite exercises every Store method against the backend produced by f.
-// Subtests run serially: factories that wrap a clustered backend (Olric)
-// hit a global init race in the upstream library when multiple instances
-// boot in parallel, and the contract tests are quick enough that serial
-// execution is not a meaningful cost.
 func RunSuite(t *testing.T, f Factory) {
 	t.Helper()
 

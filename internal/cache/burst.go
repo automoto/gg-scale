@@ -7,10 +7,8 @@ import "time"
 // far above (full-2× load drains 1:1); refilling is linear over this window.
 const BurstRefillWindow = time.Hour
 
-// BurstSlotState is the serialized state behind AcquireSlotBurst: the live
-// connection count, the remaining burst budget, and when the budget was last
-// assessed. Shared verbatim by the memory and olric backends so the state has
-// exactly one shape and one set of semantics.
+// BurstSlotState is the state behind AcquireSlotBurst and the PostgreSQL grant
+// allocator: live usage, remaining burst budget, and last assessment time.
 type BurstSlotState struct {
 	Count          int64
 	BurstRemaining time.Duration

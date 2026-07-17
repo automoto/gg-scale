@@ -7,9 +7,8 @@ import (
 	"github.com/ggscale/ggscale/internal/cache"
 )
 
-// CacheLimiter implements Limiter on top of a cache.Store. The bucket math
-// lives in the Store backend (memory or olric); this type just adapts the
-// HTTP-shaped Decision return value.
+// CacheLimiter implements Limiter on top of the process-local cache.Store. It
+// adapts the bucket math to the HTTP-shaped Decision return value.
 type CacheLimiter struct {
 	store cache.Store
 }

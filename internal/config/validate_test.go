@@ -14,6 +14,7 @@ import (
 func baseProd() *config.Config {
 	return &config.Config{
 		Env:                            "production",
+		AppRegion:                      "us-east",
 		DatabaseURL:                    "postgres://ggscale_app_login@db/ggscale",
 		DBMigrateURL:                   "postgres://ggscale_owner@db/ggscale",
 		DBMaxConns:                     10,
@@ -30,6 +31,15 @@ func baseProd() *config.Config {
 		FleetBackend:                   "agones",
 		FeatureFleetEnabled:            true,
 	}
+}
+
+func TestValidateRequiresExplicitRegionInProduction(t *testing.T) {
+	c := baseProd()
+	c.AppRegion = "local"
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "APP_REGION")
 }
 
 func TestValidateAcceptsCleanProdConfig(t *testing.T) {

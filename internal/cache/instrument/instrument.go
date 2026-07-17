@@ -1,6 +1,5 @@
-// Package instrument wraps a cache.Store with Prometheus counters.
-// Mount via build.Config.Registry so the same label shape
-// (op, result) works across the memory and olric backends.
+// Package instrument wraps the process-local cache.Store with Prometheus
+// counters.
 package instrument
 
 import (
