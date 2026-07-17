@@ -203,28 +203,60 @@ ORDER BY mode;
 -- name: InsertMatchmakerMatch :exec
 INSERT INTO matchmaker_matches (
     id, tenant_id, project_id, mode, fleet_id, address, protocol,
-    session_id, join_code, roster, expires_at
+    session_id, join_code, allocation_id, claimed_at, roster, expires_at
 )
 VALUES (
     sqlc.arg(id),
     current_setting('app.tenant_id', true)::bigint,
     sqlc.arg(project_id), sqlc.arg(mode), sqlc.narg(fleet_id),
     sqlc.arg(address), sqlc.arg(protocol), sqlc.arg(session_id),
-    sqlc.arg(join_code), sqlc.arg(roster), sqlc.arg(expires_at)
+    sqlc.arg(join_code), sqlc.narg(allocation_id), sqlc.narg(claimed_at),
+    sqlc.arg(roster), sqlc.arg(expires_at)
 );
 
 -- name: GetMatchmakerMatch :one
 SELECT id, tenant_id, project_id, mode, fleet_id, address, protocol,
-       session_id, join_code, roster, created_at, expires_at
+       session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
 FROM matchmaker_matches
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id);
 
--- name: DeleteExpiredMatchmakerMatches :execrows
--- GC (River job, leader-elected): drop match rows past their retention
--- window. Privileged — runs without a tenant GUC.
+-- name: ClaimMatchmakerMatch :one
+-- Poll/realtime delivery claims only live matches. The expiry guard prevents a
+-- late poll from reviving an allocation after the GC lease has elapsed.
+UPDATE matchmaker_matches
+SET claimed_at = COALESCE(claimed_at, now())
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = sqlc.arg(id)
+  AND expires_at > now()
+RETURNING id, tenant_id, project_id, mode, fleet_id, address, protocol,
+          session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at;
+
+-- name: ListExpiredUnclaimedMatchmakerAllocations :many
+-- GC candidates whose allocation lease elapsed without a poll or realtime
+-- delivery. Privileged — runs without a tenant GUC.
+SELECT id, tenant_id, COALESCE(allocation_id, 0)::bigint AS allocation_id
+FROM matchmaker_matches
+WHERE allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at < now()
+ORDER BY expires_at, id;
+
+-- name: DeleteExpiredUnclaimedMatchmakerMatch :execrows
+-- Delete only after its allocation has been successfully deallocated. The
+-- guards make retries and a concurrent cleanup safe.
 DELETE FROM matchmaker_matches
-WHERE expires_at < now();
+WHERE id = sqlc.arg(id)
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at < now();
+
+-- name: DeleteExpiredMatchmakerMatches :execrows
+-- Drop expired matches that do not need allocation cleanup. Unclaimed fleet
+-- matches stay until the backend deallocation above succeeds.
+DELETE FROM matchmaker_matches
+WHERE expires_at < now()
+  AND (allocation_id IS NULL OR claimed_at IS NOT NULL);
 
 -- name: DeleteTerminalMatchmakerTickets :execrows
 -- GC (River job, leader-elected): drop matched/cancelled/failed tickets

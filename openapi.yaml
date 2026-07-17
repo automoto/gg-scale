@@ -734,7 +734,7 @@ components:
       properties:
         items:
           items:
-            $ref: "#/components/schemas/StorageObjectResponse"
+            $ref: "#/components/schemas/StorageObjectListItemResponse"
           type:
             - array
             - "null"
@@ -743,6 +743,25 @@ components:
       required:
         - items
         - next_cursor
+      type: object
+    StorageObjectListItemResponse:
+      additionalProperties: false
+      properties:
+        key:
+          type: string
+        size_bytes:
+          format: int64
+          type: integer
+        updated_at:
+          type: string
+        version:
+          format: int64
+          type: integer
+      required:
+        - key
+        - version
+        - updated_at
+        - size_bytes
       type: object
     StorageObjectResponse:
       additionalProperties: false

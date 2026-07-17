@@ -1,11 +1,32 @@
 package controlpanel
 
 import (
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestVerifyPendingCookieSurvivesHandlerReconstruction(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	first := newHandler(Deps{VerifySigningKey: key})
+	second := newHandler(Deps{VerifySigningKey: key})
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	first.now = func() time.Time { return now }
+	second.now = func() time.Time { return now }
+	payload := verifyPendingPayload{UserID: 42, Email: "alice@example.com"}
+	recorder := httptest.NewRecorder()
+
+	first.setVerifyPendingCookie(recorder, payload)
+	request := httptest.NewRequest("GET", "/verify", nil)
+	request.AddCookie(recorder.Result().Cookies()[0])
+	got, ok := second.verifyPendingFromCookie(request)
+
+	require.True(t, ok)
+	assert.Equal(t, payload.UserID, got.UserID)
+}
 
 func TestEncodeDecodeVerifyCookie_roundtrip(t *testing.T) {
 	key := []byte("test-key-32-bytes-long-aaaaaaaaa")

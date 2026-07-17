@@ -169,7 +169,7 @@ func TestControlPanelTwoFactor_fullFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
+	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 
@@ -331,7 +331,7 @@ func TestControlPanelTwoFactor_fullFlow(t *testing.T) {
 
 	t.Run("nil_cipher_fails_closed_for_enrolled_user", func(t *testing.T) {
 		bare := chi.NewRouter()
-		bare.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer}))
+		bare.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
 		bareSrv := httptest.NewServer(bare)
 		defer bareSrv.Close()
 
@@ -387,7 +387,7 @@ func TestControlPanelTwoFactor_replayedValidCodeDoesNotLock(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher}))
+	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, TwoFactor: cipher, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 

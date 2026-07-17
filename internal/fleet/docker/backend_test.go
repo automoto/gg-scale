@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -148,6 +149,45 @@ func inspectWithPortBinding(containerPort, hostIP string, hostPort int) dockerco
 			State: &dockercontainer.State{Running: true},
 		},
 		NetworkSettings: ns,
+	}
+}
+
+func TestBackend_TemplateFromConfig_matchesRegistryAllowlistOnRepositoryBoundary(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	tests := []struct {
+		name          string
+		image         string
+		allowlist     []string
+		requireDigest bool
+		wantError     bool
+	}{
+		{name: "exact_repository", image: "ghcr.io/acme:latest", allowlist: []string{"ghcr.io/acme"}},
+		{name: "repository_subpath", image: "ghcr.io/acme/game:latest", allowlist: []string{"ghcr.io/acme"}},
+		{name: "lookalike_prefix", image: "ghcr.io/acme-evil/game:latest", allowlist: []string{"ghcr.io/acme"}, wantError: true},
+		{name: "digest_pinned_exact", image: "ghcr.io/acme@" + digest, allowlist: []string{"ghcr.io/acme"}, requireDigest: true},
+		{name: "digest_pinned_subpath", image: "ghcr.io/acme/game@" + digest, allowlist: []string{"ghcr.io/acme"}, requireDigest: true},
+		{name: "unparseable_reference", image: "not a valid image", wantError: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			backend, err := dockerbackend.New(dockerbackend.Config{
+				Client:            &fakeAPI{},
+				RegistryAllowlist: tc.allowlist,
+				RequireDigest:     tc.requireDigest,
+			})
+			require.NoError(t, err)
+
+			_, err = backend.TemplateFromConfig(map[string]string{
+				"image": tc.image,
+				"port":  "7777",
+			})
+			if tc.wantError {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
 	}
 }
 

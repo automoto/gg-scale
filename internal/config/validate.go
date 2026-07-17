@@ -20,9 +20,9 @@ func isLoopbackOrLinkLocal(s string) bool {
 	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
 }
 
-// isProd reports whether the deployment environment is production, accepting
+// IsProduction reports whether the deployment environment is production, accepting
 // both "production" and the "prod" shorthand, case-insensitively.
-func (c *Config) isProd() bool {
+func (c *Config) IsProduction() bool {
 	return strings.EqualFold(c.Env, "production") || strings.EqualFold(c.Env, "prod")
 }
 
@@ -118,8 +118,15 @@ func (c *Config) checkMailProvider() error {
 // checkProductionPosture enforces the hardening required when Env is prod.
 // It is a no-op outside production.
 func (c *Config) checkProductionPosture() error {
-	if !c.isProd() {
+	if !c.IsProduction() {
 		return nil
+	}
+	migrateURL := strings.TrimSpace(c.DBMigrateURL)
+	if migrateURL == "" {
+		return fmt.Errorf("DB_MIGRATE_URL must be set in production")
+	}
+	if migrateURL == strings.TrimSpace(c.DatabaseURL) {
+		return fmt.Errorf("DB_MIGRATE_URL must differ from DATABASE_URL in production")
 	}
 	if len(c.CORSAllowedOrigins) == 0 {
 		return fmt.Errorf("CORS_ALLOWED_ORIGINS must be set in production (no wildcard fallback)")
@@ -144,16 +151,31 @@ func (c *Config) checkProductionPosture() error {
 	if c.JWTSigningKey == "" {
 		return fmt.Errorf("JWT_SIGNING_KEY must be set in production")
 	}
+	if c.EmailVerifySigningKey == "" {
+		return fmt.Errorf("EMAIL_VERIFY_SIGNING_KEY must be set in production")
+	}
 	if !c.MetricsAuthDisabled && c.MetricsAuthToken == "" {
 		return fmt.Errorf("METRICS_AUTH_TOKEN (or _FILE) must be set in production; set METRICS_AUTH_DISABLED=true to explicitly serve /metrics unauthenticated")
 	}
 	if c.FleetBackend == "docker" && !c.DockerRequireDigest {
 		return fmt.Errorf("DOCKER_REQUIRE_DIGEST must be true in production when FLEET_BACKEND=docker")
 	}
+	if c.FleetBackend == "docker" && !hasNonBlankValue(c.DockerRegistryAllowlist) {
+		return fmt.Errorf("DOCKER_REGISTRY_ALLOWLIST must be set in production when FLEET_BACKEND=docker")
+	}
 	if c.FleetBackend == "docker" && isLoopbackOrLinkLocal(c.GameServerPublicIP) {
 		return fmt.Errorf("GAME_SERVER_PUBLIC_IP %q must be a routable address in production", c.GameServerPublicIP)
 	}
 	return nil
+}
+
+func hasNonBlankValue(values []string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // checkAgonesAuth validates the Agones/k3s credential combination. The three
@@ -169,7 +191,7 @@ func (c *Config) checkAgonesAuth() error {
 		return fmt.Errorf("K3S_API_URL, K3S_SA_TOKEN, K3S_CA_CERT_B64 must all be set together (or all unset)")
 	case allK3s && c.AgonesKubeconfig != "":
 		return fmt.Errorf("AGONES_KUBECONFIG and K3S_* env vars are mutually exclusive; unset one")
-	case c.isProd() && allK3s && !strings.HasPrefix(c.K3sAPIURL, "https://"):
+	case c.IsProduction() && allK3s && !strings.HasPrefix(c.K3sAPIURL, "https://"):
 		return fmt.Errorf("K3S_API_URL must use HTTPS in production (got %q)", c.K3sAPIURL)
 	}
 	return nil
@@ -274,6 +296,9 @@ func (c *Config) checkFields() error {
 	if err := checkTwoFactorKey(c.TwoFactorEncKey); err != nil {
 		return err
 	}
+	if err := checkEmailVerifySigningKey(c.EmailVerifySigningKey); err != nil {
+		return err
+	}
 
 	for _, cidr := range c.TrustedProxyCIDRs {
 		if _, _, err := net.ParseCIDR(cidr); err != nil {
@@ -287,15 +312,23 @@ func (c *Config) checkFields() error {
 // checkTwoFactorKey accepts an empty key (zero-config auto-generation) or an
 // exactly-32-byte hex string; anything else fails startup.
 func checkTwoFactorKey(key string) error {
+	return checkExactHexKey("TWO_FACTOR_ENC_KEY", key, 32)
+}
+
+func checkEmailVerifySigningKey(key string) error {
+	return checkExactHexKey("EMAIL_VERIFY_SIGNING_KEY", key, 32)
+}
+
+func checkExactHexKey(name, key string, wantBytes int) error {
 	if key == "" {
 		return nil
 	}
 	raw, err := hex.DecodeString(key)
 	if err != nil {
-		return fmt.Errorf("TWO_FACTOR_ENC_KEY: %w", err)
+		return fmt.Errorf("%s: %w", name, err)
 	}
-	if len(raw) != 32 {
-		return fmt.Errorf("TWO_FACTOR_ENC_KEY: need 32 bytes of hex, got %d", len(raw))
+	if len(raw) != wantBytes {
+		return fmt.Errorf("%s: need %d bytes of hex, got %d", name, wantBytes, len(raw))
 	}
 	return nil
 }

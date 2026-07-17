@@ -7,9 +7,9 @@
 package players
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/signedcookie"
 	"github.com/ggscale/ggscale/internal/twofactor"
+	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -68,6 +69,9 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
 	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
 	TwoFactor *twofactor.Cipher
+	// VerifySigningKey signs short-lived email-verification cookies. Startup
+	// supplies the same key to the player site and control panel.
+	VerifySigningKey []byte
 }
 
 // Handler owns player UI HTTP routes.
@@ -78,21 +82,15 @@ type Handler struct {
 	cfg      Config
 	now      func() time.Time
 	metrics  *observability.Metrics
-	// verifySigningKey signs the short-lived verify-pending cookie.
-	// Generated once at handler construction so each process has a fresh
-	// secret; restarts invalidate in-flight verify cookies (acceptable —
-	// users re-enter from login).
+	// verifySigningKey signs the short-lived verify-pending cookie and is shared
+	// across processes and the control panel.
 	verifySigningKey []byte
 	twoFactor        *twofactor.Cipher
 }
 
 // New builds the player UI router.
 func New(d Deps) http.Handler {
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		panic("players: rand: " + err.Error())
-	}
-	h := &Handler{pool: d.Pool, mailer: d.Mailer, mailFrom: d.MailFrom, cfg: d.Config, now: time.Now, metrics: d.Metrics, verifySigningKey: key, twoFactor: d.TwoFactor}
+	h := newHandler(d)
 
 	r := chi.NewRouter()
 	r.Use(webutil.PlayerSecurityHeaders)
@@ -168,6 +166,22 @@ func New(d Deps) http.Handler {
 	return r
 }
 
+func newHandler(d Deps) *Handler {
+	if len(d.VerifySigningKey) != verifycode.SigningKeySize {
+		panic(fmt.Sprintf("players: email verify signing key has %d bytes, want %d", len(d.VerifySigningKey), verifycode.SigningKeySize))
+	}
+	return &Handler{
+		pool:             d.Pool,
+		mailer:           d.Mailer,
+		mailFrom:         d.MailFrom,
+		cfg:              d.Config,
+		now:              time.Now,
+		metrics:          d.Metrics,
+		verifySigningKey: append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:        d.TwoFactor,
+	}
+}
+
 // csrf is shorthand for the CSRF token pulled off the request context by
 // the CSRFCookie middleware. Every render site stamps it onto the view so
 // the form's hidden _csrf field can be compared on the matching POST.
@@ -176,7 +190,7 @@ func (h *Handler) csrf(r *http.Request) string {
 }
 
 // verifyCookiePayload is the user ID + project ID + email parked while
-// the player types the 6-digit code. Signed with a process-local HMAC
+// the player types the 6-digit code. Signed with the shared email-verification
 // key so an attacker can't forge a payload for another user / project.
 // ExpiresAt is a server-checked Unix-seconds expiry — the cookie MaxAge
 // is client-controlled and not trusted.

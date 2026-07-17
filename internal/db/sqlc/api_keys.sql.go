@@ -152,6 +152,19 @@ func (q *Queries) GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScope
 	return i, err
 }
 
+const getAPIKeyType = `-- name: GetAPIKeyType :one
+SELECT key_type
+FROM api_keys
+WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+func (q *Queries) GetAPIKeyType(ctx context.Context, id int64) (string, error) {
+	row := q.db.QueryRow(ctx, getAPIKeyType, id)
+	var key_type string
+	err := row.Scan(&key_type)
+	return key_type, err
+}
+
 const listAPIKeys = `-- name: ListAPIKeys :many
 SELECT k.id, k.project_id, p.name AS project_name, k.label, k.scopes, k.created_at, k.revoked_at
 FROM api_keys k

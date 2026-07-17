@@ -40,14 +40,15 @@ func newPlayersServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version: "v1",
-		Commit:  "test",
-		Pool:    db.NewPool(c.appPool),
-		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Limiter: ratelimit.NewCacheLimiter(c.cache),
-		Signer:  signer,
-		Cache:   c.cache,
-		Players: players.Config{Mount: true},
+		Version:               "v1",
+		Commit:                "test",
+		Pool:                  db.NewPool(c.appPool),
+		Lookup:                tenant.NewSQLLookup(c.appPool),
+		Limiter:               ratelimit.NewCacheLimiter(c.cache),
+		Signer:                signer,
+		Cache:                 c.cache,
+		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
+		Players:               players.Config{Mount: true},
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

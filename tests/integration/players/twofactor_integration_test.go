@@ -166,7 +166,7 @@ func TestPlayerAccountTwoFactor_fullFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher}))
+	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 
@@ -337,7 +337,7 @@ func TestPlayerAccountTwoFactor_replayedValidCodeDoesNotLock(t *testing.T) {
 	require.NoError(t, err)
 
 	root := chi.NewRouter()
-	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher}))
+	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
 	srv := httptest.NewServer(root)
 	defer srv.Close()
 

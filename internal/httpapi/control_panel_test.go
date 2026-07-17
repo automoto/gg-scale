@@ -15,8 +15,9 @@ import (
 func newControlPanelServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
-		Version: "v1",
-		Commit:  "test",
+		Version:               "v1",
+		Commit:                "test",
+		EmailVerifySigningKey: []byte("0123456789abcdef0123456789abcdef"),
 		ControlPanel: controlpanel.Config{
 			Mount: true,
 		},

@@ -4,12 +4,35 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/webassets"
 )
+
+var playerTestVerifySigningKey = []byte("0123456789abcdef0123456789abcdef")
+
+func TestAccountVerifyCookieSurvivesHandlerReconstruction(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	first := newHandler(Deps{VerifySigningKey: key})
+	second := newHandler(Deps{VerifySigningKey: key})
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	first.now = func() time.Time { return now }
+	second.now = func() time.Time { return now }
+	accountID := uuid.New()
+	recorder := httptest.NewRecorder()
+
+	first.setAccountVerifyCookie(recorder, accountID, "player@example.com")
+	request := httptest.NewRequest(http.MethodGet, "/account/verify", nil)
+	request.AddCookie(recorder.Result().Cookies()[0])
+	got, ok := second.accountVerifyCookie(request)
+
+	require.True(t, ok)
+	assert.Equal(t, accountID, got.AccountID)
+}
 
 func TestValidEmail(t *testing.T) {
 	tests := []struct {
@@ -60,7 +83,7 @@ func TestDecodeVerifyCookie_rejects_garbage(t *testing.T) {
 }
 
 func TestPlayerPagesAllowFirstPartyStylesButNoScripts(t *testing.T) {
-	h := New(Deps{Config: Config{Mount: true}})
+	h := New(Deps{Config: Config{Mount: true}, VerifySigningKey: playerTestVerifySigningKey})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
 
@@ -77,7 +100,7 @@ func TestPlayerPagesAllowFirstPartyStylesButNoScripts(t *testing.T) {
 }
 
 func TestPlayerPagesLinkSharedStylesheetsAndRunNoScript(t *testing.T) {
-	h := New(Deps{Config: Config{Mount: true}})
+	h := New(Deps{Config: Config{Mount: true}, VerifySigningKey: playerTestVerifySigningKey})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/account/login", nil)
 

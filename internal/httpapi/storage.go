@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -42,6 +43,13 @@ type storageObjectOutput struct {
 	Body storageObjectResponse
 }
 
+type storageObjectListItemResponse struct {
+	Key       string `json:"key"`
+	Version   int64  `json:"version"`
+	UpdatedAt string `json:"updated_at"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
 type storagePutInput struct {
 	Key     string `path:"key"`
 	IfMatch string `header:"If-Match"`
@@ -59,8 +67,8 @@ type storageListInput struct {
 }
 
 type storageListResult struct {
-	Items      []storageObjectResponse `json:"items"`
-	NextCursor string                  `json:"next_cursor"`
+	Items      []storageObjectListItemResponse `json:"items"`
+	NextCursor string                          `json:"next_cursor"`
 }
 
 type storageListOutput struct {
@@ -320,19 +328,19 @@ func storageList(d Deps) func(context.Context, *storageListInput) (*storageListO
 		limit := parseLimit(in.Limit, 50, storageListMaxLimit)
 		cursor := parseCursor(in.Cursor)
 
-		var items []storageObjectResponse
+		var items []storageObjectListItemResponse
 		var lastID int64
 		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			rows, qerr := sqlcgen.New(tx).ListStorageObjects(ctx, sqlcgen.ListStorageObjectsParams{
 				ProjectID: projectID, OwnerUserID: ownerID,
-				Column3: in.KeyPrefix, ID: cursor, Limit: limit,
+				KeyPrefix: escapeStorageKeyPrefix(in.KeyPrefix), CursorID: cursor, RowLimit: limit,
 			})
 			if qerr != nil {
 				return qerr
 			}
 			for _, row := range rows {
-				items = append(items, storageObjectResponse{
-					Key: row.Key, Value: row.Value, Version: row.Version,
+				items = append(items, storageObjectListItemResponse{
+					Key: row.Key, Version: row.Version, SizeBytes: row.SizeBytes,
 					UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 				})
 				lastID = row.ID
@@ -348,6 +356,16 @@ func storageList(d Deps) func(context.Context, *storageListInput) (*storageListO
 		}
 		return &storageListOutput{Body: storageListResult{Items: items, NextCursor: next}}, nil
 	}
+}
+
+var storageKeyPrefixEscaper = strings.NewReplacer(
+	`\`, `\\`,
+	`%`, `\%`,
+	`_`, `\_`,
+)
+
+func escapeStorageKeyPrefix(prefix string) string {
+	return storageKeyPrefixEscaper.Replace(prefix)
 }
 
 func parseLimit(s string, def, max int32) int32 {

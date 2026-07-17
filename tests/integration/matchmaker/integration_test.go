@@ -454,6 +454,9 @@ func TestPGQueueWorkerPathWorksUnderAppRoleRLS(t *testing.T) {
 	match, err := queue.GetMatch(tenantCtx, got.MatchID)
 	require.NoError(t, err)
 	assert.Len(t, match.Roster, 1)
+	claimed, err := queue.ClaimMatch(tenantCtx, got.MatchID)
+	require.NoError(t, err)
+	assert.False(t, claimed.ClaimedAt.IsZero(), "poll claim must work under the app-role RLS policy")
 }
 
 // game_session mode end to end against Postgres: two tickets match, the

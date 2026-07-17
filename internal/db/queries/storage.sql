@@ -119,13 +119,13 @@ WHERE m.tenant_id = sqlc.arg(tenant_id)
 ORDER BY u.email;
 
 -- name: ListStorageObjects :many
-SELECT id, key, value, version, updated_at
+SELECT id, key, octet_length(value::text)::bigint AS size_bytes, version, updated_at
 FROM storage_objects
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND project_id = $1
-  AND owner_user_id = $2
+  AND project_id = sqlc.arg(project_id)
+  AND owner_user_id = sqlc.arg(owner_user_id)
   AND deleted_at IS NULL
-  AND ($3::text = '' OR key LIKE $3 || '%')
-  AND id > $4
+  AND key LIKE CAST(sqlc.arg(key_prefix) AS text) || '%' ESCAPE '\'
+  AND id > sqlc.arg(cursor_id)
 ORDER BY id ASC
-LIMIT $5;
+LIMIT sqlc.arg(row_limit);

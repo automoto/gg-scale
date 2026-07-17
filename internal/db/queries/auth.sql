@@ -132,7 +132,7 @@ WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND u.deleted_at IS NULL
   AND u.disabled_at IS NULL;
 
--- name: RevokeSession :exec
+-- name: RevokeSession :execrows
 -- Rotation path: the token is being superseded by a freshly-issued one, so a
 -- later replay of this hash is a reuse (theft) signal.
 UPDATE sessions

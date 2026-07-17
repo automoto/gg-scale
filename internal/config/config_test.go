@@ -200,6 +200,41 @@ func TestLoad_defaults_two_factor_key_to_empty(t *testing.T) {
 	assert.Empty(t, cfg.TwoFactorEncKey)
 }
 
+func TestLoad_accepts_valid_email_verify_signing_key(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	key := strings.Repeat("cd", 32)
+	t.Setenv("EMAIL_VERIFY_SIGNING_KEY", key)
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, key, cfg.EmailVerifySigningKey)
+}
+
+func TestLoad_rejects_malformed_email_verify_signing_key(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "not hex", value: "not-hex"},
+		{name: "too short", value: "deadbeef"},
+		{name: "too long", value: strings.Repeat("ab", 33)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv("EMAIL_VERIFY_SIGNING_KEY", tt.value)
+
+			_, err := config.Load()
+
+			assert.ErrorContains(t, err, "EMAIL_VERIFY_SIGNING_KEY")
+		})
+	}
+}
+
 func TestLoad_rejects_malformed_two_factor_key(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -367,6 +402,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{
 		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "LOG_LEVEL", "ENV",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
+		"EMAIL_VERIFY_SIGNING_KEY", "EMAIL_VERIFY_SIGNING_KEY_FILE",
 		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",
 		"CONTROL_PANEL_DISABLED", "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", "CONTROL_PANEL_COOKIE_SECURE",
 		"CACHE_BACKEND", "CACHE_OLRIC_BIND_ADDR", "CACHE_OLRIC_BIND_PORT",

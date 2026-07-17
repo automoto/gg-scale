@@ -381,18 +381,20 @@ type LeaderboardEntry struct {
 }
 
 type MatchmakerMatch struct {
-	ID        string
-	TenantID  int64
-	ProjectID int64
-	Mode      string
-	FleetID   *int64
-	Address   string
-	Protocol  string
-	SessionID string
-	JoinCode  string
-	Roster    []byte
-	CreatedAt pgtype.Timestamptz
-	ExpiresAt pgtype.Timestamptz
+	ID           string
+	TenantID     int64
+	ProjectID    int64
+	Mode         string
+	FleetID      *int64
+	Address      string
+	Protocol     string
+	SessionID    string
+	JoinCode     string
+	Roster       []byte
+	CreatedAt    pgtype.Timestamptz
+	ExpiresAt    pgtype.Timestamptz
+	AllocationID *int64
+	ClaimedAt    pgtype.Timestamptz
 }
 
 type MatchmakingTicket struct {

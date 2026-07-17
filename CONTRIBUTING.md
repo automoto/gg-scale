@@ -8,7 +8,7 @@ contributing you agree your contribution is licensed under the same terms.
 All make targets use plain `docker` / `docker compose`; any Docker engine works
 (Docker Desktop, a Linux daemon, Colima).
 
-1. Install Go 1.26.4+, Docker, `golangci-lint`, `govulncheck`.
+1. Install Go 1.26.5+, Docker, `golangci-lint`, `govulncheck`.
 2. `cp .env.example .env`
 3. `make up` brings the basic stack up.
 4. `curl localhost:8080/v1/healthz` should return `200`.

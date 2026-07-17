@@ -109,16 +109,26 @@ func TestServeWSIdleConnectionSurvivesPastReadTimeoutWindow(t *testing.T) {
 	conn, _, err := websocket.Dial(ctx, url, nil)
 	require.NoError(t, err)
 	defer conn.CloseNow()
+	type readResult struct {
+		messageType websocket.MessageType
+		data        []byte
+		err         error
+	}
+	read := make(chan readResult, 1)
+	go func() {
+		mt, data, readErr := conn.Read(ctx)
+		read <- readResult{messageType: mt, data: data, err: readErr}
+	}()
 
 	require.Eventually(t, func() bool { return hub.Count() == 1 }, time.Second, 10*time.Millisecond)
 	time.Sleep(heartbeat*2 + 30*time.Millisecond)
 
 	require.NoError(t, hub.Send(ctx, 1, 42, realtime.Message{Type: "match_ready", Payload: json.RawMessage(`{"address":"1.2.3.4:7777"}`)}))
-	mt, data, err := conn.Read(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, websocket.MessageText, mt)
+	result := <-read
+	require.NoError(t, result.err)
+	assert.Equal(t, websocket.MessageText, result.messageType)
 	var got realtime.Message
-	require.NoError(t, json.Unmarshal(data, &got))
+	require.NoError(t, json.Unmarshal(result.data, &got))
 	assert.Equal(t, "match_ready", got.Type)
 }
 

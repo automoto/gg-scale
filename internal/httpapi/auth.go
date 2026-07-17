@@ -619,8 +619,12 @@ func authRefresh(d Deps) func(context.Context, *refreshInput) (*sessionOutput, e
 			if sessionEpoch, err = playerEpoch(ctx, q, row.PlayerID); err != nil {
 				return err
 			}
-			if err := q.RevokeSession(ctx, row.ID); err != nil {
+			revokedRows, err := q.RevokeSession(ctx, row.ID)
+			if err != nil {
 				return err
+			}
+			if revokedRows == 0 {
+				return errSessionRevoked
 			}
 			if err := insertSession(ctx, tx, row.ProjectID, row.PlayerID, newRefresh, now); err != nil {
 				return err

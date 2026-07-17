@@ -82,8 +82,10 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs 2FA pending cookies for the
 	// control panel and player surfaces. nil = 2FA enrollment unavailable.
 	TwoFactor *twofactor.Cipher
-	Cache     cache.Store
-	Registry  *prometheus.Registry
+	// EmailVerifySigningKey signs verification cookies for both web surfaces.
+	EmailVerifySigningKey []byte
+	Cache                 cache.Store
+	Registry              *prometheus.Registry
 	// Metrics carries the business/health counters. nil is a no-op (unit tests).
 	Metrics *observability.Metrics
 	RBAC    *rbac.Authorizer
@@ -270,20 +272,22 @@ func NewRouter(d Deps) http.Handler {
 				RBAC:               d.RBAC,
 				PluginInfo:         d.ControlPanelPluginInfo,
 				TwoFactor:          d.TwoFactor,
+				VerifySigningKey:   d.EmailVerifySigningKey,
 				StorageLimits:      d.StorageLimits,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {
 			r.Mount("/players", players.New(players.Deps{
-				Pool:       d.Pool,
-				Mailer:     d.Mailer,
-				MailFrom:   d.MailFrom,
-				Config:     d.Players,
-				Limiter:    d.Limiter,
-				ProxyTrust: d.ProxyTrust,
-				Registry:   reg,
-				Metrics:    d.Metrics,
-				TwoFactor:  d.TwoFactor,
+				Pool:             d.Pool,
+				Mailer:           d.Mailer,
+				MailFrom:         d.MailFrom,
+				Config:           d.Players,
+				Limiter:          d.Limiter,
+				ProxyTrust:       d.ProxyTrust,
+				Registry:         reg,
+				Metrics:          d.Metrics,
+				TwoFactor:        d.TwoFactor,
+				VerifySigningKey: d.EmailVerifySigningKey,
 			}))
 		}
 

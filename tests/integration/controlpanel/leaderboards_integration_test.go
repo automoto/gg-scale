@@ -86,6 +86,7 @@ func newLeaderboardServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Pool
 	root := chi.NewRouter()
 	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{
 		Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, RBAC: authorizer,
+		VerifySigningKey: []byte(testEmailVerifySigningKey),
 	}))
 	srv = httptest.NewServer(root)
 	t.Cleanup(srv.Close)

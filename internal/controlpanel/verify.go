@@ -46,8 +46,8 @@ type VerifyView struct {
 }
 
 // verifyPendingPayload is the user ID stored in the verify-pending cookie.
-// We sign it with the control panel bootstrap signing key so a stolen cookie
-// can't grant verification of a different user. ExpiresAt is a server-
+// We sign it with the shared email-verification key so a stolen cookie can't
+// grant verification of a different user. ExpiresAt is a server-
 // checked Unix-seconds expiry: the cookie's own MaxAge is client-controlled
 // and not trusted.
 type verifyPendingPayload struct {
@@ -101,9 +101,7 @@ func (h *Handler) verifyPendingFromCookie(r *http.Request) (verifyPendingPayload
 	return p, true
 }
 
-// verifyCookieKey returns the HMAC key for the verify-pending cookie.
-// The key is a 32-byte random secret generated at handler construction;
-// it lives only in memory and is rotated on every process restart.
+// verifyCookieKey returns the shared HMAC key for the verify-pending cookie.
 func (h *Handler) verifyCookieKey() []byte {
 	return h.verifySigningKey
 }

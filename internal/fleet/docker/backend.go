@@ -17,6 +17,7 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
+	"github.com/distribution/reference"
 	"github.com/docker/docker/api/types"
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerevents "github.com/docker/docker/api/types/events"
@@ -70,9 +71,8 @@ type Config struct {
 	DefaultMemoryBytes int64
 	DefaultNanoCPUs    int64
 	DefaultPidsLimit   int64
-	// RegistryAllowlist restricts which registries may run. Empty disables
-	// the check; non-empty rejects images whose canonical reference does
-	// not start with one of the listed prefixes.
+	// RegistryAllowlist restricts which image repositories may run. Empty
+	// disables the check; entries match exactly or at a path boundary.
 	RegistryAllowlist []string
 	// RequireDigest enforces that every image carries an @sha256:… pin.
 	// Recommended on for production deployments.
@@ -104,6 +104,11 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("docker: Client is required")
 	}
+	registryAllowlist, err := normalizeRegistryAllowlist(cfg.RegistryAllowlist)
+	if err != nil {
+		return nil, err
+	}
+	cfg.RegistryAllowlist = registryAllowlist
 	if cfg.BindIP == "" {
 		cfg.BindIP = "127.0.0.1"
 	}
@@ -178,18 +183,47 @@ func TemplateFromConfig(cfg map[string]string) (Template, error) {
 }
 
 func (b *Backend) validateImage(image string) error {
-	if b.cfg.RequireDigest && !strings.Contains(image, "@sha256:") {
+	named, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return fmt.Errorf("docker: invalid image %q: %w", image, err)
+	}
+	if b.cfg.RequireDigest && !hasSHA256Digest(named) {
 		return fmt.Errorf("docker: image %q lacks digest pin (require_digest is set)", image)
 	}
 	if len(b.cfg.RegistryAllowlist) == 0 {
 		return nil
 	}
-	for _, prefix := range b.cfg.RegistryAllowlist {
-		if strings.HasPrefix(image, prefix) {
+	repository := reference.TrimNamed(named).Name()
+	for _, allowed := range b.cfg.RegistryAllowlist {
+		if repository == allowed || strings.HasPrefix(repository, allowed+"/") {
 			return nil
 		}
 	}
 	return fmt.Errorf("docker: image %q not in registry allowlist", image)
+}
+
+func normalizeRegistryAllowlist(entries []string) ([]string, error) {
+	repositories := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		named, err := reference.ParseNormalizedNamed(entry)
+		if err != nil {
+			return nil, fmt.Errorf("docker: invalid registry allowlist entry %q: %w", entry, err)
+		}
+		if _, tagged := named.(reference.Tagged); tagged {
+			return nil, fmt.Errorf("docker: registry allowlist entry %q must not include a tag", entry)
+		}
+		if _, canonical := named.(reference.Canonical); canonical {
+			return nil, fmt.Errorf("docker: registry allowlist entry %q must not include a digest", entry)
+		}
+		repositories = append(repositories, reference.TrimNamed(named).Name())
+	}
+	return repositories, nil
+}
+
+func hasSHA256Digest(named reference.Named) bool {
+	canonical, ok := named.(reference.Canonical)
+	return ok && canonical.Digest().Algorithm() == "sha256"
 }
 
 // Allocate creates, starts, and probes a container. On any failure past

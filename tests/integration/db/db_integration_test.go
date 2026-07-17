@@ -17,6 +17,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/migrate"
 )
 
@@ -133,4 +134,41 @@ func TestQ_rolls_back_on_closure_error(t *testing.T) {
 	var name string
 	require.NoError(t, pool.QueryRow(ctx, "SELECT name FROM tenants WHERE id = 1").Scan(&name))
 	assert.Equal(t, "seed", name)
+}
+
+func TestRevokeSession_reports_zero_rows_when_session_already_revoked(t *testing.T) {
+	pool := startMigrated(t)
+	ctx := context.Background()
+
+	var tenantID, projectID, playerID, sessionID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('session-revoke-tenant') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'session-revoke-project') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'session-revoke-player') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO sessions (tenant_id, project_id, player_id, refresh_hash, expires_at)
+		 VALUES ($1, $2, $3, '\x01', now() + interval '1 hour') RETURNING id`,
+		tenantID, projectID, playerID).Scan(&sessionID))
+
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	queries := db.NewPool(pool)
+	var firstRows, secondRows int64
+	err := queries.Q(tenantCtx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		var err error
+		firstRows, err = q.RevokeSession(tenantCtx, sessionID)
+		if err != nil {
+			return err
+		}
+		secondRows, err = q.RevokeSession(tenantCtx, sessionID)
+		return err
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), firstRows)
+	assert.Zero(t, secondRows)
 }

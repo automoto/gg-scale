@@ -1,5 +1,5 @@
 .PHONY: help build fmt test test-integration test-plugins e2e e2e-docker e2e-agones \
-	lint vulncheck check sqlc-gen templ-generate openapi \
+	lint vulncheck test-vulncheck-wrapper check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-fleet-docker down-fleet-docker \
@@ -64,7 +64,10 @@ lint: ## golangci-lint
 vulncheck: ## govulncheck with the accepted-vuln allowlist
 	@bash scripts/govulncheck.sh
 
-check: lint test ## Local CI mirror: lint + unit tests
+test-vulncheck-wrapper: ## Deterministic govulncheck wrapper protocol tests
+	@bash scripts/govulncheck_test.sh
+
+check: lint test test-vulncheck-wrapper ## Local CI mirror: lint + unit tests
 
 # ─── Codegen ────────────────────────────────────────────────────────────
 

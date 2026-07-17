@@ -14,6 +14,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/fleet"
 )
 
 const notifyChannel = "matchmaker_ticket"
@@ -429,18 +430,29 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 		f := m.FleetID
 		fleetID = &f
 	}
+	var allocationID *int64
+	if m.AllocationID != 0 {
+		id := int64(m.AllocationID)
+		allocationID = &id
+	}
+	claimedAt := pgtype.Timestamptz{}
+	if !m.ClaimedAt.IsZero() {
+		claimedAt = pgtype.Timestamptz{Time: m.ClaimedAt, Valid: true}
+	}
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).InsertMatchmakerMatch(ctx, sqlcgen.InsertMatchmakerMatchParams{
-			ID:        m.ID,
-			ProjectID: m.ProjectID,
-			Mode:      string(m.Mode),
-			FleetID:   fleetID,
-			Address:   m.Address,
-			Protocol:  m.Protocol,
-			SessionID: m.SessionID,
-			JoinCode:  m.JoinCode,
-			Roster:    roster,
-			ExpiresAt: pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
+			ID:           m.ID,
+			ProjectID:    m.ProjectID,
+			Mode:         string(m.Mode),
+			FleetID:      fleetID,
+			Address:      m.Address,
+			Protocol:     m.Protocol,
+			SessionID:    m.SessionID,
+			JoinCode:     m.JoinCode,
+			AllocationID: allocationID,
+			ClaimedAt:    claimedAt,
+			Roster:       roster,
+			ExpiresAt:    pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
 		})
 	})
 }
@@ -456,30 +468,57 @@ func (q *PGQueue) GetMatch(ctx context.Context, id string) (*Match, error) {
 		if qerr != nil {
 			return qerr
 		}
-		var roster []RosterEntry
-		if err := json.Unmarshal(row.Roster, &roster); err != nil {
-			return fmt.Errorf("matchmaker: unmarshal roster: %w", err)
-		}
-		m = &Match{
-			ID:        row.ID,
-			TenantID:  row.TenantID,
-			ProjectID: row.ProjectID,
-			Mode:      Mode(row.Mode),
-			FleetID:   derefFleetID(row.FleetID),
-			Address:   row.Address,
-			Protocol:  row.Protocol,
-			SessionID: row.SessionID,
-			JoinCode:  row.JoinCode,
-			Roster:    roster,
-			CreatedAt: row.CreatedAt.Time,
-			ExpiresAt: row.ExpiresAt.Time,
-		}
-		return nil
+		m, qerr = decodeMatchmakerMatch(row)
+		return qerr
 	})
 	if err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// ClaimMatch atomically claims and returns an unexpired match for polling or
+// successful realtime delivery.
+func (q *PGQueue) ClaimMatch(ctx context.Context, id string) (*Match, error) {
+	var m *Match
+	err := q.pool.Q(ctx, func(tx pgx.Tx) error {
+		row, qerr := sqlcgen.New(tx).ClaimMatchmakerMatch(ctx, id)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if qerr != nil {
+			return qerr
+		}
+		m, qerr = decodeMatchmakerMatch(row)
+		return qerr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func decodeMatchmakerMatch(row sqlcgen.MatchmakerMatch) (*Match, error) {
+	var roster []RosterEntry
+	if err := json.Unmarshal(row.Roster, &roster); err != nil {
+		return nil, fmt.Errorf("matchmaker: unmarshal roster: %w", err)
+	}
+	return &Match{
+		ID:           row.ID,
+		TenantID:     row.TenantID,
+		ProjectID:    row.ProjectID,
+		Mode:         Mode(row.Mode),
+		FleetID:      derefFleetID(row.FleetID),
+		Address:      row.Address,
+		Protocol:     row.Protocol,
+		SessionID:    row.SessionID,
+		JoinCode:     row.JoinCode,
+		AllocationID: fleet.AllocationID(derefFleetID(row.AllocationID)),
+		ClaimedAt:    row.ClaimedAt.Time,
+		Roster:       roster,
+		CreatedAt:    row.CreatedAt.Time,
+		ExpiresAt:    row.ExpiresAt.Time,
+	}, nil
 }
 
 // Listen subscribes to the matchmaker_ticket NOTIFY channel and dispatches

@@ -48,6 +48,7 @@ import (
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
+	"github.com/ggscale/ggscale/internal/verifycode"
 )
 
 // commit is overridden at build time via -ldflags.
@@ -118,7 +119,7 @@ func runMigrateCommand(args []string) error {
 	}
 	slog.SetDefault(newLogger(cfg.LogLevel))
 
-	mr, err := migraterunner.New(cfg.DatabaseURL, cfg.MigrationsDir)
+	mr, err := migraterunner.New(migrationURL(cfg), cfg.MigrationsDir)
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}
@@ -164,11 +165,7 @@ func run() error {
 	// Runner returns ErrNoChange internally as a no-op so this is safe on
 	// every restart. Migrations need elevated rights (DDL, CREATE ROLE, RLS);
 	// DB_MIGRATE_URL supplies them so DATABASE_URL can stay least-privilege.
-	migrateURL := cfg.DatabaseURL
-	if cfg.DBMigrateURL != "" {
-		migrateURL = cfg.DBMigrateURL
-	}
-	mr, err := migraterunner.New(migrateURL, cfg.MigrationsDir)
+	mr, err := migraterunner.New(migrationURL(cfg), cfg.MigrationsDir)
 	if err != nil {
 		return fmt.Errorf("migrate init: %w", err)
 	}
@@ -187,7 +184,7 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
-	if err := assertAppDBRole(ctx, pool); err != nil {
+	if err := db.AssertAppRole(ctx, pool, cfg.IsProduction()); err != nil {
 		return err
 	}
 
@@ -231,7 +228,7 @@ func run() error {
 			return rerr
 		}
 		defer readPgxPool.Close()
-		if rerr := assertAppDBRole(ctx, readPgxPool); rerr != nil {
+		if rerr := db.AssertAppRole(ctx, readPgxPool, cfg.IsProduction()); rerr != nil {
 			return rerr
 		}
 		readPool = db.NewReadPoolWithTimeout(readPgxPool, cfg.DBStatementTimeout)
@@ -241,6 +238,10 @@ func run() error {
 	// After migrations and pool setup: resolves TWO_FACTOR_ENC_KEY or the
 	// auto-generated database key, so 2FA works with zero configuration.
 	tfCipher, err := twofactor.Load(ctx, appPool, cfg.TwoFactorEncKey)
+	if err != nil {
+		return err
+	}
+	emailVerifySigningKey, err := verifycode.LoadSigningKey(ctx, appPool, cfg.EmailVerifySigningKey)
 	if err != nil {
 		return err
 	}
@@ -314,7 +315,7 @@ func run() error {
 	// leader-elected periodic job, so it fires once across the fleet rather
 	// than once per instance. River failures are non-fatal — GC is best-effort
 	// and the server must boot without it.
-	if stopRiver := startRiverJobs(ctx, pool, appPool, m, cfg.MailFrom, logger); stopRiver != nil {
+	if stopRiver := startRiverJobs(ctx, pool, appPool, fleetMgr, m, cfg.MailFrom, logger); stopRiver != nil {
 		defer stopRiver()
 	}
 
@@ -366,6 +367,7 @@ func run() error {
 		Mailer:                        m,
 		MailFrom:                      cfg.MailFrom,
 		TwoFactor:                     tfCipher,
+		EmailVerifySigningKey:         emailVerifySigningKey,
 		Cache:                         store,
 		Registry:                      registry,
 		Metrics:                       metrics,
@@ -477,11 +479,11 @@ func (c queryRejectCounter) Inc() { c.m.MatchmakerQueryReject() }
 // returns a stop function, or nil if River couldn't start. River runs under
 // the app DB role via the pool's SET ROLE; its tables are granted in migration
 // 0055. Failures are logged and swallowed so a River problem never blocks boot.
-func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m mailer.Mailer, mailFrom string, logger *slog.Logger) func() {
+func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, matchReleaser jobs.MatchmakerAllocationReleaser, m mailer.Mailer, mailFrom string, logger *slog.Logger) func() {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
-	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool, matchReleaser))
 	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
@@ -531,30 +533,11 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	}
 }
 
-func assertAppDBRole(ctx context.Context, pool *pgxpool.Pool) error {
-	var currentUser string
-	var ownsTenantTables bool
-	if err := pool.QueryRow(ctx, `
-SELECT current_user,
-       EXISTS (
-           SELECT 1
-           FROM pg_class c
-           JOIN pg_namespace n ON n.oid = c.relnamespace
-           JOIN pg_roles r ON r.oid = c.relowner
-           WHERE n.nspname = 'public'
-             AND c.relkind IN ('r', 'p')
-             AND c.relname IN ('tenants', 'projects', 'api_keys', 'project_players', 'sessions')
-             AND r.rolname = current_user
-       )`).Scan(&currentUser, &ownsTenantTables); err != nil {
-		return fmt.Errorf("db role assertion: %w", err)
+func migrationURL(cfg *config.Config) string {
+	if cfg.DBMigrateURL != "" {
+		return cfg.DBMigrateURL
 	}
-	if currentUser != "ggscale_app" {
-		return fmt.Errorf("db role assertion: current_user is %q, want ggscale_app", currentUser)
-	}
-	if ownsTenantTables {
-		return fmt.Errorf("db role assertion: ggscale_app must not own tenant tables")
-	}
-	return nil
+	return cfg.DatabaseURL
 }
 
 // newDBPool builds a pgxpool with the shared app settings: the given size, the

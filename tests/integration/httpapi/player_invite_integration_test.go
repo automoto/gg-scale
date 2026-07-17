@@ -59,6 +59,7 @@ func newControlPanelAndPlayerServerWithConfig(t *testing.T, c *cluster, cfg cont
 		Cache:                 c.cache,
 		Mailer:                rec,
 		MailFrom:              "no-reply@example.test",
+		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
 		RBAC:                  authorizer,
 		ControlPanel:          cfg,
 		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),

@@ -14,6 +14,8 @@ import (
 func baseProd() *config.Config {
 	return &config.Config{
 		Env:                            "production",
+		DatabaseURL:                    "postgres://ggscale_app_login@db/ggscale",
+		DBMigrateURL:                   "postgres://ggscale_owner@db/ggscale",
 		DBMaxConns:                     10,
 		DBMinConns:                     2,
 		DBMaxConnLifetime:              time.Hour,
@@ -23,6 +25,7 @@ func baseProd() *config.Config {
 		ControlPanelCookieSecure:       true,
 		ControlPanelBaseURL:            "https://control-panel.example.com",
 		JWTSigningKey:                  "1234567890abcdef1234567890abcdef",
+		EmailVerifySigningKey:          "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
 		MetricsAuthToken:               "1234567890abcdef1234567890abcdef",
 		FleetBackend:                   "agones",
 		FeatureFleetEnabled:            true,
@@ -31,6 +34,35 @@ func baseProd() *config.Config {
 
 func TestValidateAcceptsCleanProdConfig(t *testing.T) {
 	require.NoError(t, baseProd().Validate())
+}
+
+func TestValidateRequiresSeparateDatabaseCredentialsInProd(t *testing.T) {
+	tests := []struct {
+		name           string
+		migrateURL     string
+		wantErrMessage string
+	}{
+		{
+			name:           "missing migration URL",
+			wantErrMessage: "DB_MIGRATE_URL must be set in production",
+		},
+		{
+			name:           "migration URL matches runtime URL",
+			migrateURL:     "postgres://ggscale_app_login@db/ggscale",
+			wantErrMessage: "DB_MIGRATE_URL must differ from DATABASE_URL",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := baseProd()
+			c.DBMigrateURL = tt.migrateURL
+
+			err := c.Validate()
+
+			assert.ErrorContains(t, err, tt.wantErrMessage)
+		})
+	}
 }
 
 func TestValidateRejectsShortRelaySecret(t *testing.T) {
@@ -75,6 +107,15 @@ func TestValidateRequiresJWTKeyInProd(t *testing.T) {
 	assert.ErrorContains(t, err, "JWT_SIGNING_KEY")
 }
 
+func TestValidateRequiresEmailVerifySigningKeyInProd(t *testing.T) {
+	c := baseProd()
+	c.EmailVerifySigningKey = ""
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "EMAIL_VERIFY_SIGNING_KEY")
+}
+
 func TestValidateRequiresBootstrapTokenFileInProd(t *testing.T) {
 	c := baseProd()
 	c.ControlPanelBootstrapTokenFile = ""
@@ -115,7 +156,31 @@ func TestValidateAcceptsDigestPinForDockerProd(t *testing.T) {
 	c := baseProd()
 	c.FleetBackend = "docker"
 	c.DockerRequireDigest = true
+	c.DockerRegistryAllowlist = []string{"ghcr.io/acme"}
 	assert.NoError(t, c.Validate())
+}
+
+func TestValidateRequiresRegistryAllowlistForDockerProd(t *testing.T) {
+	tests := []struct {
+		name      string
+		allowlist []string
+	}{
+		{name: "missing"},
+		{name: "blank", allowlist: []string{"  "}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseProd()
+			c.FleetBackend = "docker"
+			c.DockerRequireDigest = true
+			c.DockerRegistryAllowlist = tc.allowlist
+
+			err := c.Validate()
+
+			assert.ErrorContains(t, err, "DOCKER_REGISTRY_ALLOWLIST")
+		})
+	}
 }
 
 func TestValidateRequiresPoolMinimum(t *testing.T) {

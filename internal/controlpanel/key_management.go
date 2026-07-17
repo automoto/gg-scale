@@ -29,6 +29,7 @@ var (
 	errInvalidKeyType     = errors.New("control panel: key type must be 'publishable' or 'secret'")
 	errInvalidScope       = errors.New("control panel: unknown feature scope")
 	errKeyNotInTenant     = errors.New("control panel: api key not found in tenant")
+	errAPIKeyManageDenied = errors.New("control panel: api key management forbidden")
 	errScopeNotGrantable  = errors.New("control panel: feature is not enabled for this key")
 )
 
@@ -215,6 +216,42 @@ func isManagedAPIKeyScope(scope string) bool {
 	return false
 }
 
+func apiKeyObjectForType(keyType tenant.KeyType) (string, bool) {
+	switch keyType {
+	case tenant.KeyTypePublishable:
+		return rbac.ObjectAPIKeyPublic, true
+	case tenant.KeyTypeSecret:
+		return rbac.ObjectAPIKeySecret, true
+	default:
+		return "", false
+	}
+}
+
+func (h *Handler) authorizeAPIKeyManagement(ctx context.Context, q *sqlcgen.Queries, actorID, tenantID, apiKeyID int64) error {
+	keyType, err := q.GetAPIKeyType(ctx, apiKeyID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errKeyNotInTenant
+	}
+	if err != nil {
+		return fmt.Errorf("get api key type: %w", err)
+	}
+	object, ok := apiKeyObjectForType(tenant.KeyType(keyType))
+	if !ok {
+		return fmt.Errorf("%w: %q", errInvalidKeyType, keyType)
+	}
+	if h.rbac == nil {
+		return rbac.ErrAuthorizerUnavailable
+	}
+	allowed, err := h.rbac.CanControlPanel(actorID, tenantID, object, rbac.ActionManage)
+	if err != nil {
+		return fmt.Errorf("authorize api key management: %w", err)
+	}
+	if !allowed {
+		return errAPIKeyManageDenied
+	}
+	return nil
+}
+
 func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenantID, apiKeyID int64, desired []string) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
@@ -227,6 +264,9 @@ func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenant
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
+			return err
+		}
 		row, err := q.GetAPIKeyScopes(ctx, apiKeyID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errKeyNotInTenant
@@ -415,7 +455,11 @@ func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiK
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		if err := sqlcgen.New(tx).UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{
+		q := sqlcgen.New(tx)
+		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
+			return err
+		}
+		if err := q.UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{
 			ID:    apiKeyID,
 			Label: strings.TrimSpace(label),
 		}); err != nil {
@@ -431,7 +475,11 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		if err := sqlcgen.New(tx).RevokeAPIKey(ctx, apiKeyID); err != nil {
+		q := sqlcgen.New(tx)
+		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
+			return err
+		}
+		if err := q.RevokeAPIKey(ctx, apiKeyID); err != nil {
 			return err
 		}
 		if h.rbac != nil {

@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -313,6 +314,123 @@ func TestStorage_put_get_delete_round_trip(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	resp, _ = authedReq(t, http.MethodGet, srv.URL+"/v1/storage/objects/save", "k", access, nil)
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestStorage_list_returns_metadata_without_values(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-list-metadata")
+	srv, _ := newFullStackServer(t, c)
+	access := anonymousLogin(t, srv.URL, "storage-list-metadata")
+
+	resp, body := authedReq(t, http.MethodPut,
+		srv.URL+"/v1/storage/objects/metadata", "storage-list-metadata", access,
+		map[string]any{"hp": 100})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	resp, body = authedReq(t, http.MethodGet,
+		srv.URL+"/v1/storage/objects?key_prefix=metadata", "storage-list-metadata", access, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var listed struct {
+		Items []struct {
+			Key       string          `json:"key"`
+			Value     json.RawMessage `json:"value"`
+			Version   int64           `json:"version"`
+			UpdatedAt string          `json:"updated_at"`
+			SizeBytes int64           `json:"size_bytes"`
+		} `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(body, &listed))
+	require.Len(t, listed.Items, 1)
+	assert.Equal(t, "metadata", listed.Items[0].Key)
+	assert.Empty(t, listed.Items[0].Value)
+	assert.Equal(t, int64(1), listed.Items[0].Version)
+	assert.NotEmpty(t, listed.Items[0].UpdatedAt)
+	assert.Equal(t, int64(len(`{"hp": 100}`)), listed.Items[0].SizeBytes)
+}
+
+func TestStorage_list_treats_key_prefix_wildcards_as_literals(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-list-prefix")
+	srv, _ := newFullStackServer(t, c)
+	access := anonymousLogin(t, srv.URL, "storage-list-prefix")
+
+	for _, key := range []string{
+		"percent%match", "percentXmatch", "under_match", "underXmatch", `slash\match`,
+	} {
+		resp, body := authedReq(t, http.MethodPut,
+			srv.URL+"/v1/storage/objects/"+url.PathEscape(key), "storage-list-prefix", access,
+			map[string]string{"key": key})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	}
+
+	tests := []struct {
+		name      string
+		prefix    string
+		wantedKey string
+	}{
+		{name: "percent", prefix: "percent%", wantedKey: "percent%match"},
+		{name: "underscore", prefix: "under_", wantedKey: "under_match"},
+		{name: "backslash", prefix: `slash\`, wantedKey: `slash\match`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			query := url.Values{"key_prefix": []string{tc.prefix}}.Encode()
+			resp, body := authedReq(t, http.MethodGet,
+				srv.URL+"/v1/storage/objects?"+query, "storage-list-prefix", access, nil)
+			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+			var listed struct {
+				Items []struct {
+					Key string `json:"key"`
+				} `json:"items"`
+			}
+			require.NoError(t, json.Unmarshal(body, &listed))
+			require.Len(t, listed.Items, 1)
+			assert.Equal(t, tc.wantedKey, listed.Items[0].Key)
+		})
+	}
+}
+
+func TestStorage_list_preserves_cursor_pagination(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-list-pagination")
+	srv, _ := newFullStackServer(t, c)
+	access := anonymousLogin(t, srv.URL, "storage-list-pagination")
+
+	for _, key := range []string{"page-a", "page-b", "page-c"} {
+		resp, body := authedReq(t, http.MethodPut,
+			srv.URL+"/v1/storage/objects/"+key, "storage-list-pagination", access,
+			map[string]string{"key": key})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	}
+
+	type page struct {
+		Items []struct {
+			Key string `json:"key"`
+		} `json:"items"`
+		NextCursor string `json:"next_cursor"`
+	}
+	resp, body := authedReq(t, http.MethodGet,
+		srv.URL+"/v1/storage/objects?key_prefix=page-&limit=2", "storage-list-pagination", access, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var first page
+	require.NoError(t, json.Unmarshal(body, &first))
+	require.Len(t, first.Items, 2)
+	assert.Equal(t, []string{"page-a", "page-b"}, []string{first.Items[0].Key, first.Items[1].Key})
+	require.NotEmpty(t, first.NextCursor)
+
+	query := url.Values{
+		"key_prefix": []string{"page-"},
+		"limit":      []string{"2"},
+		"cursor":     []string{first.NextCursor},
+	}.Encode()
+	resp, body = authedReq(t, http.MethodGet,
+		srv.URL+"/v1/storage/objects?"+query, "storage-list-pagination", access, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var second page
+	require.NoError(t, json.Unmarshal(body, &second))
+	require.Len(t, second.Items, 1)
+	assert.Equal(t, "page-c", second.Items[0].Key)
+	assert.Empty(t, second.NextCursor)
 }
 
 func TestStorageLimit_resolution_precedence(t *testing.T) {

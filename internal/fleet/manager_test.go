@@ -21,9 +21,10 @@ type fakeBackend struct {
 	name           string
 	allocateCalls  int
 	deallocateIDs  []fleet.AllocationID
+	deallocateRefs []string
 	allocateImpl   func(int) (*fleet.Allocation, error)
 	watchImpl      func() <-chan fleet.StatusUpdate
-	deallocateImpl func(fleet.AllocationID, string) error
+	deallocateImpl func(context.Context, fleet.AllocationID, string) error
 }
 
 func (f *fakeBackend) Name() string { return f.name }
@@ -36,12 +37,13 @@ func (f *fakeBackend) Allocate(_ context.Context, _ fleet.AllocationRequest) (*f
 	return f.allocateImpl(n)
 }
 
-func (f *fakeBackend) Deallocate(_ context.Context, id fleet.AllocationID, ref string) error {
+func (f *fakeBackend) Deallocate(ctx context.Context, id fleet.AllocationID, ref string) error {
 	f.mu.Lock()
 	f.deallocateIDs = append(f.deallocateIDs, id)
+	f.deallocateRefs = append(f.deallocateRefs, ref)
 	f.mu.Unlock()
 	if f.deallocateImpl != nil {
-		return f.deallocateImpl(id, ref)
+		return f.deallocateImpl(ctx, id, ref)
 	}
 	return nil
 }
@@ -64,10 +66,15 @@ func (f *fakeBackend) HealthCheck(_ context.Context) error { return nil }
 // fakeStore is an in-memory replacement for the Postgres-backed store. It
 // hands out monotonic IDs and lets tests inspect the persisted lifecycle.
 type fakeStore struct {
-	mu          sync.Mutex
-	next        fleet.AllocationID
-	allocations map[fleet.AllocationID]*fleet.Allocation
-	events      []fleet.Event
+	mu                 sync.Mutex
+	next               fleet.AllocationID
+	allocations        map[fleet.AllocationID]*fleet.Allocation
+	events             []fleet.Event
+	markReadyErr       error
+	markReadyCancel    context.CancelFunc
+	markFailedIDs      []fleet.AllocationID
+	markFailedActive   bool
+	markFailedDeadline bool
 }
 
 func newFakeStore() *fakeStore {
@@ -94,6 +101,12 @@ func (s *fakeStore) InsertPending(_ context.Context, req fleet.AllocationRequest
 func (s *fakeStore) MarkReady(_ context.Context, id fleet.AllocationID, ref, address string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.markReadyCancel != nil {
+		s.markReadyCancel()
+	}
+	if s.markReadyErr != nil {
+		return s.markReadyErr
+	}
 	a, ok := s.allocations[id]
 	if !ok {
 		return fleet.ErrNotFound
@@ -104,9 +117,12 @@ func (s *fakeStore) MarkReady(_ context.Context, id fleet.AllocationID, ref, add
 	return nil
 }
 
-func (s *fakeStore) MarkFailed(_ context.Context, id fleet.AllocationID) error {
+func (s *fakeStore) MarkFailed(ctx context.Context, id fleet.AllocationID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.markFailedIDs = append(s.markFailedIDs, id)
+	s.markFailedActive = ctx.Err() == nil
+	_, s.markFailedDeadline = ctx.Deadline()
 	a, ok := s.allocations[id]
 	if !ok {
 		return fleet.ErrNotFound
@@ -342,6 +358,50 @@ func TestManager_Allocate_marks_failed_after_exhausting_retries(t *testing.T) {
 	persisted, err := store.Get(context.Background(), 1)
 	require.NoError(t, err)
 	assert.Equal(t, fleet.StatusFailed, persisted.Status)
+}
+
+func TestManager_Allocate_markReadyFailureCleansBackendAndPersistsFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	markReadyErr := errors.New("database unavailable")
+	cleanupErr := errors.New("backend cleanup failed")
+	store := newFakeStore()
+	store.markReadyErr = markReadyErr
+	store.markReadyCancel = cancel
+	var cleanupContextActive, cleanupHasDeadline bool
+	backend := &fakeBackend{
+		name: "fake",
+		allocateImpl: func(_ int) (*fleet.Allocation, error) {
+			return &fleet.Allocation{BackendRef: "container-orphan", Address: "10.0.0.9:7777"}, nil
+		},
+		deallocateImpl: func(cleanupCtx context.Context, _ fleet.AllocationID, _ string) error {
+			cleanupContextActive = cleanupCtx.Err() == nil
+			_, cleanupHasDeadline = cleanupCtx.Deadline()
+			return cleanupErr
+		},
+	}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+
+	got, err := mgr.Allocate(ctx, sampleReq())
+
+	require.ErrorIs(t, err, markReadyErr)
+	assert.NotErrorIs(t, err, cleanupErr)
+	assert.Nil(t, got)
+	assert.Equal(t, []fleet.AllocationID{1}, backend.deallocateIDs)
+	assert.Equal(t, []string{"container-orphan"}, backend.deallocateRefs)
+	assert.True(t, cleanupContextActive)
+	assert.True(t, cleanupHasDeadline)
+	assert.Equal(t, []fleet.AllocationID{1}, store.markFailedIDs)
+	assert.True(t, store.markFailedActive)
+	assert.True(t, store.markFailedDeadline)
+	persisted, getErr := store.Get(context.Background(), 1)
+	require.NoError(t, getErr)
+	assert.Equal(t, fleet.StatusFailed, persisted.Status)
+	events, eventErr := store.ListEvents(context.Background(), 1, 10)
+	require.NoError(t, eventErr)
+	require.NotEmpty(t, events)
+	assert.Equal(t, fleet.StatusFailed, events[0].Status)
+	assert.Contains(t, events[0].ErrMessage, "container-orphan")
+	assert.Contains(t, events[0].ErrMessage, cleanupErr.Error())
 }
 
 func TestManager_Deallocate_calls_backend_and_releases_row(t *testing.T) {

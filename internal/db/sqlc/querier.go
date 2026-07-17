@@ -53,6 +53,9 @@ type Querier interface {
 	// claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
 	// IS NOT DISTINCT FROM.
 	ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmakerBucketParams) ([]ClaimMatchmakerBucketRow, error)
+	// Poll/realtime delivery claims only live matches. The expiry guard prevents a
+	// late poll from reviving an allocation after the GC lease has elapsed.
+	ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	ClearControlPanelVerificationCode(ctx context.Context, id int64) error
 	ClearPlayerVerificationCode(ctx context.Context, id int64) error
 	// Flip the given still-queued tickets holding this claim_id to 'matched'
@@ -174,10 +177,13 @@ type Querier interface {
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
-	// GC (River job, leader-elected): drop match rows past their retention
-	// window. Privileged — runs without a tenant GUC.
+	// Drop expired matches that do not need allocation cleanup. Unclaimed fleet
+	// matches stay until the backend deallocation above succeeds.
 	DeleteExpiredMatchmakerMatches(ctx context.Context) (int64, error)
 	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
+	// Delete only after its allocation has been successfully deallocated. The
+	// guards make retries and a concurrent cleanup safe.
+	DeleteExpiredUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error)
 	// Symmetric unfriend: caller can be on either side. Never removes a 'blocked'
 	// edge — a block is cleared only via the directed unblock path
 	// (DeleteFriendEdgeDirected), so a blockee cannot delete the blocker's block.
@@ -217,6 +223,7 @@ type Querier interface {
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error)
+	GetAPIKeyType(ctx context.Context, id int64) (string, error)
 	// Tenant-level HTTP API override (project_id NULL, kind 'api'). Read by the
 	// rate-limit middleware; falls back to compiled tier defaults when absent.
 	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)
@@ -407,6 +414,9 @@ type Querier interface {
 	// Name, usage, class, and last-notified threshold for every quota-enforced
 	// tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
 	ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforcedTenantStorageRow, error)
+	// GC candidates whose allocation lease elapsed without a poll or realtime
+	// delivery. Privileged — runs without a tenant GUC.
+	ListExpiredUnclaimedMatchmakerAllocations(ctx context.Context) ([]ListExpiredUnclaimedMatchmakerAllocationsRow, error)
 	// Control panel list. Soft-deleted rows are excluded; include_deleted is reserved
 	// for a future "archive" view but not wired through the UI yet.
 	ListFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
@@ -561,7 +571,7 @@ type Querier interface {
 	RevokePlayerSession(ctx context.Context, refreshHash []byte) error
 	// Rotation path: the token is being superseded by a freshly-issued one, so a
 	// later replay of this hash is a reuse (theft) signal.
-	RevokeSession(ctx context.Context, id int64) error
+	RevokeSession(ctx context.Context, id int64) (int64, error)
 	// Logout path: a later replay of this hash is a benign stale-client retry, not
 	// reuse, so it must NOT trip the family kill.
 	RevokeSessionByRefreshHash(ctx context.Context, refreshHash []byte) (int64, error)

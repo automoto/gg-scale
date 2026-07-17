@@ -284,22 +284,27 @@ func TestWorkerProcessesBucketOnListenerEvent(t *testing.T) {
 	require.Eventually(t, func() bool { return len(hub.Sent()) == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
-// When the only matched player is no longer connected, the worker must
-// release the allocation it just made — otherwise the fleet slot leaks and
-// subsequent allocate calls fail with state=UnAllocated until the fleet is
-// scaled or the server is reaped manually.
-func TestWorkerReleasesAllocationWhenNoClientIsReachable(t *testing.T) {
+// When the only matched player is no longer connected, the allocation stays
+// alive until the match lease expires so polling can still recover it.
+func TestWorkerKeepsAllocationWhenNoClientIsReachableForPolling(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
 	hub := &fakeNotifier{failErr: realtime.ErrNotConnected}
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Region: "r", GameMode: "g"})
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Region: "r", GameMode: "g"})
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())
-	assert.Equal(t, []fleet.AllocationID{1}, alloc.Deallocated(),
-		"allocation must be released when no client received match_ready")
+	assert.Empty(t, alloc.Deallocated(), "polling clients retain the allocation until the match lease expires")
+
+	tenantCtx := db.WithTenant(context.Background(), 1)
+	got, err := q.Get(tenantCtx, ticket.ID, ticket.PlayerID)
+	require.NoError(t, err)
+	match, err := q.GetMatch(tenantCtx, got.MatchID)
+	require.NoError(t, err)
+	assert.Equal(t, fleet.AllocationID(1), match.AllocationID)
+	assert.True(t, match.ClaimedAt.IsZero())
 }
 
 // Multi-player match where one player is offline but others got the push:
@@ -311,13 +316,19 @@ func TestWorkerKeepsAllocationWhenAnyClientReachable(t *testing.T) {
 	hub := &fakeNotifier{failForUserID: 42} // one of two players is offline
 	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{})
 
-	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 41, Region: "r", GameMode: "g", MinCount: 2, MaxCount: 2})
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 41, Region: "r", GameMode: "g", MinCount: 2, MaxCount: 2})
 	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Region: "r", GameMode: "g", MinCount: 2, MaxCount: 2})
 
 	require.NoError(t, w.Tick(context.Background()))
 	assert.Equal(t, int64(1), alloc.Called())
 	assert.Empty(t, alloc.Deallocated(),
 		"allocation must persist when at least one client received match_ready")
+	tenantCtx := db.WithTenant(context.Background(), 1)
+	got, err := q.Get(tenantCtx, ticket.ID, ticket.PlayerID)
+	require.NoError(t, err)
+	match, err := q.GetMatch(tenantCtx, got.MatchID)
+	require.NoError(t, err)
+	assert.False(t, match.ClaimedAt.IsZero(), "WebSocket delivery claims the allocation lease")
 }
 
 func TestWorkerRunWaitsForGoroutinesOnShutdown(t *testing.T) {

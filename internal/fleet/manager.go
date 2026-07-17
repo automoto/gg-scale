@@ -93,6 +93,8 @@ var ErrFleetRequired = errors.New("fleet: AllocationRequest.FleetID is required"
 // field doesn't match the configured manager backend.
 var ErrFleetBackendMismatch = errors.New("fleet: fleet backend does not match the configured backend")
 
+const allocationCleanupTimeout = 30 * time.Second
+
 // Allocate persists a pending row, asks the backend to bring up a server,
 // and persists the result. On terminal failure the row is marked failed and
 // a non-nil error is returned so the matchmaker can re-queue the ticket.
@@ -133,6 +135,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 		alloc, err := m.backend.Allocate(ctx, req)
 		if err == nil {
 			if err := m.store.MarkReady(ctx, id, alloc.BackendRef, alloc.Address); err != nil {
+				m.cleanupAfterMarkReadyFailure(ctx, id, alloc, err)
 				return nil, fmt.Errorf("fleet: mark ready: %w", err)
 			}
 			alloc.ID = id
@@ -153,6 +156,24 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 	}
 	m.appendEvent(ctx, id, StatusFailed, "", lastErr.Error())
 	return nil, fmt.Errorf("fleet: allocate after %d attempts: %w", m.opts.Retries+1, lastErr)
+}
+
+func (m *Manager) cleanupAfterMarkReadyFailure(ctx context.Context, id AllocationID, alloc *Allocation, markReadyErr error) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), allocationCleanupTimeout)
+	deallocateErr := m.backend.Deallocate(cleanupCtx, id, alloc.BackendRef)
+	cancel()
+
+	errMessage := fmt.Sprintf("mark ready failed: %v; backend_ref=%q", markReadyErr, alloc.BackendRef)
+	if deallocateErr != nil {
+		errMessage += fmt.Sprintf("; backend deallocate failed: %v", deallocateErr)
+	}
+
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(ctx), allocationCleanupTimeout)
+	defer persistCancel()
+	if err := m.store.MarkFailed(persistCtx, id); err != nil {
+		errMessage += fmt.Sprintf("; mark failed: %v", err)
+	}
+	m.appendEvent(persistCtx, id, StatusFailed, alloc.Address, errMessage)
 }
 
 // appendEvent is fire-and-forget — event-log failures must not block the

@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/ggscale/ggscale/internal/fleet"
 )
 
 // Status is the lifecycle position of a ticket.
@@ -169,6 +171,12 @@ type Match struct {
 	Protocol  string
 	SessionID string
 	JoinCode  string
+	// AllocationID identifies the fleet resource leased to this match. Zero
+	// for match-only and game-session modes.
+	AllocationID fleet.AllocationID
+	// ClaimedAt is set when a roster player receives the match over realtime
+	// or recovers it by polling before ExpiresAt.
+	ClaimedAt time.Time
 	Roster    []RosterEntry
 	CreatedAt time.Time
 	ExpiresAt time.Time
@@ -227,6 +235,9 @@ type Queue interface {
 	// GetMatch returns the match by id for the tenant on ctx, or
 	// ErrNotFound.
 	GetMatch(ctx context.Context, id string) (*Match, error)
+	// ClaimMatch atomically marks an unexpired match claimed and returns it.
+	// Polling uses this so an expired lease cannot be revived while GC runs.
+	ClaimMatch(ctx context.Context, id string) (*Match, error)
 }
 
 // Sweeper is an optional capability for releasing claims left by crashed

@@ -424,7 +424,7 @@ func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, gro
 	if w.cfg.MatchCounter != nil {
 		w.cfg.MatchCounter.Inc()
 	}
-	w.notifyMatched(ctx, group, match)
+	w.notifyAndClaim(ctx, tenantCtx, group, match)
 	return nil
 }
 
@@ -492,6 +492,7 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 	}
 	match.Address = alloc.Address
 	match.Protocol = alloc.Protocol
+	match.AllocationID = alloc.ID
 	if err := w.queue.CreateMatch(tenantCtx, match); err != nil {
 		w.deallocateOrphan(tenantCtx, alloc, "match setup failed")
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("create match: %w", err))
@@ -513,13 +514,10 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 		w.cfg.MatchCounter.Inc()
 	}
 
-	// If no client received the matched event, the match can't proceed —
-	// release the allocation so the fleet slot is reusable instead of
-	// leaking. Deallocate goes through the fleet store, which requires
-	// tenant context. The players can still recover the result by polling.
-	if notified := w.notifyMatched(ctx, group, match); notified == 0 {
-		w.deallocateOrphan(tenantCtx, alloc, "no clients reachable")
-	}
+	// A successful realtime delivery claims the lease. With no delivery the
+	// allocation remains available for polling until match expiry, when the
+	// matchmaker GC releases it.
+	w.notifyAndClaim(ctx, tenantCtx, group, match)
 	return nil
 }
 
@@ -579,13 +577,23 @@ type matchedPayload struct {
 	Users        []RosterEntry `json:"users"`
 }
 
+func (w *Worker) notifyAndClaim(ctx, tenantCtx context.Context, tickets []*Ticket, match *Match) {
+	if w.notifyMatched(ctx, tickets, match) == 0 {
+		return
+	}
+	claimed, err := w.queue.ClaimMatch(tenantCtx, match.ID)
+	if err != nil {
+		w.log.Warn("matchmaker: record realtime claim failed", "match_id", match.ID, "err", err)
+		return
+	}
+	match.ClaimedAt = claimed.ClaimedAt
+}
+
 // notifyMatched pushes matchmaker_matched to each rostered player and
-// returns the number of successful deliveries. A return of 0 tells the
-// fleet path no client will ever connect to the allocated server, so that
-// caller releases the allocation.
+// returns the number of successful deliveries.
 func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, match *Match) int {
 	if w.hub == nil {
-		return len(tickets)
+		return 0
 	}
 	delivered := 0
 	for _, t := range tickets {

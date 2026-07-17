@@ -5,6 +5,7 @@ package httpapi_test
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,14 +46,15 @@ func newControlPanelIntegrationServerWithMailer(t *testing.T, c *cluster, bootst
 
 	rec := &mailer.Recorder{}
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version: "v1",
-		Commit:  "test",
-		Pool:    pool,
-		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Signer:  signer,
-		Cache:   c.cache,
-		RBAC:    authorizer,
-		Mailer:  rec,
+		Version:               "v1",
+		Commit:                "test",
+		Pool:                  pool,
+		Lookup:                tenant.NewSQLLookup(c.appPool),
+		Signer:                signer,
+		Cache:                 c.cache,
+		RBAC:                  authorizer,
+		Mailer:                rec,
+		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
 		ControlPanel: controlpanel.Config{
 			Mount:    true,
 			MailFrom: "noreply@ggscale.test",
@@ -482,6 +484,94 @@ func TestControlPanelAPIKeys_create_label_and_revoke(t *testing.T) {
 	allowed, _, err = c.cache.TokenBucket(context.Background(), bucketKey, 1, 0.01, 1)
 	require.NoError(t, err)
 	assert.True(t, allowed)
+}
+
+func TestControlPanelAPIKeyMutations_authorizeAgainstKeyType(t *testing.T) {
+	tests := []struct {
+		name          string
+		actorRole     string
+		keyType       string
+		foreignTenant bool
+		wantStatus    int
+	}{
+		{name: "tenant_admin_publishable", actorRole: "admin", keyType: "publishable", wantStatus: http.StatusSeeOther},
+		{name: "tenant_admin_secret", actorRole: "admin", keyType: "secret", wantStatus: http.StatusForbidden},
+		{name: "owner_secret", actorRole: "owner", keyType: "secret", wantStatus: http.StatusSeeOther},
+		{name: "other_tenant", actorRole: "owner", keyType: "secret", foreignTenant: true, wantStatus: http.StatusNotFound},
+	}
+	operations := []struct {
+		name       string
+		pathSuffix string
+		form       func(string) url.Values
+	}{
+		{
+			name:       "relabel",
+			pathSuffix: "/label",
+			form: func(csrf string) url.Values {
+				return url.Values{"_csrf": {csrf}, "label": {"renamed"}}
+			},
+		},
+		{
+			name:       "scope_update",
+			pathSuffix: "/features",
+			form: func(csrf string) url.Values {
+				return url.Values{"_csrf": {csrf}, "scopes": {tenant.ScopeMatchmaker}}
+			},
+		},
+		{
+			name:       "revoke",
+			pathSuffix: "/revoke",
+			form: func(csrf string) url.Values {
+				return url.Values{"_csrf": {csrf}}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startCluster(t)
+			actorTenantID, actorProjectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "actor-"+tc.name)
+			targetTenantID, targetProjectID := actorTenantID, actorProjectID
+			if tc.foreignTenant {
+				targetTenantID, targetProjectID = seedTenantWithAPIKey(t, c.bootstrapPool, 0, "target-"+tc.name)
+			}
+			actorID := seedControlPanelUser(t, c, "actor@example.com", "correct-horse-battery-staple", false)
+			seedControlPanelMembership(t, c, actorID, actorTenantID, tc.actorRole)
+			srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+			cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "actor@example.com", "correct-horse-battery-staple")
+			client := noRedirectClient()
+
+			for i, operation := range operations {
+				t.Run(operation.name, func(t *testing.T) {
+					keyID := seedControlPanelMutationAPIKey(t, c, targetTenantID, targetProjectID, tc.keyType, i)
+					form := operation.form(csrf)
+					path := fmt.Sprintf("%s/v1/control-panel/tenants/%d/api-keys/%d%s",
+						srv.URL, actorTenantID, keyID, operation.pathSuffix)
+					req, err := http.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+					require.NoError(t, err)
+					req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+					req.AddCookie(cookie)
+
+					resp, err := client.Do(req)
+					require.NoError(t, err)
+					defer resp.Body.Close()
+
+					assert.Equal(t, tc.wantStatus, resp.StatusCode)
+				})
+			}
+		})
+	}
+}
+
+func seedControlPanelMutationAPIKey(t *testing.T, c *cluster, tenantID, projectID int64, keyType string, index int) int64 {
+	t.Helper()
+	tokenHash := sha256.Sum256([]byte(fmt.Sprintf("mutation-%d-%d-%s-%d", tenantID, projectID, keyType, index)))
+	var keyID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type, scopes)
+		 VALUES ($1, $2, $3, $4, '{}') RETURNING id`,
+		tenantID, projectID, tokenHash[:], keyType).Scan(&keyID))
+	return keyID
 }
 
 func seedControlPanelUser(t *testing.T, c *cluster, email, password string, platformAdmin bool) int64 {

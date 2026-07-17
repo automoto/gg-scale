@@ -468,6 +468,7 @@ func newQuotaMetricsServer(t *testing.T, c *cluster) *httptest.Server {
 		Registry:              reg,
 		Metrics:               observability.NewMetrics(reg),
 		RBAC:                  authorizer,
+		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
 		ControlPanel:          controlpanel.Config{Mount: true, BaseURL: "http://app.example.test"},
 		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),
 	})

@@ -36,9 +36,7 @@ func NewMemQueue() *MemQueue {
 func (q *MemQueue) CreateMatch(_ context.Context, m *Match) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	dup := *m
-	dup.Roster = append([]RosterEntry(nil), m.Roster...)
-	q.matches[m.ID] = &dup
+	q.matches[m.ID] = cloneMatch(m)
 	return nil
 }
 
@@ -54,9 +52,31 @@ func (q *MemQueue) GetMatch(ctx context.Context, id string) (*Match, error) {
 	if !ok || m.TenantID != tenantID {
 		return nil, ErrNotFound
 	}
+	return cloneMatch(m), nil
+}
+
+// ClaimMatch atomically claims and returns an unexpired tenant match.
+func (q *MemQueue) ClaimMatch(ctx context.Context, id string) (*Match, error) {
+	tenantID, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	m, ok := q.matches[id]
+	if !ok || m.TenantID != tenantID || !m.ExpiresAt.After(time.Now().UTC()) {
+		return nil, ErrNotFound
+	}
+	if m.ClaimedAt.IsZero() {
+		m.ClaimedAt = time.Now().UTC()
+	}
+	return cloneMatch(m), nil
+}
+
+func cloneMatch(m *Match) *Match {
 	dup := *m
 	dup.Roster = append([]RosterEntry(nil), m.Roster...)
-	return &dup, nil
+	return &dup
 }
 
 // Enqueue inserts a queued ticket and returns the persisted view. The

@@ -41,6 +41,8 @@ import (
 // hand-roll for negative cases.
 const testSignerKey = "test-key-must-be-at-least-32-bytes-long"
 
+const testEmailVerifySigningKey = "0123456789abcdef0123456789abcdef"
+
 // newTestSigner builds a Signer over testSignerKey. Fails the test on
 // any constructor error; callers don't need to handle it.
 func newTestSigner(t *testing.T) *auth.Signer {
@@ -316,6 +318,33 @@ func TestAuthAnonymous_returns_401_with_unknown_api_key(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestAuthRefresh_preRevokedSession_returns401WithoutCreatingSuccessor(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pre-revoked-refresh")
+	srv := newServerForCluster(t, c)
+
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/anonymous", "pre-revoked-refresh", nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var session struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	require.NoError(t, json.Unmarshal(body, &session))
+	refreshHash := sha256.Sum256([]byte(session.RefreshToken))
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE sessions SET revoked_at = now(), revoked_reason = 'logout' WHERE refresh_hash = $1`,
+		refreshHash[:])
+	require.NoError(t, err)
+
+	resp, body = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/refresh", "pre-revoked-refresh",
+		map[string]string{"refresh_token": session.RefreshToken})
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+
+	var sessionCount int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM sessions`).Scan(&sessionCount))
+	assert.Equal(t, int64(1), sessionCount)
 }
 
 func TestHealthz_remains_public_with_auth_deps_present(t *testing.T) {

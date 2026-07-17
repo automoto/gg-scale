@@ -405,7 +405,7 @@ func matchmakerGetTicket(d Deps) func(context.Context, *matchmakerTicketIDInput)
 		// A match past its retention window degrades to the bare ticket.
 		var match *matchmaker.Match
 		if ticket.MatchID != "" {
-			m, merr := d.Matchmaker.GetMatch(ctx, ticket.MatchID)
+			m, merr := d.Matchmaker.ClaimMatch(ctx, ticket.MatchID)
 			if merr != nil && !errors.Is(merr, matchmaker.ErrNotFound) {
 				return nil, huma.Error500InternalServerError("internal error")
 			}

@@ -176,15 +176,69 @@ func appendRefresh(current func(context.Context), next func(context.Context)) fu
 	}
 }
 
+type realtimeConnection interface {
+	Read(context.Context) (websocket.MessageType, []byte, error)
+	Ping(context.Context) error
+	CloseNow() error
+}
+
+type connectionTicker interface {
+	C() <-chan time.Time
+	Stop()
+}
+
+type connectionClock interface {
+	Now() time.Time
+	NewTicker(time.Duration) connectionTicker
+}
+
+type wallConnectionClock struct{}
+
+func (wallConnectionClock) Now() time.Time {
+	return time.Now()
+}
+
+func (wallConnectionClock) NewTicker(interval time.Duration) connectionTicker {
+	return wallConnectionTicker{ticker: time.NewTicker(interval)}
+}
+
+type wallConnectionTicker struct {
+	ticker *time.Ticker
+}
+
+func (t wallConnectionTicker) C() <-chan time.Time {
+	return t.ticker.C
+}
+
+func (t wallConnectionTicker) Stop() {
+	t.ticker.Stop()
+}
+
 // runConnection drives the per-client read loop alongside a heartbeat
 // ticker. It returns when the client disconnects, the heartbeat ping
 // fails, or ctx is cancelled.
-func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger) {
+func runConnection(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger) {
+	runConnectionWithClock(ctx, conn, heartbeat, refreshSlots, logger, wallConnectionClock{})
+}
+
+func runConnectionWithClock(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger, clock connectionClock) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	heartbeatErr := make(chan error, 1)
-	go func() { heartbeatErr <- runHeartbeat(ctx, conn, heartbeat, refreshSlots) }()
+	go func() {
+		err := runHeartbeatWithClock(ctx, conn, heartbeat, refreshSlots, clock)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			cancel()
+			if closeErr := conn.CloseNow(); closeErr != nil {
+				logger.Debug("realtime: ws close after heartbeat failure", "err", closeErr)
+			}
+		}
+		heartbeatErr <- err
+	}()
+
+	var lastInboundRefresh time.Time
+	var inboundRefreshed bool
 
 	for {
 		_, _, err := conn.Read(ctx)
@@ -196,33 +250,47 @@ func runConnection(ctx context.Context, conn *websocket.Conn, heartbeat time.Dur
 			<-heartbeatErr
 			return
 		}
-		if refreshSlots != nil {
-			refreshSlots(context.Background())
-		}
 		// Inbound messages are currently ignored; lobby + chat handlers
 		// are deferred.
+		if refreshSlots == nil {
+			continue
+		}
+		now := clock.Now()
+		if inboundRefreshed && now.Sub(lastInboundRefresh) < heartbeat {
+			continue
+		}
+		lastInboundRefresh = now
+		inboundRefreshed = true
+		refreshSlotsWithTimeout(ctx, heartbeat, refreshSlots)
 	}
 }
 
-func runHeartbeat(ctx context.Context, conn *websocket.Conn, interval time.Duration, refreshSlots func(context.Context)) error {
-	t := time.NewTicker(interval)
+func runHeartbeatWithClock(ctx context.Context, conn realtimeConnection, interval time.Duration, refreshSlots func(context.Context), clock connectionClock) error {
+	t := clock.NewTicker(interval)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-t.C:
+		case <-t.C():
 			pingCtx, cancel := context.WithTimeout(ctx, interval)
 			err := conn.Ping(pingCtx)
 			cancel()
 			if err != nil {
 				return err
 			}
-			if refreshSlots != nil {
-				refreshSlots(context.Background())
-			}
+			refreshSlotsWithTimeout(ctx, interval, refreshSlots)
 		}
 	}
+}
+
+func refreshSlotsWithTimeout(ctx context.Context, timeout time.Duration, refreshSlots func(context.Context)) {
+	if refreshSlots == nil {
+		return
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	refreshSlots(refreshCtx)
 }
 
 func isExpectedCloseErr(err error) bool {

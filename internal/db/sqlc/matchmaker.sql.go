@@ -163,6 +163,40 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 	return items, nil
 }
 
+const claimMatchmakerMatch = `-- name: ClaimMatchmakerMatch :one
+UPDATE matchmaker_matches
+SET claimed_at = COALESCE(claimed_at, now())
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND expires_at > now()
+RETURNING id, tenant_id, project_id, mode, fleet_id, address, protocol,
+          session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
+`
+
+// Poll/realtime delivery claims only live matches. The expiry guard prevents a
+// late poll from reviving an allocation after the GC lease has elapsed.
+func (q *Queries) ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error) {
+	row := q.db.QueryRow(ctx, claimMatchmakerMatch, id)
+	var i MatchmakerMatch
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Mode,
+		&i.FleetID,
+		&i.Address,
+		&i.Protocol,
+		&i.SessionID,
+		&i.JoinCode,
+		&i.Roster,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.AllocationID,
+		&i.ClaimedAt,
+	)
+	return i, err
+}
+
 const commitMatchmakerTickets = `-- name: CommitMatchmakerTickets :execrows
 UPDATE matchmaking_tickets
 SET status           = 'matched',
@@ -267,12 +301,31 @@ func (q *Queries) CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueu
 const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
 DELETE FROM matchmaker_matches
 WHERE expires_at < now()
+  AND (allocation_id IS NULL OR claimed_at IS NOT NULL)
 `
 
-// GC (River job, leader-elected): drop match rows past their retention
-// window. Privileged — runs without a tenant GUC.
+// Drop expired matches that do not need allocation cleanup. Unclaimed fleet
+// matches stay until the backend deallocation above succeeds.
 func (q *Queries) DeleteExpiredMatchmakerMatches(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredMatchmakerMatches)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredUnclaimedMatchmakerMatch = `-- name: DeleteExpiredUnclaimedMatchmakerMatch :execrows
+DELETE FROM matchmaker_matches
+WHERE id = $1
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at < now()
+`
+
+// Delete only after its allocation has been successfully deallocated. The
+// guards make retries and a concurrent cleanup safe.
+func (q *Queries) DeleteExpiredUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredUnclaimedMatchmakerMatch, id)
 	if err != nil {
 		return 0, err
 	}
@@ -320,7 +373,7 @@ func (q *Queries) ExpireMatchmakerTickets(ctx context.Context) (int64, error) {
 
 const getMatchmakerMatch = `-- name: GetMatchmakerMatch :one
 SELECT id, tenant_id, project_id, mode, fleet_id, address, protocol,
-       session_id, join_code, roster, created_at, expires_at
+       session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
 FROM matchmaker_matches
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -342,6 +395,8 @@ func (q *Queries) GetMatchmakerMatch(ctx context.Context, id string) (Matchmaker
 		&i.Roster,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.AllocationID,
+		&i.ClaimedAt,
 	)
 	return i, err
 }
@@ -423,28 +478,31 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 const insertMatchmakerMatch = `-- name: InsertMatchmakerMatch :exec
 INSERT INTO matchmaker_matches (
     id, tenant_id, project_id, mode, fleet_id, address, protocol,
-    session_id, join_code, roster, expires_at
+    session_id, join_code, allocation_id, claimed_at, roster, expires_at
 )
 VALUES (
     $1,
     current_setting('app.tenant_id', true)::bigint,
     $2, $3, $4,
     $5, $6, $7,
-    $8, $9, $10
+    $8, $9, $10,
+    $11, $12
 )
 `
 
 type InsertMatchmakerMatchParams struct {
-	ID        string
-	ProjectID int64
-	Mode      string
-	FleetID   *int64
-	Address   string
-	Protocol  string
-	SessionID string
-	JoinCode  string
-	Roster    []byte
-	ExpiresAt pgtype.Timestamptz
+	ID           string
+	ProjectID    int64
+	Mode         string
+	FleetID      *int64
+	Address      string
+	Protocol     string
+	SessionID    string
+	JoinCode     string
+	AllocationID *int64
+	ClaimedAt    pgtype.Timestamptz
+	Roster       []byte
+	ExpiresAt    pgtype.Timestamptz
 }
 
 func (q *Queries) InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmakerMatchParams) error {
@@ -457,6 +515,8 @@ func (q *Queries) InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmake
 		arg.Protocol,
 		arg.SessionID,
 		arg.JoinCode,
+		arg.AllocationID,
+		arg.ClaimedAt,
 		arg.Roster,
 		arg.ExpiresAt,
 	)
@@ -521,6 +581,43 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 	var i InsertMatchmakingTicketRow
 	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
 	return i, err
+}
+
+const listExpiredUnclaimedMatchmakerAllocations = `-- name: ListExpiredUnclaimedMatchmakerAllocations :many
+SELECT id, tenant_id, COALESCE(allocation_id, 0)::bigint AS allocation_id
+FROM matchmaker_matches
+WHERE allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at < now()
+ORDER BY expires_at, id
+`
+
+type ListExpiredUnclaimedMatchmakerAllocationsRow struct {
+	ID           string
+	TenantID     int64
+	AllocationID int64
+}
+
+// GC candidates whose allocation lease elapsed without a poll or realtime
+// delivery. Privileged — runs without a tenant GUC.
+func (q *Queries) ListExpiredUnclaimedMatchmakerAllocations(ctx context.Context) ([]ListExpiredUnclaimedMatchmakerAllocationsRow, error) {
+	rows, err := q.db.Query(ctx, listExpiredUnclaimedMatchmakerAllocations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpiredUnclaimedMatchmakerAllocationsRow
+	for rows.Next() {
+		var i ListExpiredUnclaimedMatchmakerAllocationsRow
+		if err := rows.Scan(&i.ID, &i.TenantID, &i.AllocationID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMatchmakerBucketsForProject = `-- name: ListMatchmakerBucketsForProject :many

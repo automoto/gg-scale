@@ -223,4 +223,7 @@ func TestMatchmakerGet_should_return_roster_after_match_for_missed_event_recover
 	assert.True(t, strings.HasPrefix(resp.MatchID, "mm_"), "match_id=%q", resp.MatchID)
 	require.Len(t, resp.Users, 1)
 	assert.Equal(t, int64(42), resp.Users[0].PlayerID)
+	match, err := d.Matchmaker.GetMatch(db.WithTenant(context.Background(), 1), resp.MatchID)
+	require.NoError(t, err)
+	assert.False(t, match.ClaimedAt.IsZero(), "polling a matched ticket claims its allocation lease")
 }

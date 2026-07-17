@@ -2,7 +2,6 @@ package controlpanel
 
 import (
 	"context"
-	"crypto/rand"
 	"embed"
 	"errors"
 	"fmt"
@@ -28,6 +27,7 @@ import (
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
+	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webassets"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -68,6 +68,9 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
 	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
 	TwoFactor *twofactor.Cipher
+	// VerifySigningKey signs short-lived email-verification cookies. Startup
+	// supplies the same key to the control panel and player site.
+	VerifySigningKey []byte
 	// StorageLimits (may be nil) reads/writes per-tenant/project storage-size
 	// overrides for the rate-limits page.
 	StorageLimits storagelimit.LimitStore
@@ -102,10 +105,8 @@ type Handler struct {
 	now            func() time.Time
 	proxyTrust     *ratelimit.ProxyTrust
 	metrics        *observability.Metrics
-	// verifySigningKey signs the short-lived verify-pending cookie.
-	// Generated once at handler construction so each process has a fresh
-	// secret; restarts invalidate in-flight verify cookies (acceptable —
-	// users re-enter from login).
+	// verifySigningKey signs the short-lived verify-pending cookie and is shared
+	// across processes and the player site.
 	verifySigningKey []byte
 	twoFactor        *twofactor.Cipher
 	storageLimits    storagelimit.LimitStore
@@ -114,39 +115,7 @@ type Handler struct {
 // New builds the control panel router. Callers should only mount it when
 // d.Config.Enabled returns true.
 func New(d Deps) http.Handler {
-	bootstrap := d.Bootstrap
-	if bootstrap == nil {
-		bootstrap = DisabledBootstrap()
-	}
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
-		// crypto/rand failure is unrecoverable; this only fires at process
-		// startup so panicking is appropriate.
-		panic("control panel: rand: " + err.Error())
-	}
-	h := &Handler{
-		pool:             d.Pool,
-		cache:            d.Cache,
-		limiter:          d.Limiter,
-		overrides:        d.RateLimitOverrides,
-		reg:              d.Registry,
-		cfg:              d.Config,
-		bootstrap:        bootstrap,
-		mailer:           d.Mailer,
-		fleet:            d.Fleet,
-		rbac:             d.RBAC,
-		pluginInfo:       d.PluginInfo,
-		now:              time.Now,
-		proxyTrust:       d.ProxyTrust,
-		metrics:          d.Metrics,
-		verifySigningKey: key,
-		twoFactor:        d.TwoFactor,
-		storageLimits:    d.StorageLimits,
-	}
-	if d.Limiter != nil && d.Registry != nil {
-		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
-			WithOverrides(d.RateLimitOverrides)
-	}
+	h := newHandler(d)
 
 	r := chi.NewRouter()
 	r.Use(webutil.SecurityHeaders)
@@ -313,6 +282,40 @@ func New(d Deps) http.Handler {
 	})
 
 	return r
+}
+
+func newHandler(d Deps) *Handler {
+	if len(d.VerifySigningKey) != verifycode.SigningKeySize {
+		panic(fmt.Sprintf("control panel: email verify signing key has %d bytes, want %d", len(d.VerifySigningKey), verifycode.SigningKeySize))
+	}
+	bootstrap := d.Bootstrap
+	if bootstrap == nil {
+		bootstrap = DisabledBootstrap()
+	}
+	h := &Handler{
+		pool:             d.Pool,
+		cache:            d.Cache,
+		limiter:          d.Limiter,
+		overrides:        d.RateLimitOverrides,
+		reg:              d.Registry,
+		cfg:              d.Config,
+		bootstrap:        bootstrap,
+		mailer:           d.Mailer,
+		fleet:            d.Fleet,
+		rbac:             d.RBAC,
+		pluginInfo:       d.PluginInfo,
+		now:              time.Now,
+		proxyTrust:       d.ProxyTrust,
+		metrics:          d.Metrics,
+		verifySigningKey: append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:        d.TwoFactor,
+		storageLimits:    d.StorageLimits,
+	}
+	if d.Limiter != nil && d.Registry != nil {
+		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
+			WithOverrides(d.RateLimitOverrides)
+	}
+	return h
 }
 
 func (h *Handler) assetHandler(w http.ResponseWriter, r *http.Request) {
@@ -574,10 +577,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	// owner-only; admins are limited to publishable keys. The shared roleAdmin
 	// route guard only checks project:manage, so enforce the key-type boundary
 	// here (api_key:secret vs api_key:publishable).
-	keyObject := rbac.ObjectAPIKeyPublic
-	if keyType == tenant.KeyTypeSecret {
-		keyObject = rbac.ObjectAPIKeySecret
-	}
+	keyObject, _ := apiKeyObjectForType(keyType)
 	if !h.requireControlPanelPermission(w, r, tenantID, keyObject, rbac.ActionManage) {
 		return
 	}
@@ -653,11 +653,16 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := h.updateAPIKeyLabel(r.Context(), session.User.ID, tenantID, apiKeyID, r.Form.Get("label")); err != nil {
+	switch err := h.updateAPIKeyLabel(r.Context(), session.User.ID, tenantID, apiKeyID, r.Form.Get("label")); {
+	case err == nil:
+		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
+	case errors.Is(err, errAPIKeyManageDenied):
+		http.Error(w, "forbidden", http.StatusForbidden)
+	case errors.Is(err, errKeyNotInTenant):
+		http.Error(w, "api key not found", http.StatusNotFound)
+	default:
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
-		return
 	}
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 }
 
 func (h *Handler) updateAPIKeyFeaturesHandler(w http.ResponseWriter, r *http.Request) {
@@ -677,7 +682,7 @@ func (h *Handler) updateAPIKeyFeaturesHandler(w http.ResponseWriter, r *http.Req
 	switch err := h.updateAPIKeyManagedScopes(r.Context(), session.User.ID, tenantID, apiKeyID, scopes); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable):
+	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable), errors.Is(err, errAPIKeyManageDenied):
 		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, errKeyNotInTenant):
 		http.Error(w, "api key not found", http.StatusNotFound)
@@ -695,11 +700,16 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := h.revokeAPIKey(r.Context(), session.User.ID, tenantID, apiKeyID); err != nil {
+	switch err := h.revokeAPIKey(r.Context(), session.User.ID, tenantID, apiKeyID); {
+	case err == nil:
+		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
+	case errors.Is(err, errAPIKeyManageDenied):
+		http.Error(w, "forbidden", http.StatusForbidden)
+	case errors.Is(err, errKeyNotInTenant):
+		http.Error(w, "api key not found", http.StatusNotFound)
+	default:
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)
-		return
 	}
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
 }
 
 func (h *Handler) requireSession(next http.Handler) http.Handler {

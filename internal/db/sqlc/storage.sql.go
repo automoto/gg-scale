@@ -121,13 +121,13 @@ func (q *Queries) ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforced
 }
 
 const listStorageObjects = `-- name: ListStorageObjects :many
-SELECT id, key, value, version, updated_at
+SELECT id, key, octet_length(value::text)::bigint AS size_bytes, version, updated_at
 FROM storage_objects
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND owner_user_id = $2
   AND deleted_at IS NULL
-  AND ($3::text = '' OR key LIKE $3 || '%')
+  AND key LIKE CAST($3 AS text) || '%' ESCAPE '\'
   AND id > $4
 ORDER BY id ASC
 LIMIT $5
@@ -136,15 +136,15 @@ LIMIT $5
 type ListStorageObjectsParams struct {
 	ProjectID   int64
 	OwnerUserID int64
-	Column3     string
-	ID          int64
-	Limit       int32
+	KeyPrefix   string
+	CursorID    int64
+	RowLimit    int32
 }
 
 type ListStorageObjectsRow struct {
 	ID        int64
 	Key       string
-	Value     []byte
+	SizeBytes int64
 	Version   int64
 	UpdatedAt pgtype.Timestamptz
 }
@@ -153,9 +153,9 @@ func (q *Queries) ListStorageObjects(ctx context.Context, arg ListStorageObjects
 	rows, err := q.db.Query(ctx, listStorageObjects,
 		arg.ProjectID,
 		arg.OwnerUserID,
-		arg.Column3,
-		arg.ID,
-		arg.Limit,
+		arg.KeyPrefix,
+		arg.CursorID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -167,7 +167,7 @@ func (q *Queries) ListStorageObjects(ctx context.Context, arg ListStorageObjects
 		if err := rows.Scan(
 			&i.ID,
 			&i.Key,
-			&i.Value,
+			&i.SizeBytes,
 			&i.Version,
 			&i.UpdatedAt,
 		); err != nil {

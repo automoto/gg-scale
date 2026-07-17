@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -38,6 +39,38 @@ func TestParseMigrateArgs(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMigrationURLUsesElevatedCredentialWhenConfigured(t *testing.T) {
+	tests := []struct {
+		name        string
+		databaseURL string
+		migrateURL  string
+		want        string
+	}{
+		{
+			name:        "development fallback",
+			databaseURL: "postgres://app@db/ggscale",
+			want:        "postgres://app@db/ggscale",
+		},
+		{
+			name:        "separate migration credential",
+			databaseURL: "postgres://app@db/ggscale",
+			migrateURL:  "postgres://owner@db/ggscale",
+			want:        "postgres://owner@db/ggscale",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.Config{
+				DatabaseURL:  tt.databaseURL,
+				DBMigrateURL: tt.migrateURL,
+			}
+
+			assert.Equal(t, tt.want, migrationURL(cfg))
 		})
 	}
 }

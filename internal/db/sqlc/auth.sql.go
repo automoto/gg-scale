@@ -398,7 +398,7 @@ func (q *Queries) RevokeActivePlayerSessions(ctx context.Context, arg RevokeActi
 	return result.RowsAffected(), nil
 }
 
-const revokeSession = `-- name: RevokeSession :exec
+const revokeSession = `-- name: RevokeSession :execrows
 UPDATE sessions
 SET revoked_at = now(), revoked_reason = 'rotated'
 WHERE id = $1
@@ -408,9 +408,12 @@ WHERE id = $1
 
 // Rotation path: the token is being superseded by a freshly-issued one, so a
 // later replay of this hash is a reuse (theft) signal.
-func (q *Queries) RevokeSession(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokeSession, id)
-	return err
+func (q *Queries) RevokeSession(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSession, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeSessionByRefreshHash = `-- name: RevokeSessionByRefreshHash :one
