@@ -49,3 +49,12 @@ scripts/ui_playwright_audit.mjs
 scripts/ui_visual_screenshots.mjs
 package-lock.json
 package.json
+wiki/api_routes.md
+wiki/architecture.md
+wiki/features.md
+wiki/onboarding.md
+package-lock.json
+package.json
+*.md
+*.json
+
