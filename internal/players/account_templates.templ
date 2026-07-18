@@ -149,7 +149,7 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 			<p class="subtitle">Add a second sign-in step with an authenticator app such as Google Authenticator.</p>
 			<form method="post" action={ templ.URL("/v1/players/account/2fa/setup") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<button type="submit">Enable two-factor authentication</button>
+				<button type="submit" class="btn-inline">Enable two-factor authentication</button>
 			</form>
 		} else {
 			<p class="subtitle">Enabled. Backup codes remaining: { fmt.Sprint(vm.BackupCodesRemaining) }.</p>
@@ -169,7 +169,7 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 						<small class="field-error">{ msg }</small>
 					}
 				</label>
-				<button type="submit">Regenerate backup codes</button>
+				<button type="submit" class="btn-inline">Regenerate backup codes</button>
 			</form>
 			<h2>Disable two-factor authentication</h2>
 			<p class="subtitle">All other sessions and remembered devices will be signed out.</p>
@@ -187,7 +187,7 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 						<small class="field-error">{ msg }</small>
 					}
 				</label>
-				<button class="secondary" type="submit">Disable</button>
+				<button class="secondary btn-inline" type="submit">Disable</button>
 			</form>
 		}
 		<p><a href={ templ.URL("/v1/players/account/") }>Back to account</a></p>
@@ -217,7 +217,7 @@ templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
 			<label>6-digit code
 				<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
 			</label>
-			<button type="submit">Confirm and enable</button>
+			<button type="submit" class="btn-inline">Confirm and enable</button>
 		</form>
 	}
 }

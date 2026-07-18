@@ -2057,11 +2057,8 @@ paths:
             type: string
       requestBody:
         content:
-          application/octet-stream:
-            schema:
-              contentMediaType: application/octet-stream
-              format: binary
-              type: string
+          application/json:
+            schema: {}
         required: true
       responses:
         "200":

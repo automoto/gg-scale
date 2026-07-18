@@ -65,7 +65,7 @@ type storageObjectListItemResponse struct {
 type storagePutInput struct {
 	Key     string `path:"key"`
 	IfMatch string `header:"If-Match"`
-	RawBody []byte
+	Body    json.RawMessage
 }
 
 type storageKeyInput struct {
@@ -132,7 +132,7 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		if in.Key == "" {
 			return nil, huma.Error400BadRequest("key required")
 		}
-		if !json.Valid(in.RawBody) {
+		if !json.Valid(in.Body) {
 			return nil, huma.Error400BadRequest("value must be valid JSON")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
@@ -148,7 +148,7 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		if err != nil {
 			return nil, serverError(ctx, "storage put: resolve limit", err)
 		}
-		if int64(len(in.RawBody)) > limit {
+		if int64(len(in.Body)) > limit {
 			return nil, huma.Error413RequestEntityTooLarge("value exceeds maximum size")
 		}
 
@@ -167,7 +167,7 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		}
 
 		return &storageObjectOutput{Body: storageObjectResponse{
-			Key: in.Key, Value: in.RawBody, Version: version,
+			Key: in.Key, Value: in.Body, Version: version,
 			UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
 		}}, nil
 	}
@@ -200,13 +200,13 @@ func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in 
 		}); lerr != nil {
 			return fmt.Errorf("storage write lock: %w", lerr)
 		}
-		delta, qerr := storageWriteDelta(ctx, q, projectID, ownerID, in.Key, in.RawBody)
+		delta, qerr := storageWriteDelta(ctx, q, projectID, ownerID, in.Key, in.Body)
 		if qerr != nil {
 			return qerr
 		}
 		if in.IfMatch == "" {
 			row, err := q.PutStorageObject(ctx, sqlcgen.PutStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: in.RawBody,
+				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key, Value: in.Body,
 			})
 			if err != nil {
 				return err
@@ -219,7 +219,7 @@ func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in 
 			}
 			row, err := q.PutStorageObjectIfMatch(ctx, sqlcgen.PutStorageObjectIfMatchParams{
 				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
-				Version: expected, Value: in.RawBody,
+				Version: expected, Value: in.Body,
 			})
 			if err != nil {
 				return err

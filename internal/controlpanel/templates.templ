@@ -27,59 +27,61 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 					<div class="nav-links">
 						@navLink("/v1/control-panel", "Tenants", nav.IsActive(navTenants))
 						if nav.TenantID > 0 {
-							<details class="nav-menu">
+							<details class="dropdown nav-menu">
 								<summary>Tenant</summary>
-								<div class="nav-menu-content">
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects", "Projects", nav.IsActive(navProjects))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/api-keys", "API keys", nav.IsActive(navAPIKeys))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/team", "Team", nav.IsActive(navTeam))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/settings", "Settings", nav.IsActive(navTenantSettings))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/rate-limits", "Limits", nav.IsActive(navRateLimits))
-								</div>
+								<ul>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Projects", nav.IsActive(navProjects))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/api-keys", "API keys", nav.IsActive(navAPIKeys))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/team", "Team", nav.IsActive(navTeam))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/settings", "Settings", nav.IsActive(navTenantSettings))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/rate-limits", "Limits", nav.IsActive(navRateLimits))</li>
+								</ul>
 							</details>
 						}
 						if nav.TenantID > 0 && nav.ProjectID > 0 {
-							<details class="nav-menu">
+							<details class="dropdown nav-menu">
 								<summary>Project</summary>
-								<div class="nav-menu-content">
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/players", "Players", nav.IsActive(navPlayers))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/leaderboards", "Leaderboards", nav.IsActive(navLeaderboards))
-									@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/settings", "Settings", nav.IsActive(navProjectSettings))
+								<ul>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/players", "Players", nav.IsActive(navPlayers))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/leaderboards", "Leaderboards", nav.IsActive(navLeaderboards))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Settings", nav.IsActive(navProjectSettings))</li>
 									if nav.FleetEnabled {
-										@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/fleets", "Fleets", nav.IsActive(navFleets))
-										@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/allocations", "Allocations", nav.IsActive(navAllocations))
-										@navLink("/v1/control-panel/tenants/" + stringFromInt(nav.TenantID) + "/projects/" + stringFromInt(nav.ProjectID) + "/matchmaker", "Matchmaker", nav.IsActive(navMatchmaker))
+										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/fleets", "Fleets", nav.IsActive(navFleets))</li>
+										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/allocations", "Allocations", nav.IsActive(navAllocations))</li>
+										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/matchmaker", "Matchmaker", nav.IsActive(navMatchmaker))</li>
 									}
-								</div>
+								</ul>
 							</details>
 						}
 						if nav.IsPlatformAdmin {
-							<details class="nav-menu">
+							<details class="dropdown nav-menu">
 								<summary>Menu</summary>
-								<div class="nav-menu-content">
-									@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))
-									@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))
-									@navLink("/v1/control-panel/admin/change-requests", "Change requests", nav.IsActive(navChangeRequests))
-									@navLink("/v1/control-panel/admin/player-accounts", "Player accounts", nav.IsActive(navPlayerAccounts))
-									@navLink("/v1/control-panel/admin/team", "Platform admins", nav.IsActive(navPlatformTeam))
-									@navLink("/v1/control-panel/admin/settings", "Server settings", nav.IsActive(navServerSettings))
+								<ul>
+									<li>@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))</li>
+									<li>@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))</li>
+									<li>@navLink("/v1/control-panel/admin/change-requests", "Change requests", nav.IsActive(navChangeRequests))</li>
+									<li>@navLink("/v1/control-panel/admin/player-accounts", "Player accounts", nav.IsActive(navPlayerAccounts))</li>
+									<li>@navLink("/v1/control-panel/admin/team", "Platform admins", nav.IsActive(navPlatformTeam))</li>
+									<li>@navLink("/v1/control-panel/admin/settings", "Server settings", nav.IsActive(navServerSettings))</li>
 									if nav.PluginsEnabled {
-										@navLink("/v1/control-panel/admin/plugins", "Plugins", nav.IsActive(navPlugins))
+										<li>@navLink("/v1/control-panel/admin/plugins", "Plugins", nav.IsActive(navPlugins))</li>
 									}
-								</div>
+								</ul>
 							</details>
 						}
 						@navLink("/v1/control-panel/help", "Help", nav.IsActive(navHelp))
 					</div>
-					<details class="nav-menu account-menu">
+					<details class="dropdown nav-menu account-menu dropdown-right">
 						<summary>{ userEmail }</summary>
-						<div class="nav-menu-content">
-							@navLink("/v1/control-panel/account/password", "Account Settings", nav.IsActive(navAccount))
-							<form method="post" action="/v1/control-panel/logout">
-								<input type="hidden" name="_csrf" value={ csrfToken }/>
-								<button type="submit" class="secondary outline btn-inline">Sign out</button>
-							</form>
-						</div>
+						<ul>
+							<li>@navLink("/v1/control-panel/account/password", "Account Settings", nav.IsActive(navAccount))</li>
+							<li>
+								<form method="post" action="/v1/control-panel/logout">
+									<input type="hidden" name="_csrf" value={ csrfToken }/>
+									<button type="submit" class="secondary outline btn-inline">Sign out</button>
+								</form>
+							</li>
+						</ul>
 					</details>
 				</nav>
 			</header>
@@ -224,13 +226,13 @@ templ HomePage(vm HomeView) {
 								<td><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") }>{ tenant.Name }</a></td>
 								<td><span class="badge badge-role">{ tenant.Role }</span></td>
 								<td class="actions-cell">
-									<details class="row-menu">
+									<details class="dropdown row-menu dropdown-right">
 										<summary>Manage</summary>
-										<div>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") }>Projects</a>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/api-keys") }>API keys</a>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/team") }>Team</a>
-										</div>
+										<ul>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") }>Projects</a></li>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/api-keys") }>API keys</a></li>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/team") }>Team</a></li>
+										</ul>
 									</details>
 								</td>
 							</tr>
@@ -316,18 +318,18 @@ templ ProjectsPage(vm ProjectsView) {
 								<td><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") }>{ p.Name }</a></td>
 								<td>{ timeString(p.CreatedAt) }</td>
 								<td class="actions-cell">
-									<details class="row-menu">
+									<details class="dropdown row-menu dropdown-right">
 										<summary>Manage</summary>
-										<div>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") }>Players</a>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/leaderboards") }>Leaderboards</a>
+										<ul>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/players") }>Players</a></li>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/leaderboards") }>Leaderboards</a></li>
 											if vm.FleetEnabled {
-												<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") }>Fleets</a>
-												<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") }>Allocations</a>
+												<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/fleets") }>Fleets</a></li>
+												<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/allocations") }>Allocations</a></li>
 											}
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a>
-											<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/settings") }>Settings</a>
-										</div>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a></li>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(p.ID) + "/settings") }>Settings</a></li>
+										</ul>
 									</details>
 								</td>
 							</tr>

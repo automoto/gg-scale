@@ -127,7 +127,7 @@ func playerLayout(title string, active playerNavDestination, csrfToken, accountE
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</div><details class=\"nav-menu account-menu\"><summary>Account</summary><div class=\"nav-menu-content\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</div><details class=\"dropdown nav-menu account-menu dropdown-right\"><summary>Account</summary><ul><li>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -135,7 +135,7 @@ func playerLayout(title string, active playerNavDestination, csrfToken, accountE
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<form method=\"post\" action=\"/v1/players/account/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</li><li><form method=\"post\" action=\"/v1/players/account/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -143,7 +143,7 @@ func playerLayout(title string, active playerNavDestination, csrfToken, accountE
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Sign out</button></form></div></details></nav></header><main class=\"app-main\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Sign out</button></form></li></ul></details></nav></header><main class=\"app-main\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -192,7 +192,7 @@ func playerNavLink(href, label string, active bool) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 69, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 71, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -219,7 +219,7 @@ func playerNavLink(href, label string, active bool) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 71, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 73, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -310,7 +310,7 @@ func InviteAcceptPage(vm InviteAcceptView) templ.Component {
 				var templ_7745c5c3_Var12 string
 				templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Error)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 95, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 97, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 				if templ_7745c5c3_Err != nil {
@@ -328,7 +328,7 @@ func InviteAcceptPage(vm InviteAcceptView) templ.Component {
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(vm.ProjectName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 97, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 99, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -341,7 +341,7 @@ func InviteAcceptPage(vm InviteAcceptView) templ.Component {
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Email)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 98, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 100, Col: 29}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -404,7 +404,7 @@ func InviteAcceptPage(vm InviteAcceptView) templ.Component {
 						var templ_7745c5c3_Var16 string
 						templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 111, Col: 39}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 113, Col: 39}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 						if templ_7745c5c3_Err != nil {
