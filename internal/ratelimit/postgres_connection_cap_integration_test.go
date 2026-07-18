@@ -154,6 +154,41 @@ WHERE tenant_id = 7002`).Scan(&visibleCrossTenant)
 	assert.Zero(t, visibleCrossTenant, "worker renewal policy must not weaken request-scoped RLS")
 }
 
+func TestPostgresConnectionCap_applies_changed_caps_without_dropping_established_connections(t *testing.T) {
+	pool := startConnectionCapPostgres(t)
+	cap := newIntegrationLeasedCap(t, pool, "us-east", "changing-app")
+	original := CapLimits{Sustained: 4, Ceiling: 4}
+
+	for range 4 {
+		decision, err := cap.Acquire(context.Background(), 7001, original)
+		require.NoError(t, err)
+		require.True(t, decision.Allowed)
+	}
+
+	changed := CapLimits{Sustained: 2, Ceiling: 2}
+	decision, err := cap.Acquire(context.Background(), 7001, changed)
+	require.NoError(t, err)
+	assert.False(t, decision.Allowed)
+	assert.Equal(t, CapRejectCeiling, decision.Reason)
+
+	cap.mu.Lock()
+	grant := cap.grants[7001]
+	cap.mu.Unlock()
+	require.NotNil(t, grant)
+	grant.mu.Lock()
+	assert.Equal(t, int64(4), grant.used)
+	assert.Equal(t, int64(4), grant.allocated)
+	assert.Equal(t, changed, grant.caps)
+	grant.mu.Unlock()
+
+	for range 3 {
+		require.NoError(t, cap.Release(context.Background(), 7001))
+	}
+	decision, err = cap.Acquire(context.Background(), 7001, changed)
+	require.NoError(t, err)
+	assert.True(t, decision.Allowed, "new admissions resume only after established usage falls below the changed cap")
+}
+
 func TestPostgresGrantStore_recovers_capacity_after_a_process_lease_expires(t *testing.T) {
 	pool := startConnectionCapPostgres(t)
 	store := newPostgresGrantStore(pool)
