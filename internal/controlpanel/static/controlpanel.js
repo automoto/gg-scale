@@ -49,30 +49,34 @@
 	// Row menus sit inside horizontally scrollable cards, where an absolutely
 	// positioned panel is clipped to the card's scroll box. While one is open,
 	// float its panel with position: fixed anchored to the summary, flipping
-	// above it when there is no room below.
+	// above it when there is no room below. The panel's right edge is pinned to
+	// the summary's (never computed from a measured width) so the anchor cannot
+	// shift if fonts or layout settle after the panel first paints.
 	var rowMenuGap = 6;
 
 	function positionRowMenu(menu) {
 		var summary = menu.querySelector("summary");
-		var panel = menu.querySelector(":scope > div");
+		var panel = menu.querySelector(":scope > ul");
 		if (!(summary instanceof HTMLElement) || !(panel instanceof HTMLElement)) {
 			return;
 		}
 		var rect = summary.getBoundingClientRect();
 		panel.style.position = "fixed";
-		panel.style.right = "auto";
 		panel.style.margin = "0";
-		var left = Math.max(8, rect.right - panel.offsetWidth);
-		var top = rect.bottom + rowMenuGap;
-		if (top + panel.offsetHeight > window.innerHeight - 8 && rect.top - rowMenuGap - panel.offsetHeight > 8) {
-			top = rect.top - rowMenuGap - panel.offsetHeight;
+		panel.style.width = "auto";
+		panel.style.left = "auto";
+		panel.style.right = Math.max(8, window.innerWidth - rect.right) + "px";
+		if (rect.bottom + rowMenuGap + panel.offsetHeight > window.innerHeight - 8 && rect.top - rowMenuGap - panel.offsetHeight > 8) {
+			panel.style.top = "auto";
+			panel.style.bottom = window.innerHeight - rect.top + rowMenuGap + "px";
+		} else {
+			panel.style.bottom = "auto";
+			panel.style.top = rect.bottom + rowMenuGap + "px";
 		}
-		panel.style.left = left + "px";
-		panel.style.top = top + "px";
 	}
 
 	function resetRowMenu(menu) {
-		var panel = menu.querySelector(":scope > div");
+		var panel = menu.querySelector(":scope > ul");
 		if (panel instanceof HTMLElement) {
 			panel.removeAttribute("style");
 		}
@@ -84,10 +88,50 @@
 		});
 	}
 
-	// A fixed panel cannot track the summary through a scroll (the summary may
-	// slide under the card's clip edge), so close instead of repositioning.
+	// Scroll events are dispatched asynchronously, so a scroll the browser
+	// started before the menu opened (e.g. scrolling the clicked summary into
+	// view) can arrive just after: follow the summary through that early
+	// scroll. A fixed panel cannot track later, deliberate scrolls (the summary
+	// may slide under the card's clip edge), so those close the menu.
+	var rowMenuOpenedAt = 0;
+
 	window.addEventListener("resize", closeOpenRowMenus);
-	document.addEventListener("scroll", closeOpenRowMenus, true);
+	document.addEventListener("scroll", function () {
+		var open = document.querySelector("details.row-menu[open]");
+		if (!(open instanceof HTMLDetailsElement)) {
+			return;
+		}
+		if (performance.now() - rowMenuOpenedAt < 150) {
+			positionRowMenu(open);
+		} else {
+			open.open = false;
+		}
+	}, true);
+
+	// Open and position row menus synchronously on the summary click — the
+	// panel is positioned exactly once, before the first paint. Relying on the
+	// asynchronous toggle event instead lets the browser paint frames with the
+	// panel at its fallback position and then re-pin it, visible as a jump.
+	document.addEventListener("click", function (event) {
+		var target = event.target;
+		if (!(target instanceof Element)) {
+			return;
+		}
+		var summary = target.closest("details.row-menu > summary");
+		if (!(summary instanceof HTMLElement)) {
+			return;
+		}
+		var menu = summary.parentElement;
+		event.preventDefault();
+		if (menu.open) {
+			menu.open = false;
+			return;
+		}
+		closeOpenRowMenus();
+		rowMenuOpenedAt = performance.now();
+		menu.open = true;
+		positionRowMenu(menu);
+	});
 
 	document.addEventListener("toggle", function (event) {
 		var menu = event.target;
@@ -103,9 +147,6 @@
 				other.open = false;
 			}
 		});
-		if (menu.matches("details.row-menu")) {
-			positionRowMenu(menu);
-		}
 	}, true);
 
 	document.addEventListener("click", function (event) {

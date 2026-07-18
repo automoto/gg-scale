@@ -116,94 +116,35 @@ body {
   background: rgba(129, 140, 248, 0.12);
 }
 .app-header .btn-inline { width: auto; padding: 4px 14px; font-size: 0.875rem; margin: 0; }
-/* Dropdown menus built on <details>. Every rule is prefixed with .app-header
-   so it beats Pico's accordion styles for <details>/<summary> on specificity:
-   those add margin-bottom to an open summary (shifting the whole header and
-   the panel anchor), draw their own rotating chevron behind ours, and recolor
-   the summary via :not([role]) selectors. */
-.app-header .nav-menu {
-  position: relative;
-  margin: 0;
-}
+/* Header dropdowns use Pico's details.dropdown; these overrides only keep the
+   summaries looking like plain nav links (Pico styles them like form selects)
+   and neutralize Pico's dropdown margins inside the flex nav. */
+.app-header .nav-menu { margin: 0; }
 .app-header .nav-menu > summary,
-.app-header .nav-menu[open] > summary {
+.app-header details.nav-menu > summary:not([role]) {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
+  height: auto;
   min-height: 2rem;
   margin: 0;
   padding: 0.35rem 0.6rem;
+  border: none;
   border-radius: 8px;
-  cursor: pointer;
-  list-style: none;
+  background: none;
   white-space: nowrap;
-  text-align: left;
   line-height: 1.4;
   color: var(--pico-color);
-  transition: background-color 0.12s ease, color 0.12s ease;
 }
-.app-header .nav-menu > summary::-webkit-details-marker { display: none; }
-.app-header .nav-menu > summary::after {
-  content: "▾";
-  display: inline-block;
-  width: auto;
-  height: auto;
-  margin: 0;
-  float: none;
-  background: none;
-  font-size: 0.65rem;
-  opacity: 0.55;
-  transform: none;
-  transition: transform 0.12s ease;
-}
-.app-header .nav-menu[open] > summary::after {
-  transform: rotate(180deg);
-}
-/* :not([role]) mirrors Pico's own accordion selector so the open-state color
-   wins without !important. */
 .app-header .nav-menu > summary:hover,
 .app-header .nav-menu[open] > summary:not([role]) {
   background: rgba(129, 140, 248, 0.12);
   color: var(--pico-primary);
 }
-.app-header .nav-menu > summary:focus-visible {
-  outline: 2px solid var(--pico-primary-focus);
-  outline-offset: 1px;
-}
-.app-header .nav-menu-content {
-  position: absolute;
-  top: calc(100% + 0.35rem);
-  right: 0;
-  z-index: 20;
-  min-width: 13rem;
-  padding: 0.35rem;
-  border: 1px solid var(--pico-border-color);
-  border-radius: 8px;
-  background: var(--pico-card-background-color);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.35);
-}
-.app-header .nav-links .nav-menu-content {
-  left: 0;
-  right: auto;
-}
-.app-header .nav-menu-content a,
-.app-header .nav-menu-content button {
-  display: block;
-  width: 100%;
-  margin: 0;
-  text-align: left;
-}
-.app-header .nav-menu-content a {
-  border-radius: 6px;
-}
-.app-header .nav-menu-content a:hover {
-  text-decoration: none;
-  background: rgba(129, 140, 248, 0.12);
-}
-.app-header .nav-menu-content form {
-  display: block;
-  margin: 0;
-}
+/* Panels that open near the viewport or table edge anchor to the right. */
+details.dropdown-right > summary + ul { left: auto; right: 0; }
+.app-header .dropdown > ul form { margin: 0; }
+.app-header .dropdown > ul button { width: 100%; margin: 0; }
 .account-menu {
   margin-left: auto;
   max-width: 18rem;
@@ -316,6 +257,16 @@ input.btn-inline {
 }
 .form-actions button,
 .form-actions [role="button"] { width: auto; margin: 0; }
+/* Player friends lists: label followed by inline action buttons. */
+.friends-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.friends-list li form { margin: 0; }
+.friends-list button,
+.friends-list [role="button"] { padding: 4px 14px; font-size: 0.8rem; }
 .filter-form,
 .settings-form {
   display: flex;
@@ -384,54 +335,32 @@ section.card .data-table {
   padding: 4px 14px;
   font-size: 0.8rem;
 }
-.row-menu {
-  position: relative;
-  display: inline-block;
-  margin: 0;
-}
-.row-menu summary {
+/* Row "Manage" dropdowns use Pico's details.dropdown; only the pill-styled
+   summary and left-aligned panel text are custom. */
+.row-menu { display: inline-block; margin: 0; }
+details.row-menu > summary,
+details.row-menu > summary:not([role]) {
   display: inline-flex;
   align-items: center;
+  gap: 0.25rem;
+  height: auto;
   min-height: 1.85rem;
   margin: 0;
   padding: 4px 12px;
   border: 1px solid var(--pico-border-color);
   border-radius: 999px;
+  background: none;
   color: var(--pico-color);
-  cursor: pointer;
-  list-style: none;
   font-size: 0.8rem;
+  white-space: nowrap;
 }
-/* Pico adds margin-bottom to an open summary; without this override the table
-   row grows every time the menu opens. */
-.row-menu[open] > summary {
-  margin-bottom: 0;
-}
-.row-menu summary::-webkit-details-marker { display: none; }
-.row-menu[open] summary,
-.row-menu summary:hover {
+details.row-menu[open] > summary:not([role]),
+details.row-menu > summary:hover {
   color: var(--pico-primary);
   border-color: var(--pico-primary);
 }
-.row-menu > div {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 0.35rem);
-  z-index: 15;
-  min-width: 10rem;
-  padding: 0.35rem;
-  border: 1px solid var(--pico-border-color);
-  border-radius: 8px;
-  background: var(--pico-card-background-color);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
-}
-.row-menu a {
-  display: block;
-  padding: 0.45rem 0.55rem;
-  border-radius: 6px;
-  text-decoration: none;
-}
-.row-menu a:hover { background: rgba(129, 140, 248, 0.12); }
+/* The actions cell is right-aligned; keep panel text left-aligned. */
+.row-menu > ul { text-align: left; }
 .data-table .label-cell details { display: inline-block; }
 .data-table .label-cell .label-edit-toggle {
   display: inline-flex; align-items: center; gap: 0.5rem;
@@ -649,8 +578,7 @@ dl.concept-list code { font-size: 0.85em; padding: 1px 5px; }
     content: "Account";
     font-size: 1rem;
   }
-  .app-header .nav-menu-content,
-  .app-header .nav-links .nav-menu-content {
+  .app-header .dropdown > ul {
     left: auto;
     right: 0;
   }

@@ -577,7 +577,7 @@ func AccountTwoFactorPage(vm AccountTwoFactorView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\">Enable two-factor authentication</button></form>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"btn-inline\">Enable two-factor authentication</button></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -658,7 +658,7 @@ func AccountTwoFactorPage(vm AccountTwoFactorView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <button type=\"submit\">Regenerate backup codes</button></form><h2>Disable two-factor authentication</h2><p class=\"subtitle\">All other sessions and remembered devices will be signed out.</p><form method=\"post\" action=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <button type=\"submit\" class=\"btn-inline\">Regenerate backup codes</button></form><h2>Disable two-factor authentication</h2><p class=\"subtitle\">All other sessions and remembered devices will be signed out.</p><form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -721,7 +721,7 @@ func AccountTwoFactorPage(vm AccountTwoFactorView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <button class=\"secondary\" type=\"submit\">Disable</button></form>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <button class=\"secondary btn-inline\" type=\"submit\">Disable</button></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -843,7 +843,7 @@ func AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>6-digit code <input name=\"code\" type=\"text\" inputmode=\"numeric\" autocomplete=\"one-time-code\" required></label> <button type=\"submit\">Confirm and enable</button></form>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>6-digit code <input name=\"code\" type=\"text\" inputmode=\"numeric\" autocomplete=\"one-time-code\" required></label> <button type=\"submit\" class=\"btn-inline\">Confirm and enable</button></form>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

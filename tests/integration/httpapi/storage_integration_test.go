@@ -28,6 +28,10 @@ type storageHTTPResult struct {
 }
 
 func storageRequestStatus(method, target, apiKey, accessToken string, body []byte, ifMatch string) storageHTTPResult {
+	return storageRequestStatusWithContentType(method, target, apiKey, accessToken, body, ifMatch, "application/json")
+}
+
+func storageRequestStatusWithContentType(method, target, apiKey, accessToken string, body []byte, ifMatch, contentType string) storageHTTPResult {
 	req, err := http.NewRequest(method, target, bytes.NewReader(body))
 	if err != nil {
 		return storageHTTPResult{err: err}
@@ -35,7 +39,7 @@ func storageRequestStatus(method, target, apiKey, accessToken string, body []byt
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("X-Session-Token", accessToken)
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if ifMatch != "" {
 		req.Header.Set("If-Match", ifMatch)
@@ -50,6 +54,28 @@ func storageRequestStatus(method, target, apiKey, accessToken string, body []byt
 		return storageHTTPResult{status: resp.StatusCode, err: readErr}
 	}
 	return storageHTTPResult{status: resp.StatusCode, body: string(raw), err: closeErr}
+}
+
+func TestStoragePut_rejects_nonJSON_content_type(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-content-type")
+	srv := newQuotaServerWithAllowAllLimiter(t, c)
+	access := anonymousLogin(t, srv.URL, "storage-content-type")
+	target := srv.URL + "/v1/storage/objects/text-plain"
+
+	// Act
+	result := storageRequestStatusWithContentType(http.MethodPut, target,
+		"storage-content-type", access, []byte(`{"valid":true}`), "", "text/plain")
+
+	// Assert
+	require.NoError(t, result.err)
+	assert.Equal(t, http.StatusUnsupportedMediaType, result.status, result.body)
+	var count int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM storage_objects
+		WHERE tenant_id = $1 AND key = 'text-plain' AND deleted_at IS NULL`, tenantID).Scan(&count))
+	assert.Zero(t, count)
 }
 
 func assertTenantStorageUsageMatches(t *testing.T, c *cluster, tenantID int64) int64 {

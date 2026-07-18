@@ -46,15 +46,17 @@ templ playerLayout(title string, active playerNavDestination, csrfToken, account
 						@playerNavLink("/v1/players/account/friends", "Friends", active == playerNavFriends)
 						@playerNavLink("/v1/players/account/2fa", "Security", active == playerNavSecurity)
 					</div>
-					<details class="nav-menu account-menu">
+					<details class="dropdown nav-menu account-menu dropdown-right">
 						<summary>Account</summary>
-						<div class="nav-menu-content">
-							@playerNavLink("/v1/players/account/", playerAccountNavLabel(accountEmail), active == playerNavAccount)
-							<form method="post" action="/v1/players/account/logout">
-								<input type="hidden" name="_csrf" value={ csrfToken }/>
-								<button type="submit" class="secondary outline btn-inline">Sign out</button>
-							</form>
-						</div>
+						<ul>
+							<li>@playerNavLink("/v1/players/account/", playerAccountNavLabel(accountEmail), active == playerNavAccount)</li>
+							<li>
+								<form method="post" action="/v1/players/account/logout">
+									<input type="hidden" name="_csrf" value={ csrfToken }/>
+									<button type="submit" class="secondary outline btn-inline">Sign out</button>
+								</form>
+							</li>
+						</ul>
 					</details>
 				</nav>
 			</header>
