@@ -9,10 +9,13 @@ type Limits struct {
 }
 
 // LimitsForTier returns the token-bucket parameters for the given tenant
-// class. Sustained req/s per the tier-rework ladder; burst (bucket capacity)
-// is 2× the sustained rate so login spikes and reconnect storms absorb into
-// the bucket. tier_3 values are the defaults an operator starts from before
-// applying per-axis overrides (latent per pricing-strategy.md).
+// class. Sizing rule: sustained rate = the class CCU cap / 10, so a chatty
+// game (one DB action per player per 10 s — the reference envelope in
+// docs/capacity-and-launch.md) can fill its advertised CCU cap without the
+// rate axis binding first. Burst (bucket capacity) is 2× the sustained rate
+// so login spikes and reconnect storms absorb into the bucket. tier_3 values
+// are the defaults an operator starts from before applying per-axis
+// overrides (latent per pricing-strategy.md).
 //
 // Unknown/out-of-range classes fall back to tier_0 — fail-closed.
 func LimitsForTier(t tenant.Tier) Limits {
@@ -20,10 +23,10 @@ func LimitsForTier(t tenant.Tier) Limits {
 	case tenant.Tier1:
 		return Limits{RatePerSecond: 1000, Burst: 2000}
 	case tenant.Tier2:
-		return Limits{RatePerSecond: 5000, Burst: 10000}
+		return Limits{RatePerSecond: 2500, Burst: 5000}
 	case tenant.Tier3:
 		return Limits{RatePerSecond: 10000, Burst: 20000}
 	default:
-		return Limits{RatePerSecond: 150, Burst: 300}
+		return Limits{RatePerSecond: 250, Burst: 500}
 	}
 }

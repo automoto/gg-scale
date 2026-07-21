@@ -19,33 +19,38 @@ const Unlimited = -1
 // Axis labels identify which quota a rejection hit. Kept low-cardinality for
 // the rejection metric.
 const (
-	AxisProjects = "projects"
-	AxisPlayers  = "players"
-	AxisStorage  = "storage"
+	AxisProjects      = "projects"
+	AxisPlayers       = "players"
+	AxisStorage       = "storage"
+	AxisRelaySessions = "relay_sessions"
 )
 
 const gb = int64(1) << 30
 
-// Limits is the per-class quota ladder. Projects is a small count; Players and
-// StorageBytes are int64. Unlimited (-1) marks an uncapped axis.
+// Limits is the per-class quota ladder. Projects is a small count; Players,
+// StorageBytes, and RelaySessionsPerMonth are int64. Unlimited (-1) marks an
+// uncapped axis. RelaySessionsPerMonth caps managed-relay credential
+// issuances per calendar month; it only bites for tenants holding the
+// p2p_relay grant with enforce_quotas on.
 type Limits struct {
-	Projects     int
-	Players      int64
-	StorageBytes int64
+	Projects              int
+	Players               int64
+	StorageBytes          int64
+	RelaySessionsPerMonth int64
 }
 
-// LimitsForClass returns the quota ladder for a tenant class. Unknown/out-of-
-// range classes fall back to tier_0 — fail-closed, matching the rate ladder.
+// LimitsForClass returns the quota ladder for a tenant class.
+// Unknown/out-of-range classes fall back to tier_0 — fail-closed, matching the rate ladder.
 func LimitsForClass(t tenant.Tier) Limits {
 	switch t {
 	case tenant.Tier1:
-		return Limits{Projects: 10, Players: 1_000_000, StorageBytes: 25 * gb}
+		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000}
 	case tenant.Tier2:
-		return Limits{Projects: 20, Players: 5_000_000, StorageBytes: 100 * gb}
+		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000}
 	case tenant.Tier3:
-		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb}
+		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited}
 	default:
-		return Limits{Projects: 3, Players: 250_000, StorageBytes: 5 * gb}
+		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000}
 	}
 }
 

@@ -68,6 +68,16 @@ func TestOpenAPIDoc_covers_expected_paths(t *testing.T) {
 	assert.Equal(t, want, got, "documented /v1 paths drifted from OpenAPIDoc registrations")
 }
 
+func TestOpenAPIDoc_never_documents_internal_surface(t *testing.T) {
+	doc := OpenAPIDoc("1.0.0")
+	require.NotNil(t, doc)
+
+	for p := range doc.Paths {
+		assert.NotContains(t, p, "/internal",
+			"the entitlement API must stay out of the generated spec")
+	}
+}
+
 func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {
 	doc := OpenAPIDoc("1.0.0")
 	item := doc.Paths["/v1/server/player-sessions/verify"]

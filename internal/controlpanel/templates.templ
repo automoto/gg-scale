@@ -2513,6 +2513,12 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 		<section class="card">
 			<h2>Plan &amp; feature requests</h2>
 			<p class="card-subtitle">Request a tier upgrade or a feature grant. A platform admin reviews each request; approvals apply automatically.</p>
+			if vm.BillingUpgradeURL != "" && vm.BillingUpgradeToken != "" {
+				<p><a href={ templ.URL(vm.BillingUpgradeURL + "?t=" + vm.BillingUpgradeToken) } target="_blank" rel="noopener">Upgrade →</a></p>
+			}
+			if vm.BillingPortalURL != "" {
+				<p><a href={ templ.URL(vm.BillingPortalURL) } target="_blank" rel="noopener">Manage billing →</a></p>
+			}
 			if vm.CanRequestUpgrade {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>

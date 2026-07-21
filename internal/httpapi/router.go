@@ -36,6 +36,7 @@ import (
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
+	"github.com/ggscale/ggscale/internal/relaymeter"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -123,9 +124,15 @@ type Deps struct {
 
 	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
 	RelayIssuer *relay.Issuer
+	// RelayMeter enforces the per-class monthly relay-session allowance at
+	// credential issuance. nil disables metering (unit tests).
+	RelayMeter *relaymeter.Meter
 
 	ControlPanel          controlpanel.Config
 	ControlPanelBootstrap *controlpanel.Bootstrap
+	// BillingHandoffKey signs the control panel's short-lived billing upgrade
+	// handoff tokens. nil = no upgrade link renders.
+	BillingHandoffKey []byte
 	// ControlPanelPluginInfo is the closure the admin/plugins page calls to
 	// snapshot the running fleet plugin. nil when no plugin backend is
 	// configured — the page renders "no plugin backend" in that case.
@@ -143,6 +150,12 @@ type Deps struct {
 	// MetricsAuthToken, when non-empty, gates /metrics behind a bearer token.
 	// Empty leaves /metrics open (dev / explicitly-unauthenticated deployments).
 	MetricsAuthToken string
+
+	// EntitlementAPIToken, when non-empty, mounts the internal declarative
+	// entitlement API at /internal/entitlements behind this bearer token —
+	// outside /v1, so it never enters openapi.yaml or the SDKs. Empty (the
+	// default) leaves the surface unmounted entirely.
+	EntitlementAPIToken string
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -247,6 +260,7 @@ func NewRouter(d Deps) http.Handler {
 	}
 	r.Handle("/metrics", metricsHandler)
 	r.Get("/favicon.ico", webassets.FaviconHandler())
+	mountInternalAPI(r, d)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.NewRequestID())
@@ -278,6 +292,7 @@ func NewRouter(d Deps) http.Handler {
 				TwoFactor:          d.TwoFactor,
 				VerifySigningKey:   d.EmailVerifySigningKey,
 				StorageLimits:      d.StorageLimits,
+				BillingHandoffKey:  d.BillingHandoffKey,
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {

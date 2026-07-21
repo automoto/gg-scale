@@ -46,13 +46,13 @@ func ConnectionCapForClass(t tenant.Tier) CapLimits {
 	var sustained int64
 	switch t {
 	case tenant.Tier1:
-		sustained = 20000
+		sustained = 10000
 	case tenant.Tier2:
-		sustained = 50000
+		sustained = 25000
 	case tenant.Tier3:
 		sustained = 50000
 	default:
-		sustained = 5000
+		sustained = 2500
 	}
 	return CapLimits{Sustained: sustained, Ceiling: 2 * sustained}
 }

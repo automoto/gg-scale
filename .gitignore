@@ -39,7 +39,6 @@ docs/temp
 work/
 
 .cursor/*
-.env.example
 .claude/*
 ggscale-seed
 sdk-go
@@ -55,6 +54,4 @@ wiki/features.md
 wiki/onboarding.md
 package-lock.json
 package.json
-*.md
-*.json
 

@@ -22,11 +22,13 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/ggscale/ggscale/internal/billing"
 	"github.com/ggscale/ggscale/internal/cache/instrument"
 	"github.com/ggscale/ggscale/internal/cache/memory"
 	"github.com/ggscale/ggscale/internal/config"
 	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/entitlement"
 	"github.com/ggscale/ggscale/internal/fleet"
 	fleetbuild "github.com/ggscale/ggscale/internal/fleet/build"
 	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
@@ -45,6 +47,7 @@ import (
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
+	"github.com/ggscale/ggscale/internal/relaymeter"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -257,6 +260,26 @@ func run() error {
 		return fmt.Errorf("rbac: %w", err)
 	}
 	defer authorizer.Close()
+	// Internal entitlement API: dormant unless explicitly enabled. The bearer
+	// token is auto-generated into server_secrets on first boot unless
+	// ENTITLEMENT_API_TOKEN pins one.
+	var entitlementToken string
+	if cfg.EntitlementAPIEnabled {
+		entitlementToken, err = entitlement.LoadToken(ctx, appPool, cfg.EntitlementAPIToken)
+		if err != nil {
+			return err
+		}
+	}
+	// Billing upgrade handoff key: only loaded (and, if absent, generated)
+	// when the upgrade link-out is configured.
+	var billingHandoffKey []byte
+	if cfg.BillingUpgradeURL != "" {
+		billingHandoffKey, err = billing.LoadHandoffKey(ctx, appPool, cfg.BillingHandoffKey)
+		if err != nil {
+			return err
+		}
+	}
+
 	var controlPanelBootstrap *controlpanel.Bootstrap
 	if cfg.ControlPanelEnabled {
 		controlPanelBootstrap, err = controlpanel.LoadBootstrap(ctx, appPool, cfg.ControlPanelBootstrapTokenFile, logger)
@@ -383,6 +406,7 @@ func run() error {
 		GameSessions:                  gameSessions,
 		ServerList:                    serverListRegistry,
 		RelayIssuer:                   relayIssuer,
+		RelayMeter:                    relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
 			CookieSecure:           cfg.ControlPanelCookieSecure,
@@ -393,6 +417,8 @@ func run() error {
 			FleetEnabled:           cfg.FeatureFleetEnabled,
 			RelayEnabled:           cfg.FeatureP2PRelayEnabled,
 			StorageMaxValueBytes:   cfg.StorageMaxValueBytes,
+			BillingPortalURL:       cfg.BillingPortalURL,
+			BillingUpgradeURL:      cfg.BillingUpgradeURL,
 			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
@@ -427,6 +453,8 @@ func run() error {
 		ControlPanelPluginInfo: pluginInfo,
 		CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
 		MetricsAuthToken:       cfg.MetricsAuthToken,
+		EntitlementAPIToken:    entitlementToken,
+		BillingHandoffKey:      billingHandoffKey,
 	})
 
 	srv := &http.Server{

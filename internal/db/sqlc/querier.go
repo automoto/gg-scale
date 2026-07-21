@@ -208,6 +208,9 @@ type Querier interface {
 	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
 	DenyTenantChangeRequest(ctx context.Context, arg DenyTenantChangeRequestParams) (int64, error)
 	DenyTenantSignupRequest(ctx context.Context, arg DenyTenantSignupRequestParams) (int64, error)
+	// Declarative entitlement apply: switch a tenant-level grant off in place so
+	// the row survives (audit trail, later re-enable). Runs in tenant RLS context.
+	DisableTenantFeatureGrant(ctx context.Context, arg DisableTenantFeatureGrantParams) (int64, error)
 	// TTL enforcement: unclaimed queued tickets past expires_at flip to
 	// 'failed'. Claimed tickets are left alone — the claim path settles them.
 	ExpireMatchmakerTickets(ctx context.Context) (int64, error)
@@ -333,6 +336,7 @@ type Querier interface {
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
+	GetRelaySessionUsage(ctx context.Context, month pgtype.Date) (int64, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid. revoked_reason lets the
@@ -357,6 +361,11 @@ type Querier interface {
 	IncrementControlPanelVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttemptsByID(ctx context.Context, id int64) (int32, error)
+	// Counts one managed-relay credential issuance for the tenant month. The
+	// allowance check and the increment are one atomic statement: past the
+	// allowance the conflict-update WHERE fails and no row returns (refuse new
+	// issuance). A negative allowance means unmetered. Runs in tenant RLS context.
+	IncrementRelaySessions(ctx context.Context, arg IncrementRelaySessionsParams) (int64, error)
 	// Append an event for the watch stream. The trim trigger keeps history
 	// bounded per allocation_id; callers can fire-and-forget.
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
@@ -492,6 +501,11 @@ type Querier interface {
 	MarkPlayerInvitationAccepted(ctx context.Context, id int64) error
 	MarkPlayerVerified(ctx context.Context, id int64) error
 	MarkPlayerVerifiedByID(ctx context.Context, id int64) error
+	// Claims the right to send the single 100% warning email for this month.
+	MarkRelayUsageWarned100(ctx context.Context, month pgtype.Date) (int64, error)
+	// Claims the right to send the single 80% warning email for this month
+	// (0 rows = another request already sent it).
+	MarkRelayUsageWarned80(ctx context.Context, month pgtype.Date) (int64, error)
 	// Clears the code hash so the magic link can't be replayed after acceptance.
 	MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) error
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
@@ -627,6 +641,10 @@ type Querier interface {
 	// prior tier under the same row lock so the audit record cannot race another
 	// administrator's update.
 	SetTenantTierByID(ctx context.Context, arg SetTenantTierByIDParams) (SetTenantTierByIDRow, error)
+	// Declarative entitlement apply: converge on an exact class in either
+	// direction (downgrades rely on the existing grace path). 0 rows = no-op.
+	// Runs in tenant RLS context.
+	SetTenantTierExact(ctx context.Context, tier int16) (int64, error)
 	// Auto-applied on tier-upgrade approval. The direction check and write are one
 	// atomic operation so a stale request can never lower the current tier.
 	SetTenantTierIfUpgrade(ctx context.Context, tier int16) (int64, error)

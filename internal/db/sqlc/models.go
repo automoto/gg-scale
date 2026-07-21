@@ -163,13 +163,14 @@ type APIKey struct {
 }
 
 type AuditLog struct {
-	ID          int64
-	TenantID    int64
-	ActorUserID *int64
-	Action      string
-	Target      *string
-	Payload     []byte
-	OccurredAt  pgtype.Timestamptz
+	ID           int64
+	TenantID     int64
+	ActorUserID  *int64
+	Action       string
+	Target       *string
+	Payload      []byte
+	OccurredAt   pgtype.Timestamptz
+	ActorService *string
 }
 
 type CasbinRule struct {
@@ -428,12 +429,13 @@ type MatchmakingTicket struct {
 }
 
 type PlatformAuditLog struct {
-	ID          int64
-	ActorUserID *int64
-	Action      string
-	Target      *string
-	Payload     []byte
-	OccurredAt  pgtype.Timestamptz
+	ID           int64
+	ActorUserID  *int64
+	Action       string
+	Target       *string
+	Payload      []byte
+	OccurredAt   pgtype.Timestamptz
+	ActorService *string
 }
 
 type PlatformSignupConfig struct {
@@ -585,6 +587,15 @@ type RealtimeConnectionGrant struct {
 	Used      int64
 	ExpiresAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type RelaySessionUsage struct {
+	TenantID    int64
+	Month       pgtype.Date
+	Sessions    int64
+	Warned80At  pgtype.Timestamptz
+	Warned100At pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type RiverClient struct {

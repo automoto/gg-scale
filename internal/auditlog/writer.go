@@ -74,6 +74,50 @@ func WritePlatform(ctx context.Context, tx pgx.Tx, actorUserID int64, action, ta
 	return nil
 }
 
+// WriteService inserts a tenant-scoped row on behalf of an automated service
+// actor (NULL actor_user_id, actor_service set) so service-driven changes stay
+// distinguishable from human ones.
+func WriteService(ctx context.Context, tx pgx.Tx, service, action, target string, payload any) error {
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return err
+	}
+	if err := sqlcgen.New(tx).WriteAudit(ctx, sqlcgen.WriteAuditParams{
+		ActorService: &service,
+		Action:       action,
+		Target:       optionalTarget(target),
+		Payload:      body,
+	}); err != nil {
+		return fmt.Errorf("auditlog: write service: %w", err)
+	}
+	return nil
+}
+
+// WritePlatformService inserts a platform-scoped row on behalf of an automated
+// service actor (NULL actor_user_id, actor_service set).
+func WritePlatformService(ctx context.Context, tx pgx.Tx, service, action, target string, payload any) error {
+	body, err := marshalPayload(payload)
+	if err != nil {
+		return err
+	}
+	if err := sqlcgen.New(tx).WritePlatformAudit(ctx, sqlcgen.WritePlatformAuditParams{
+		ActorService: &service,
+		Action:       action,
+		Target:       optionalTarget(target),
+		Payload:      body,
+	}); err != nil {
+		return fmt.Errorf("auditlog: write platform service: %w", err)
+	}
+	return nil
+}
+
+func optionalTarget(target string) *string {
+	if target == "" {
+		return nil
+	}
+	return &target
+}
+
 func marshalPayload(payload any) ([]byte, error) {
 	if payload == nil {
 		return []byte("{}"), nil

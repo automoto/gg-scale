@@ -74,6 +74,9 @@ type Deps struct {
 	// StorageLimits (may be nil) reads/writes per-tenant/project storage-size
 	// overrides for the rate-limits page.
 	StorageLimits storagelimit.LimitStore
+	// BillingHandoffKey signs the short-lived upgrade handoff tokens appended
+	// to Config.BillingUpgradeURL. nil = no upgrade link renders.
+	BillingHandoffKey []byte
 }
 
 // PluginSnapshot is the read-only view the admin/plugins page renders.
@@ -107,9 +110,10 @@ type Handler struct {
 	metrics        *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the player site.
-	verifySigningKey []byte
-	twoFactor        *twofactor.Cipher
-	storageLimits    storagelimit.LimitStore
+	verifySigningKey  []byte
+	twoFactor         *twofactor.Cipher
+	storageLimits     storagelimit.LimitStore
+	billingHandoffKey []byte
 }
 
 // New builds the control panel router. Callers should only mount it when
@@ -293,23 +297,24 @@ func newHandler(d Deps) *Handler {
 		bootstrap = DisabledBootstrap()
 	}
 	h := &Handler{
-		pool:             d.Pool,
-		cache:            d.Cache,
-		limiter:          d.Limiter,
-		overrides:        d.RateLimitOverrides,
-		reg:              d.Registry,
-		cfg:              d.Config,
-		bootstrap:        bootstrap,
-		mailer:           d.Mailer,
-		fleet:            d.Fleet,
-		rbac:             d.RBAC,
-		pluginInfo:       d.PluginInfo,
-		now:              time.Now,
-		proxyTrust:       d.ProxyTrust,
-		metrics:          d.Metrics,
-		verifySigningKey: append([]byte(nil), d.VerifySigningKey...),
-		twoFactor:        d.TwoFactor,
-		storageLimits:    d.StorageLimits,
+		pool:              d.Pool,
+		cache:             d.Cache,
+		limiter:           d.Limiter,
+		overrides:         d.RateLimitOverrides,
+		reg:               d.Registry,
+		cfg:               d.Config,
+		bootstrap:         bootstrap,
+		mailer:            d.Mailer,
+		fleet:             d.Fleet,
+		rbac:              d.RBAC,
+		pluginInfo:        d.PluginInfo,
+		now:               time.Now,
+		proxyTrust:        d.ProxyTrust,
+		metrics:           d.Metrics,
+		verifySigningKey:  append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:         d.TwoFactor,
+		storageLimits:     d.StorageLimits,
+		billingHandoffKey: append([]byte(nil), d.BillingHandoffKey...),
 	}
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).

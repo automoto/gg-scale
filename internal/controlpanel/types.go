@@ -35,6 +35,14 @@ type Config struct {
 	// StorageMaxValueBytes is the platform default storage value cap, shown on
 	// the rate-limits page as the fallback when no tenant/project override is set.
 	StorageMaxValueBytes int64
+	// BillingPortalURL mirrors BILLING_PORTAL_URL: the static Stripe Customer
+	// Portal link rendered as "Manage billing" on tenant settings. Empty
+	// renders nothing (self-host default).
+	BillingPortalURL string
+	// BillingUpgradeURL mirrors BILLING_UPGRADE_URL: the billing service's
+	// /start page rendered as "Upgrade", carrying a signed handoff token.
+	// Empty renders nothing.
+	BillingUpgradeURL string
 	// EnforceNewTenantQuotas mirrors QUOTAS_ENFORCE_NEW_TENANTS. When true,
 	// tenant provisioning sets enforce_quotas=true on the new tenant so the
 	// class ladder is enforced from creation.
@@ -394,6 +402,12 @@ type TenantSettingsView struct {
 	StoragePercent    int
 	// StorageWarn is set when usage is at/over 80% of the limit.
 	StorageWarn bool
+	// Billing link-outs, rendered next to the change-request forms when
+	// non-empty. BillingUpgradeToken is the short-lived signed handoff token
+	// appended to the upgrade URL (?t=...).
+	BillingPortalURL    string
+	BillingUpgradeURL   string
+	BillingUpgradeToken string
 	// Change requests (tier upgrades / feature grants) — tenant self-service.
 	ChangeRequests    []ChangeRequestView
 	UpgradeTargets    []FeatureOptionView // class targets above the current tier

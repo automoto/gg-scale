@@ -151,9 +151,9 @@ func TestTierLimits_ladder_values_per_class(t *testing.T) {
 		wantRate  float64
 		wantBurst float64
 	}{
-		{tenant.Tier0, 150, 300},
+		{tenant.Tier0, 250, 500},
 		{tenant.Tier1, 1000, 2000},
-		{tenant.Tier2, 5000, 10000},
+		{tenant.Tier2, 2500, 5000},
 		{tenant.Tier3, 10000, 20000},
 	}
 	for _, tc := range cases {

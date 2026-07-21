@@ -24,6 +24,7 @@ type Metrics struct {
 	relayCreds            prometheus.Counter
 	mailSends             *prometheus.CounterVec
 	quotaRejections       *prometheus.CounterVec
+	entitlementApplies    *prometheus.CounterVec
 }
 
 // Signup kinds.
@@ -89,6 +90,13 @@ const (
 	MailError = "error"
 )
 
+// Entitlement API apply outcomes.
+const (
+	EntitlementChanged  = "changed"
+	EntitlementNoOp     = "noop"
+	EntitlementRejected = "rejected"
+)
+
 // NewMetrics registers the business metrics on reg. Call once per process; it
 // uses MustRegister because the process owns a single registry.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -147,11 +155,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_quota_rejections_total",
 			Help: "New-growth operations rejected by an enforced tenant quota, by axis (projects/players/storage).",
 		}, []string{"axis"}),
+		entitlementApplies: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ggscale_entitlement_apply_total",
+			Help: "Entitlement API applies by outcome (changed/noop/rejected).",
+		}, []string{"outcome"}),
 	}
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
 		m.matchmakerQueryReject, m.relayCreds, m.mailSends, m.quotaRejections,
+		m.entitlementApplies,
 	)
 	return m
 }
@@ -268,4 +281,13 @@ func (m *Metrics) QuotaRejection(axis string) {
 		return
 	}
 	m.quotaRejections.WithLabelValues(axis).Inc()
+}
+
+// EntitlementApply counts an entitlement API apply by outcome (see
+// EntitlementChanged / EntitlementNoOp / EntitlementRejected).
+func (m *Metrics) EntitlementApply(outcome string) {
+	if m == nil {
+		return
+	}
+	m.entitlementApplies.WithLabelValues(outcome).Inc()
 }

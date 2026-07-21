@@ -23,9 +23,9 @@ func TestConnectionCapForClass_climbs_with_class(t *testing.T) {
 	t2 := ratelimit.ConnectionCapForClass(tenant.Tier2)
 	t3 := ratelimit.ConnectionCapForClass(tenant.Tier3)
 
-	assert.Equal(t, int64(5000), t0.Sustained)
-	assert.Greater(t, t1.Sustained, t0.Sustained)
-	assert.Greater(t, t2.Sustained, t1.Sustained)
+	assert.Equal(t, int64(2500), t0.Sustained)
+	assert.Equal(t, int64(10000), t1.Sustained)
+	assert.Equal(t, int64(25000), t2.Sustained)
 	assert.GreaterOrEqual(t, t3.Sustained, t2.Sustained)
 }
 

@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/relay"
 )
@@ -70,6 +72,18 @@ func relayCredentials(d Deps) func(context.Context, *struct{}) (*relayCredential
 			return nil, huma.Error500InternalServerError("internal error")
 		} else if banned {
 			return nil, huma.Error403Forbidden("account banned")
+		}
+		// Monthly session allowance: refuses only new issuance — in-flight
+		// TURN sessions are unaffected.
+		if d.RelayMeter != nil {
+			if err := d.RelayMeter.Allow(ctx, tenantID); err != nil {
+				var qe *quota.ErrQuotaExceeded
+				if errors.As(err, &qe) {
+					d.Metrics.QuotaRejection(qe.Axis)
+					return nil, huma.Error403Forbidden("relay session allowance for this month is used up")
+				}
+				return nil, huma.Error500InternalServerError("internal error")
+			}
 		}
 		creds, err := d.RelayIssuer.Issue(tenantID, playerID)
 		if err != nil {

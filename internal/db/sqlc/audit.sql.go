@@ -10,18 +10,19 @@ import (
 )
 
 const writeAudit = `-- name: WriteAudit :exec
-INSERT INTO audit_log (tenant_id, actor_user_id, action, target, payload)
+INSERT INTO audit_log (tenant_id, actor_user_id, action, target, payload, actor_service)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5
 )
 `
 
 type WriteAuditParams struct {
-	ActorUserID *int64
-	Action      string
-	Target      *string
-	Payload     []byte
+	ActorUserID  *int64
+	Action       string
+	Target       *string
+	Payload      []byte
+	ActorService *string
 }
 
 func (q *Queries) WriteAudit(ctx context.Context, arg WriteAuditParams) error {
@@ -30,20 +31,22 @@ func (q *Queries) WriteAudit(ctx context.Context, arg WriteAuditParams) error {
 		arg.Action,
 		arg.Target,
 		arg.Payload,
+		arg.ActorService,
 	)
 	return err
 }
 
 const writePlatformAudit = `-- name: WritePlatformAudit :exec
-INSERT INTO platform_audit_log (actor_user_id, action, target, payload)
-VALUES ($1, $2, $3, $4)
+INSERT INTO platform_audit_log (actor_user_id, action, target, payload, actor_service)
+VALUES ($1, $2, $3, $4, $5)
 `
 
 type WritePlatformAuditParams struct {
-	ActorUserID *int64
-	Action      string
-	Target      *string
-	Payload     []byte
+	ActorUserID  *int64
+	Action       string
+	Target       *string
+	Payload      []byte
+	ActorService *string
 }
 
 func (q *Queries) WritePlatformAudit(ctx context.Context, arg WritePlatformAuditParams) error {
@@ -52,6 +55,7 @@ func (q *Queries) WritePlatformAudit(ctx context.Context, arg WritePlatformAudit
 		arg.Action,
 		arg.Target,
 		arg.Payload,
+		arg.ActorService,
 	)
 	return err
 }

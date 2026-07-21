@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -41,6 +42,7 @@ func (c *Config) Validate() error {
 		c.checkFeatureSwitches,
 		c.checkDBPool,
 		c.checkMailProvider,
+		c.checkBilling,
 		c.checkProductionPosture,
 		c.checkAgonesAuth,
 	}
@@ -76,6 +78,9 @@ func (c *Config) checkSecretLengths() error {
 	if c.MetricsAuthToken != "" && len(c.MetricsAuthToken) < 32 {
 		return fmt.Errorf("METRICS_AUTH_TOKEN must be >= 32 bytes when set (got %d)", len(c.MetricsAuthToken))
 	}
+	if c.EntitlementAPIToken != "" && len(c.EntitlementAPIToken) < 32 {
+		return fmt.Errorf("ENTITLEMENT_API_TOKEN must be >= 32 bytes when set (got %d)", len(c.EntitlementAPIToken))
+	}
 	return nil
 }
 
@@ -87,6 +92,9 @@ func (c *Config) checkFeatureSwitches() error {
 	}
 	if !c.FeatureFleetEnabled && c.FleetBackend != "" {
 		return fmt.Errorf("FLEET_BACKEND=%q set while FEATURE_FLEET_ENABLED is false; enable the feature or unset FLEET_BACKEND", c.FleetBackend)
+	}
+	if !c.EntitlementAPIEnabled && c.EntitlementAPIToken != "" {
+		return fmt.Errorf("ENTITLEMENT_API_TOKEN set while ENTITLEMENT_API_ENABLED is false; enable the API or clear the token")
 	}
 	return nil
 }
@@ -113,6 +121,40 @@ func (c *Config) checkMailProvider() error {
 	default:
 		return fmt.Errorf("MAIL_PROVIDER must be one of smtp|noop (got %q)", c.MailProvider)
 	}
+}
+
+// checkBilling validates the external-billing link-out settings: both URLs
+// must be absolute http(s) URLs when set (https in production), and the
+// handoff key — a 32-byte hex HMAC key — only makes sense alongside the
+// upgrade URL it signs tokens for.
+func (c *Config) checkBilling() error {
+	if err := c.checkBillingURL("BILLING_PORTAL_URL", c.BillingPortalURL); err != nil {
+		return err
+	}
+	if err := c.checkBillingURL("BILLING_UPGRADE_URL", c.BillingUpgradeURL); err != nil {
+		return err
+	}
+	if c.BillingHandoffKey != "" && c.BillingUpgradeURL == "" {
+		return fmt.Errorf("BILLING_HANDOFF_KEY set while BILLING_UPGRADE_URL is empty; set the upgrade URL or clear the key")
+	}
+	return checkExactHexKey("BILLING_HANDOFF_KEY", c.BillingHandoffKey, 32)
+}
+
+func (c *Config) checkBillingURL(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	u, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("%s %q: %w", name, value, err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("%s %q: must be an absolute http(s) URL", name, value)
+	}
+	if c.IsProduction() && u.Scheme != "https" {
+		return fmt.Errorf("%s %q: must use HTTPS in production", name, value)
+	}
+	return nil
 }
 
 // checkProductionPosture enforces the hardening required when Env is prod.

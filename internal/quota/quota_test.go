@@ -13,21 +13,23 @@ import (
 func TestLimitsForClass_ladder_values(t *testing.T) {
 	const gb = int64(1) << 30
 	cases := []struct {
-		tier     tenant.Tier
-		projects int
-		players  int64
-		storage  int64
+		tier          tenant.Tier
+		projects      int
+		players       int64
+		storage       int64
+		relaySessions int64
 	}{
-		{tenant.Tier0, 3, 250_000, 5 * gb},
-		{tenant.Tier1, 10, 1_000_000, 25 * gb},
-		{tenant.Tier2, 20, 5_000_000, 100 * gb},
-		{tenant.Tier3, quota.Unlimited, quota.Unlimited, 500 * gb},
+		{tenant.Tier0, 3, 100_000, 5 * gb, 1_000},
+		{tenant.Tier1, 10, 500_000, 25 * gb, 10_000},
+		{tenant.Tier2, 20, 2_000_000, 100 * gb, 100_000},
+		{tenant.Tier3, quota.Unlimited, quota.Unlimited, 500 * gb, quota.Unlimited},
 	}
 	for _, tc := range cases {
 		got := quota.LimitsForClass(tc.tier)
 		assert.Equal(t, tc.projects, got.Projects, "tier=%s projects", tc.tier)
 		assert.Equal(t, tc.players, got.Players, "tier=%s players", tc.tier)
 		assert.Equal(t, tc.storage, got.StorageBytes, "tier=%s storage", tc.tier)
+		assert.Equal(t, tc.relaySessions, got.RelaySessionsPerMonth, "tier=%s relay sessions", tc.tier)
 	}
 }
 
@@ -53,8 +55,8 @@ func TestCheckProjects_rejects_at_and_above_limit(t *testing.T) {
 }
 
 func TestCheckPlayers_rejects_at_limit(t *testing.T) {
-	l := quota.LimitsForClass(tenant.Tier0) // 250k
-	err := l.CheckPlayers(250_000)
+	l := quota.LimitsForClass(tenant.Tier0) // 100k
+	err := l.CheckPlayers(100_000)
 
 	var qe *quota.ErrQuotaExceeded
 	assert.ErrorAs(t, err, &qe)

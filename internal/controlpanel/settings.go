@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/auditlog"
+	"github.com/ggscale/ggscale/internal/billing"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/quota"
@@ -47,7 +48,8 @@ func (h *Handler) tenantSettingsPage(w http.ResponseWriter, r *http.Request) {
 // bootstrap transaction — the page needs none of the
 // per-project rows the rate-limits view assembles.
 func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (TenantSettingsView, error) {
-	view := TenantSettingsView{TenantID: tenantID}
+	view := TenantSettingsView{TenantID: tenantID, BillingPortalURL: h.cfg.BillingPortalURL}
+	view.BillingUpgradeURL, view.BillingUpgradeToken = h.billingLinks(tenantID)
 	var currentTier tenant.Tier
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
@@ -99,6 +101,17 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 		return TenantSettingsView{}, err
 	}
 	return view, nil
+}
+
+// billingLinks returns the external upgrade URL plus a freshly minted handoff
+// token for it. Both empty unless the upgrade URL is configured and a handoff
+// key was loaded — the link only renders when the billing service can
+// actually verify the token.
+func (h *Handler) billingLinks(tenantID int64) (upgradeURL, token string) {
+	if h.cfg.BillingUpgradeURL == "" || len(h.billingHandoffKey) == 0 {
+		return "", ""
+	}
+	return h.cfg.BillingUpgradeURL, billing.SignHandoff(h.billingHandoffKey, tenantID, billing.DefaultHandoffTTL, h.now())
 }
 
 var errInvalidTenantTier = errors.New("control panel: invalid tenant tier")

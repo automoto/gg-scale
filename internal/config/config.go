@@ -174,6 +174,35 @@ type Config struct {
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`
 
+	// BillingPortalURL, when set, renders an "Upgrade / Manage billing" link on
+	// the tenant settings page pointing at an external billing portal (e.g. a
+	// Stripe-hosted Checkout / Customer Portal entry). Empty (default) renders
+	// nothing — the self-host zero-config posture. Must be an absolute
+	// http(s) URL when set.
+	BillingPortalURL string `env:"BILLING_PORTAL_URL"`
+	// BillingUpgradeURL, when set, renders an "Upgrade" link on the tenant
+	// settings page pointing at the billing service's /start page, carrying a
+	// short-lived signed handoff token (?t=...) that identifies the tenant.
+	// Empty (default) renders nothing. Absolute http(s) URL (https in
+	// production).
+	BillingUpgradeURL string `env:"BILLING_UPGRADE_URL"`
+	// BillingHandoffKey pins the 32-byte hex HMAC key signing upgrade handoff
+	// tokens; the billing service must hold the same key to verify them.
+	// Empty auto-generates one into server_secrets on first boot. Supports
+	// the _FILE convention. Only consulted when BillingUpgradeURL is set.
+	BillingHandoffKey string `env:"BILLING_HANDOFF_KEY" envFile:"true"`
+
+	// EntitlementAPIEnabled mounts /internal/entitlements/{tenantID}, the
+	// bearer-token API an external billing service uses to apply tier +
+	// feature entitlements declaratively. Default false: the surface does not
+	// exist on a self-host deployment. Deploys that enable it must
+	// bind/firewall it to a private network.
+	EntitlementAPIEnabled bool `env:"ENTITLEMENT_API_ENABLED" envDefault:"false"`
+	// EntitlementAPIToken pins the entitlement API bearer token (>= 32 chars).
+	// Empty auto-generates one into server_secrets on first boot (zero-config
+	// pattern shared with TWO_FACTOR_ENC_KEY). Supports the _FILE convention.
+	EntitlementAPIToken string `env:"ENTITLEMENT_API_TOKEN" envFile:"true"`
+
 	// CORSAllowedOrigins is the comma-separated list of origins permitted by
 	// the API router. Empty in dev allows "*"; in production an empty list
 	// is rejected by Validate.
