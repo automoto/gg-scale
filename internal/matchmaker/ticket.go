@@ -310,3 +310,31 @@ var ErrShortCommit = errors.New("matchmaker: commit did not cover the whole grou
 type Listener interface {
 	Listen(ctx context.Context, fn func(Bucket)) error
 }
+
+// FailureRecorder counts tickets flipped to 'failed', keyed by the
+// machine-readable reason stamped on them (failureReasonExpired,
+// failureReasonAttemptsExhausted). Every flip site lives in the queue, so the
+// queue reports flips through this hook and the Prometheus layer stays out of
+// this package. A nil recorder is a no-op. *observability.Metrics satisfies it.
+type FailureRecorder interface {
+	MatchmakerTicketFailure(reason string, n int)
+}
+
+// BucketStat is a sampled per-bucket queue metric for the observability
+// gauges. Region is blank for non-fleet modes, matching the worker's buckets.
+// There is deliberately no game_mode dimension: it is developer-supplied free
+// text and would make the gauge series count unbounded.
+type BucketStat struct {
+	Mode             string
+	Region           string
+	Depth            int64
+	OldestAgeSeconds float64
+}
+
+// StatsLister is an optional Queue capability exposing a cross-tenant sample
+// of queue depth and oldest-ticket age for the observability gauges. The
+// PGQueue implements it (privileged, GUC-less scan); the MemQueue implements
+// it for local dev and unit tests.
+type StatsLister interface {
+	QueueStats(ctx context.Context) ([]BucketStat, error)
+}

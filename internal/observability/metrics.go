@@ -11,21 +11,25 @@ import "github.com/prometheus/client_golang/prometheus"
 // low-cardinality — no tenant/project/user IDs — so the series count stays
 // bounded no matter how many tenants exist.
 type Metrics struct {
-	signups               *prometheus.CounterVec
-	verifications         *prometheus.CounterVec
-	logins                *prometheus.CounterVec
-	invitesSent           *prometheus.CounterVec
-	friendRequests        *prometheus.CounterVec
-	bansIssued            *prometheus.CounterVec
-	playerSessions        *prometheus.CounterVec
-	matchmakerTicket      prometheus.Counter
-	matchmakerMatch       prometheus.Counter
-	matchmakerShortCommit prometheus.Counter
-	matchmakerQueryReject prometheus.Counter
-	relayCreds            prometheus.Counter
-	mailSends             *prometheus.CounterVec
-	quotaRejections       *prometheus.CounterVec
-	entitlementApplies    *prometheus.CounterVec
+	signups                  *prometheus.CounterVec
+	verifications            *prometheus.CounterVec
+	logins                   *prometheus.CounterVec
+	invitesSent              *prometheus.CounterVec
+	friendRequests           *prometheus.CounterVec
+	bansIssued               *prometheus.CounterVec
+	playerSessions           *prometheus.CounterVec
+	matchmakerTicket         prometheus.Counter
+	matchmakerMatch          prometheus.Counter
+	matchmakerShortCommit    prometheus.Counter
+	matchmakerQueryReject    prometheus.Counter
+	matchmakerTicketFailures *prometheus.CounterVec
+	matchmakerTimeToMatch    prometheus.Histogram
+	matchmakerQueueDepth     *prometheus.GaugeVec
+	matchmakerOldestTicket   *prometheus.GaugeVec
+	relayCreds               prometheus.Counter
+	mailSends                *prometheus.CounterVec
+	quotaRejections          *prometheus.CounterVec
+	entitlementApplies       *prometheus.CounterVec
 }
 
 // Signup kinds.
@@ -98,6 +102,24 @@ const (
 	EntitlementRejected = "rejected"
 )
 
+// Matchmaker ticket-failure reasons (the `reason` label on
+// ggscale_matchmaker_ticket_failures_total).
+const (
+	MatchmakerFailureExpired           = "expired"
+	MatchmakerFailureAttemptsExhausted = "attempts_exhausted"
+)
+
+// MatchmakerBucketSample is one sampled matchmaker bucket, fed to
+// SetMatchmakerQueueStats to drive the queue-depth and oldest-ticket-age
+// gauges. Region is blank for non-fleet modes. There is no game_mode dimension:
+// it is developer-supplied free text and would make the series count unbounded.
+type MatchmakerBucketSample struct {
+	Mode             string
+	Region           string
+	Depth            float64
+	OldestAgeSeconds float64
+}
+
 // NewMetrics registers the business metrics on reg. Call once per process; it
 // uses MustRegister because the process owns a single registry.
 func NewMetrics(reg prometheus.Registerer) *Metrics {
@@ -148,6 +170,24 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_matchmaker_query_rejections_total",
 			Help: "Candidate pairings rejected by mutual query acceptance; high values point at overly strict ticket queries.",
 		}),
+		matchmakerTicketFailures: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ggscale_matchmaker_ticket_failures_total",
+			Help: "Matchmaker tickets that ended in 'failed', by reason (expired / attempts_exhausted).",
+		}, []string{"reason"}),
+		matchmakerTimeToMatch: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "ggscale_matchmaker_time_to_match_seconds",
+			Help: "Queued→matched latency per committed ticket. Buckets span ~0.5s→~34m to bracket the 10m default ticket TTL.",
+			// ExponentialBuckets(0.5, 2, 12): 0.5s, 1s, 2s ... ~1024s.
+			Buckets: prometheus.ExponentialBuckets(0.5, 2, 12),
+		}),
+		matchmakerQueueDepth: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ggscale_matchmaker_queue_depth",
+			Help: "Queued, unclaimed matchmaker tickets per bucket, sampled on the sweep cadence.",
+		}, []string{"mode", "region"}),
+		matchmakerOldestTicket: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ggscale_matchmaker_oldest_ticket_age_seconds",
+			Help: "Age of the oldest queued ticket per bucket (head-of-line-blocking early warning), sampled on the sweep cadence.",
+		}, []string{"mode", "region"}),
 		relayCreds: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "ggscale_relay_credentials_issued_total",
 			Help: "Relay (TURN) credential sets issued.",
@@ -168,8 +208,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
-		m.matchmakerShortCommit, m.matchmakerQueryReject, m.relayCreds,
-		m.mailSends, m.quotaRejections, m.entitlementApplies,
+		m.matchmakerShortCommit, m.matchmakerQueryReject, m.matchmakerTicketFailures,
+		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
+		m.relayCreds, m.mailSends, m.quotaRejections, m.entitlementApplies,
 	)
 	return m
 }
@@ -270,6 +311,39 @@ func (m *Metrics) MatchmakerQueryReject() {
 		return
 	}
 	m.matchmakerQueryReject.Inc()
+}
+
+// MatchmakerTicketFailure counts n tickets flipped to 'failed' for the given
+// reason (MatchmakerFailureExpired / MatchmakerFailureAttemptsExhausted).
+func (m *Metrics) MatchmakerTicketFailure(reason string, n int) {
+	if m == nil || n <= 0 {
+		return
+	}
+	m.matchmakerTicketFailures.WithLabelValues(reason).Add(float64(n))
+}
+
+// MatchmakerTimeToMatch observes one ticket's queued→matched latency in
+// seconds.
+func (m *Metrics) MatchmakerTimeToMatch(seconds float64) {
+	if m == nil {
+		return
+	}
+	m.matchmakerTimeToMatch.Observe(seconds)
+}
+
+// SetMatchmakerQueueStats replaces the queue-depth and oldest-ticket-age
+// gauge series with a fresh sample. Both vecs are reset first so buckets that
+// drained since the last pass read 0 rather than a stale last value.
+func (m *Metrics) SetMatchmakerQueueStats(samples []MatchmakerBucketSample) {
+	if m == nil {
+		return
+	}
+	m.matchmakerQueueDepth.Reset()
+	m.matchmakerOldestTicket.Reset()
+	for _, s := range samples {
+		m.matchmakerQueueDepth.WithLabelValues(s.Mode, s.Region).Set(s.Depth)
+		m.matchmakerOldestTicket.WithLabelValues(s.Mode, s.Region).Set(s.OldestAgeSeconds)
+	}
 }
 
 // RelayCredentialIssued counts one issued relay credential set.

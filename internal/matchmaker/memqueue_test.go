@@ -16,6 +16,85 @@ func tenantCtx(tenantID int64) context.Context {
 	return db.WithTenant(context.Background(), tenantID)
 }
 
+// fakeFailureRecorder records the per-reason failure counts the queue reports.
+type fakeFailureRecorder struct{ byReason map[string]int }
+
+func newFakeFailureRecorder() *fakeFailureRecorder {
+	return &fakeFailureRecorder{byReason: map[string]int{}}
+}
+
+func (r *fakeFailureRecorder) MatchmakerTicketFailure(reason string, n int) {
+	r.byReason[reason] += n
+}
+
+func TestMemQueueEnqueueExpiredStaleRecordsFailure(t *testing.T) {
+	rec := newFakeFailureRecorder()
+	q := matchmaker.NewMemQueue().WithFailureRecorder(rec)
+	past := time.Now().UTC().Add(-time.Minute)
+	_, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g", ExpiresAt: &past})
+	require.NoError(t, err)
+
+	_, err = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g"})
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, rec.byReason["expired"])
+	assert.Zero(t, rec.byReason["attempts_exhausted"])
+}
+
+func TestMemQueueReleaseAtCapRecordsAttemptsExhausted(t *testing.T) {
+	rec := newFakeFailureRecorder()
+	q := matchmaker.NewMemQueue().WithFailureRecorder(rec)
+	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g"})
+	require.NoError(t, err)
+	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, GameMode: "g"}
+
+	claim, err := q.ClaimBucket(context.Background(), bucket, 1, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, q.ReleaseTickets(context.Background(), claim, []int64{t1.ID}, 1))
+
+	assert.Equal(t, 1, rec.byReason["attempts_exhausted"])
+	assert.Zero(t, rec.byReason["expired"])
+}
+
+func TestMemQueueSweepRecordsFailuresByReason(t *testing.T) {
+	rec := newFakeFailureRecorder()
+	q := matchmaker.NewMemQueue().WithFailureRecorder(rec)
+	past := time.Now().UTC().Add(-time.Minute)
+	// One expired (TTL) ticket and one claimed-then-lease-expired ticket at cap.
+	_, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g", ExpiresAt: &past})
+	require.NoError(t, err)
+	t2, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 4, Region: "r", GameMode: "g"})
+	require.NoError(t, err)
+	_, err = q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, GameMode: "g"}, 1, 0)
+	require.NoError(t, err)
+	time.Sleep(2 * time.Millisecond)
+
+	_, err = q.SweepStaleClaims(context.Background(), 1)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, rec.byReason["expired"])
+	assert.Equal(t, 1, rec.byReason["attempts_exhausted"])
+	_ = t2
+}
+
+func TestMemQueueStatsGroupsByBucket(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	_, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Mode: matchmaker.ModeMatchOnly, Region: "r", GameMode: "g"})
+	require.NoError(t, err)
+	_, err = q.Enqueue(context.Background(), matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 4, Mode: matchmaker.ModeMatchOnly, Region: "x", GameMode: "g"})
+	require.NoError(t, err)
+
+	stats, err := q.QueueStats(context.Background())
+	require.NoError(t, err)
+
+	// match_only merges regions into one bucket (region blanked).
+	require.Len(t, stats, 1)
+	assert.Equal(t, "match_only", stats[0].Mode)
+	assert.Equal(t, "", stats[0].Region)
+	assert.Equal(t, int64(2), stats[0].Depth)
+	assert.GreaterOrEqual(t, stats[0].OldestAgeSeconds, 0.0)
+}
+
 func TestMemQueueEnqueueAssignsIdAndQueuedStatus(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 
@@ -342,4 +421,31 @@ func TestMemQueueSweepStaleClaimsReleasesExpired(t *testing.T) {
 
 	got, _ := q.Get(tenantCtx(1), t1.ID, 0)
 	assert.Equal(t, matchmaker.StatusQueued, got.Status, "swept ticket re-enters the queue (under attempt cap)")
+}
+
+func TestMemQueueSweepFailsReleasedTicketPastTTL(t *testing.T) {
+	rec := newFakeFailureRecorder()
+	q := matchmaker.NewMemQueue().WithFailureRecorder(rec)
+	// A ticket claimed just before its TTL, whose lease AND TTL then both
+	// expire. Releasing it (under the attempt cap) un-claims it, and the same
+	// sweep must go on to fail it as 'expired' — mirroring PGQueue, which runs
+	// ExpireMatchmakerTickets in the same pass — rather than leave it queued.
+	soon := time.Now().UTC().Add(20 * time.Millisecond)
+	t1, err := q.Enqueue(context.Background(), matchmaker.EnqueueRequest{
+		TenantID: 1, ProjectID: 2, PlayerID: 3, Region: "r", GameMode: "g", ExpiresAt: &soon,
+	})
+	require.NoError(t, err)
+	// Lease TTL 0 → the claim is stale the moment the sweep runs.
+	_, err = q.ClaimBucket(context.Background(), matchmaker.Bucket{TenantID: 1, ProjectID: 2, Mode: matchmaker.ModeMatchOnly, GameMode: "g"}, 1, 0)
+	require.NoError(t, err)
+	time.Sleep(40 * time.Millisecond)
+
+	_, err = q.SweepStaleClaims(context.Background(), 5)
+	require.NoError(t, err)
+
+	got, err := q.Get(tenantCtx(1), t1.ID, 3)
+	require.NoError(t, err)
+	assert.Equal(t, matchmaker.StatusFailed, got.Status)
+	assert.Equal(t, "expired", got.FailureReason)
+	assert.Equal(t, 1, rec.byReason["expired"])
 }

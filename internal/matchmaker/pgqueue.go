@@ -24,12 +24,28 @@ const notifyChannel = "matchmaker_ticket"
 // (Enqueue, Get, Cancel) run inside db.Pool.Q so RLS receives app.tenant_id;
 // privileged paths called by the worker run inside db.Pool.BootstrapQ.
 type PGQueue struct {
-	pool *db.Pool
+	pool     *db.Pool
+	failures FailureRecorder
 }
 
 // NewPGQueue returns a Queue backed by the given pool.
 func NewPGQueue(pool *db.Pool) *PGQueue {
 	return &PGQueue{pool: pool}
+}
+
+// WithFailureRecorder wires a hook that counts tickets flipped to 'failed' by
+// reason. Returns the queue for chaining. Passing nil (or never calling it)
+// leaves failure metering disabled.
+func (q *PGQueue) WithFailureRecorder(r FailureRecorder) *PGQueue {
+	q.failures = r
+	return q
+}
+
+// recordFailures reports n tickets flipped to 'failed' for the given reason.
+func (q *PGQueue) recordFailures(reason string, n int64) {
+	if q.failures != nil && n > 0 {
+		q.failures.MatchmakerTicketFailure(reason, int(n))
+	}
 }
 
 // Enqueue persists a queued ticket. The caller must have a player
@@ -60,17 +76,20 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		expiresAt = pgtype.Timestamptz{Time: *req.ExpiresAt, Valid: true}
 	}
 	var ticket *Ticket
+	var expiredStale int64
 	err = q.pool.Q(ctx, func(tx pgx.Tx) error {
 		gen := sqlcgen.New(tx)
 		// TTL-expire this player's stale queued ticket first: the one-active
 		// unique index can't be time-aware, so an expired-but-unswept ticket
 		// would otherwise trip the violation below and block re-queuing.
-		if _, xerr := gen.ExpirePlayerQueuedTicket(ctx, sqlcgen.ExpirePlayerQueuedTicketParams{
+		n, xerr := gen.ExpirePlayerQueuedTicket(ctx, sqlcgen.ExpirePlayerQueuedTicketParams{
 			ProjectID: req.ProjectID,
 			PlayerID:  req.PlayerID,
-		}); xerr != nil {
+		})
+		if xerr != nil {
 			return xerr
 		}
+		expiredStale = n
 		row, qerr := gen.InsertMatchmakingTicket(ctx, sqlcgen.InsertMatchmakingTicketParams{
 			ProjectID:         req.ProjectID,
 			FleetID:           fleetID,
@@ -120,6 +139,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 	if err != nil {
 		return nil, fmt.Errorf("matchmaker: enqueue: %w", err)
 	}
+	q.recordFailures(failureReasonExpired, expiredStale)
 	return ticket, nil
 }
 
@@ -440,14 +460,21 @@ func (q *PGQueue) ReleaseTickets(ctx context.Context, claim *Claim, ticketIDs []
 	if err != nil {
 		return err
 	}
-	return q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		_, qerr := sqlcgen.New(tx).ReleaseMatchmakerTickets(ctx, sqlcgen.ReleaseMatchmakerTicketsParams{
+	var failed int64
+	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		failed, qerr = sqlcgen.New(tx).ReleaseMatchmakerTickets(ctx, sqlcgen.ReleaseMatchmakerTicketsParams{
 			MaxAttempts: int32(maxAttempts), //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
 			ClaimID:     pgUUID,
 			TicketIds:   ticketIDs,
 		})
 		return qerr
 	})
+	if err != nil {
+		return err
+	}
+	q.recordFailures(failureReasonAttemptsExhausted, failed)
+	return nil
 }
 
 // ReturnUnmatched un-claims whatever the claim still holds without touching
@@ -467,20 +494,52 @@ func (q *PGQueue) ReturnUnmatched(ctx context.Context, claim *Claim) error {
 }
 
 // SweepStaleClaims releases every claim whose lease has expired and fails
-// unclaimed tickets past their TTL.
+// unclaimed tickets past their TTL. The released count feeds the worker's
+// housekeeping log; the per-reason failure breakdown feeds the failure
+// counter (attempts_exhausted from the cap, expired from the TTL sweep).
 func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64, error) {
-	var n int64
+	var n, attemptsFailed, expired int64
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		var qerr error
-		n, qerr = sqlcgen.New(tx).SweepStaleMatchmakerClaims(ctx, int32(maxAttempts)) //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
+		gen := sqlcgen.New(tx)
+		swept, qerr := gen.SweepStaleMatchmakerClaims(ctx, int32(maxAttempts)) //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
 		if qerr != nil {
 			return qerr
 		}
-		expired, qerr := sqlcgen.New(tx).ExpireMatchmakerTickets(ctx)
-		n += expired
+		attemptsFailed = swept.Failed
+		expired, qerr = gen.ExpireMatchmakerTickets(ctx)
+		n = swept.Released + expired
 		return qerr
 	})
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	q.recordFailures(failureReasonAttemptsExhausted, attemptsFailed)
+	q.recordFailures(failureReasonExpired, expired)
+	return n, nil
+}
+
+// QueueStats returns a cross-tenant sample of queue depth and oldest-ticket
+// age per (mode, region) bucket for the observability gauges. Privileged: runs
+// over the bootstrap role, like the sweeper.
+func (q *PGQueue) QueueStats(ctx context.Context) ([]BucketStat, error) {
+	var out []BucketStat
+	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		rows, qerr := sqlcgen.New(tx).MatchmakerQueueStats(ctx)
+		if qerr != nil {
+			return qerr
+		}
+		out = make([]BucketStat, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, BucketStat{
+				Mode:             r.Mode,
+				Region:           r.Region,
+				Depth:            r.Depth,
+				OldestAgeSeconds: r.OldestAgeSeconds,
+			})
+		}
+		return nil
+	})
+	return out, err
 }
 
 // CreateMatch persists a committed match result under the tenant on ctx.

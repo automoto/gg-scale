@@ -779,25 +779,81 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMa
 	return items, nil
 }
 
-const releaseMatchmakerTickets = `-- name: ReleaseMatchmakerTickets :execrows
-UPDATE matchmaking_tickets
-SET claim_id            = NULL,
-    claimed_at          = NULL,
-    claim_expires_at    = NULL,
-    allocation_attempts = allocation_attempts + 1,
-    status = CASE
-        WHEN allocation_attempts + 1 >= $1::int
-            THEN 'failed'::ticket_status
-        ELSE status
-    END,
-    failure_reason = CASE
-        WHEN allocation_attempts + 1 >= $1::int
-            THEN 'attempts_exhausted'
-        ELSE failure_reason
-    END
-WHERE claim_id = $2::uuid
-  AND id = ANY ($3::bigint[])
-  AND status = 'queued'
+const matchmakerQueueStats = `-- name: MatchmakerQueueStats :many
+SELECT mode,
+       (CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END)::text AS region,
+       count(*)::bigint AS depth,
+       EXTRACT(EPOCH FROM (now() - min(created_at)))::float8 AS oldest_age_seconds
+FROM matchmaking_tickets
+WHERE status = 'queued'
+  AND claim_id IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
+GROUP BY mode, CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END
+`
+
+type MatchmakerQueueStatsRow struct {
+	Mode             string
+	Region           string
+	Depth            int64
+	OldestAgeSeconds float64
+}
+
+// Cross-tenant queue-depth + oldest-queued-ticket age, sampled by the
+// observability collector for the queue gauges. Privileged: runs over the
+// bootstrap role (no tenant GUC), mirroring the sweeper's scan. Region is a
+// bucket dimension only for fleet_allocation; blanked for other modes so the
+// gauge label set matches the worker's buckets. Deliberately does NOT group by
+// game_mode: that column is developer-supplied free text, so labelling the
+// Prometheus gauges with it would make the series count unbounded.
+func (q *Queries) MatchmakerQueueStats(ctx context.Context) ([]MatchmakerQueueStatsRow, error) {
+	rows, err := q.db.Query(ctx, matchmakerQueueStats)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MatchmakerQueueStatsRow
+	for rows.Next() {
+		var i MatchmakerQueueStatsRow
+		if err := rows.Scan(
+			&i.Mode,
+			&i.Region,
+			&i.Depth,
+			&i.OldestAgeSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const releaseMatchmakerTickets = `-- name: ReleaseMatchmakerTickets :one
+WITH released AS (
+    UPDATE matchmaking_tickets
+    SET claim_id            = NULL,
+        claimed_at          = NULL,
+        claim_expires_at    = NULL,
+        allocation_attempts = allocation_attempts + 1,
+        status = CASE
+            WHEN allocation_attempts + 1 >= $1::int
+                THEN 'failed'::ticket_status
+            ELSE status
+        END,
+        failure_reason = CASE
+            WHEN allocation_attempts + 1 >= $1::int
+                THEN 'attempts_exhausted'
+            ELSE failure_reason
+        END
+    WHERE claim_id = $2::uuid
+      AND id = ANY ($3::bigint[])
+      AND status = 'queued'
+    RETURNING status
+)
+SELECT count(*) FILTER (WHERE status = 'failed')::bigint AS failed
+FROM released
 `
 
 type ReleaseMatchmakerTicketsParams struct {
@@ -808,13 +864,14 @@ type ReleaseMatchmakerTicketsParams struct {
 
 // Worker-driven release of one failed group: the resolver (allocator,
 // session creator) failed. Bump allocation_attempts; flip to 'failed' on
-// the Nth attempt, stamping the structured reason.
+// the Nth attempt, stamping the structured reason. Returns how many tickets
+// flipped to 'failed' this call so the caller can meter the
+// attempts_exhausted failure counter without re-reading the rows.
 func (q *Queries) ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseMatchmakerTickets, arg.MaxAttempts, arg.ClaimID, arg.TicketIds)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, releaseMatchmakerTickets, arg.MaxAttempts, arg.ClaimID, arg.TicketIds)
+	var failed int64
+	err := row.Scan(&failed)
+	return failed, err
 }
 
 const returnMatchmakerClaim = `-- name: ReturnMatchmakerClaim :execrows
@@ -862,34 +919,46 @@ func (q *Queries) ReturnMatchmakerTicketsByID(ctx context.Context, arg ReturnMat
 	return result.RowsAffected(), nil
 }
 
-const sweepStaleMatchmakerClaims = `-- name: SweepStaleMatchmakerClaims :execrows
-UPDATE matchmaking_tickets
-SET claim_id            = NULL,
-    claimed_at          = NULL,
-    claim_expires_at    = NULL,
-    allocation_attempts = allocation_attempts + 1,
-    status = CASE
-        WHEN allocation_attempts + 1 >= $1::int
-            THEN 'failed'::ticket_status
-        ELSE status
-    END,
-    failure_reason = CASE
-        WHEN allocation_attempts + 1 >= $1::int
-            THEN 'attempts_exhausted'
-        ELSE failure_reason
-    END
-WHERE claim_id IS NOT NULL
-  AND status = 'queued'
-  AND claim_expires_at < now()
+const sweepStaleMatchmakerClaims = `-- name: SweepStaleMatchmakerClaims :one
+WITH released AS (
+    UPDATE matchmaking_tickets
+    SET claim_id            = NULL,
+        claimed_at          = NULL,
+        claim_expires_at    = NULL,
+        allocation_attempts = allocation_attempts + 1,
+        status = CASE
+            WHEN allocation_attempts + 1 >= $1::int
+                THEN 'failed'::ticket_status
+            ELSE status
+        END,
+        failure_reason = CASE
+            WHEN allocation_attempts + 1 >= $1::int
+                THEN 'attempts_exhausted'
+            ELSE failure_reason
+        END
+    WHERE claim_id IS NOT NULL
+      AND status = 'queued'
+      AND claim_expires_at < now()
+    RETURNING status
+)
+SELECT count(*)::bigint AS released,
+       count(*) FILTER (WHERE status = 'failed')::bigint AS failed
+FROM released
 `
+
+type SweepStaleMatchmakerClaimsRow struct {
+	Released int64
+	Failed   int64
+}
 
 // Release every claim whose lease has expired. Same accounting as
 // ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
-// detached context so it isn't tied to any request lifetime.
-func (q *Queries) SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (int64, error) {
-	result, err := q.db.Exec(ctx, sweepStaleMatchmakerClaims, maxAttempts)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+// detached context so it isn't tied to any request lifetime. Returns the
+// number of claims released and, of those, how many flipped to 'failed' at
+// the cap so the caller can meter the attempts_exhausted failure counter.
+func (q *Queries) SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (SweepStaleMatchmakerClaimsRow, error) {
+	row := q.db.QueryRow(ctx, sweepStaleMatchmakerClaims, maxAttempts)
+	var i SweepStaleMatchmakerClaimsRow
+	err := row.Scan(&i.Released, &i.Failed)
+	return i, err
 }

@@ -110,6 +110,47 @@ func enqueue(t *testing.T, q *matchmaker.MemQueue, req matchmaker.EnqueueRequest
 	return ticket
 }
 
+// fakeObserver records histogram observations.
+type fakeObserver struct{ samples []float64 }
+
+func (o *fakeObserver) Observe(v float64) { o.samples = append(o.samples, v) }
+
+// fakeQueueGauge captures the last pushed queue sample.
+type fakeQueueGauge struct{ last []matchmaker.BucketStat }
+
+func (g *fakeQueueGauge) SetQueueStats(stats []matchmaker.BucketStat) { g.last = stats }
+
+func TestWorkerObservesTimeToMatchPerCommittedTicket(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	obs := &fakeObserver{}
+	w := matchmaker.NewWorker(q, nil, nil, matchmaker.WorkerConfig{TimeToMatch: obs})
+
+	// Two match_only tickets that pair into one match.
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Mode: matchmaker.ModeMatchOnly, GameMode: "g", MinCount: 2, MaxCount: 2})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 4, Mode: matchmaker.ModeMatchOnly, GameMode: "g", MinCount: 2, MaxCount: 2})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	require.Len(t, obs.samples, 2, "one observation per committed ticket")
+	for _, s := range obs.samples {
+		assert.GreaterOrEqual(t, s, 0.0)
+	}
+}
+
+func TestWorkerCollectStatsPushesQueueSample(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	gauge := &fakeQueueGauge{}
+	w := matchmaker.NewWorker(q, nil, nil, matchmaker.WorkerConfig{QueueGauge: gauge})
+
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 2, PlayerID: 3, Mode: matchmaker.ModeMatchOnly, GameMode: "g"})
+
+	require.NoError(t, w.CollectStats(context.Background()))
+
+	require.Len(t, gauge.last, 1)
+	assert.Equal(t, int64(1), gauge.last[0].Depth)
+	assert.Equal(t, "match_only", gauge.last[0].Mode)
+}
+
 func TestWorkerAllocatesAndNotifiesOnFullBucket(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	alloc := &fakeAllocator{address: "10.0.0.1:7777"}

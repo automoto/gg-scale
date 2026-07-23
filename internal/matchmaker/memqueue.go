@@ -12,10 +12,11 @@ import (
 // MemQueue is an in-memory Queue used by worker tests and as a stand-in for
 // local-only dev. Not safe for production: state vanishes on restart.
 type MemQueue struct {
-	mu      sync.Mutex
-	nextID  int64
-	tickets map[int64]*memTicket
-	matches map[string]*Match
+	mu       sync.Mutex
+	nextID   int64
+	tickets  map[int64]*memTicket
+	matches  map[string]*Match
+	failures FailureRecorder
 }
 
 // memTicket is the internal storage row. The exported Ticket is constructed
@@ -30,6 +31,20 @@ type memTicket struct {
 // NewMemQueue returns an empty in-memory queue.
 func NewMemQueue() *MemQueue {
 	return &MemQueue{tickets: make(map[int64]*memTicket), matches: make(map[string]*Match)}
+}
+
+// WithFailureRecorder wires a hook that counts tickets flipped to 'failed' by
+// reason, mirroring PGQueue. Returns the queue for chaining.
+func (q *MemQueue) WithFailureRecorder(r FailureRecorder) *MemQueue {
+	q.failures = r
+	return q
+}
+
+// recordFailures reports n tickets flipped to 'failed' for the given reason.
+func (q *MemQueue) recordFailures(reason string, n int) {
+	if q.failures != nil && n > 0 {
+		q.failures.MatchmakerTicketFailure(reason, n)
+	}
 }
 
 // CreateMatch stores a committed match result.
@@ -96,6 +111,7 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 		if t.claimID == "" && expired(&t.Ticket) {
 			t.Status = StatusFailed
 			t.FailureReason = failureReasonExpired
+			q.recordFailures(failureReasonExpired, 1)
 			continue
 		}
 		return nil, &TicketActiveError{ActiveTicketID: t.ID}
@@ -302,6 +318,7 @@ func (q *MemQueue) ReleaseTickets(_ context.Context, claim *Claim, ticketIDs []i
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	var failed int
 	for _, id := range ticketIDs {
 		t, ok := q.tickets[id]
 		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
@@ -313,8 +330,10 @@ func (q *MemQueue) ReleaseTickets(_ context.Context, claim *Claim, ticketIDs []i
 		if t.allocationAttempts >= maxAttempts {
 			t.Status = StatusFailed
 			t.FailureReason = failureReasonAttemptsExhausted
+			failed++
 		}
 	}
+	q.recordFailures(failureReasonAttemptsExhausted, failed)
 	return nil
 }
 
@@ -360,30 +379,77 @@ func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, 
 	now := time.Now().UTC()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	var released int64
+	var releasedClaims int64
+	var expiredFailed, attemptsFailed int
 	for _, t := range q.tickets {
 		if t.Status != StatusQueued {
 			continue
 		}
-		if t.claimID == "" && expired(&t.Ticket) {
+		// Phase 1: release claims whose lease has expired (mirror
+		// SweepStaleMatchmakerClaims): bump attempts, fail at the cap.
+		if t.claimID != "" {
+			if !t.claimExpiresAt.Before(now) {
+				continue
+			}
+			t.allocationAttempts++
+			t.claimID = ""
+			t.claimExpiresAt = time.Time{}
+			releasedClaims++
+			if t.allocationAttempts >= maxAttempts {
+				t.Status = StatusFailed
+				t.FailureReason = failureReasonAttemptsExhausted
+				attemptsFailed++
+				continue
+			}
+		}
+		// Phase 2: TTL expiry of unclaimed queued tickets, including the ones
+		// just released above (mirror ExpireMatchmakerTickets).
+		if expired(&t.Ticket) {
 			t.Status = StatusFailed
 			t.FailureReason = failureReasonExpired
-			released++
-			continue
+			expiredFailed++
 		}
-		if t.claimID == "" || !t.claimExpiresAt.Before(now) {
-			continue
-		}
-		t.allocationAttempts++
-		t.claimID = ""
-		t.claimExpiresAt = time.Time{}
-		if t.allocationAttempts >= maxAttempts {
-			t.Status = StatusFailed
-			t.FailureReason = failureReasonAttemptsExhausted
-		}
-		released++
 	}
-	return released, nil
+	q.recordFailures(failureReasonExpired, expiredFailed)
+	q.recordFailures(failureReasonAttemptsExhausted, attemptsFailed)
+	return releasedClaims + int64(expiredFailed), nil
+}
+
+// QueueStats returns a cross-tenant sample of queue depth and oldest-ticket
+// age per (mode, region) bucket, mirroring PGQueue for local dev and unit
+// tests. Region is blanked for non-fleet modes. game_mode is deliberately not
+// a dimension: it is free text and would make the gauge series unbounded.
+func (q *MemQueue) QueueStats(_ context.Context) ([]BucketStat, error) {
+	now := time.Now().UTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	type key struct{ mode, region string }
+	depth := make(map[key]int64)
+	oldest := make(map[key]time.Time)
+	for _, t := range q.tickets {
+		if t.Status != StatusQueued || t.claimID != "" || expired(&t.Ticket) {
+			continue
+		}
+		region := t.Region
+		if t.Mode != ModeFleetAllocation {
+			region = ""
+		}
+		k := key{string(t.Mode), region}
+		depth[k]++
+		if o, ok := oldest[k]; !ok || t.CreatedAt.Before(o) {
+			oldest[k] = t.CreatedAt
+		}
+	}
+	out := make([]BucketStat, 0, len(depth))
+	for k, d := range depth {
+		out = append(out, BucketStat{
+			Mode:             k.mode,
+			Region:           k.region,
+			Depth:            d,
+			OldestAgeSeconds: now.Sub(oldest[k]).Seconds(),
+		})
+	}
+	return out, nil
 }
 
 func cloneTicket(t *Ticket) *Ticket {

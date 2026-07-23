@@ -342,7 +342,7 @@ func run() error {
 		defer stopRiver()
 	}
 
-	mmQueue := matchmaker.NewPGQueue(appPool)
+	mmQueue := matchmaker.NewPGQueue(appPool).WithFailureRecorder(metrics)
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()
@@ -368,6 +368,8 @@ func run() error {
 		ShortCommitCounter: shortCommitCounter{metrics},
 		Sessions:           gamesession.NewMatchAdapter(gameSessions),
 		QueryRejectCounter: queryRejectCounter{metrics},
+		TimeToMatch:        timeToMatchObserver{metrics},
+		QueueGauge:         queueGauge{metrics},
 		Logger:             logger,
 	})
 	go func() {
@@ -507,6 +509,29 @@ func (c shortCommitCounter) Inc() { c.m.MatchmakerShortCommit() }
 type queryRejectCounter struct{ m *observability.Metrics }
 
 func (c queryRejectCounter) Inc() { c.m.MatchmakerQueryReject() }
+
+// timeToMatchObserver adapts *observability.Metrics to matchmaker.Observer for
+// the queued→matched latency histogram.
+type timeToMatchObserver struct{ m *observability.Metrics }
+
+func (o timeToMatchObserver) Observe(v float64) { o.m.MatchmakerTimeToMatch(v) }
+
+// queueGauge adapts *observability.Metrics to matchmaker.QueueGaugeSink,
+// translating the sampled buckets into gauge series.
+type queueGauge struct{ m *observability.Metrics }
+
+func (g queueGauge) SetQueueStats(stats []matchmaker.BucketStat) {
+	samples := make([]observability.MatchmakerBucketSample, len(stats))
+	for i, s := range stats {
+		samples[i] = observability.MatchmakerBucketSample{
+			Mode:             s.Mode,
+			Region:           s.Region,
+			Depth:            float64(s.Depth),
+			OldestAgeSeconds: s.OldestAgeSeconds,
+		}
+	}
+	g.m.SetMatchmakerQueueStats(samples)
+}
 
 // startRiverJobs boots the River client and its periodic maintenance jobs, then
 // returns a stop function, or nil if River couldn't start. River runs under

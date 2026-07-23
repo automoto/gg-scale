@@ -46,6 +46,21 @@ type Counter interface {
 	Inc()
 }
 
+// Observer is the minimal Prometheus-ish interface for a single-sample
+// observation (the queued→matched latency histogram). prometheus.Histogram
+// satisfies it; nil is valid.
+type Observer interface {
+	Observe(float64)
+}
+
+// QueueGaugeSink receives the sampled per-bucket queue stats each collection
+// pass. The metrics layer implements it (resets stale label series, then sets
+// the depth + oldest-age gauges). nil — or a Queue without StatsLister —
+// disables the sampler.
+type QueueGaugeSink interface {
+	SetQueueStats(stats []BucketStat)
+}
+
 // WorkerConfig controls group formation, scan cadence, and the claim
 // lifecycle.
 type WorkerConfig struct {
@@ -97,7 +112,14 @@ type WorkerConfig struct {
 	// QueryRejectCounter is incremented once per candidate pairing
 	// rejected by mutual query acceptance. Optional; nil disables.
 	QueryRejectCounter Counter
-	Logger             *slog.Logger
+	// TimeToMatch observes queued→matched latency (seconds) once per
+	// committed ticket. Optional; nil disables.
+	TimeToMatch Observer
+	// QueueGauge receives sampled queue depth + oldest-ticket age every
+	// SweepInterval. Optional; nil — or a Queue that isn't a StatsLister —
+	// disables the sampler.
+	QueueGauge QueueGaugeSink
+	Logger     *slog.Logger
 }
 
 // Worker consumes the queue, allocates servers, and notifies matched players.
@@ -163,11 +185,16 @@ func (w *Worker) Run(ctx context.Context) {
 		}()
 	}
 
-	if s, ok := w.queue.(Sweeper); ok {
+	sweeper, _ := w.queue.(Sweeper)
+	stats, _ := w.queue.(StatsLister)
+	if w.cfg.QueueGauge == nil {
+		stats = nil
+	}
+	if sweeper != nil || stats != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w.runSweeper(ctx, s)
+			w.runHousekeeping(ctx, sweeper, stats)
 		}()
 	}
 
@@ -282,10 +309,13 @@ func (w *Worker) runConsumer(ctx context.Context, events <-chan Bucket) {
 	}
 }
 
-// runSweeper releases claims whose lease has expired (crashed worker
-// recovery). Runs on context.Background() with a per-call timeout so a
-// request-scoped ctx cancellation doesn't stop the sweep mid-flight.
-func (w *Worker) runSweeper(ctx context.Context, s Sweeper) {
+// runHousekeeping runs the periodic stale-claim sweep and the queue-stats
+// sample on a single SweepInterval ticker, so one background pass covers both
+// rather than two independent scans of the tickets table on the same cadence.
+// Either task may be nil (queue lacks the capability, or no gauge sink). Runs
+// on a detached context per task so a request-scoped cancellation doesn't stop
+// housekeeping mid-flight.
+func (w *Worker) runHousekeeping(ctx context.Context, sweeper Sweeper, stats StatsLister) {
 	t := time.NewTicker(w.cfg.SweepInterval)
 	defer t.Stop()
 	for {
@@ -293,17 +323,73 @@ func (w *Worker) runSweeper(ctx context.Context, s Sweeper) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			n, err := s.SweepStaleClaims(sweepCtx, w.cfg.MaxAttempts)
-			cancel()
-			if err != nil {
-				w.log.Warn("matchmaker: sweep stale claims failed", "err", err)
-				continue
+			if sweeper != nil {
+				w.sweepOnce(sweeper)
 			}
-			if n > 0 {
-				w.log.Info("matchmaker: swept stale claims", "released", n)
+			if stats != nil {
+				if err := w.collect(context.Background(), stats); err != nil {
+					w.log.Warn("matchmaker: queue stats sample failed", "err", err)
+				}
 			}
 		}
+	}
+}
+
+// sweepOnce releases claims whose lease has expired (crashed worker recovery).
+// Runs on context.Background() with a per-call timeout so a request-scoped ctx
+// cancellation doesn't stop the sweep mid-flight.
+func (w *Worker) sweepOnce(s Sweeper) {
+	sweepCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	n, err := s.SweepStaleClaims(sweepCtx, w.cfg.MaxAttempts)
+	if err != nil {
+		w.log.Warn("matchmaker: sweep stale claims failed", "err", err)
+		return
+	}
+	if n > 0 {
+		w.log.Info("matchmaker: swept stale claims", "released", n)
+	}
+}
+
+// CollectStats samples the queue and pushes one gauge update synchronously.
+// Exposed for tests; the background collector calls the same path. No-op when
+// the queue isn't a StatsLister or no gauge sink is configured.
+func (w *Worker) CollectStats(ctx context.Context) error {
+	s, ok := w.queue.(StatsLister)
+	if !ok || w.cfg.QueueGauge == nil {
+		return nil
+	}
+	return w.collect(ctx, s)
+}
+
+func (w *Worker) collect(ctx context.Context, s StatsLister) error {
+	sampleCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	stats, err := s.QueueStats(sampleCtx)
+	if err != nil {
+		return err
+	}
+	w.cfg.QueueGauge.SetQueueStats(stats)
+	return nil
+}
+
+// observeMatched records the queued→matched latency of every ticket in a
+// just-committed group. CreatedAt is the DB-assigned enqueue time and now is
+// the app clock, so a skew between the app host and the database host can push
+// the delta negative; clamp to zero rather than corrupt the histogram with
+// negative observations. (NTP keeps any residual skew far below the ~0.5s
+// smallest bucket.)
+func (w *Worker) observeMatched(group []*Ticket) {
+	if w.cfg.TimeToMatch == nil {
+		return
+	}
+	now := time.Now().UTC()
+	for _, t := range group {
+		seconds := now.Sub(t.CreatedAt).Seconds()
+		if seconds < 0 {
+			seconds = 0
+		}
+		w.cfg.TimeToMatch.Observe(seconds)
 	}
 }
 
@@ -433,6 +519,7 @@ func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, gro
 	if w.cfg.MatchCounter != nil {
 		w.cfg.MatchCounter.Inc()
 	}
+	w.observeMatched(group)
 	w.notifyAndClaim(ctx, tenantCtx, group, match)
 	return nil
 }
@@ -540,6 +627,7 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 	if w.cfg.MatchCounter != nil {
 		w.cfg.MatchCounter.Inc()
 	}
+	w.observeMatched(group)
 
 	// A successful realtime delivery claims the lease. With no delivery the
 	// allocation remains available for polling until match expiry, when the

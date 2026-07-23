@@ -136,28 +136,35 @@ WHERE claim_id = sqlc.arg('claim_id')::uuid
   AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
   AND status = 'queued';
 
--- name: ReleaseMatchmakerTickets :execrows
+-- name: ReleaseMatchmakerTickets :one
 -- Worker-driven release of one failed group: the resolver (allocator,
 -- session creator) failed. Bump allocation_attempts; flip to 'failed' on
--- the Nth attempt, stamping the structured reason.
-UPDATE matchmaking_tickets
-SET claim_id            = NULL,
-    claimed_at          = NULL,
-    claim_expires_at    = NULL,
-    allocation_attempts = allocation_attempts + 1,
-    status = CASE
-        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
-            THEN 'failed'::ticket_status
-        ELSE status
-    END,
-    failure_reason = CASE
-        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
-            THEN 'attempts_exhausted'
-        ELSE failure_reason
-    END
-WHERE claim_id = sqlc.arg('claim_id')::uuid
-  AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
-  AND status = 'queued';
+-- the Nth attempt, stamping the structured reason. Returns how many tickets
+-- flipped to 'failed' this call so the caller can meter the
+-- attempts_exhausted failure counter without re-reading the rows.
+WITH released AS (
+    UPDATE matchmaking_tickets
+    SET claim_id            = NULL,
+        claimed_at          = NULL,
+        claim_expires_at    = NULL,
+        allocation_attempts = allocation_attempts + 1,
+        status = CASE
+            WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+                THEN 'failed'::ticket_status
+            ELSE status
+        END,
+        failure_reason = CASE
+            WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+                THEN 'attempts_exhausted'
+            ELSE failure_reason
+        END
+    WHERE claim_id = sqlc.arg('claim_id')::uuid
+      AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
+      AND status = 'queued'
+    RETURNING status
+)
+SELECT count(*) FILTER (WHERE status = 'failed')::bigint AS failed
+FROM released;
 
 -- name: ReturnMatchmakerClaim :execrows
 -- Un-claim whatever the claim still holds without penalty: tickets that
@@ -181,28 +188,36 @@ WHERE claim_id = sqlc.arg('claim_id')::uuid
   AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
   AND status = 'queued';
 
--- name: SweepStaleMatchmakerClaims :execrows
+-- name: SweepStaleMatchmakerClaims :one
 -- Release every claim whose lease has expired. Same accounting as
 -- ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
--- detached context so it isn't tied to any request lifetime.
-UPDATE matchmaking_tickets
-SET claim_id            = NULL,
-    claimed_at          = NULL,
-    claim_expires_at    = NULL,
-    allocation_attempts = allocation_attempts + 1,
-    status = CASE
-        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
-            THEN 'failed'::ticket_status
-        ELSE status
-    END,
-    failure_reason = CASE
-        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
-            THEN 'attempts_exhausted'
-        ELSE failure_reason
-    END
-WHERE claim_id IS NOT NULL
-  AND status = 'queued'
-  AND claim_expires_at < now();
+-- detached context so it isn't tied to any request lifetime. Returns the
+-- number of claims released and, of those, how many flipped to 'failed' at
+-- the cap so the caller can meter the attempts_exhausted failure counter.
+WITH released AS (
+    UPDATE matchmaking_tickets
+    SET claim_id            = NULL,
+        claimed_at          = NULL,
+        claim_expires_at    = NULL,
+        allocation_attempts = allocation_attempts + 1,
+        status = CASE
+            WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+                THEN 'failed'::ticket_status
+            ELSE status
+        END,
+        failure_reason = CASE
+            WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+                THEN 'attempts_exhausted'
+            ELSE failure_reason
+        END
+    WHERE claim_id IS NOT NULL
+      AND status = 'queued'
+      AND claim_expires_at < now()
+    RETURNING status
+)
+SELECT count(*)::bigint AS released,
+       count(*) FILTER (WHERE status = 'failed')::bigint AS failed
+FROM released;
 
 -- name: ExpireMatchmakerTickets :execrows
 -- TTL enforcement: unclaimed queued tickets past expires_at flip to 'failed'
@@ -215,6 +230,24 @@ WHERE status = 'queued'
   AND claim_id IS NULL
   AND expires_at IS NOT NULL
   AND expires_at < now();
+
+-- name: MatchmakerQueueStats :many
+-- Cross-tenant queue-depth + oldest-queued-ticket age, sampled by the
+-- observability collector for the queue gauges. Privileged: runs over the
+-- bootstrap role (no tenant GUC), mirroring the sweeper's scan. Region is a
+-- bucket dimension only for fleet_allocation; blanked for other modes so the
+-- gauge label set matches the worker's buckets. Deliberately does NOT group by
+-- game_mode: that column is developer-supplied free text, so labelling the
+-- Prometheus gauges with it would make the series count unbounded.
+SELECT mode,
+       (CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END)::text AS region,
+       count(*)::bigint AS depth,
+       EXTRACT(EPOCH FROM (now() - min(created_at)))::float8 AS oldest_age_seconds
+FROM matchmaking_tickets
+WHERE status = 'queued'
+  AND claim_id IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
+GROUP BY mode, CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END;
 
 -- name: ListMatchmakerBucketsForProject :many
 -- Control panel matchmaker page: queue depth per (mode, region, game_mode)

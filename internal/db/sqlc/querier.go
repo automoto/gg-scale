@@ -517,6 +517,14 @@ type Querier interface {
 	MarkRelayUsageWarned80(ctx context.Context, month pgtype.Date) (int64, error)
 	// Clears the code hash so the magic link can't be replayed after acceptance.
 	MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) error
+	// Cross-tenant queue-depth + oldest-queued-ticket age, sampled by the
+	// observability collector for the queue gauges. Privileged: runs over the
+	// bootstrap role (no tenant GUC), mirroring the sweeper's scan. Region is a
+	// bucket dimension only for fleet_allocation; blanked for other modes so the
+	// gauge label set matches the worker's buckets. Deliberately does NOT group by
+	// game_mode: that column is developer-supplied free text, so labelling the
+	// Prometheus gauges with it would make the series count unbounded.
+	MatchmakerQueueStats(ctx context.Context) ([]MatchmakerQueueStatsRow, error)
 	// Privileged (SECURITY DEFINER) lookup used by the player invite-accept
 	// page. Returns the tenant_id so the caller can SET app.tenant_id and
 	// continue under normal RLS enforcement.
@@ -540,7 +548,9 @@ type Querier interface {
 	ReleaseAllocation(ctx context.Context, id int64) error
 	// Worker-driven release of one failed group: the resolver (allocator,
 	// session creator) failed. Bump allocation_attempts; flip to 'failed' on
-	// the Nth attempt, stamping the structured reason.
+	// the Nth attempt, stamping the structured reason. Returns how many tickets
+	// flipped to 'failed' this call so the caller can meter the
+	// attempts_exhausted failure counter without re-reading the rows.
 	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
 	// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
 	// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
@@ -676,8 +686,10 @@ type Querier interface {
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
 	// Release every claim whose lease has expired. Same accounting as
 	// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
-	// detached context so it isn't tied to any request lifetime.
-	SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (int64, error)
+	// detached context so it isn't tied to any request lifetime. Returns the
+	// number of claims released and, of those, how many flipped to 'failed' at
+	// the cap so the caller can meter the attempts_exhausted failure counter.
+	SweepStaleMatchmakerClaims(ctx context.Context, maxAttempts int32) (SweepStaleMatchmakerClaimsRow, error)
 	// A name is taken if an active tenant has it, or another live (pending/approved)
 	// signup request claims it. exclude_request_id lets the approve re-check ignore
 	// the request being approved; pass 0 at submit time.
