@@ -153,6 +153,12 @@ func fillGroup(seed *Ticket, pool []*Ticket, used map[int64]bool, widened bool, 
 			if used[c.ID] || c.ID == seed.ID || slices.Contains(group, c) {
 				continue
 			}
+			// A player may hold at most one ticket, but enforce uniqueness
+			// here too so a lone player can never self-match even if the
+			// one-active index is bypassed.
+			if playerInGroup(group, c.PlayerID) {
+				continue
+			}
 			if preferSame != (c.Region == seed.Region) {
 				continue
 			}
@@ -173,6 +179,16 @@ func fillGroup(seed *Ticket, pool []*Ticket, used map[int64]bool, widened bool, 
 		sameRegionFirst(false)
 	}
 	return group
+}
+
+// playerInGroup reports whether playerID already holds a ticket in group.
+func playerInGroup(group []*Ticket, playerID int64) bool {
+	for _, m := range group {
+		if m.PlayerID == playerID {
+			return true
+		}
+	}
+	return false
 }
 
 // compatibleWithAll reports whether candidate c may join every member of

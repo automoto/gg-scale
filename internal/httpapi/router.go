@@ -107,9 +107,6 @@ type Deps struct {
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
-	// MatchmakerMaxTicketsPerPlayer caps a player's concurrently queued
-	// tickets per project. 0 disables the cap.
-	MatchmakerMaxTicketsPerPlayer int
 	// MatchmakerTicketTTL bounds how long a queued ticket lives. 0
 	// disables expiry.
 	MatchmakerTicketTTL time.Duration

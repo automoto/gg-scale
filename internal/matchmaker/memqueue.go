@@ -79,22 +79,26 @@ func cloneMatch(m *Match) *Match {
 	return &dup
 }
 
-// Enqueue inserts a queued ticket and returns the persisted view. The
-// MaxActive cap is enforced under the queue lock.
+// Enqueue inserts a queued ticket and returns the persisted view. One active
+// (queued) ticket per player per project is enforced under the queue lock,
+// mirroring the Postgres partial unique index.
 func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, error) {
 	req.normalize()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if req.MaxActive > 0 {
-		active := 0
-		for _, t := range q.tickets {
-			if t.Status == StatusQueued && t.ProjectID == req.ProjectID && t.PlayerID == req.PlayerID && !expired(&t.Ticket) {
-				active++
-			}
+	for _, t := range q.tickets {
+		if t.Status != StatusQueued || t.TenantID != req.TenantID || t.ProjectID != req.ProjectID || t.PlayerID != req.PlayerID {
+			continue
 		}
-		if active >= req.MaxActive {
-			return nil, ErrTicketLimit
+		// An expired-but-unswept ticket must not block re-queuing; TTL-expire
+		// it here as the sweeper would, mirroring the Postgres enqueue path.
+		// Claimed tickets are left for the claim path to settle.
+		if t.claimID == "" && expired(&t.Ticket) {
+			t.Status = StatusFailed
+			t.FailureReason = failureReasonExpired
+			continue
 		}
+		return nil, &TicketActiveError{ActiveTicketID: t.ID}
 	}
 	q.nextID++
 	t := &memTicket{
@@ -254,22 +258,31 @@ func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, max int, ttl ti
 	return &Claim{ID: claimID, Tickets: out}, nil
 }
 
-// CommitTickets flips the given still-queued claim tickets to 'matched'
-// with the match id, address + protocol hint. Returns rows-affected
-// (0 if the claim drifted).
+// CommitTickets flips the given still-queued claim tickets to 'matched' with
+// the match id, address + protocol hint, all-or-none: a full commit returns
+// (len, nil), a fully drifted claim returns (0, nil), and a partial commit
+// flips nothing and returns the would-be count with ErrShortCommit.
 func (q *MemQueue) CommitTickets(_ context.Context, claim *Claim, ticketIDs []int64, matchID, matchAddress, matchProtocol string) (int64, error) {
 	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
 		return 0, nil
 	}
-	now := time.Now().UTC()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	var affected int64
+	var committable int64
 	for _, id := range ticketIDs {
-		t, ok := q.tickets[id]
-		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
-			continue
+		if t, ok := q.tickets[id]; ok && t.claimID == claim.ID && t.Status == StatusQueued {
+			committable++
 		}
+	}
+	if committable == 0 {
+		return 0, nil
+	}
+	if committable != int64(len(ticketIDs)) {
+		return committable, ErrShortCommit
+	}
+	now := time.Now().UTC()
+	for _, id := range ticketIDs {
+		t := q.tickets[id]
 		t.Status = StatusMatched
 		t.MatchID = matchID
 		t.MatchAddress = matchAddress
@@ -277,9 +290,8 @@ func (q *MemQueue) CommitTickets(_ context.Context, claim *Claim, ticketIDs []in
 		t.MatchedAt = &now
 		t.claimID = ""
 		t.claimExpiresAt = time.Time{}
-		affected++
 	}
-	return affected, nil
+	return committable, nil
 }
 
 // ReleaseTickets clears the claim on the given tickets, bumps attempts, and
@@ -300,6 +312,7 @@ func (q *MemQueue) ReleaseTickets(_ context.Context, claim *Claim, ticketIDs []i
 		t.claimExpiresAt = time.Time{}
 		if t.allocationAttempts >= maxAttempts {
 			t.Status = StatusFailed
+			t.FailureReason = failureReasonAttemptsExhausted
 		}
 	}
 	return nil
@@ -322,6 +335,25 @@ func (q *MemQueue) ReturnUnmatched(_ context.Context, claim *Claim) error {
 	return nil
 }
 
+// ReturnTickets un-claims the given still-queued claim tickets without
+// penalty (short-commit survivors).
+func (q *MemQueue) ReturnTickets(_ context.Context, claim *Claim, ticketIDs []int64) error {
+	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
+		return nil
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, id := range ticketIDs {
+		t, ok := q.tickets[id]
+		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
+			continue
+		}
+		t.claimID = ""
+		t.claimExpiresAt = time.Time{}
+	}
+	return nil
+}
+
 // SweepStaleClaims releases every expired claim. MemQueue implements Sweeper
 // for symmetry with PGQueue and for cleanup tests.
 func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, error) {
@@ -335,6 +367,7 @@ func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, 
 		}
 		if t.claimID == "" && expired(&t.Ticket) {
 			t.Status = StatusFailed
+			t.FailureReason = failureReasonExpired
 			released++
 			continue
 		}
@@ -346,6 +379,7 @@ func (q *MemQueue) SweepStaleClaims(_ context.Context, maxAttempts int) (int64, 
 		t.claimExpiresAt = time.Time{}
 		if t.allocationAttempts >= maxAttempts {
 			t.Status = StatusFailed
+			t.FailureReason = failureReasonAttemptsExhausted
 		}
 		released++
 	}

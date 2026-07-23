@@ -116,9 +116,6 @@ type Config struct {
 	// MatchmakerSweepInterval is how often the cleanup goroutine releases
 	// claims whose lease has expired. Default 60s.
 	MatchmakerSweepInterval time.Duration `env:"MATCHMAKER_SWEEP_INTERVAL" envDefault:"60s"`
-	// MatchmakerMaxTicketsPerPlayer caps a player's concurrently queued
-	// tickets per project. 0 disables the cap. Default 3.
-	MatchmakerMaxTicketsPerPlayer int `env:"MATCHMAKER_MAX_TICKETS_PER_PLAYER" envDefault:"3"`
 	// MatchmakerTicketTTL is how long a queued ticket lives before the
 	// sweeper fails it. 0 disables expiry. Default 10m.
 	MatchmakerTicketTTL time.Duration `env:"MATCHMAKER_TICKET_TTL" envDefault:"10m"`

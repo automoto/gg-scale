@@ -396,6 +396,7 @@ type MatchmakerMatch struct {
 	ExpiresAt    pgtype.Timestamptz
 	AllocationID *int64
 	ClaimedAt    pgtype.Timestamptz
+	HostPlayerID *int64
 }
 
 type MatchmakingTicket struct {
@@ -426,6 +427,7 @@ type MatchmakingTicket struct {
 	StringProperties   []byte
 	NumericProperties  []byte
 	ExpiresAt          pgtype.Timestamptz
+	FailureReason      *string
 }
 
 type PlatformAuditLog struct {

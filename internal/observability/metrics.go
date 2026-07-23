@@ -20,6 +20,7 @@ type Metrics struct {
 	playerSessions        *prometheus.CounterVec
 	matchmakerTicket      prometheus.Counter
 	matchmakerMatch       prometheus.Counter
+	matchmakerShortCommit prometheus.Counter
 	matchmakerQueryReject prometheus.Counter
 	relayCreds            prometheus.Counter
 	mailSends             *prometheus.CounterVec
@@ -139,6 +140,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_matchmaker_matches_total",
 			Help: "Matchmaker matches formed.",
 		}),
+		matchmakerShortCommit: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_matchmaker_short_commits_total",
+			Help: "Groups rolled back because a member drifted between claim and commit; survivors were returned to the queue.",
+		}),
 		matchmakerQueryReject: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "ggscale_matchmaker_query_rejections_total",
 			Help: "Candidate pairings rejected by mutual query acceptance; high values point at overly strict ticket queries.",
@@ -163,8 +168,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
-		m.matchmakerQueryReject, m.relayCreds, m.mailSends, m.quotaRejections,
-		m.entitlementApplies,
+		m.matchmakerShortCommit, m.matchmakerQueryReject, m.relayCreds,
+		m.mailSends, m.quotaRejections, m.entitlementApplies,
 	)
 	return m
 }
@@ -247,6 +252,15 @@ func (m *Metrics) MatchmakerMatch() {
 		return
 	}
 	m.matchmakerMatch.Inc()
+}
+
+// MatchmakerShortCommit counts a group rolled back because a member drifted
+// between claim and commit.
+func (m *Metrics) MatchmakerShortCommit() {
+	if m == nil {
+		return
+	}
+	m.matchmakerShortCommit.Inc()
 }
 
 // MatchmakerQueryReject counts a candidate pairing rejected by mutual

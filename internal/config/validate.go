@@ -307,7 +307,6 @@ func (c *Config) checkFields() error {
 	}{
 		{"REALTIME_MAX_PER_TENANT", c.RealtimeMaxPerTenant},
 		{"REALTIME_MAX_PER_PLAYER", c.RealtimeMaxPerPlayer},
-		{"MATCHMAKER_MAX_TICKETS_PER_PLAYER", int64(c.MatchmakerMaxTicketsPerPlayer)},
 		{"DB_MIN_CONNS", int64(c.DBMinConns)},
 		{"DOCKER_DEFAULT_MEMORY", c.DockerDefaultMemory},
 		{"DOCKER_DEFAULT_PIDS", c.DockerDefaultPids},

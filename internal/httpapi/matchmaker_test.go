@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -163,6 +164,8 @@ func TestMatchmakerCreate_should_validate_counts_and_mode(t *testing.T) {
 		{"max_count overflowing int32 rejected", `{"mode":"match_only","max_count":2147483648}`, http.StatusBadRequest},
 		{"game_session within player cap accepted", `{"mode":"game_session","game_mode":"coop","min_count":2,"max_count":64}`, http.StatusCreated},
 		{"game_session above player cap rejected", `{"mode":"game_session","game_mode":"coop","max_count":65}`, http.StatusBadRequest},
+		{"attributes within cap accepted", `{"mode":"match_only","attributes":{"lobby":"abc"}}`, http.StatusCreated},
+		{"attributes over cap rejected", `{"mode":"match_only","attributes":{"blob":"` + strings.Repeat("x", 5000) + `"}}`, http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -175,18 +178,54 @@ func TestMatchmakerCreate_should_validate_counts_and_mode(t *testing.T) {
 	}
 }
 
-func TestMatchmakerCreate_should_enforce_concurrent_ticket_limit(t *testing.T) {
+func TestMatchmakerCreate_should_409_when_player_already_has_active_ticket(t *testing.T) {
 	d := matchmakerTestDeps(t)
-	d.MatchmakerMaxTicketsPerPlayer = 2
 	key := tenant.APIKey{TenantID: 1, Scopes: []string{tenant.ScopeMatchmaker}}
 	h := matchmakerTestRouter(t, d, key)
 
-	for i := 0; i < 2; i++ {
-		rec := postTicket(t, h, `{"mode":"match_only"}`)
-		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	first := postTicket(t, h, `{"mode":"match_only"}`)
+	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+	var created struct {
+		ID int64 `json:"id"`
 	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &created))
+
 	rec := postTicket(t, h, `{"mode":"match_only"}`)
-	assert.Equal(t, http.StatusTooManyRequests, rec.Code, rec.Body.String())
+
+	require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+	var problem struct {
+		Detail string `json:"detail"`
+		Errors []struct {
+			Location string `json:"location"`
+			Value    int64  `json:"value"`
+		} `json:"errors"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+	assert.Equal(t, "ticket_already_active", problem.Detail)
+	require.Len(t, problem.Errors, 1)
+	assert.Equal(t, "active_ticket_id", problem.Errors[0].Location)
+	assert.Equal(t, created.ID, problem.Errors[0].Value)
+}
+
+func TestMatchmakerCreate_should_allow_new_ticket_after_cancel(t *testing.T) {
+	d := matchmakerTestDeps(t)
+	key := tenant.APIKey{TenantID: 1, Scopes: []string{tenant.ScopeMatchmaker}}
+	h := matchmakerTestRouter(t, d, key)
+
+	first := postTicket(t, h, `{"mode":"match_only"}`)
+	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(first.Body.Bytes(), &created))
+
+	del := httptest.NewRequest(http.MethodDelete, "/v1/matchmaker/tickets/"+strconv.FormatInt(created.ID, 10), nil)
+	delRec := httptest.NewRecorder()
+	h.ServeHTTP(delRec, del)
+	require.Equal(t, http.StatusNoContent, delRec.Code, delRec.Body.String())
+
+	rec := postTicket(t, h, `{"mode":"match_only"}`)
+	assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
 }
 
 func TestMatchmakerGet_should_return_roster_after_match_for_missed_event_recovery(t *testing.T) {
@@ -226,4 +265,33 @@ func TestMatchmakerGet_should_return_roster_after_match_for_missed_event_recover
 	match, err := d.Matchmaker.GetMatch(db.WithTenant(context.Background(), 1), resp.MatchID)
 	require.NoError(t, err)
 	assert.False(t, match.ClaimedAt.IsZero(), "polling a matched ticket claims its allocation lease")
+}
+
+func TestMatchmakerGet_should_surface_failure_reason_for_failed_ticket(t *testing.T) {
+	d := matchmakerTestDeps(t)
+	key := tenant.APIKey{TenantID: 1, Scopes: []string{tenant.ScopeMatchmaker}}
+	h := matchmakerTestRouter(t, d, key)
+
+	// Enqueue directly with an already-lapsed TTL, then sweep so the ticket
+	// fails with a structured reason the poll must surface.
+	past := time.Now().UTC().Add(-time.Minute)
+	tk, err := d.Matchmaker.Enqueue(context.Background(), matchmaker.EnqueueRequest{
+		TenantID: 1, ProjectID: 7, PlayerID: 42, Mode: matchmaker.ModeMatchOnly, ExpiresAt: &past,
+	})
+	require.NoError(t, err)
+	_, err = d.Matchmaker.(matchmaker.Sweeper).SweepStaleClaims(context.Background(), 3)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/matchmaker/tickets/"+strconv.FormatInt(tk.ID, 10), nil)
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, req)
+
+	require.Equal(t, http.StatusOK, getRec.Code, getRec.Body.String())
+	var resp struct {
+		Status        string `json:"status"`
+		FailureReason string `json:"failure_reason"`
+	}
+	require.NoError(t, json.Unmarshal(getRec.Body.Bytes(), &resp))
+	assert.Equal(t, "failed", resp.Status)
+	assert.Equal(t, "expired", resp.FailureReason)
 }

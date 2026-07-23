@@ -109,6 +109,47 @@ func TestFormGroups_count_semantics(t *testing.T) {
 	}
 }
 
+func TestFormGroups_should_not_group_duplicate_player(t *testing.T) {
+	cfg := groupConfig{relaxAfter: 30 * time.Second, regionRelaxAfter: 60 * time.Second}
+	// Two queued tickets share a player_id (defense in depth: even if the
+	// one-active unique index is ever relaxed, a player must never appear
+	// twice in one roster — that would let a lone player self-match).
+	dup := func(id, playerID int64) *Ticket {
+		return &Ticket{
+			ID:               id,
+			PlayerID:         playerID,
+			Region:           "eu",
+			MinCount:         2,
+			MaxCount:         2,
+			CountMultiple:    1,
+			AllowCrossRegion: true,
+			CreatedAt:        testNow.Add(-2 * time.Second),
+		}
+	}
+	cases := []struct {
+		name    string
+		tickets []*Ticket
+		want    [][]int64
+	}{
+		{
+			"same player cannot fill its own group",
+			[]*Ticket{dup(1, 99), dup(2, 99)},
+			nil, // only player 99 present → no valid 2-player group
+		},
+		{
+			"duplicate player is skipped, distinct player fills the group",
+			[]*Ticket{dup(1, 99), dup(2, 99), dup(3, 7)},
+			[][]int64{{1, 3}}, // ticket 2 (player 99, already in group) is skipped
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := formGroups(c.tickets, testNow, cfg)
+			assert.Equal(t, c.want, groupIDs(got))
+		})
+	}
+}
+
 func TestFormGroups_region_semantics(t *testing.T) {
 	cfg := groupConfig{relaxAfter: 30 * time.Second, regionRelaxAfter: 60 * time.Second}
 	cases := []struct {

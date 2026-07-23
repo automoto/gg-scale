@@ -365,6 +365,7 @@ func run() error {
 		WorkerCount:        cfg.MatchmakerWorkerCount,
 		SweepInterval:      cfg.MatchmakerSweepInterval,
 		MatchCounter:       matchCounter{metrics},
+		ShortCommitCounter: shortCommitCounter{metrics},
 		Sessions:           gamesession.NewMatchAdapter(gameSessions),
 		QueryRejectCounter: queryRejectCounter{metrics},
 		Logger:             logger,
@@ -375,38 +376,37 @@ func run() error {
 	}()
 
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:                       "v1",
-		Commit:                        commit,
-		RequestTimeout:                cfg.HTTPRequestTimeout,
-		Pool:                          appPool,
-		ReadPool:                      readPool,
-		Lookup:                        tenant.NewSQLLookup(pool),
-		Limiter:                       ratelimit.NewCacheLimiter(store),
-		RateLimitOverrides:            ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
-		StorageMaxValueBytes:          cfg.StorageMaxValueBytes,
-		StorageLimits:                 storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
-		ProxyTrust:                    ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
-		Signer:                        signer,
-		Mailer:                        m,
-		MailFrom:                      cfg.MailFrom,
-		TwoFactor:                     tfCipher,
-		EmailVerifySigningKey:         emailVerifySigningKey,
-		Cache:                         store,
-		Registry:                      registry,
-		Metrics:                       metrics,
-		RBAC:                          authorizer,
-		Fleet:                         fleetMgr,
-		Hub:                           hub,
-		RealtimeMaxPerTenant:          cfg.RealtimeMaxPerTenant,
-		RealtimeMaxPerPlayer:          cfg.RealtimeMaxPerPlayer,
-		TenantConnectionCap:           tenantCap,
-		Matchmaker:                    mmQueue,
-		MatchmakerMaxTicketsPerPlayer: cfg.MatchmakerMaxTicketsPerPlayer,
-		MatchmakerTicketTTL:           cfg.MatchmakerTicketTTL,
-		GameSessions:                  gameSessions,
-		ServerList:                    serverListRegistry,
-		RelayIssuer:                   relayIssuer,
-		RelayMeter:                    relaymeter.New(appPool, m, cfg.MailFrom),
+		Version:               "v1",
+		Commit:                commit,
+		RequestTimeout:        cfg.HTTPRequestTimeout,
+		Pool:                  appPool,
+		ReadPool:              readPool,
+		Lookup:                tenant.NewSQLLookup(pool),
+		Limiter:               ratelimit.NewCacheLimiter(store),
+		RateLimitOverrides:    ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
+		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
+		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
+		ProxyTrust:            ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
+		Signer:                signer,
+		Mailer:                m,
+		MailFrom:              cfg.MailFrom,
+		TwoFactor:             tfCipher,
+		EmailVerifySigningKey: emailVerifySigningKey,
+		Cache:                 store,
+		Registry:              registry,
+		Metrics:               metrics,
+		RBAC:                  authorizer,
+		Fleet:                 fleetMgr,
+		Hub:                   hub,
+		RealtimeMaxPerTenant:  cfg.RealtimeMaxPerTenant,
+		RealtimeMaxPerPlayer:  cfg.RealtimeMaxPerPlayer,
+		TenantConnectionCap:   tenantCap,
+		Matchmaker:            mmQueue,
+		MatchmakerTicketTTL:   cfg.MatchmakerTicketTTL,
+		GameSessions:          gameSessions,
+		ServerList:            serverListRegistry,
+		RelayIssuer:           relayIssuer,
+		RelayMeter:            relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
 			CookieSecure:           cfg.ControlPanelCookieSecure,
@@ -499,6 +499,10 @@ func run() error {
 type matchCounter struct{ m *observability.Metrics }
 
 func (c matchCounter) Inc() { c.m.MatchmakerMatch() }
+
+type shortCommitCounter struct{ m *observability.Metrics }
+
+func (c shortCommitCounter) Inc() { c.m.MatchmakerShortCommit() }
 
 type queryRejectCounter struct{ m *observability.Metrics }
 

@@ -15,22 +15,42 @@ SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        mode, match_id, min_count, max_count, count_multiple,
        allow_cross_region, query, string_properties, numeric_properties,
-       created_at, matched_at, expires_at
+       created_at, matched_at, expires_at, failure_reason
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id)
   AND player_id = sqlc.arg(player_id);
 
--- name: CountQueuedTicketsForPlayer :one
--- Concurrent-ticket cap: how many live queued tickets the player already has
--- in the project. Expired-but-unswept tickets don't count against the cap.
-SELECT count(*)
+-- name: ExpirePlayerQueuedTicket :execrows
+-- TTL-expire this player's stale queued ticket ahead of a re-enqueue. An
+-- expired-but-unswept ticket still occupies the one-active unique index (the
+-- index predicate can't be time-aware), so without this the player is locked
+-- out of re-queuing until the periodic sweeper runs. Mirrors
+-- ExpireMatchmakerTickets but scoped to the one player; claimed tickets are
+-- left for the claim path to settle.
+UPDATE matchmaking_tickets
+SET status = 'failed',
+    failure_reason = 'expired'
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND player_id = sqlc.arg(player_id)
+  AND status = 'queued'
+  AND claim_id IS NULL
+  AND expires_at IS NOT NULL
+  AND expires_at < now();
+
+-- name: GetQueuedTicketForPlayer :one
+-- The player's current queued ticket in the project, if any. Used to surface
+-- the active ticket id in the 409 when a second create hits the one-active
+-- unique index.
+SELECT id
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg(project_id)
   AND player_id = sqlc.arg(player_id)
   AND status = 'queued'
-  AND (expires_at IS NULL OR expires_at > now());
+ORDER BY id
+LIMIT 1;
 
 -- name: CancelMatchmakingTicket :one
 -- Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
@@ -119,7 +139,7 @@ WHERE claim_id = sqlc.arg('claim_id')::uuid
 -- name: ReleaseMatchmakerTickets :execrows
 -- Worker-driven release of one failed group: the resolver (allocator,
 -- session creator) failed. Bump allocation_attempts; flip to 'failed' on
--- the Nth attempt.
+-- the Nth attempt, stamping the structured reason.
 UPDATE matchmaking_tickets
 SET claim_id            = NULL,
     claimed_at          = NULL,
@@ -129,6 +149,11 @@ SET claim_id            = NULL,
         WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
             THEN 'failed'::ticket_status
         ELSE status
+    END,
+    failure_reason = CASE
+        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+            THEN 'attempts_exhausted'
+        ELSE failure_reason
     END
 WHERE claim_id = sqlc.arg('claim_id')::uuid
   AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
@@ -144,6 +169,18 @@ SET claim_id         = NULL,
 WHERE claim_id = sqlc.arg('claim_id')::uuid
   AND status = 'queued';
 
+-- name: ReturnMatchmakerTicketsByID :execrows
+-- Penalty-free un-claim of specific still-queued tickets holding this claim:
+-- the survivors of a short commit go back to waiting without an attempt bump.
+-- Drifted tickets (cancelled/failed) are no longer 'queued' and are skipped.
+UPDATE matchmaking_tickets
+SET claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
+WHERE claim_id = sqlc.arg('claim_id')::uuid
+  AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
+  AND status = 'queued';
+
 -- name: SweepStaleMatchmakerClaims :execrows
 -- Release every claim whose lease has expired. Same accounting as
 -- ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
@@ -157,16 +194,23 @@ SET claim_id            = NULL,
         WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
             THEN 'failed'::ticket_status
         ELSE status
+    END,
+    failure_reason = CASE
+        WHEN allocation_attempts + 1 >= sqlc.arg('max_attempts')::int
+            THEN 'attempts_exhausted'
+        ELSE failure_reason
     END
 WHERE claim_id IS NOT NULL
   AND status = 'queued'
   AND claim_expires_at < now();
 
 -- name: ExpireMatchmakerTickets :execrows
--- TTL enforcement: unclaimed queued tickets past expires_at flip to
--- 'failed'. Claimed tickets are left alone — the claim path settles them.
+-- TTL enforcement: unclaimed queued tickets past expires_at flip to 'failed'
+-- with the structured reason 'expired'. Claimed tickets are left alone — the
+-- claim path settles them.
 UPDATE matchmaking_tickets
-SET status = 'failed'
+SET status = 'failed',
+    failure_reason = 'expired'
 WHERE status = 'queued'
   AND claim_id IS NULL
   AND expires_at IS NOT NULL
@@ -203,7 +247,8 @@ ORDER BY mode;
 -- name: InsertMatchmakerMatch :exec
 INSERT INTO matchmaker_matches (
     id, tenant_id, project_id, mode, fleet_id, address, protocol,
-    session_id, join_code, allocation_id, claimed_at, roster, expires_at
+    session_id, join_code, allocation_id, claimed_at, roster, expires_at,
+    host_player_id
 )
 VALUES (
     sqlc.arg(id),
@@ -211,12 +256,13 @@ VALUES (
     sqlc.arg(project_id), sqlc.arg(mode), sqlc.narg(fleet_id),
     sqlc.arg(address), sqlc.arg(protocol), sqlc.arg(session_id),
     sqlc.arg(join_code), sqlc.narg(allocation_id), sqlc.narg(claimed_at),
-    sqlc.arg(roster), sqlc.arg(expires_at)
+    sqlc.arg(roster), sqlc.arg(expires_at), sqlc.narg(host_player_id)
 );
 
 -- name: GetMatchmakerMatch :one
 SELECT id, tenant_id, project_id, mode, fleet_id, address, protocol,
-       session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
+       session_id, join_code, roster, created_at, expires_at, allocation_id,
+       claimed_at, host_player_id
 FROM matchmaker_matches
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id);
@@ -230,7 +276,8 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id)
   AND expires_at > now()
 RETURNING id, tenant_id, project_id, mode, fleet_id, address, protocol,
-          session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at;
+          session_id, join_code, roster, created_at, expires_at, allocation_id,
+          claimed_at, host_player_id;
 
 -- name: ListExpiredUnclaimedMatchmakerAllocations :many
 -- GC candidates whose allocation lease elapsed without a poll or realtime

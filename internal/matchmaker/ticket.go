@@ -46,6 +46,15 @@ const (
 	ModeFleetAllocation Mode = "fleet_allocation"
 )
 
+// Failure reasons stamped on a ticket when it flips to StatusFailed. They
+// mirror the CHECK on matchmaking_tickets.failure_reason and are surfaced in
+// the ticket poll response. Documented as an open enum: more values may be
+// added by forward migration.
+const (
+	failureReasonExpired           = "expired"
+	failureReasonAttemptsExhausted = "attempts_exhausted"
+)
+
 // ValidMode reports whether m is a known ticket mode.
 func ValidMode(m Mode) bool {
 	switch m {
@@ -77,9 +86,13 @@ type Ticket struct {
 	MatchID           string
 	MatchAddress      string
 	MatchProtocol     string
-	CreatedAt         time.Time
-	MatchedAt         *time.Time
-	ExpiresAt         *time.Time
+	// FailureReason is a machine-readable reason a ticket ended in
+	// StatusFailed ("expired", "attempts_exhausted"). Empty for
+	// non-failed tickets.
+	FailureReason string
+	CreatedAt     time.Time
+	MatchedAt     *time.Time
+	ExpiresAt     *time.Time
 }
 
 // EnqueueRequest is the input HTTP handlers pass to Queue.Enqueue. FleetID
@@ -106,10 +119,6 @@ type EnqueueRequest struct {
 	// ExpiresAt bounds how long the ticket may sit queued; nil disables
 	// expiry.
 	ExpiresAt *time.Time
-	// MaxActive caps the player's concurrently queued tickets in the
-	// project. 0 disables the cap. Enqueue returns ErrTicketLimit at the
-	// cap.
-	MaxActive int
 }
 
 // normalize fills zero-value mode and counts with their defaults so
@@ -156,6 +165,10 @@ type RosterEntry struct {
 	Region            string             `json:"region,omitempty"`
 	StringProperties  map[string]string  `json:"string_properties,omitempty"`
 	NumericProperties map[string]float64 `json:"numeric_properties,omitempty"`
+	// Attributes is the player's opaque ticket attributes, passed through to
+	// matched peers so match_only P2P can exchange lobby codes or endpoints
+	// with no extra infrastructure. Visible to every peer in the match.
+	Attributes json.RawMessage `json:"attributes,omitempty"`
 }
 
 // Match is a committed match result. Ticket rows reference it via MatchID;
@@ -171,6 +184,10 @@ type Match struct {
 	Protocol  string
 	SessionID string
 	JoinCode  string
+	// HostPlayerID is the player peers connect to for match_only and
+	// game_session results (the group's oldest ticket). Zero for
+	// fleet_allocation, where the endpoint is a dedicated server.
+	HostPlayerID int64
 	// AllocationID identifies the fleet resource leased to this match. Zero
 	// for match-only and game-session modes.
 	AllocationID fleet.AllocationID
@@ -215,9 +232,14 @@ type Queue interface {
 	// ReleaseTickets, then returns the rest with ReturnUnmatched.
 	ClaimBucket(ctx context.Context, bucket Bucket, max int, ttl time.Duration) (*Claim, error)
 	// CommitTickets flips the given still-queued claim tickets to
-	// 'matched' with the given match id, address, and protocol hint.
-	// Returns rows-affected so the caller can detect a race (sweeper,
-	// cancel) and deallocate the orphan server. matchAddress and
+	// 'matched' with the given match id, address, and protocol hint. It is
+	// all-or-none: it flips every requested ticket or none. A drifted claim
+	// (no requested ticket still queued) returns (0, nil) — the caller
+	// treats it as a harmless race and lets the orphan match GC. A partial
+	// commit (some but not all still queued — a member cancelled or expired
+	// between claim and commit) rolls back and returns the would-be count
+	// with ErrShortCommit; the caller returns the survivors via
+	// ReturnTickets and deallocates any orphan server. matchAddress and
 	// matchProtocol are empty for non-fleet modes; matchProtocol may also
 	// be empty when the backend can't determine it.
 	CommitTickets(ctx context.Context, claim *Claim, ticketIDs []int64, matchID, matchAddress, matchProtocol string) (int64, error)
@@ -228,6 +250,11 @@ type Queue interface {
 	// ReturnUnmatched un-claims whatever the claim still holds without
 	// penalty: tickets that fit no group this pass go back to waiting.
 	ReturnUnmatched(ctx context.Context, claim *Claim) error
+	// ReturnTickets un-claims the given still-queued claim tickets without
+	// penalty. Used after a short commit to send the survivors back to
+	// waiting (scoped to one group, unlike the claim-wide ReturnUnmatched);
+	// terminal tickets among the ids are already un-queued and skipped.
+	ReturnTickets(ctx context.Context, claim *Claim, ticketIDs []int64) error
 
 	// CreateMatch persists a committed match result. Tenant-scoped: the
 	// worker supplies a tenant context derived from the bucket.
@@ -255,9 +282,26 @@ var ErrNotFound = errors.New("matchmaker: ticket not found")
 // reached a terminal status.
 var ErrAlreadyTerminal = errors.New("matchmaker: ticket already finalised")
 
-// ErrTicketLimit is returned by Enqueue when the player already has
-// EnqueueRequest.MaxActive queued tickets in the project.
-var ErrTicketLimit = errors.New("matchmaker: too many queued tickets")
+// ErrTicketActive is returned by Enqueue when the player already holds a
+// queued ticket in the project. Only one active ticket per player per project
+// is allowed; the caller must cancel it before opening another.
+var ErrTicketActive = errors.New("matchmaker: player already has an active ticket")
+
+// TicketActiveError wraps ErrTicketActive with the id of the ticket already
+// queued so the API can point the player at the ticket to cancel. errors.Is
+// against ErrTicketActive matches; errors.As recovers ActiveTicketID.
+type TicketActiveError struct {
+	ActiveTicketID int64
+}
+
+func (e *TicketActiveError) Error() string { return ErrTicketActive.Error() }
+
+func (e *TicketActiveError) Unwrap() error { return ErrTicketActive }
+
+// ErrShortCommit is returned by CommitTickets when only some of the requested
+// tickets were still committable: the flip is rolled back so a match is never
+// formed with a partial roster.
+var ErrShortCommit = errors.New("matchmaker: commit did not cover the whole group")
 
 // Listener is an optional capability a Queue can implement to wake the
 // worker on ticket inserts instead of forcing a polling tick. The Postgres

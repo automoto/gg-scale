@@ -15,6 +15,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const notifyChannel = "matchmaker_ticket"
@@ -32,8 +33,10 @@ func NewPGQueue(pool *db.Pool) *PGQueue {
 }
 
 // Enqueue persists a queued ticket. The caller must have a player
-// authenticated context (tenant_id is read via RLS). The MaxActive cap is
-// checked in the same transaction as the insert.
+// authenticated context (tenant_id is read via RLS). A partial unique index
+// enforces one active (queued) ticket per player per project; a second
+// insert violates it and surfaces as a TicketActiveError carrying the id of
+// the ticket already queued.
 func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, error) {
 	req.normalize()
 	attrs := req.Attributes
@@ -58,19 +61,17 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 	}
 	var ticket *Ticket
 	err = q.pool.Q(ctx, func(tx pgx.Tx) error {
-		if req.MaxActive > 0 {
-			n, cerr := sqlcgen.New(tx).CountQueuedTicketsForPlayer(ctx, sqlcgen.CountQueuedTicketsForPlayerParams{
-				ProjectID: req.ProjectID,
-				PlayerID:  req.PlayerID,
-			})
-			if cerr != nil {
-				return cerr
-			}
-			if n >= int64(req.MaxActive) {
-				return ErrTicketLimit
-			}
+		gen := sqlcgen.New(tx)
+		// TTL-expire this player's stale queued ticket first: the one-active
+		// unique index can't be time-aware, so an expired-but-unswept ticket
+		// would otherwise trip the violation below and block re-queuing.
+		if _, xerr := gen.ExpirePlayerQueuedTicket(ctx, sqlcgen.ExpirePlayerQueuedTicketParams{
+			ProjectID: req.ProjectID,
+			PlayerID:  req.PlayerID,
+		}); xerr != nil {
+			return xerr
 		}
-		row, qerr := sqlcgen.New(tx).InsertMatchmakingTicket(ctx, sqlcgen.InsertMatchmakingTicketParams{
+		row, qerr := gen.InsertMatchmakingTicket(ctx, sqlcgen.InsertMatchmakingTicketParams{
 			ProjectID:         req.ProjectID,
 			FleetID:           fleetID,
 			PlayerID:          req.PlayerID,
@@ -113,13 +114,35 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		}
 		return nil
 	})
-	if errors.Is(err, ErrTicketLimit) {
-		return nil, ErrTicketLimit
+	if webutil.IsUniqueViolation(err) {
+		return nil, q.activeTicketError(ctx, req)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("matchmaker: enqueue: %w", err)
 	}
 	return ticket, nil
+}
+
+// activeTicketError builds the TicketActiveError for a rejected duplicate
+// enqueue, looking up the id of the ticket already queued. The insert's
+// transaction has been rolled back, so the lookup runs in its own query; if
+// the active ticket can't be read back (a rare cancel race), the error is
+// still a *TicketActiveError with a zero id so the handler maps it to a 409 —
+// returning the bare sentinel would miss errors.As and degrade to a 500.
+func (q *PGQueue) activeTicketError(ctx context.Context, req EnqueueRequest) error {
+	var id int64
+	lookupErr := q.pool.Q(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		id, qerr = sqlcgen.New(tx).GetQueuedTicketForPlayer(ctx, sqlcgen.GetQueuedTicketForPlayerParams{
+			ProjectID: req.ProjectID,
+			PlayerID:  req.PlayerID,
+		})
+		return qerr
+	})
+	if lookupErr != nil {
+		return &TicketActiveError{}
+	}
+	return &TicketActiveError{ActiveTicketID: id}
 }
 
 // marshalProps encodes a property map as JSONB, defaulting to {}.
@@ -189,6 +212,7 @@ func (q *PGQueue) Get(ctx context.Context, id, playerID int64) (*Ticket, error) 
 			MatchID:           row.MatchID,
 			MatchAddress:      row.MatchAddress,
 			MatchProtocol:     row.MatchProtocol,
+			FailureReason:     derefString(row.FailureReason),
 			CreatedAt:         row.CreatedAt.Time,
 		}
 		if row.MatchedAt.Valid {
@@ -207,6 +231,13 @@ func (q *PGQueue) Get(ctx context.Context, id, playerID int64) (*Ticket, error) 
 func derefFleetID(p *int64) int64 {
 	if p == nil {
 		return 0
+	}
+	return *p
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
 	}
 	return *p
 }
@@ -339,10 +370,11 @@ func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, max int, ttl t
 	return &Claim{ID: claimUUID.String(), Tickets: tickets}, nil
 }
 
-// CommitTickets flips the given still-queued claim tickets to 'matched'
-// with the given match id, address and protocol hint. Returns rows-affected
-// so the caller can detect 0-row commits (claim drifted) and deallocate the
-// orphan server.
+// CommitTickets flips the given still-queued claim tickets to 'matched' with
+// the given match id, address and protocol hint, all-or-none. A full commit
+// returns (len, nil); a fully drifted claim returns (0, nil); a partial
+// commit rolls the flip back and returns the would-be count with
+// ErrShortCommit.
 func (q *PGQueue) CommitTickets(ctx context.Context, claim *Claim, ticketIDs []int64, matchID, matchAddress, matchProtocol string) (int64, error) {
 	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
 		return 0, nil
@@ -351,6 +383,7 @@ func (q *PGQueue) CommitTickets(ctx context.Context, claim *Claim, ticketIDs []i
 	if err != nil {
 		return 0, err
 	}
+	want := int64(len(ticketIDs))
 	var n int64
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var qerr error
@@ -361,9 +394,40 @@ func (q *PGQueue) CommitTickets(ctx context.Context, claim *Claim, ticketIDs []i
 			ClaimID:       pgUUID,
 			TicketIds:     ticketIDs,
 		})
+		if qerr != nil {
+			return qerr
+		}
+		if n != 0 && n != want {
+			// Some members drifted after the claim. Roll the flip back so no
+			// partial roster is ever committed; the caller returns the
+			// survivors and (fleet) deallocates.
+			return ErrShortCommit
+		}
+		return nil
+	})
+	if errors.Is(err, ErrShortCommit) {
+		return n, ErrShortCommit
+	}
+	return n, err
+}
+
+// ReturnTickets un-claims the given still-queued claim tickets without
+// penalty (short-commit survivors go back to waiting).
+func (q *PGQueue) ReturnTickets(ctx context.Context, claim *Claim, ticketIDs []int64) error {
+	if claim == nil || claim.ID == "" || len(ticketIDs) == 0 {
+		return nil
+	}
+	pgUUID, err := parseClaimID(claim.ID)
+	if err != nil {
+		return err
+	}
+	return q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		_, qerr := sqlcgen.New(tx).ReturnMatchmakerTicketsByID(ctx, sqlcgen.ReturnMatchmakerTicketsByIDParams{
+			ClaimID:   pgUUID,
+			TicketIds: ticketIDs,
+		})
 		return qerr
 	})
-	return n, err
 }
 
 // ReleaseTickets clears the claim on the given tickets, bumps
@@ -435,6 +499,11 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 		id := int64(m.AllocationID)
 		allocationID = &id
 	}
+	var hostPlayerID *int64
+	if m.HostPlayerID != 0 {
+		h := m.HostPlayerID
+		hostPlayerID = &h
+	}
 	claimedAt := pgtype.Timestamptz{}
 	if !m.ClaimedAt.IsZero() {
 		claimedAt = pgtype.Timestamptz{Time: m.ClaimedAt, Valid: true}
@@ -453,6 +522,7 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 			ClaimedAt:    claimedAt,
 			Roster:       roster,
 			ExpiresAt:    pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
+			HostPlayerID: hostPlayerID,
 		})
 	})
 }
@@ -513,6 +583,7 @@ func decodeMatchmakerMatch(row sqlcgen.MatchmakerMatch) (*Match, error) {
 		Protocol:     row.Protocol,
 		SessionID:    row.SessionID,
 		JoinCode:     row.JoinCode,
+		HostPlayerID: derefFleetID(row.HostPlayerID),
 		AllocationID: fleet.AllocationID(derefFleetID(row.AllocationID)),
 		ClaimedAt:    row.ClaimedAt.Time,
 		Roster:       roster,

@@ -98,9 +98,6 @@ type Querier interface {
 	CountPlayersForTenant(ctx context.Context) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
-	// Concurrent-ticket cap: how many live queued tickets the player already has
-	// in the project. Expired-but-unswept tickets don't count against the cap.
-	CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueuedTicketsForPlayerParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
 	// New keys start with the matchmaker scope: matchmaking is a zero-config
@@ -211,9 +208,17 @@ type Querier interface {
 	// Declarative entitlement apply: switch a tenant-level grant off in place so
 	// the row survives (audit trail, later re-enable). Runs in tenant RLS context.
 	DisableTenantFeatureGrant(ctx context.Context, arg DisableTenantFeatureGrantParams) (int64, error)
-	// TTL enforcement: unclaimed queued tickets past expires_at flip to
-	// 'failed'. Claimed tickets are left alone — the claim path settles them.
+	// TTL enforcement: unclaimed queued tickets past expires_at flip to 'failed'
+	// with the structured reason 'expired'. Claimed tickets are left alone — the
+	// claim path settles them.
 	ExpireMatchmakerTickets(ctx context.Context) (int64, error)
+	// TTL-expire this player's stale queued ticket ahead of a re-enqueue. An
+	// expired-but-unswept ticket still occupies the one-active unique index (the
+	// index predicate can't be time-aware), so without this the player is locked
+	// out of re-queuing until the periodic sweeper runs. Mirrors
+	// ExpireMatchmakerTickets but scoped to the one player; claimed tickets are
+	// left for the claim path to settle.
+	ExpirePlayerQueuedTicket(ctx context.Context, arg ExpirePlayerQueuedTicketParams) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
@@ -336,6 +341,10 @@ type Querier interface {
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
+	// The player's current queued ticket in the project, if any. Used to surface
+	// the active ticket id in the 409 when a second create hits the one-active
+	// unique index.
+	GetQueuedTicketForPlayer(ctx context.Context, arg GetQueuedTicketForPlayerParams) (int64, error)
 	GetRelaySessionUsage(ctx context.Context, month pgtype.Date) (int64, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
@@ -531,7 +540,7 @@ type Querier interface {
 	ReleaseAllocation(ctx context.Context, id int64) error
 	// Worker-driven release of one failed group: the resolver (allocator,
 	// session creator) failed. Bump allocation_attempts; flip to 'failed' on
-	// the Nth attempt.
+	// the Nth attempt, stamping the structured reason.
 	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
 	// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
 	// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
@@ -570,6 +579,10 @@ type Querier interface {
 	// Un-claim whatever the claim still holds without penalty: tickets that
 	// didn't fit a group this pass simply go back to waiting.
 	ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error)
+	// Penalty-free un-claim of specific still-queued tickets holding this claim:
+	// the survivors of a short commit go back to waiting without an attempt bump.
+	// Drifted tickets (cancelled/failed) are no longer 'queued' and are skipped.
+	ReturnMatchmakerTicketsByID(ctx context.Context, arg ReturnMatchmakerTicketsByIDParams) (int64, error)
 	RevokeAPIKey(ctx context.Context, id int64) error
 	// Reuse-detection response: nuke every live session for the player in this
 	// project. Paired with BumpPlayerSessionEpoch so outstanding access tokens die

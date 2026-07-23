@@ -74,12 +74,20 @@ type matchmakerTicketResponse struct {
 	// SessionID / JoinCode are set for matched game_session tickets.
 	SessionID string `json:"session_id,omitempty"`
 	JoinCode  string `json:"join_code,omitempty"`
+	// HostPlayerID is the player peers connect to for matched match_only and
+	// game_session tickets (the group's oldest ticket). Absent for
+	// fleet_allocation, which resolves to a dedicated server address.
+	HostPlayerID int64 `json:"host_player_id,omitempty"`
 	// Users is the match roster, populated once the ticket is matched (and
 	// while the match record is within its retention window).
-	Users     []matchmaker.RosterEntry `json:"users,omitempty"`
-	CreatedAt string                   `json:"created_at"`
-	MatchedAt string                   `json:"matched_at,omitempty"`
-	ExpiresAt string                   `json:"expires_at,omitempty"`
+	Users []matchmaker.RosterEntry `json:"users,omitempty"`
+	// FailureReason is a machine-readable reason a failed ticket ended that
+	// way. Present only for failed tickets. Known values: "expired",
+	// "attempts_exhausted"; treat as an open enum — more may be added.
+	FailureReason string `json:"failure_reason,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	MatchedAt     string `json:"matched_at,omitempty"`
+	ExpiresAt     string `json:"expires_at,omitempty"`
 }
 
 // resolveTicketMode applies the omitted-mode inference rule and validates
@@ -107,6 +115,10 @@ func resolveTicketMode(req *matchmakerTicketRequest) (matchmaker.Mode, string) {
 const (
 	maxPropsPerKind    = 16
 	maxPropValueLength = 128
+	// maxAttributesBytes caps the opaque per-ticket attributes blob. It is
+	// echoed to every matched peer via the roster, so bound it well below the
+	// 64 KiB request-body ceiling (which is not a per-field limit).
+	maxAttributesBytes = 4 << 10
 )
 
 // validateTicketCriteria checks the query expression and property maps.
@@ -321,6 +333,9 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 		}
 
 		req := in.Body
+		if len(req.Attributes) > maxAttributesBytes {
+			return nil, huma.Error400BadRequest(fmt.Sprintf("attributes must not exceed %d bytes", maxAttributesBytes))
+		}
 		if len(req.Attributes) > 0 && !json.Valid(req.Attributes) {
 			return nil, huma.Error400BadRequest("attributes must be valid JSON")
 		}
@@ -369,15 +384,19 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 			Query:             req.Query,
 			StringProperties:  req.StringProperties,
 			NumericProperties: req.NumericProperties,
-			MaxActive:         d.MatchmakerMaxTicketsPerPlayer,
 		}
 		if d.MatchmakerTicketTTL > 0 {
 			exp := time.Now().UTC().Add(d.MatchmakerTicketTTL)
 			enq.ExpiresAt = &exp
 		}
 		ticket, err := d.Matchmaker.Enqueue(ctx, enq)
-		if errors.Is(err, matchmaker.ErrTicketLimit) {
-			return nil, huma.Error429TooManyRequests("too many queued tickets")
+		var active *matchmaker.TicketActiveError
+		if errors.As(err, &active) {
+			return nil, huma.Error409Conflict("ticket_already_active", &huma.ErrorDetail{
+				Message:  "player already has an active matchmaking ticket in this project",
+				Location: "active_ticket_id",
+				Value:    active.ActiveTicketID,
+			})
 		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError("internal error")
@@ -488,6 +507,9 @@ func ticketResponse(t *matchmaker.Ticket, m *matchmaker.Match) matchmakerTicketR
 		ProtocolHint:      t.MatchProtocol,
 		CreatedAt:         t.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
+	if t.Status == matchmaker.StatusFailed {
+		resp.FailureReason = t.FailureReason
+	}
 	if t.MatchedAt != nil {
 		resp.MatchedAt = t.MatchedAt.UTC().Format(time.RFC3339Nano)
 	}
@@ -498,6 +520,7 @@ func ticketResponse(t *matchmaker.Ticket, m *matchmaker.Match) matchmakerTicketR
 		resp.Users = m.Roster
 		resp.SessionID = m.SessionID
 		resp.JoinCode = m.JoinCode
+		resp.HostPlayerID = m.HostPlayerID
 	}
 	return resp
 }

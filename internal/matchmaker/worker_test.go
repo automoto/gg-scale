@@ -434,6 +434,93 @@ func TestWorkerCommitsMatchOnlyEvenWhenNobodyConnected(t *testing.T) {
 	assert.NotEmpty(t, got.MatchID)
 }
 
+// countingCounter is a test double for the worker's Counter metric hook.
+type countingCounter struct{ n atomic.Int64 }
+
+func (c *countingCounter) Inc() { c.n.Add(1) }
+
+// cancelDuringCommitQueue cancels one ticket the first time CommitTickets is
+// invoked, simulating a member who bails between claim and commit so the
+// commit comes up short. Everything else delegates to the embedded MemQueue.
+type cancelDuringCommitQueue struct {
+	*matchmaker.MemQueue
+	tenantID     int64
+	cancelID     int64
+	cancelPlayer int64
+	once         sync.Once
+}
+
+func (q *cancelDuringCommitQueue) CommitTickets(ctx context.Context, claim *matchmaker.Claim, ids []int64, matchID, addr, proto string) (int64, error) {
+	q.once.Do(func() {
+		_ = q.Cancel(db.WithTenant(context.Background(), q.tenantID), q.cancelID, q.cancelPlayer)
+	})
+	return q.MemQueue.CommitTickets(ctx, claim, ids, matchID, addr, proto)
+}
+
+func TestWorkerShortCommitReturnsSurvivorsAndSuppressesEvent(t *testing.T) {
+	mq := matchmaker.NewMemQueue()
+	players := []int64{41, 42, 43, 44}
+	ids := make([]int64, 0, len(players))
+	for _, p := range players {
+		tk := enqueue(t, mq, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: p, Mode: matchmaker.ModeMatchOnly, Region: "eu-1", GameMode: "1v1", MinCount: 2, MaxCount: 4})
+		ids = append(ids, tk.ID)
+	}
+	// Player 44 cancels between claim and commit → 3 survivors.
+	q := &cancelDuringCommitQueue{MemQueue: mq, tenantID: 1, cancelID: ids[3], cancelPlayer: 44}
+	hub := &fakeNotifier{}
+	shortCommits := &countingCounter{}
+	w := matchmaker.NewWorker(q, nil, hub, matchmaker.WorkerConfig{ShortCommitCounter: shortCommits})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	assert.Empty(t, hub.Sent(), "a short commit delivers no matched event")
+	assert.Equal(t, int64(1), shortCommits.n.Load(), "short commit is metered")
+	tctx := db.WithTenant(context.Background(), 1)
+	cancelled, err := q.Get(tctx, ids[3], 44)
+	require.NoError(t, err)
+	assert.Equal(t, matchmaker.StatusCancelled, cancelled.Status)
+	for i := 0; i < 3; i++ {
+		s, err := q.Get(tctx, ids[i], players[i])
+		require.NoError(t, err)
+		assert.Equal(t, matchmaker.StatusQueued, s.Status, "survivors return to the queue penalty-free")
+	}
+
+	// The survivors rematch on the next pass with the canceller absent.
+	require.NoError(t, w.Tick(context.Background()))
+	sent := hub.Sent()
+	require.Len(t, sent, 3, "three survivors matched")
+	var payload struct {
+		Users []struct {
+			PlayerID int64 `json:"player_id"`
+		} `json:"users"`
+	}
+	require.NoError(t, json.Unmarshal(sent[0].msg.Payload, &payload))
+	require.Len(t, payload.Users, 3)
+	for _, u := range payload.Users {
+		assert.NotEqual(t, int64(44), u.PlayerID, "a cancelled player never appears in a delivered roster")
+	}
+}
+
+func TestWorkerShortCommitDeallocatesFleetAllocation(t *testing.T) {
+	mq := matchmaker.NewMemQueue()
+	players := []int64{51, 52}
+	ids := make([]int64, 0, len(players))
+	for _, p := range players {
+		tk := enqueue(t, mq, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: p, Mode: matchmaker.ModeFleetAllocation, Region: "us-east-1", GameMode: "1v1", MinCount: 2, MaxCount: 2})
+		ids = append(ids, tk.ID)
+	}
+	q := &cancelDuringCommitQueue{MemQueue: mq, tenantID: 1, cancelID: ids[1], cancelPlayer: 52}
+	alloc := &fakeAllocator{address: "10.0.0.9:7777"}
+	hub := &fakeNotifier{}
+	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	assert.Empty(t, hub.Sent(), "no event on a short commit")
+	assert.Equal(t, int64(1), alloc.Called())
+	require.Len(t, alloc.Deallocated(), 1, "the orphan allocation is reclaimed on a short commit")
+}
+
 type fakeSessionCreator struct {
 	mu      sync.Mutex
 	calls   []fakeSessionCall
@@ -509,6 +596,93 @@ func TestWorkerGameSessionModeFailsTicketsWhenSessionCreationFails(t *testing.T)
 	require.NoError(t, err)
 	assert.Equal(t, matchmaker.StatusFailed, got.Status,
 		"session-creation failure follows the allocation-failure path")
+}
+
+func TestWorkerMatchOnlyDesignatesHostAndSurfacesPeerAttributes(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	hub := &fakeNotifier{}
+	w := matchmaker.NewWorker(q, nil, hub, matchmaker.WorkerConfig{})
+
+	// Player 41 queues first → oldest ticket → host.
+	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 41, Mode: matchmaker.ModeMatchOnly, Region: "eu-1", GameMode: "1v1", MinCount: 2, MaxCount: 2, Attributes: json.RawMessage(`{"lobby":"A"}`)})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Mode: matchmaker.ModeMatchOnly, Region: "eu-1", GameMode: "1v1", MinCount: 2, MaxCount: 2, Attributes: json.RawMessage(`{"lobby":"B"}`)})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	tctx := db.WithTenant(context.Background(), 1)
+	g1, err := q.Get(tctx, t1.ID, 41)
+	require.NoError(t, err)
+	match, err := q.GetMatch(tctx, g1.MatchID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(41), match.HostPlayerID, "the oldest ticket's player hosts")
+
+	// The roster carries each peer's opaque attributes so match_only P2P can
+	// exchange connect info with no extra infrastructure.
+	attrs := map[int64]string{}
+	for _, r := range match.Roster {
+		attrs[r.PlayerID] = string(r.Attributes)
+	}
+	assert.JSONEq(t, `{"lobby":"A"}`, attrs[41])
+	assert.JSONEq(t, `{"lobby":"B"}`, attrs[42])
+
+	sent := hub.Sent()
+	require.Len(t, sent, 2)
+	var payload struct {
+		HostPlayerID int64 `json:"host_player_id"`
+		Users        []struct {
+			PlayerID   int64           `json:"player_id"`
+			Attributes json.RawMessage `json:"attributes"`
+		} `json:"users"`
+	}
+	require.NoError(t, json.Unmarshal(sent[0].msg.Payload, &payload))
+	assert.Equal(t, int64(41), payload.HostPlayerID, "matched event names the host")
+	require.Len(t, payload.Users, 2)
+}
+
+func TestWorkerFleetMatchHasNoHostPlayer(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	hub := &fakeNotifier{}
+	w := matchmaker.NewWorker(q, alloc, hub, matchmaker.WorkerConfig{})
+
+	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 41, Mode: matchmaker.ModeFleetAllocation, Region: "us-east-1", GameMode: "1v1", MinCount: 2, MaxCount: 2})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Mode: matchmaker.ModeFleetAllocation, Region: "us-east-1", GameMode: "1v1", MinCount: 2, MaxCount: 2})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	tctx := db.WithTenant(context.Background(), 1)
+	g1, err := q.Get(tctx, t1.ID, 41)
+	require.NoError(t, err)
+	match, err := q.GetMatch(tctx, g1.MatchID)
+	require.NoError(t, err)
+	assert.Zero(t, match.HostPlayerID, "fleet allocations have a server, not a host player")
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(hub.Sent()[0].msg.Payload, &payload))
+	_, hasHost := payload["host_player_id"]
+	assert.False(t, hasHost, "host_player_id omitted for fleet matches")
+}
+
+func TestWorkerGameSessionHostMatchesSessionHead(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	sessions := &fakeSessionCreator{}
+	w := matchmaker.NewWorker(q, nil, &fakeNotifier{}, matchmaker.WorkerConfig{Sessions: sessions})
+
+	t1 := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 41, Mode: matchmaker.ModeGameSession, GameMode: "coop", MinCount: 2, MaxCount: 2})
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Mode: matchmaker.ModeGameSession, GameMode: "coop", MinCount: 2, MaxCount: 2})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	require.Len(t, sessions.calls, 1)
+	tctx := db.WithTenant(context.Background(), 1)
+	g1, err := q.Get(tctx, t1.ID, 41)
+	require.NoError(t, err)
+	match, err := q.GetMatch(tctx, g1.MatchID)
+	require.NoError(t, err)
+	// The head of the players slice handed to the session (which becomes the
+	// session's HostPlayerID) is the same player the match names as host.
+	assert.Equal(t, int64(41), match.HostPlayerID)
+	assert.Equal(t, match.HostPlayerID, sessions.calls[0].players[0])
 }
 
 func TestWorkerWidensRegionsAfterWindow(t *testing.T) {

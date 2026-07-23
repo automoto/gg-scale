@@ -8,11 +8,21 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/relay"
 )
+
+// relayCredentialsInput optionally scopes the request to a match. When MatchID
+// is set the server verifies the caller is in that match's roster before
+// issuing, so a peer-to-peer client can prove match membership when asking for
+// relay credentials. Unqualified requests stay valid for non-matchmade P2P
+// (server browser, direct invites).
+type relayCredentialsInput struct {
+	MatchID string `query:"match_id"`
+}
 
 // relayCredentialsOutput carries the TURN-REST credentials. The password field
 // is the TURN-REST HMAC, intentionally returned to the authenticated player so
@@ -32,8 +42,8 @@ func registerRelay(api huma.API, d Deps) {
 	}, relayCredentials(d))
 }
 
-func relayCredentials(d Deps) func(context.Context, *struct{}) (*relayCredentialsOutput, error) {
-	return func(ctx context.Context, _ *struct{}) (*relayCredentialsOutput, error) {
+func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*relayCredentialsOutput, error) {
+	return func(ctx context.Context, in *relayCredentialsInput) (*relayCredentialsOutput, error) {
 		tenantID, err := db.TenantFromContext(ctx)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("internal error")
@@ -73,6 +83,13 @@ func relayCredentials(d Deps) func(context.Context, *struct{}) (*relayCredential
 		} else if banned {
 			return nil, huma.Error403Forbidden("account banned")
 		}
+		// Optional match scoping: prove roster membership before issuing. Done
+		// before metering so a rejected request never consumes the allowance.
+		if in.MatchID != "" {
+			if merr := verifyRelayMatchMembership(ctx, d, projectID, playerID, in.MatchID); merr != nil {
+				return nil, merr
+			}
+		}
 		// Monthly session allowance: refuses only new issuance — in-flight
 		// TURN sessions are unaffected.
 		if d.RelayMeter != nil {
@@ -92,4 +109,30 @@ func relayCredentials(d Deps) func(context.Context, *struct{}) (*relayCredential
 		d.Metrics.RelayCredentialIssued()
 		return &relayCredentialsOutput{Body: *creds}, nil
 	}
+}
+
+// verifyRelayMatchMembership confirms the caller belongs to the given match's
+// roster in this project. A missing match, a cross-project match, or a
+// non-member all return the same 403 so match ids can't be enumerated. Returns
+// nil when the player is a member.
+func verifyRelayMatchMembership(ctx context.Context, d Deps, projectID, playerID int64, matchID string) error {
+	if d.Matchmaker == nil {
+		return huma.Error400BadRequest("match scoping unavailable")
+	}
+	match, err := d.Matchmaker.GetMatch(ctx, matchID)
+	if errors.Is(err, matchmaker.ErrNotFound) {
+		return huma.Error403Forbidden("forbidden")
+	}
+	if err != nil {
+		return huma.Error500InternalServerError("internal error")
+	}
+	if match.ProjectID != projectID {
+		return huma.Error403Forbidden("forbidden")
+	}
+	for _, r := range match.Roster {
+		if r.PlayerID == playerID {
+			return nil
+		}
+	}
+	return huma.Error403Forbidden("forbidden")
 }

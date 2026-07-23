@@ -471,8 +471,13 @@ components:
           type: string
         expires_at:
           type: string
+        failure_reason:
+          type: string
         game_mode:
           type: string
+        host_player_id:
+          format: int64
+          type: integer
         id:
           format: int64
           type: integer
@@ -655,6 +660,7 @@ components:
     RosterEntry:
       additionalProperties: false
       properties:
+        attributes: {}
         numeric_properties:
           additionalProperties:
             format: double
@@ -1876,6 +1882,12 @@ paths:
   /v1/relay/credentials:
     post:
       operationId: issueRelayCredentials
+      parameters:
+        - explode: false
+          in: query
+          name: match_id
+          schema:
+            type: string
       responses:
         "200":
           content:

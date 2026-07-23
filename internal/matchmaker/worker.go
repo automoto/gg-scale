@@ -84,6 +84,10 @@ type WorkerConfig struct {
 	// disables. Lets main wire a Prometheus counter without this package
 	// importing the metrics layer.
 	MatchCounter Counter
+	// ShortCommitCounter is incremented once per short commit (a member
+	// drifted between claim and commit, so the group was rolled back and the
+	// survivors returned). Optional; nil disables.
+	ShortCommitCounter Counter
 	// MatchTTL is the retention window for committed matchmaker_matches
 	// rows (the poll-recovery record). Defaults to 24h.
 	MatchTTL time.Duration
@@ -414,6 +418,11 @@ func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, gro
 	}
 	committed, err := w.queue.CommitTickets(ctx, claim, ticketIDs(group), match.ID, match.Address, match.Protocol)
 	switch {
+	case errors.Is(err, ErrShortCommit):
+		// A member drifted after the claim. The commit rolled back; return
+		// the survivors so they rematch without the canceller. The orphan
+		// match row is harmless and GC'd by retention.
+		return w.returnAfterShortCommit(ctx, claim, group)
 	case err != nil:
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("commit tickets: %w", err))
 	case committed == 0:
@@ -425,6 +434,19 @@ func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, gro
 		w.cfg.MatchCounter.Inc()
 	}
 	w.notifyAndClaim(ctx, tenantCtx, group, match)
+	return nil
+}
+
+// returnAfterShortCommit meters a short commit and un-claims the group's
+// survivors penalty-free so they rematch on the next pass. Terminal members
+// among the ids are already un-queued and untouched.
+func (w *Worker) returnAfterShortCommit(ctx context.Context, claim *Claim, group []*Ticket) error {
+	if w.cfg.ShortCommitCounter != nil {
+		w.cfg.ShortCommitCounter.Inc()
+	}
+	if err := w.queue.ReturnTickets(ctx, claim, ticketIDs(group)); err != nil {
+		return fmt.Errorf("return survivors after short commit: %w", err)
+	}
 	return nil
 }
 
@@ -500,6 +522,11 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 
 	committed, err := w.queue.CommitTickets(ctx, claim, ticketIDs(group), match.ID, alloc.Address, alloc.Protocol)
 	switch {
+	case errors.Is(err, ErrShortCommit):
+		// A member drifted after the claim. Reclaim the orphan server and
+		// return the survivors penalty-free so they rematch next pass.
+		w.deallocateOrphan(tenantCtx, alloc, "short commit")
+		return w.returnAfterShortCommit(ctx, claim, group)
 	case err != nil:
 		w.deallocateOrphan(tenantCtx, alloc, "commit error")
 		// Release through the attempt counter instead of letting the group
@@ -534,9 +561,10 @@ func (w *Worker) newMatch(b Bucket, tickets []*Ticket) (*Match, error) {
 			Region:            t.Region,
 			StringProperties:  t.StringProperties,
 			NumericProperties: t.NumericProperties,
+			Attributes:        t.Attributes,
 		})
 	}
-	return &Match{
+	match := &Match{
 		ID:        id,
 		TenantID:  b.TenantID,
 		ProjectID: b.ProjectID,
@@ -544,7 +572,14 @@ func (w *Worker) newMatch(b Bucket, tickets []*Ticket) (*Match, error) {
 		FleetID:   b.FleetID,
 		Roster:    roster,
 		ExpiresAt: time.Now().UTC().Add(w.cfg.MatchTTL),
-	}, nil
+	}
+	// P2P modes designate a host: the group is oldest-first, so the
+	// longest-waiting player (tickets[0]) hosts. Fleet results have a
+	// dedicated server, not a host player.
+	if b.Mode != ModeFleetAllocation && len(tickets) > 0 {
+		match.HostPlayerID = tickets[0].PlayerID
+	}
+	return match, nil
 }
 
 // deallocateOrphan releases an allocation we made but couldn't bind to any
@@ -565,7 +600,8 @@ func (w *Worker) deallocateOrphan(ctx context.Context, alloc *fleet.Allocation, 
 const matchedEventType = "matchmaker_matched"
 
 // matchedPayload is the matchmaker_matched envelope body. Address/protocol
-// are set for fleet_allocation, session/join code for game_session.
+// are set for fleet_allocation, session/join code for game_session,
+// host_player_id for the P2P modes.
 type matchedPayload struct {
 	TicketID     int64         `json:"ticket_id"`
 	MatchID      string        `json:"match_id"`
@@ -574,6 +610,7 @@ type matchedPayload struct {
 	ProtocolHint string        `json:"protocol_hint,omitempty"`
 	SessionID    string        `json:"session_id,omitempty"`
 	JoinCode     string        `json:"join_code,omitempty"`
+	HostPlayerID int64         `json:"host_player_id,omitempty"`
 	Users        []RosterEntry `json:"users"`
 }
 
@@ -605,6 +642,7 @@ func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, match *Ma
 			ProtocolHint: match.Protocol,
 			SessionID:    match.SessionID,
 			JoinCode:     match.JoinCode,
+			HostPlayerID: match.HostPlayerID,
 			Users:        match.Roster,
 		})
 		err := w.hub.Send(ctx, t.TenantID, t.PlayerID, realtime.Message{

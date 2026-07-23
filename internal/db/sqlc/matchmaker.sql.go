@@ -170,7 +170,8 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
   AND expires_at > now()
 RETURNING id, tenant_id, project_id, mode, fleet_id, address, protocol,
-          session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
+          session_id, join_code, roster, created_at, expires_at, allocation_id,
+          claimed_at, host_player_id
 `
 
 // Poll/realtime delivery claims only live matches. The expiry guard prevents a
@@ -193,6 +194,7 @@ func (q *Queries) ClaimMatchmakerMatch(ctx context.Context, id string) (Matchmak
 		&i.ExpiresAt,
 		&i.AllocationID,
 		&i.ClaimedAt,
+		&i.HostPlayerID,
 	)
 	return i, err
 }
@@ -274,30 +276,6 @@ func (q *Queries) CountMatchmakerMatchesByMode(ctx context.Context, projectID in
 	return items, nil
 }
 
-const countQueuedTicketsForPlayer = `-- name: CountQueuedTicketsForPlayer :one
-SELECT count(*)
-FROM matchmaking_tickets
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND project_id = $1
-  AND player_id = $2
-  AND status = 'queued'
-  AND (expires_at IS NULL OR expires_at > now())
-`
-
-type CountQueuedTicketsForPlayerParams struct {
-	ProjectID int64
-	PlayerID  int64
-}
-
-// Concurrent-ticket cap: how many live queued tickets the player already has
-// in the project. Expired-but-unswept tickets don't count against the cap.
-func (q *Queries) CountQueuedTicketsForPlayer(ctx context.Context, arg CountQueuedTicketsForPlayerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countQueuedTicketsForPlayer, arg.ProjectID, arg.PlayerID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
 DELETE FROM matchmaker_matches
 WHERE expires_at < now()
@@ -354,15 +332,17 @@ func (q *Queries) DeleteTerminalMatchmakerTickets(ctx context.Context, retention
 
 const expireMatchmakerTickets = `-- name: ExpireMatchmakerTickets :execrows
 UPDATE matchmaking_tickets
-SET status = 'failed'
+SET status = 'failed',
+    failure_reason = 'expired'
 WHERE status = 'queued'
   AND claim_id IS NULL
   AND expires_at IS NOT NULL
   AND expires_at < now()
 `
 
-// TTL enforcement: unclaimed queued tickets past expires_at flip to
-// 'failed'. Claimed tickets are left alone — the claim path settles them.
+// TTL enforcement: unclaimed queued tickets past expires_at flip to 'failed'
+// with the structured reason 'expired'. Claimed tickets are left alone — the
+// claim path settles them.
 func (q *Queries) ExpireMatchmakerTickets(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, expireMatchmakerTickets)
 	if err != nil {
@@ -371,9 +351,42 @@ func (q *Queries) ExpireMatchmakerTickets(ctx context.Context) (int64, error) {
 	return result.RowsAffected(), nil
 }
 
+const expirePlayerQueuedTicket = `-- name: ExpirePlayerQueuedTicket :execrows
+UPDATE matchmaking_tickets
+SET status = 'failed',
+    failure_reason = 'expired'
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND player_id = $2
+  AND status = 'queued'
+  AND claim_id IS NULL
+  AND expires_at IS NOT NULL
+  AND expires_at < now()
+`
+
+type ExpirePlayerQueuedTicketParams struct {
+	ProjectID int64
+	PlayerID  int64
+}
+
+// TTL-expire this player's stale queued ticket ahead of a re-enqueue. An
+// expired-but-unswept ticket still occupies the one-active unique index (the
+// index predicate can't be time-aware), so without this the player is locked
+// out of re-queuing until the periodic sweeper runs. Mirrors
+// ExpireMatchmakerTickets but scoped to the one player; claimed tickets are
+// left for the claim path to settle.
+func (q *Queries) ExpirePlayerQueuedTicket(ctx context.Context, arg ExpirePlayerQueuedTicketParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expirePlayerQueuedTicket, arg.ProjectID, arg.PlayerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getMatchmakerMatch = `-- name: GetMatchmakerMatch :one
 SELECT id, tenant_id, project_id, mode, fleet_id, address, protocol,
-       session_id, join_code, roster, created_at, expires_at, allocation_id, claimed_at
+       session_id, join_code, roster, created_at, expires_at, allocation_id,
+       claimed_at, host_player_id
 FROM matchmaker_matches
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -397,6 +410,7 @@ func (q *Queries) GetMatchmakerMatch(ctx context.Context, id string) (Matchmaker
 		&i.ExpiresAt,
 		&i.AllocationID,
 		&i.ClaimedAt,
+		&i.HostPlayerID,
 	)
 	return i, err
 }
@@ -406,7 +420,7 @@ SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        mode, match_id, min_count, max_count, count_multiple,
        allow_cross_region, query, string_properties, numeric_properties,
-       created_at, matched_at, expires_at
+       created_at, matched_at, expires_at, failure_reason
 FROM matchmaking_tickets
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -442,6 +456,7 @@ type GetMatchmakingTicketRow struct {
 	CreatedAt         pgtype.Timestamptz
 	MatchedAt         pgtype.Timestamptz
 	ExpiresAt         pgtype.Timestamptz
+	FailureReason     *string
 }
 
 func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error) {
@@ -471,14 +486,42 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 		&i.CreatedAt,
 		&i.MatchedAt,
 		&i.ExpiresAt,
+		&i.FailureReason,
 	)
 	return i, err
+}
+
+const getQueuedTicketForPlayer = `-- name: GetQueuedTicketForPlayer :one
+SELECT id
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND player_id = $2
+  AND status = 'queued'
+ORDER BY id
+LIMIT 1
+`
+
+type GetQueuedTicketForPlayerParams struct {
+	ProjectID int64
+	PlayerID  int64
+}
+
+// The player's current queued ticket in the project, if any. Used to surface
+// the active ticket id in the 409 when a second create hits the one-active
+// unique index.
+func (q *Queries) GetQueuedTicketForPlayer(ctx context.Context, arg GetQueuedTicketForPlayerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getQueuedTicketForPlayer, arg.ProjectID, arg.PlayerID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertMatchmakerMatch = `-- name: InsertMatchmakerMatch :exec
 INSERT INTO matchmaker_matches (
     id, tenant_id, project_id, mode, fleet_id, address, protocol,
-    session_id, join_code, allocation_id, claimed_at, roster, expires_at
+    session_id, join_code, allocation_id, claimed_at, roster, expires_at,
+    host_player_id
 )
 VALUES (
     $1,
@@ -486,7 +529,7 @@ VALUES (
     $2, $3, $4,
     $5, $6, $7,
     $8, $9, $10,
-    $11, $12
+    $11, $12, $13
 )
 `
 
@@ -503,6 +546,7 @@ type InsertMatchmakerMatchParams struct {
 	ClaimedAt    pgtype.Timestamptz
 	Roster       []byte
 	ExpiresAt    pgtype.Timestamptz
+	HostPlayerID *int64
 }
 
 func (q *Queries) InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmakerMatchParams) error {
@@ -519,6 +563,7 @@ func (q *Queries) InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmake
 		arg.ClaimedAt,
 		arg.Roster,
 		arg.ExpiresAt,
+		arg.HostPlayerID,
 	)
 	return err
 }
@@ -744,6 +789,11 @@ SET claim_id            = NULL,
         WHEN allocation_attempts + 1 >= $1::int
             THEN 'failed'::ticket_status
         ELSE status
+    END,
+    failure_reason = CASE
+        WHEN allocation_attempts + 1 >= $1::int
+            THEN 'attempts_exhausted'
+        ELSE failure_reason
     END
 WHERE claim_id = $2::uuid
   AND id = ANY ($3::bigint[])
@@ -758,7 +808,7 @@ type ReleaseMatchmakerTicketsParams struct {
 
 // Worker-driven release of one failed group: the resolver (allocator,
 // session creator) failed. Bump allocation_attempts; flip to 'failed' on
-// the Nth attempt.
+// the Nth attempt, stamping the structured reason.
 func (q *Queries) ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, releaseMatchmakerTickets, arg.MaxAttempts, arg.ClaimID, arg.TicketIds)
 	if err != nil {
@@ -786,6 +836,32 @@ func (q *Queries) ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID
 	return result.RowsAffected(), nil
 }
 
+const returnMatchmakerTicketsByID = `-- name: ReturnMatchmakerTicketsByID :execrows
+UPDATE matchmaking_tickets
+SET claim_id         = NULL,
+    claimed_at       = NULL,
+    claim_expires_at = NULL
+WHERE claim_id = $1::uuid
+  AND id = ANY ($2::bigint[])
+  AND status = 'queued'
+`
+
+type ReturnMatchmakerTicketsByIDParams struct {
+	ClaimID   pgtype.UUID
+	TicketIds []int64
+}
+
+// Penalty-free un-claim of specific still-queued tickets holding this claim:
+// the survivors of a short commit go back to waiting without an attempt bump.
+// Drifted tickets (cancelled/failed) are no longer 'queued' and are skipped.
+func (q *Queries) ReturnMatchmakerTicketsByID(ctx context.Context, arg ReturnMatchmakerTicketsByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, returnMatchmakerTicketsByID, arg.ClaimID, arg.TicketIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const sweepStaleMatchmakerClaims = `-- name: SweepStaleMatchmakerClaims :execrows
 UPDATE matchmaking_tickets
 SET claim_id            = NULL,
@@ -796,6 +872,11 @@ SET claim_id            = NULL,
         WHEN allocation_attempts + 1 >= $1::int
             THEN 'failed'::ticket_status
         ELSE status
+    END,
+    failure_reason = CASE
+        WHEN allocation_attempts + 1 >= $1::int
+            THEN 'attempts_exhausted'
+        ELSE failure_reason
     END
 WHERE claim_id IS NOT NULL
   AND status = 'queued'
