@@ -203,16 +203,42 @@ func TestHomePage_RendersPlatformMenuWhenAuthorized(t *testing.T) {
 	}))
 
 	assert.Contains(t, html, "<summary>Menu</summary>")
+	assert.Contains(t, html, `<li class="nav-section">Admin</li>`)
 	assert.Contains(t, html, `href="/v1/control-panel/admin/users"`)
 	assert.Contains(t, html, `href="/v1/control-panel/admin/player-accounts"`)
-	assert.Contains(t, html, `aria-current="page">Tenants</a>`)
+	assert.Contains(t, html, `aria-current="page">All tenants</a>`)
 }
 
-func TestHomePage_HidesPlatformMenuWhenNotAuthorized(t *testing.T) {
+func TestHomePage_HidesAdminItemsWhenNotAuthorized(t *testing.T) {
 	html := renderToString(t, HomePage(HomeView{UserEmail: "user@example.com"}))
 
-	assert.NotContains(t, html, "<summary>Menu</summary>")
+	// The Menu itself is always present now; only the Admin section is gated.
+	assert.Contains(t, html, "<summary>Menu</summary>")
+	assert.NotContains(t, html, `<li class="nav-section">Admin</li>`)
 	assert.NotContains(t, html, `href="/v1/control-panel/admin/users"`)
+}
+
+func TestHomePage_AutoScopesSingleTenantMember(t *testing.T) {
+	html := renderToString(t, HomePage(HomeView{
+		UserEmail: "solo@example.com",
+		Tenants:   []TenantView{{ID: 5, Name: "Acme"}},
+	}))
+
+	// A non-platform admin with exactly one tenant is auto-scoped: the Menu
+	// surfaces that tenant's pages on the landing page. /rate-limits is nav-only
+	// (the tenant-list row menu never links to it), so it proves the nav section.
+	assert.Contains(t, html, `href="/v1/control-panel/tenants/5/rate-limits"`)
+}
+
+func TestHomePage_DoesNotAutoScopeMultipleTenants(t *testing.T) {
+	html := renderToString(t, HomePage(HomeView{
+		UserEmail: "multi@example.com",
+		Tenants:   []TenantView{{ID: 5, Name: "Acme"}, {ID: 6, Name: "Beta"}},
+	}))
+
+	// Ambiguous membership: no tenant is pre-selected, so the Menu carries no
+	// tenant section until the user picks one (/rate-limits is nav-only).
+	assert.NotContains(t, html, `href="/v1/control-panel/tenants/5/rate-limits"`)
 }
 
 func TestProjectsPage_RendersTenantNavigationAndNoSecondaryHeaderButtons(t *testing.T) {
@@ -222,7 +248,7 @@ func TestProjectsPage_RendersTenantNavigationAndNoSecondaryHeaderButtons(t *test
 		CSRFToken: "tok",
 	}))
 
-	assert.Contains(t, html, "<summary>Tenant</summary>")
+	assert.Contains(t, html, "<summary>Menu</summary>")
 	assert.Contains(t, html, `href="/v1/control-panel/tenants/42/api-keys"`)
 	assert.Contains(t, html, `aria-current="page">Projects</a>`)
 	assert.NotContains(t, html, `role="button" class="secondary outline btn-inline">Settings</a>`)
@@ -238,7 +264,7 @@ func TestPlayersPage_RendersProjectNavigationAndCompactTableAction(t *testing.T)
 		Players:   []PlayerView{{ID: 9, Email: "p@example.com"}},
 	}))
 
-	assert.Contains(t, html, "<summary>Project</summary>")
+	assert.Contains(t, html, `href="/v1/control-panel/tenants/42/projects/7/leaderboards"`)
 	assert.Contains(t, html, `aria-current="page">Players</a>`)
 	assert.Contains(t, html, `class="filter-form"`)
 	assert.Contains(t, html, `role="button" class="secondary outline btn-inline">View</a>`)

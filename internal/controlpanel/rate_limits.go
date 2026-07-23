@@ -13,6 +13,7 @@ import (
 	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
@@ -72,9 +73,11 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		if err != nil {
 			return err
 		}
-		defaults := ratelimit.LimitsForTier(tenant.ClampTier(int(tier)))
+		clamped := tenant.ClampTier(int(tier))
+		defaults := ratelimit.LimitsForTier(clamped)
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst
+		view.StorageTotalBytes = quota.LimitsForClass(clamped).StorageBytes
 
 		rows, err := q.ListAllRateLimitOverridesForTenant(ctx, tenantID)
 		if err != nil {
@@ -317,13 +320,28 @@ func rlValue(f float64) string {
 	return rlNum(f)
 }
 
-// storageBytesValue formats a storage-limit form field: blank when unset (0) so
-// the placeholder shows the platform default, otherwise the override in bytes.
-func storageBytesValue(n int64) string {
+const (
+	bytesPerMiB = int64(1) << 20
+	bytesPerGiB = int64(1) << 30
+)
+
+// storageMB renders a byte count as megabytes (MiB) without trailing zeros.
+func storageMB(n int64) string {
+	return strconv.FormatFloat(float64(n)/float64(bytesPerMiB), 'f', -1, 64)
+}
+
+// storageGB renders a byte count as gigabytes (GiB) without trailing zeros.
+func storageGB(n int64) string {
+	return strconv.FormatFloat(float64(n)/float64(bytesPerGiB), 'f', -1, 64)
+}
+
+// storageMBValue formats a storage-limit form field in MB: blank when unset (0)
+// so the placeholder shows the platform default, otherwise the override.
+func storageMBValue(n int64) string {
 	if n <= 0 {
 		return ""
 	}
-	return strconv.FormatInt(n, 10)
+	return storageMB(n)
 }
 
 func parseLimitField(s string) (float64, error) {

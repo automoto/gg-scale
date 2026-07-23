@@ -1,0 +1,3 @@
+-- Intentionally a no-op: this migration only heals a missing singleton row.
+-- Deleting it on rollback would reintroduce the 500 that motivated the fix, and
+-- the row is owned by 0004's schema, not this migration.

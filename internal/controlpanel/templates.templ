@@ -23,40 +23,33 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 		<body>
 			<header class="app-header">
 				<nav class="app-nav" aria-label="Control panel navigation">
-					<a class="brand" href="/v1/control-panel">ggscale</a>
+					<a class="brand" href="/v1/control-panel"><img src={ webassets.URL("logo.svg") } alt="ggscale" class="brand-logo"/></a>
 					<div class="nav-links">
-						@navLink("/v1/control-panel", "Tenants", nav.IsActive(navTenants))
-						if nav.TenantID > 0 {
-							<details class="dropdown nav-menu">
-								<summary>Tenant</summary>
-								<ul>
+						<details class="dropdown nav-menu">
+							<summary>Menu</summary>
+							<ul>
+								<li>@navLink("/v1/control-panel", "All tenants", nav.IsActive(navTenants))</li>
+								if nav.TenantID > 0 {
+									<li class="nav-divider"></li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Projects", nav.IsActive(navProjects))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/api-keys", "API keys", nav.IsActive(navAPIKeys))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/team", "Team", nav.IsActive(navTeam))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/settings", "Settings", nav.IsActive(navTenantSettings))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/rate-limits", "Limits", nav.IsActive(navRateLimits))</li>
-								</ul>
-							</details>
-						}
-						if nav.TenantID > 0 && nav.ProjectID > 0 {
-							<details class="dropdown nav-menu">
-								<summary>Project</summary>
-								<ul>
+								}
+								if nav.TenantID > 0 && nav.ProjectID > 0 {
+									<li class="nav-divider"></li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/players", "Players", nav.IsActive(navPlayers))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/leaderboards", "Leaderboards", nav.IsActive(navLeaderboards))</li>
-									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Settings", nav.IsActive(navProjectSettings))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Project settings", nav.IsActive(navProjectSettings))</li>
 									if nav.FleetEnabled {
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/fleets", "Fleets", nav.IsActive(navFleets))</li>
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/allocations", "Allocations", nav.IsActive(navAllocations))</li>
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/matchmaker", "Matchmaker", nav.IsActive(navMatchmaker))</li>
 									}
-								</ul>
-							</details>
-						}
-						if nav.IsPlatformAdmin {
-							<details class="dropdown nav-menu">
-								<summary>Menu</summary>
-								<ul>
+								}
+								if nav.IsPlatformAdmin {
+									<li class="nav-section">Admin</li>
 									<li>@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))</li>
 									<li>@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))</li>
 									<li>@navLink("/v1/control-panel/admin/change-requests", "Change requests", nav.IsActive(navChangeRequests))</li>
@@ -66,10 +59,9 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 									if nav.PluginsEnabled {
 										<li>@navLink("/v1/control-panel/admin/plugins", "Plugins", nav.IsActive(navPlugins))</li>
 									}
-								</ul>
-							</details>
-						}
-						@navLink("/v1/control-panel/help", "Help", nav.IsActive(navHelp))
+								}
+							</ul>
+						</details>
 					</div>
 					<details class="dropdown nav-menu account-menu dropdown-right">
 						<summary>{ userEmail }</summary>
@@ -196,10 +188,9 @@ templ SetupAdminPage(vm SetupAdminView) {
 }
 
 templ HomePage(vm HomeView) {
-	@appLayout("ggscale Control panel", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenants, IsPlatformAdmin: vm.IsPlatformAdmin}) {
+	@appLayout("ggscale Control panel", vm.UserEmail, vm.CSRFToken, vm.nav()) {
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Tenants</p>
 				<h1>Tenants</h1>
 				<p class="subtitle">Tenants you have access to.</p>
 			</div>
@@ -249,7 +240,6 @@ templ NewTenantPage(vm NewTenantView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / New</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">New tenant</p>
 				<h1>New tenant</h1>
 				<p class="subtitle">Sets up a tenant with a starter project and its first API key.</p>
 			</div>
@@ -290,7 +280,6 @@ templ ProjectsPage(vm ProjectsView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Projects</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Projects</p>
 				<h1>Projects</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
@@ -348,7 +337,6 @@ templ NewProjectPage(vm NewProjectView) {
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">New project</p>
 				<h1>New project</h1>
 				<p class="subtitle">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p>
 			</div>
@@ -426,7 +414,6 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">New API key</p>
 				<h1>New API key</h1>
 				<p class="subtitle">Generates a new key. The plaintext value is shown once after creation.</p>
 			</div>
@@ -474,7 +461,6 @@ templ APIKeysPage(vm APIKeysView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / API keys</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">API keys</p>
 				<h1>API keys</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
@@ -683,7 +669,6 @@ templ RateLimitsPage(vm RateLimitsView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Rate limits</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Rate limits</p>
 				<h1>Rate limits</h1>
 				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
@@ -733,29 +718,30 @@ templ RateLimitsPage(vm RateLimitsView) {
 		<section class="card">
 			<h2>Storage limits</h2>
 			<p class="card-subtitle">
-				Maximum size (bytes) of a single stored value. Blank = default. Platform default:
-				{ stringFromInt(vm.StoragePlatformDefault) } bytes.
+				Maximum size (MB) of a single stored value. Blank = default. Platform default:
+				{ storageMB(vm.StoragePlatformDefault) } MB.
 			</p>
+			<p class="card-subtitle">Total tenant storage: { storageGB(vm.StorageTotalBytes) } GB.</p>
 			if vm.IsPlatformAdmin {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/storage") } class="rate-limit-row">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<strong>Tenant default</strong>
-					<label>Max value bytes
-						<input name="max_value_bytes" type="number" step="1" min="0" value={ storageBytesValue(vm.StorageTenantOverride) } placeholder={ stringFromInt(vm.StoragePlatformDefault) }/>
+					<label>Max value size (MB)
+						<input name="max_value_mb" type="number" step="any" min="0" value={ storageMBValue(vm.StorageTenantOverride) } placeholder={ storageMB(vm.StoragePlatformDefault) }/>
 					</label>
 					<button type="submit" class="btn-inline">Save</button>
 				</form>
 			} else if vm.StorageTenantOverride > 0 {
-				<p class="card-subtitle">Tenant limit: { stringFromInt(vm.StorageTenantOverride) } bytes (set by a platform admin).</p>
+				<p class="card-subtitle">Per-value limit: { storageMB(vm.StorageTenantOverride) } MB (set by a platform admin).</p>
 			} else {
-				<p class="card-subtitle">Tenant limit: { stringFromInt(vm.StoragePlatformDefault) } bytes (platform default).</p>
+				<p class="card-subtitle">Per-value limit: { storageMB(vm.StoragePlatformDefault) } MB (platform default).</p>
 			}
 			for _, p := range vm.Projects {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(p.ProjectID) + "/storage") } class="rate-limit-row">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<strong>{ p.ProjectName }</strong>
-					<label>Max value bytes
-						<input name="max_value_bytes" type="number" step="1" min="0" value={ storageBytesValue(p.StorageOverrideBytes) } placeholder={ stringFromInt(vm.StoragePlatformDefault) }/>
+					<label>Max value size (MB)
+						<input name="max_value_mb" type="number" step="any" min="0" value={ storageMBValue(p.StorageOverrideBytes) } placeholder={ storageMB(vm.StoragePlatformDefault) }/>
 					</label>
 					<button type="submit" class="btn-inline">Save</button>
 				</form>
@@ -828,7 +814,6 @@ templ AccountPage(vm AccountView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Control panel</a> / Account</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Account</p>
 				<h1>Account</h1>
 				<p class="subtitle">Signed in as { vm.UserEmail }</p>
 			</div>
@@ -1094,7 +1079,6 @@ templ PlatformTeamPage(vm PlatformTeamView) {
 		<div class="breadcrumb">Platform admins</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Platform admins</p>
 				<h1>Platform admins</h1>
 				<p class="subtitle">Users with full administrative access to every tenant.</p>
 			</div>
@@ -1188,7 +1172,6 @@ templ PlayersPage(vm PlayersView) {
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Players</p>
 				<h1>Players</h1>
 				<p class="subtitle">Game players in project #{ stringFromInt(vm.ProjectID) }.</p>
 			</div>
@@ -1623,7 +1606,6 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Manual allocate</p>
 				<h1>Manual allocate</h1>
 				<p class="subtitle">
 					Bypasses the matchmaker queue and asks
@@ -1863,7 +1845,6 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Control panel users</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Control panel users</p>
 				<h1>Control panel users</h1>
 				<p class="subtitle">Every control panel user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
 			</div>
@@ -1948,7 +1929,6 @@ templ PlayerAccountsPage(vm PlayerAccountsView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Player accounts</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Player accounts</p>
 				<h1>Player accounts</h1>
 				<p class="subtitle">Global gg-scale accounts across every project. Disabling locks the account out of the platform and revokes its sessions.</p>
 			</div>
@@ -2329,7 +2309,6 @@ templ LeaderboardsListPage(vm LeaderboardsListView) {
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Leaderboards</p>
 				<h1>Leaderboards</h1>
 				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
 			</div>
@@ -2469,7 +2448,6 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
-		@apiLimitCard(vm.apiLimitCardView())
 		<section class="card">
 			<h2>Tenant</h2>
 			<dl class="kv">
@@ -2512,50 +2490,52 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 		}
 		<section class="card">
 			<h2>Plan &amp; feature requests</h2>
-			<p class="card-subtitle">Request a tier upgrade or a feature grant. A platform admin reviews each request; approvals apply automatically.</p>
 			if vm.BillingUpgradeURL != "" && vm.BillingUpgradeToken != "" {
+				<p class="card-subtitle">Manage your plan and subscription through billing.</p>
 				<p><a href={ templ.URL(vm.BillingUpgradeURL + "?t=" + vm.BillingUpgradeToken) } target="_blank" rel="noopener">Upgrade →</a></p>
-			}
-			if vm.BillingPortalURL != "" {
-				<p><a href={ templ.URL(vm.BillingPortalURL) } target="_blank" rel="noopener">Manage billing →</a></p>
-			}
-			if vm.CanRequestUpgrade {
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<input type="hidden" name="kind" value="tier_upgrade"/>
-					<label>
-						Upgrade to
-						<select name="requested_tier" required>
-							for _, opt := range vm.UpgradeTargets {
-								<option value={ opt.Value }>{ opt.Label }</option>
-							}
-						</select>
-					</label>
-					<label>
-						Note <span class="muted">(optional)</span>
-						<input name="note"/>
-					</label>
-					<button type="submit" class="btn-inline">Request tier upgrade</button>
-				</form>
-			}
-			if len(vm.FeatureOptions) > 0 {
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
-					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<input type="hidden" name="kind" value="feature"/>
-					<label>
-						Feature
-						<select name="feature" required>
-							for _, opt := range vm.FeatureOptions {
-								<option value={ opt.Value }>{ opt.Label }</option>
-							}
-						</select>
-					</label>
-					<label>
-						Note <span class="muted">(optional)</span>
-						<input name="note"/>
-					</label>
-					<button type="submit" class="btn-inline">Request feature</button>
-				</form>
+				if vm.TierClass > 0 && vm.BillingPortalURL != "" {
+					<p><a href={ templ.URL(vm.BillingPortalURL) } target="_blank" rel="noopener">Manage subscription →</a></p>
+				}
+			} else {
+				<p class="card-subtitle">Request a tier upgrade or a feature grant. A platform admin reviews each request; approvals apply automatically.</p>
+				if vm.CanRequestUpgrade {
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<input type="hidden" name="kind" value="tier_upgrade"/>
+						<label>
+							Upgrade to
+							<select name="requested_tier" required>
+								for _, opt := range vm.UpgradeTargets {
+									<option value={ opt.Value }>{ opt.Label }</option>
+								}
+							</select>
+						</label>
+						<label>
+							Note <span class="muted">(optional)</span>
+							<input name="note"/>
+						</label>
+						<button type="submit" class="btn-inline">Request tier upgrade</button>
+					</form>
+				}
+				if len(vm.FeatureOptions) > 0 {
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<input type="hidden" name="kind" value="feature"/>
+						<label>
+							Feature
+							<select name="feature" required>
+								for _, opt := range vm.FeatureOptions {
+									<option value={ opt.Value }>{ opt.Label }</option>
+								}
+							</select>
+						</label>
+						<label>
+							Note <span class="muted">(optional)</span>
+							<input name="note"/>
+						</label>
+						<button type="submit" class="btn-inline">Request feature</button>
+					</form>
+				}
 			}
 			if len(vm.ChangeRequests) > 0 {
 				<h3>Your requests</h3>
@@ -2634,7 +2614,6 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Server settings</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Server settings</p>
 				<h1>Server settings</h1>
 				<p class="subtitle">Read-only view of server-wide configuration. Set via environment variables; secrets show only whether they are configured.</p>
 			</div>

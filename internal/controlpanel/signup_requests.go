@@ -141,6 +141,16 @@ func (h *Handler) publicSignupEnabled(ctx context.Context) bool {
 	return enabled
 }
 
+// signupEnabledOrClosed collapses a missing platform_signup_config singleton
+// (pgx.ErrNoRows) into the closed/default state, so an unseeded config row can
+// never 500 the admin page. Real query errors still propagate.
+func signupEnabledOrClosed(enabled bool, err error) (bool, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return enabled, err
+}
+
 func (h *Handler) tenantNameTaken(ctx context.Context, name string, excludeRequestID int64) (bool, error) {
 	var taken bool
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
@@ -280,7 +290,7 @@ func (h *Handler) tenantSignupRequestsPage(w http.ResponseWriter, r *http.Reques
 	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		var e error
-		if enabled, e = q.GetPublicSignupEnabled(r.Context()); e != nil {
+		if enabled, e = signupEnabledOrClosed(q.GetPublicSignupEnabled(r.Context())); e != nil {
 			return e
 		}
 		rows, e = q.ListPendingTenantSignupRequests(r.Context())

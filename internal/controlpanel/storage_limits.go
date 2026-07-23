@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,9 +15,9 @@ import (
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-// errInvalidStorageBytes is returned when a storage-limit form field is not a
-// non-negative integer byte count.
-var errInvalidStorageBytes = errors.New("control panel: storage limit must be a non-negative integer (bytes)")
+// errInvalidStorageMB is returned when a storage-limit form field is not a
+// non-negative number of megabytes.
+var errInvalidStorageMB = errors.New("control panel: storage limit must be a non-negative number (MB)")
 
 // storagePlatformDefault is the platform storage cap from config, or the
 // compiled fallback when unset.
@@ -54,9 +55,9 @@ func (h *Handler) updateTenantStorageLimitHandler(w http.ResponseWriter, r *http
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	bytes, err := parseStorageBytes(r.Form.Get("max_value_bytes"))
+	bytes, err := parseStorageMB(r.Form.Get("max_value_mb"))
 	if err != nil {
-		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative integer (bytes).")
+		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative number (MB).")
 		return
 	}
 	if err := h.setStorageLimit(r.Context(), session.User.ID, tenantID, nil, bytes); err != nil {
@@ -81,9 +82,9 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	bytes, err := parseStorageBytes(r.Form.Get("max_value_bytes"))
+	bytes, err := parseStorageMB(r.Form.Get("max_value_mb"))
 	if err != nil {
-		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative integer (bytes).")
+		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative number (MB).")
 		return
 	}
 	if err := h.requireProjectInTenant(r.Context(), tenantID, projectID); err != nil {
@@ -129,15 +130,16 @@ func (h *Handler) setStorageLimit(ctx context.Context, actorID, tenantID int64, 
 	})
 }
 
-// parseStorageBytes parses a byte count; blank or "0" clears the override.
-func parseStorageBytes(s string) (int64, error) {
+// parseStorageMB parses a megabyte (MiB) value and returns the equivalent byte
+// count; blank or "0" clears the override.
+func parseStorageMB(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, nil
 	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n < 0 {
-		return 0, errInvalidStorageBytes
+	mb, err := strconv.ParseFloat(s, 64)
+	if err != nil || mb < 0 || math.IsNaN(mb) || math.IsInf(mb, 0) {
+		return 0, errInvalidStorageMB
 	}
-	return n, nil
+	return int64(math.Round(mb * float64(bytesPerMiB))), nil
 }

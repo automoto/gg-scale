@@ -12,7 +12,7 @@ import (
 
 func TestTenantSettingsPage_renders_billing_links_when_configured(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
-		TenantID: 3, TenantName: "acme", Tier: "tier_0",
+		TenantID: 3, TenantName: "acme", Tier: "tier_2", TierClass: 2,
 		BillingPortalURL:    "https://billing.example.com/portal",
 		BillingUpgradeURL:   "https://billing.example.com/start",
 		BillingUpgradeToken: "signed-token",
@@ -20,7 +20,7 @@ func TestTenantSettingsPage_renders_billing_links_when_configured(t *testing.T) 
 
 	assert.Contains(t, html, "https://billing.example.com/portal")
 	assert.Contains(t, html, "https://billing.example.com/start?t=signed-token")
-	assert.Contains(t, html, "Manage billing")
+	assert.Contains(t, html, "Manage subscription")
 	assert.Contains(t, html, "Upgrade")
 }
 
@@ -29,8 +29,39 @@ func TestTenantSettingsPage_omits_billing_links_by_default(t *testing.T) {
 		TenantID: 3, TenantName: "acme", Tier: "tier_0",
 	}))
 
-	assert.NotContains(t, html, "Manage billing")
+	assert.NotContains(t, html, "Manage subscription")
 	assert.NotContains(t, html, "billing.example.com")
+}
+
+func TestTenantSettingsPage_hides_manage_subscription_on_free_tier(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID: 3, TenantName: "acme", Tier: "tier_0", TierClass: 0,
+		BillingPortalURL:    "https://billing.example.com/portal",
+		BillingUpgradeURL:   "https://billing.example.com/start",
+		BillingUpgradeToken: "signed-token",
+	}))
+
+	// Upgrade is offered, but there is no subscription to manage until the
+	// tenant is on a paid tier.
+	assert.Contains(t, html, "Upgrade")
+	assert.NotContains(t, html, "Manage subscription")
+}
+
+func TestTenantSettingsPage_hosted_billing_hides_inapp_request_forms(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID: 3, TenantName: "acme", Tier: "tier_1", TierClass: 1,
+		BillingUpgradeURL:   "https://billing.example.com/start",
+		BillingUpgradeToken: "signed-token",
+		CanRequestUpgrade:   true,
+		UpgradeTargets:      []FeatureOptionView{{Value: "2", Label: "tier_2"}},
+		FeatureOptions:      []FeatureOptionView{{Value: "p2p_relay", Label: "P2P relay"}},
+	}))
+
+	// With billing wired up, upgrades and features route through Stripe, so the
+	// in-app change-request forms are suppressed.
+	assert.Contains(t, html, "Upgrade →")
+	assert.NotContains(t, html, "Request tier upgrade")
+	assert.NotContains(t, html, "Request feature")
 }
 
 func TestBillingLinks_mints_a_verifiable_handoff_token(t *testing.T) {

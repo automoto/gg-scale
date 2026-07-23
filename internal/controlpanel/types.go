@@ -170,6 +170,17 @@ type HomeView struct {
 	IsPlatformAdmin bool
 }
 
+// nav builds the landing-page navigation. A non-platform admin who belongs to
+// exactly one tenant is auto-scoped to it so the Menu exposes that tenant's
+// pages without a hop through the tenant list first.
+func (v HomeView) nav() AppNav {
+	n := AppNav{Active: navTenants, IsPlatformAdmin: v.IsPlatformAdmin}
+	if !v.IsPlatformAdmin && len(v.Tenants) == 1 {
+		n.TenantID = v.Tenants[0].ID
+	}
+	return n
+}
+
 // SignupSuccessView shows a one-time plaintext API key after creation.
 type SignupSuccessView struct {
 	TenantID  int64
@@ -310,8 +321,10 @@ type RateLimitsView struct {
 	// Storage object value-size cap in bytes. StoragePlatformDefault is the
 	// config fallback; StorageTenantOverride (0 = none) is platform-admin
 	// editable; per-project overrides live on each ProjectInviteLimitView.
+	// StorageTotalBytes is the tenant tier's total storage quota (read-only).
 	StoragePlatformDefault int64
 	StorageTenantOverride  int64
+	StorageTotalBytes      int64
 	Message                string
 	Error                  string
 }
@@ -355,22 +368,6 @@ func (v RateLimitsView) apiLimitCardView() APILimitCardView {
 	}
 }
 
-// apiLimitCardView adapts the tenant-settings view to the shared card,
-// returning the save to the settings page.
-func (v TenantSettingsView) apiLimitCardView() APILimitCardView {
-	return APILimitCardView{
-		TenantID:        v.TenantID,
-		CSRFToken:       v.CSRFToken,
-		RedirectTo:      tenantSettingsPathTpl(v.TenantID),
-		IsPlatformAdmin: v.IsPlatformAdmin,
-		Overridden:      v.APIOverridden,
-		Rate:            v.APIRate,
-		Burst:           v.APIBurst,
-		DefaultRate:     v.APIDefaultRate,
-		DefaultBurst:    v.APIDefaultBurst,
-	}
-}
-
 // HelpView is the data rendered by the in-app concepts page.
 type HelpView struct {
 	UserEmail string
@@ -387,12 +384,6 @@ type TenantSettingsView struct {
 	TierClass       int
 	IsPlatformAdmin bool
 	Message         string
-	// Tenant HTTP API limit (editable by platform admins, read-only otherwise).
-	APIOverridden   bool
-	APIRate         float64
-	APIBurst        float64
-	APIDefaultRate  float64
-	APIDefaultBurst float64
 	// Storage quota (shown only when the tenant is quota-enforced).
 	QuotasEnforced    bool
 	StorageUsedBytes  int64
@@ -1014,12 +1005,8 @@ func joinComma(s []string) string {
 	return strings.Join(s, ", ")
 }
 
-// tenantSettingsPathTpl / projectSettingsPathTpl build the redirect_to targets
-// so a reused settings POST (e.g. rate-limits) returns to the settings page.
-func tenantSettingsPathTpl(tenantID int64) string {
-	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/settings"
-}
-
+// projectSettingsPathTpl builds the redirect_to target so a reused settings
+// POST (e.g. invite limits) returns to the project settings page.
 func projectSettingsPathTpl(tenantID, projectID int64) string {
 	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/settings"

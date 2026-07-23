@@ -63,9 +63,6 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 		view.Tier = tier.String()
 		view.TierClass = int(tier)
 		view.QuotasEnforced = facts.EnforceQuotas
-		defaults := ratelimit.LimitsForTier(tier)
-		view.APIDefaultRate = defaults.RatePerSecond
-		view.APIDefaultBurst = defaults.Burst
 		if facts.EnforceQuotas {
 			used, err := q.GetTenantStorageUsageByID(ctx, tenantID)
 			if err != nil {
@@ -79,17 +76,6 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 			if limit > 0 {
 				view.StoragePercent = int(used * 100 / limit)
 				view.StorageWarn = used*100 >= limit*80
-			}
-		}
-		rows, err := q.ListAllRateLimitOverridesForTenant(ctx, tenantID)
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if row.ProjectID == nil && row.Kind == ratelimit.OverrideKindAPI {
-				view.APIOverridden = true
-				view.APIRate = row.Rate
-				view.APIBurst = row.Burst
 			}
 		}
 		return nil

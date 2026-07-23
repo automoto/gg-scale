@@ -101,6 +101,20 @@ body {
   white-space: nowrap;
 }
 .app-header .brand:hover { text-decoration: none; }
+.app-header .brand-logo { height: 36px; width: auto; display: block; }
+.nav-menu .nav-section {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.5;
+  padding: 0.5rem 0.5rem 0.2rem;
+  pointer-events: none;
+}
+.nav-menu .nav-divider {
+  height: 0;
+  margin: 0.3rem 0;
+  border-top: 1px solid var(--pico-border-color);
+}
 .app-header .user-email { font-size: 0.875rem; opacity: 0.5; }
 .app-header form { margin: 0; display: inline; }
 .app-header a {
@@ -281,7 +295,9 @@ input.btn-inline {
   flex: 1 1 16rem;
 }
 .filter-form input,
-.settings-form input {
+.settings-form input,
+.filter-form select,
+.settings-form select {
   margin-bottom: 0;
 }
 .filter-form button,
@@ -494,7 +510,7 @@ details.row-menu > summary:hover {
 .empty-state {
   text-align: center;
   padding: 2rem 1rem;
-  opacity: 0.4;
+  color: var(--pico-muted-color);
   font-size: 0.9rem;
   border: 1px dashed var(--pico-border-color);
   border-radius: var(--pico-border-radius);

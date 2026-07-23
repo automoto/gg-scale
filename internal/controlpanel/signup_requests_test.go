@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 )
@@ -20,6 +21,28 @@ func TestUniqueViolationConstraint(t *testing.T) {
 
 	_, ok = uniqueViolationConstraint(errors.New("plain error"))
 	assert.False(t, ok)
+}
+
+func TestSignupEnabledOrClosed(t *testing.T) {
+	t.Run("missing singleton row defaults to closed", func(t *testing.T) {
+		// An unseeded platform_signup_config makes GetPublicSignupEnabled return
+		// pgx.ErrNoRows; the admin page must fall back to disabled, not 500.
+		enabled, err := signupEnabledOrClosed(false, pgx.ErrNoRows)
+		assert.NoError(t, err)
+		assert.False(t, enabled)
+	})
+
+	t.Run("configured value passes through", func(t *testing.T) {
+		enabled, err := signupEnabledOrClosed(true, nil)
+		assert.NoError(t, err)
+		assert.True(t, enabled)
+	})
+
+	t.Run("real error propagates", func(t *testing.T) {
+		boom := errors.New("connection reset")
+		_, err := signupEnabledOrClosed(false, boom)
+		assert.ErrorIs(t, err, boom)
+	})
 }
 
 func TestValidTenantName(t *testing.T) {

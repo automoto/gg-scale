@@ -55,7 +55,6 @@ templ TenantSignupRequestsPage(vm TenantSignupRequestsView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Tenant sign-ups</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Tenant sign-ups</p>
 				<h1>Tenant sign-ups</h1>
 				<p class="subtitle">Developers request a tenant at <code>/v1/control-panel/request-access</code>. Nothing is granted until you approve it here; approving emails an invite and the tenant is created when they accept.</p>
 			</div>
@@ -106,7 +105,7 @@ templ TenantSignupRequestsPage(vm TenantSignupRequestsView) {
 								Tenant name (edit before approving if needed)
 								<input name="tenant_name" value={ req.TenantName } required/>
 							</label>
-							<button type="submit" class="btn-inline">Approve &amp; email invite</button>
+							<button type="submit" class="secondary btn-inline">Approve &amp; email invite</button>
 						</form>
 						<form method="post" action={ templ.URL("/v1/control-panel/admin/tenant-signups/" + stringFromInt(req.ID) + "/deny") } class="settings-form" data-confirm="Deny this request? The email is blocked from re-applying.">
 							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
@@ -114,7 +113,7 @@ templ TenantSignupRequestsPage(vm TenantSignupRequestsView) {
 								Reason <span class="muted">(optional, included in the email)</span>
 								<input name="reason"/>
 							</label>
-							<button type="submit" class="contrast outline btn-inline">Deny</button>
+							<button type="submit" class="secondary outline btn-inline">Deny</button>
 						</form>
 					</article>
 				}

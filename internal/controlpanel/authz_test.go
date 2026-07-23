@@ -74,7 +74,7 @@ func TestUpdateMemberRoleHandler_admin_denied(t *testing.T) {
 func TestUpdateTenantStorageLimitHandler_non_platform_admin_denied(t *testing.T) {
 	// adminHandlerRequest builds a non-platform-admin session; raising the
 	// tenant-wide storage ceiling is platform-admin only.
-	auth, req := adminHandlerRequest(t, url.Values{"max_value_bytes": {"2048"}})
+	auth, req := adminHandlerRequest(t, url.Values{"max_value_mb": {"2048"}})
 	h := &Handler{rbac: auth}
 
 	rr := httptest.NewRecorder()
