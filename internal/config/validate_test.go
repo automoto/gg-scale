@@ -221,6 +221,71 @@ func TestValidateAcceptsRelayConfiguredWithFeatureOn(t *testing.T) {
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
+	assert.NoError(t, c.Validate())
+}
+
+func TestValidateRejectsRelayIssuerWithoutURLs(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = nil
+	err := c.Validate()
+	assert.ErrorContains(t, err, "RELAY_URLS")
+}
+
+func TestValidateRejectsRelayHalfPortRange(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
+	c.RelayMinPort = 49200 // max unset
+	err := c.Validate()
+	assert.ErrorContains(t, err, "RELAY_MAX_PORT")
+}
+
+func TestValidateAcceptsRelayPortRange(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
+	c.RelayMinPort = 49200
+	c.RelayMaxPort = 49300
+	assert.NoError(t, c.Validate())
+}
+
+func TestValidateRejectsRelayMalformedURL(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{"https://relay.example.com"}
+	err := c.Validate()
+	assert.ErrorContains(t, err, "RELAY_URLS")
+}
+
+func TestValidateAcceptsTURNSAndTCPURLs(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{
+		"turn:relay.example.com:3478?transport=udp",
+		"turns:relay.example.com:5349?transport=tcp",
+	}
+	assert.NoError(t, c.Validate())
+}
+
+// A feature-enabled node with no shared secret does not build the issuer, so
+// RELAY_URLS is not required of it.
+func TestValidateRelayURLsNotRequiredWithoutSecret(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = ""
+	c.RelayURLs = nil
 	assert.NoError(t, c.Validate())
 }
 

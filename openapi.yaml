@@ -551,13 +551,11 @@ components:
         player_id:
           format: int64
           type: integer
-        relay: {}
         xuid:
           type: string
       required:
         - player_id
         - addr
-        - relay
       type: object
     PlayerVerifyRequest:
       additionalProperties: false

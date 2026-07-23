@@ -17,11 +17,34 @@ type fieldMeta struct {
 	fileFallback bool
 }
 
-// fieldMetas reflects over Config once and returns the env metadata for every
-// field that maps to an env var. Fields tagged env:"-" (or untagged) are
-// skipped. It backs Load's _FILE pre-pass, error renaming, and DeclaredVars.
+// fieldMetas reflects over Config and returns the env metadata for every field
+// that maps to an env var. It backs Load's error renaming.
 func fieldMetas() []fieldMeta {
-	t := reflect.TypeOf(Config{})
+	return fieldMetasOf(reflect.TypeOf(Config{}))
+}
+
+// allFieldMetas returns the env metadata across both the full Config and the
+// standalone RelayConfig, deduped by env name. buildEnvironment uses it so a
+// relay-only <NAME>_FILE var resolves even when Config never declares it.
+func allFieldMetas() []fieldMeta {
+	seen := make(map[string]bool)
+	var out []fieldMeta
+	for _, t := range []reflect.Type{reflect.TypeOf(Config{}), reflect.TypeOf(RelayConfig{})} {
+		for _, meta := range fieldMetasOf(t) {
+			if seen[meta.envName] {
+				continue
+			}
+			seen[meta.envName] = true
+			out = append(out, meta)
+		}
+	}
+	return out
+}
+
+// fieldMetasOf reflects over a struct type and returns the env metadata for
+// every field that maps to an env var. Fields tagged env:"-" (or untagged) are
+// skipped.
+func fieldMetasOf(t reflect.Type) []fieldMeta {
 	out := make([]fieldMeta, 0, t.NumField())
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
@@ -82,7 +105,7 @@ func buildEnvironment() (map[string]string, error) {
 			m[key] = val
 		}
 	}
-	for _, meta := range fieldMetas() {
+	for _, meta := range allFieldMetas() {
 		if !meta.fileFallback {
 			continue
 		}
@@ -141,6 +164,7 @@ func (c *Config) normalize() {
 	c.CORSAllowedOrigins = normalizeCSV(c.CORSAllowedOrigins)
 	c.DockerRegistryAllowlist = normalizeCSV(c.DockerRegistryAllowlist)
 	c.TrustedProxyCIDRs = normalizeCSV(c.TrustedProxyCIDRs)
+	c.RelayURLs = normalizeCSV(c.RelayURLs)
 }
 
 func normalizeCSV(in []string) []string {
@@ -156,16 +180,25 @@ func normalizeCSV(in []string) []string {
 	return out
 }
 
-// DeclaredVars returns the list of env-var names this package reads,
-// including <name>_FILE variants for vars that support file fallback.
+// DeclaredVars returns the list of env-var names this package reads across both
+// the full server Config and the standalone RelayConfig, including <name>_FILE
+// variants for file-fallback vars. Vars shared by both structs appear once.
 // Used by the drift test to compare against .env.example.
 func DeclaredVars() []string {
-	metas := fieldMetas()
-	out := make([]string, 0, len(metas))
-	for _, meta := range metas {
-		out = append(out, meta.envName)
-		if meta.fileFallback {
-			out = append(out, meta.envName+"_FILE")
+	seen := make(map[string]bool)
+	var out []string
+	add := func(name string) {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, t := range []reflect.Type{reflect.TypeOf(Config{}), reflect.TypeOf(RelayConfig{})} {
+		for _, meta := range fieldMetasOf(t) {
+			add(meta.envName)
+			if meta.fileFallback {
+				add(meta.envName + "_FILE")
+			}
 		}
 	}
 	return out

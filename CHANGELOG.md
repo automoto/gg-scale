@@ -2,11 +2,41 @@
 
 All notable changes to ggscale are recorded here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project is
-pre-1.0, so breaking changes may land in minor releases (see
-[docs/aggressive-refactor guidance]). Server and SDK (Go + C#) wire types are
+pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
 ## [Unreleased]
+
+### Managed relay GA (in progress)
+
+Managed TURN relay graduates from "built but shipped OFF/BYO-only" toward GA,
+hosted by ggscale as a **dedicated relay VM per region**. Per-tenant enablement
+is still gated by the `p2p_relay` feature grant. See `docs/relay-ga.md` (plan)
+and `docs/relay-ops.md` (runbook).
+
+#### Added
+
+- **Standalone relay mode.** `ggscale-server relay` runs only the pion TURN
+  listener (no DB/HTTP/matchmaker) for deployment on a dedicated relay VM, with
+  an optional `RELAY_HEALTH_ADDR` serving `/healthz` + `/metrics`.
+- **TURN/TCP and TURNS/TLS transports** (`RELAY_TCP_PORT`, `RELAY_TLS_PORT`,
+  `RELAY_TLS_CERT_FILE`, `RELAY_TLS_KEY_FILE`) so clients behind UDP-blocking
+  firewalls can reach the relay.
+- **`RELAY_URLS`** — the TURN/TURNS URIs clients dial, now echoed in every
+  issued credential set (previously always empty; credentials were undialable).
+  Required when the credential issuer is enabled.
+- **Zero-downtime secret rotation.** Credentials embed a key id; configure
+  `RELAY_SHARED_SECRET_NEXT` alongside the active secret to rotate across a
+  credential-TTL overlap window.
+- **Per-player relay issuance rate limit** so one player can't drain a tenant's
+  monthly allowance in a burst. New metric `ggscale_relay_issue_throttled_total`;
+  relay nodes expose `ggscale_relay_up`.
+
+#### Changed
+
+- Removed the always-`null` per-peer `relay` field from the game-session peer
+  response (server + Go/C# SDKs + OpenAPI); relay credentials come from
+  `POST /v1/relay/credentials`, not the peer roster.
 
 ### Matchmaking GA
 

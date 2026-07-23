@@ -3,10 +3,12 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
@@ -59,12 +62,21 @@ import (
 var commit = "unknown"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		if err := runMigrateCommand(os.Args[2:]); err != nil {
-			slog.Error("migrate command failed", "error", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "migrate":
+			if err := runMigrateCommand(os.Args[2:]); err != nil {
+				slog.Error("migrate command failed", "error", err)
+				os.Exit(1)
+			}
+			return
+		case "relay":
+			if err := runRelayCommand(); err != nil {
+				slog.Error("relay command failed", "error", err)
+				os.Exit(1)
+			}
+			return
 		}
-		return
 	}
 	if err := run(); err != nil {
 		slog.Error("server exited with error", "error", err)
@@ -146,6 +158,147 @@ func runMigrateCommand(args []string) error {
 	default:
 		return fmt.Errorf("unknown migrate action %q", cmd.action)
 	}
+}
+
+// runRelayCommand runs the standalone TURN relay process (`ggscale-server
+// relay`): only the pion listener, no database / HTTP API / matchmaker. It is
+// the process deployed on a dedicated relay VM. The credential issuer is built
+// solely so the TURN AuthHandler can verify incoming usernames — this node
+// never mints credentials for clients (the app hosts do).
+func runRelayCommand() error {
+	rc, err := config.LoadRelay()
+	if err != nil {
+		return err
+	}
+	logger := newLogger(rc.LogLevel)
+	slog.SetDefault(logger)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	issuer := relay.NewIssuerWithSecrets(rc.Secrets(), rc.Realm, rc.CredTTL)
+	srv, err := relay.NewServer(relay.ServerConfig{
+		PublicIP:       rc.PublicIP,
+		BindAddr:       rc.BindAddr,
+		BindPort:       rc.UDPPort,
+		TCPPort:        rc.TCPPort,
+		TLSPort:        rc.TLSPort,
+		TLSCertFile:    rc.TLSCertFile,
+		TLSKeyFile:     rc.TLSKeyFile,
+		RelayMinPort:   rc.MinPort,
+		RelayMaxPort:   rc.MaxPort,
+		MaxAllocations: rc.MaxAllocations,
+		Logger:         logger,
+		Issuer:         issuer,
+	})
+	if err != nil {
+		return fmt.Errorf("relay: %w", err)
+	}
+	defer func() { _ = srv.Close() }()
+	logger.Info("standalone relay listening",
+		"public_ip", rc.PublicIP, "bind", rc.BindAddr, "udp_port", rc.UDPPort,
+		"tcp_port", rc.TCPPort, "tls_port", rc.TLSPort, "realm", rc.Realm,
+		"relay_min_port", rc.MinPort, "relay_max_port", rc.MaxPort,
+		"max_allocations", rc.MaxAllocations)
+
+	stopHealth, err := startRelayHealth(rc, srv, logger)
+	if err != nil {
+		return err
+	}
+	if stopHealth != nil {
+		defer stopHealth()
+	}
+
+	<-ctx.Done()
+	logger.Info("relay shutting down")
+	return nil
+}
+
+// registerRelayServerMetrics exposes the relay Server's live-allocation gauge
+// and the rejected-allocation / auth-failure counters on reg. These are the
+// signals the ops runbook alerts on (port-range exhaustion, credential
+// probing); pion/turn v3 exposes no bandwidth or per-session hooks.
+func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
+	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "ggscale_relay_active_allocations",
+		Help: "Currently live TURN relay allocations on this node.",
+	}, func() float64 { return float64(srv.ActiveAllocations()) }))
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "ggscale_relay_allocations_rejected_total",
+		Help: "TURN relay allocations refused because the node allocation cap was reached.",
+	}, func() float64 { return float64(srv.RejectedAllocations()) }))
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "ggscale_relay_auth_failures_total",
+		Help: "Rejected TURN auth attempts (bad/expired/unknown credentials or wrong realm).",
+	}, func() float64 { return float64(srv.AuthFailures()) }))
+}
+
+// startRelayHealth serves /healthz and /metrics for the monitoring host to
+// scrape the relay node over the tailnet. Returns (nil, nil) when no address is
+// configured, and a non-nil error if the listener can't bind — so a bad or
+// in-use RELAY_HEALTH_ADDR fails the process fast rather than silently leaving
+// the scrape target down. When rc.MetricsToken is set, /metrics requires a
+// matching bearer token.
+func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, logger *slog.Logger) (func(), error) {
+	if rc.HealthAddr == "" {
+		return nil, nil
+	}
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collectors.NewGoCollector())
+	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	up := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "ggscale_relay_up",
+		Help: "1 while the standalone relay process is serving.",
+	})
+	up.Set(1)
+	reg.MustRegister(up)
+	registerRelayServerMetrics(reg, srv)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+
+	ln, err := net.Listen("tcp", rc.HealthAddr)
+	if err != nil {
+		return nil, fmt.Errorf("relay health server: bind %s: %w", rc.HealthAddr, err)
+	}
+	srvHTTP := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	go func() {
+		if serr := srvHTTP.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
+			logger.Error("relay health server", "error", serr)
+		}
+	}()
+	logger.Info("relay health server listening", "addr", rc.HealthAddr)
+	return func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srvHTTP.Shutdown(shutdownCtx)
+	}, nil
+}
+
+// bearerGuard wraps h to require "Authorization: Bearer <token>" when token is
+// non-empty; an empty token leaves h open (tailnet-only default).
+func bearerGuard(token string, h http.Handler) http.Handler {
+	if token == "" {
+		return h
+	}
+	want := "Bearer " + token
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(want)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 func run() error {
@@ -304,18 +457,24 @@ func run() error {
 		logger.Warn("p2p relay disabled: FEATURE_P2P_RELAY_ENABLED=false")
 	}
 	if cfg.FeatureP2PRelayEnabled && cfg.RelaySharedSecret != "" {
-		relayIssuer = relay.NewIssuer(cfg.RelaySharedSecret, cfg.RelayRealm, cfg.RelayCredTTL)
+		relayIssuer = relay.NewIssuerWithSecrets(cfg.RelaySecrets(), cfg.RelayRealm, cfg.RelayCredTTL)
+		relayIssuer.SetURLs(cfg.RelayURLs)
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
-				PublicIP: cfg.RelayPublicIP,
-				BindAddr: cfg.RelayBindAddr,
-				BindPort: cfg.RelayUDPPort,
-				Issuer:   relayIssuer,
+				PublicIP:       cfg.RelayPublicIP,
+				BindAddr:       cfg.RelayBindAddr,
+				BindPort:       cfg.RelayUDPPort,
+				RelayMinPort:   cfg.RelayMinPort,
+				RelayMaxPort:   cfg.RelayMaxPort,
+				MaxAllocations: cfg.RelayMaxAllocations,
+				Logger:         logger,
+				Issuer:         relayIssuer,
 			})
 			if rerr != nil {
 				return fmt.Errorf("relay: %w", rerr)
 			}
 			defer func() { _ = relayServer.Close() }()
+			registerRelayServerMetrics(registry, relayServer)
 			logger.Info("relay server listening", "addr", cfg.RelayBindAddr, "port", cfg.RelayUDPPort, "public_ip", cfg.RelayPublicIP)
 		} else {
 			logger.Warn("relay credentials issued but no UDP listener: RELAY_PUBLIC_IP unset")

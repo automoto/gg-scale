@@ -19,12 +19,42 @@ func TestIssueCredentialsProducesParseableUsername(t *testing.T) {
 
 	require.NoError(t, err)
 	parts := strings.Split(creds.Username, ":")
-	require.Len(t, parts, 3)
+	require.Len(t, parts, 4)
 	expires, err := strconv.ParseInt(parts[0], 10, 64)
 	require.NoError(t, err)
 	assert.WithinDuration(t, time.Now().Add(time.Minute), time.Unix(expires, 0), 5*time.Second)
 	assert.Equal(t, "1", parts[1])
 	assert.Equal(t, "42", parts[2])
+	assert.NotEmpty(t, parts[3], "username carries a key id")
+}
+
+func TestRotationAcceptsBothSecrets(t *testing.T) {
+	oldSecret := strings.Repeat("o", 32)
+	newSecret := strings.Repeat("n", 32)
+
+	// A credential minted while the old secret was active...
+	oldIssuer := relay.NewIssuer(oldSecret, "ggscale", time.Minute)
+	oldCreds, err := oldIssuer.Issue(1, 42)
+	require.NoError(t, err)
+
+	// ...must still verify after the new secret is promoted to active, as long
+	// as the old secret stays in the accepted set (the rotation overlap).
+	rotated := relay.NewIssuerWithSecrets([]string{newSecret, oldSecret}, "ggscale", time.Minute)
+	tenantID, playerID, err := rotated.Verify(oldCreds.Username, oldCreds.Password)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), tenantID)
+	assert.Equal(t, int64(42), playerID)
+
+	// New credentials verify too.
+	newCreds, err := rotated.Issue(2, 7)
+	require.NoError(t, err)
+	_, _, err = rotated.Verify(newCreds.Username, newCreds.Password)
+	require.NoError(t, err)
+
+	// Once the old secret is dropped, its credentials no longer verify.
+	newOnly := relay.NewIssuer(newSecret, "ggscale", time.Minute)
+	_, _, err = newOnly.Verify(oldCreds.Username, oldCreds.Password)
+	assert.Error(t, err)
 }
 
 func TestIssueCredentialsHonoursTTL(t *testing.T) {
@@ -34,6 +64,36 @@ func TestIssueCredentialsHonoursTTL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(30), creds.TTLSeconds)
 	assert.Equal(t, "ggscale", creds.Realm)
+}
+
+func TestVerifyRejectsExpiredAndMalformed(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", -time.Minute)
+	expired, err := issuer.Issue(1, 42)
+	require.NoError(t, err)
+
+	fresh := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	_, _, err = fresh.Verify(expired.Username, expired.Password)
+	assert.ErrorIs(t, err, relay.ErrCredentialsExpired, "expired username rejected")
+
+	_, _, err = fresh.Verify("garbage", "any")
+	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid, "malformed username rejected")
+
+	_, _, err = fresh.Verify("notanumber:1:2:kid", "any")
+	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid, "non-numeric expiry rejected")
+}
+
+func TestIssueIncludesConfiguredURLs(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	urls := []string{
+		"turn:relay.example.com:3478?transport=udp",
+		"turns:relay.example.com:5349?transport=tcp",
+	}
+	issuer.SetURLs(urls)
+
+	creds, err := issuer.Issue(1, 42)
+
+	require.NoError(t, err)
+	assert.Equal(t, urls, creds.URLs)
 }
 
 func TestVerifyAcceptsFreshCredentials(t *testing.T) {

@@ -27,6 +27,22 @@ func (c *Config) IsProduction() bool {
 	return strings.EqualFold(c.Env, "production") || strings.EqualFold(c.Env, "prod")
 }
 
+// RelaySecrets returns the ordered relay shared secrets: the active signing
+// secret first, then any rotation secret. Empty entries are dropped.
+func (c *Config) RelaySecrets() []string {
+	return nonEmpty(c.RelaySharedSecret, c.RelaySharedSecretNext)
+}
+
+func nonEmpty(vals ...string) []string {
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // Validate runs cross-field checks that no single var-decl can express.
 // Called by Load after every individual setter has run. Returning an
 // error blocks startup so a misconfigured production deployment fails
@@ -40,6 +56,7 @@ func (c *Config) Validate() error {
 	checks := []func() error{
 		c.checkSecretLengths,
 		c.checkFeatureSwitches,
+		c.checkRelay,
 		c.checkDBPool,
 		c.checkMailProvider,
 		c.checkBilling,
@@ -75,6 +92,9 @@ func (c *Config) checkSecretLengths() error {
 	if c.RelaySharedSecret != "" && len(c.RelaySharedSecret) < 32 {
 		return fmt.Errorf("RELAY_SHARED_SECRET must be >= 32 bytes when set (got %d)", len(c.RelaySharedSecret))
 	}
+	if c.RelaySharedSecretNext != "" && len(c.RelaySharedSecretNext) < 32 {
+		return fmt.Errorf("RELAY_SHARED_SECRET_NEXT must be >= 32 bytes when set (got %d)", len(c.RelaySharedSecretNext))
+	}
 	if c.MetricsAuthToken != "" && len(c.MetricsAuthToken) < 32 {
 		return fmt.Errorf("METRICS_AUTH_TOKEN must be >= 32 bytes when set (got %d)", len(c.MetricsAuthToken))
 	}
@@ -87,14 +107,63 @@ func (c *Config) checkSecretLengths() error {
 // checkFeatureSwitches refuses configs that wire up a feature whose kill
 // switch is off, rather than silently leaving the feature dark.
 func (c *Config) checkFeatureSwitches() error {
-	if !c.FeatureP2PRelayEnabled && (c.RelayPublicIP != "" || c.RelaySharedSecret != "") {
+	if !c.FeatureP2PRelayEnabled && (c.RelayPublicIP != "" || c.RelaySharedSecret != "" || c.RelaySharedSecretNext != "") {
 		return fmt.Errorf("RELAY_PUBLIC_IP/RELAY_SHARED_SECRET set while FEATURE_P2P_RELAY_ENABLED is false; enable the feature or clear the relay config")
+	}
+	if c.RelaySharedSecretNext != "" && c.RelaySharedSecret == "" {
+		return fmt.Errorf("RELAY_SHARED_SECRET_NEXT set without RELAY_SHARED_SECRET; the active signing secret must be set")
 	}
 	if !c.FeatureFleetEnabled && c.FleetBackend != "" {
 		return fmt.Errorf("FLEET_BACKEND=%q set while FEATURE_FLEET_ENABLED is false; enable the feature or unset FLEET_BACKEND", c.FleetBackend)
 	}
 	if !c.EntitlementAPIEnabled && c.EntitlementAPIToken != "" {
 		return fmt.Errorf("ENTITLEMENT_API_TOKEN set while ENTITLEMENT_API_ENABLED is false; enable the API or clear the token")
+	}
+	return nil
+}
+
+// checkRelay enforces the relay-issuer invariant: a node that mints relay
+// credentials must tell clients where to dial. The issuer is built only when
+// the feature is on and a shared secret is set (cmd/ggscale-server), so the
+// RELAY_URLS requirement is scoped to exactly that case — a feature-enabled
+// node without a secret issues nothing and needs no URLs.
+func (c *Config) checkRelay() error {
+	if !c.FeatureP2PRelayEnabled || c.RelaySharedSecret == "" {
+		return nil
+	}
+	if c.RelayPublicIP != "" {
+		if err := validateRelayPublicIP(c.RelayPublicIP); err != nil {
+			return err
+		}
+	}
+	if len(c.RelayURLs) == 0 {
+		return fmt.Errorf("RELAY_URLS must list at least one turn:/turns: URI when the relay credential issuer is enabled; clients receive credentials but no address to dial without it")
+	}
+	for _, raw := range c.RelayURLs {
+		if err := validateTURNURI(raw); err != nil {
+			return fmt.Errorf("RELAY_URLS %q: %w", raw, err)
+		}
+	}
+	return validatePortRange(c.RelayMinPort, c.RelayMaxPort)
+}
+
+// validateTURNURI accepts the turn:/turns: URI forms clients dial. TURN URIs
+// are opaque (turn:host:port?transport=udp), so the host lands in Opaque
+// rather than Host after url.Parse.
+func validateTURNURI(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "turn" && u.Scheme != "turns" {
+		return fmt.Errorf("must use the turn: or turns: scheme")
+	}
+	host := u.Opaque
+	if host == "" {
+		host = u.Host
+	}
+	if host == "" {
+		return fmt.Errorf("missing host")
 	}
 	return nil
 }
@@ -320,8 +389,8 @@ func (c *Config) checkFields() error {
 		return fmt.Errorf("DOCKER_DEFAULT_CPUS %v: must be a non-negative number", c.DockerDefaultCPUs)
 	}
 
-	if c.RelayUDPPort <= 0 || c.RelayUDPPort > 65535 {
-		return fmt.Errorf("RELAY_UDP_PORT %d: must be 1..65535", c.RelayUDPPort)
+	if err := checkPort("RELAY_UDP_PORT", c.RelayUDPPort); err != nil {
+		return err
 	}
 	if c.AppRegion == "" || strings.TrimSpace(c.AppRegion) != c.AppRegion || len(c.AppRegion) > 64 {
 		return fmt.Errorf("APP_REGION %q: must be 1..64 characters with no surrounding whitespace", c.AppRegion)

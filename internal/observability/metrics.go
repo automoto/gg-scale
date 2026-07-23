@@ -27,6 +27,7 @@ type Metrics struct {
 	matchmakerQueueDepth     *prometheus.GaugeVec
 	matchmakerOldestTicket   *prometheus.GaugeVec
 	relayCreds               prometheus.Counter
+	relayIssueThrottled      prometheus.Counter
 	mailSends                *prometheus.CounterVec
 	quotaRejections          *prometheus.CounterVec
 	entitlementApplies       *prometheus.CounterVec
@@ -192,6 +193,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_relay_credentials_issued_total",
 			Help: "Relay (TURN) credential sets issued.",
 		}),
+		relayIssueThrottled: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_relay_issue_throttled_total",
+			Help: "Relay credential requests rejected by the per-player issuance rate limit.",
+		}),
 		mailSends: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "ggscale_mail_sends_total",
 			Help: "Transactional mail sends by result.",
@@ -210,7 +215,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
 		m.matchmakerShortCommit, m.matchmakerQueryReject, m.matchmakerTicketFailures,
 		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
-		m.relayCreds, m.mailSends, m.quotaRejections, m.entitlementApplies,
+		m.relayCreds, m.relayIssueThrottled, m.mailSends, m.quotaRejections, m.entitlementApplies,
 	)
 	return m
 }
@@ -352,6 +357,15 @@ func (m *Metrics) RelayCredentialIssued() {
 		return
 	}
 	m.relayCreds.Inc()
+}
+
+// RelayIssueThrottled counts one relay credential request rejected by the
+// per-player issuance rate limit.
+func (m *Metrics) RelayIssueThrottled() {
+	if m == nil {
+		return
+	}
+	m.relayIssueThrottled.Inc()
 }
 
 // MailSend counts a mail send by result (see MailOK / MailError).

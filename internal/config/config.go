@@ -128,7 +128,29 @@ type Config struct {
 	RelayRealm        string        `env:"RELAY_REALM" envDefault:"ggscale"`
 	RelaySharedSecret string        `env:"RELAY_SHARED_SECRET" envFile:"true"`
 	RelayCredTTL      time.Duration `env:"RELAY_CRED_TTL" envDefault:"5m"`
-	DatabaseURL       string        `env:"DATABASE_URL,required" envFile:"true"`
+	// RelaySharedSecretNext is an additional secret accepted (but not used to
+	// sign) during a rotation. Configure it alongside RelaySharedSecret on every
+	// issuer and relay node, promote it to RELAY_SHARED_SECRET, then clear it
+	// after one credential TTL so in-flight credentials never break.
+	RelaySharedSecretNext string `env:"RELAY_SHARED_SECRET_NEXT" envFile:"true"`
+	// RelayMinPort/RelayMaxPort bound the UDP ports the relay allocates for
+	// relayed media, so the firewall can open only that range instead of the
+	// whole ephemeral range. Both must be set together; the width caps
+	// concurrent relay allocations. 0/0 (default) uses the OS ephemeral range.
+	RelayMinPort int `env:"RELAY_MIN_PORT" envDefault:"0"`
+	RelayMaxPort int `env:"RELAY_MAX_PORT" envDefault:"0"`
+	// RelayMaxAllocations caps concurrently-live relay allocations node-wide so
+	// a single credential can't exhaust the port range. 0 = unlimited.
+	RelayMaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"1000"`
+	// RelayURLs is the comma-separated list of TURN/TURNS URIs clients dial,
+	// reported verbatim in every issued credential set. Required when the relay
+	// credential issuer is enabled (FEATURE_P2P_RELAY_ENABLED with a shared
+	// secret): without it clients receive credentials but no address to reach.
+	// Points at the relay VM(s); list every transport so client ICE can fall
+	// back when UDP is blocked, e.g.
+	// "turn:relay-us-east.ggscale.io:3478?transport=udp,turns:relay-us-east.ggscale.io:5349?transport=tcp".
+	RelayURLs   []string `env:"RELAY_URLS"`
+	DatabaseURL string   `env:"DATABASE_URL,required" envFile:"true"`
 	// DBMigrateURL is an elevated DSN used only to apply schema
 	// migrations at startup (DDL, CREATE ROLE, FORCE RLS, CREATE POLICY).
 	// It is required in production; outside production, empty falls back to

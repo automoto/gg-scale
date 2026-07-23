@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -13,6 +14,16 @@ import (
 	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/relay"
+)
+
+// Per-player relay credential issuance is rate limited so a single player
+// cannot burn the tenant's monthly session allowance in a burst. TTL-driven
+// re-issuance needs roughly one credential per credential-TTL, so a steady
+// ~12/min with a burst of 10 leaves ample headroom for reconnect flaps while
+// still bounding abuse to a slow trickle.
+const (
+	relayIssueRatePerSecond = 0.2
+	relayIssueBurst         = 10
 )
 
 // relayCredentialsInput optionally scopes the request to a match. When MatchID
@@ -75,6 +86,21 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 		}
 		if !enabled {
 			return nil, huma.Error403Forbidden("forbidden")
+		}
+		// Per-player issuance rate limit: bounds burst abuse of the monthly
+		// allowance. Checked first among the abuse gates (before the ban DB
+		// query, match scoping, and metering) so a throttled caller costs only
+		// the in-memory bucket lookup.
+		if d.Limiter != nil {
+			key := fmt.Sprintf("relay_issue:%d:%d", tenantID, playerID)
+			dec, lerr := d.Limiter.Allow(ctx, key, relayIssueRatePerSecond, relayIssueBurst)
+			if lerr != nil {
+				return nil, huma.Error500InternalServerError("internal error")
+			}
+			if !dec.Allowed {
+				d.Metrics.RelayIssueThrottled()
+				return nil, huma.Error429TooManyRequests("relay credential requests are being throttled; retry shortly")
+			}
 		}
 		// Tenant-ban enforcement point: a banned account can't get relay
 		// credentials.

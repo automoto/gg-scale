@@ -54,7 +54,6 @@ type peerEntry struct {
 	PlayerID int64           `json:"player_id"`
 	XUID     string          `json:"xuid,omitempty"`
 	Addr     gameSessionAddr `json:"addr"`
-	Relay    any             `json:"relay"`
 }
 
 type gameSessionResponse struct {
