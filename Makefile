@@ -20,6 +20,11 @@ FLEET_AGONES_STACK := GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) docker compose -f c
 DOCKER_IMAGE ?= buildwrangler/ggscale
 TAG          ?= latest
 GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# Platforms baked into the pushed manifest. amd64 is required — the relay VMs
+# (and other x86 hosts) exec the binary directly; arm64 keeps local Apple-Silicon
+# pulls working. A plain `docker build` only emits the builder's native arch, so
+# an arm64 laptop would otherwise push an amd64-incompatible image.
+PLATFORMS    ?= linux/amd64,linux/arm64
 INTEGRATION_PARALLEL ?= 8
 SQLC_VERSION ?= 1.31.1
 
@@ -159,14 +164,21 @@ clean-full: ## Stop the full stack and delete its volumes
 
 # ─── Docker Hub image (ggscale-server) ──────────────────────────────────
 
-docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally
+docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally (host arch only)
 	docker build \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(DOCKER_IMAGE):$(TAG) \
 		.
 
-docker-push: docker-image ## Build and push to Docker Hub
-	docker push $(DOCKER_IMAGE):$(TAG)
+docker-push: ## Build and push a multi-arch ($(PLATFORMS)) manifest to Docker Hub
+	docker buildx inspect ggscale-builder >/dev/null 2>&1 \
+		|| docker buildx create --name ggscale-builder --driver docker-container --use
+	docker buildx build \
+		--builder ggscale-builder \
+		--platform $(PLATFORMS) \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		-t $(DOCKER_IMAGE):$(TAG) \
+		--push .
 
 # ─── Misc ───────────────────────────────────────────────────────────────
 
