@@ -33,6 +33,10 @@ type ServerConfig struct {
 	// MaxAllocations caps concurrently-live relay allocations node-wide,
 	// bounding port-range exhaustion from a single credential. 0 = unlimited.
 	MaxAllocations int
+	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated TURN ops per
+	// player so one credential can't monopolise the global pool. <=0 disables.
+	PlayerAllocPerMinute int
+	PlayerAllocBurst     int
 	// Logger receives the pion server's internal events; nil uses slog.Default.
 	Logger *slog.Logger
 	Issuer *Issuer
@@ -41,11 +45,13 @@ type ServerConfig struct {
 // Server wraps pion/turn/v3. One Server per process. It owns every listener it
 // opens (UDP packet conns + TCP/TLS listeners); Close releases them all.
 type Server struct {
-	turn         *pionturn.Server
-	conns        []net.PacketConn
-	listeners    []net.Listener
-	alloc        *allocationLimiter
-	authFailures atomic.Int64
+	turn           *pionturn.Server
+	conns          []net.PacketConn
+	listeners      []net.Listener
+	alloc          *allocationLimiter
+	playerLimiter  *playerAllocLimiter
+	authFailures   atomic.Int64
+	allocThrottled atomic.Int64
 }
 
 // NewServer binds the configured listeners and starts the underlying pion
@@ -81,6 +87,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 	s := &Server{}
 	s.alloc = newAllocationLimiter(relayGenerator(ip, bindAddr, cfg.RelayMinPort, cfg.RelayMaxPort), cfg.MaxAllocations)
+	s.playerLimiter = newPlayerAllocLimiter(cfg.PlayerAllocPerMinute, cfg.PlayerAllocBurst)
 
 	conn, err := net.ListenPacket("udp4", net.JoinHostPort(bindAddr, strconv.Itoa(bindPort)))
 	if err != nil {
@@ -207,6 +214,18 @@ func (s *Server) authHandler(iss *Issuer) pionturn.AuthHandler {
 			s.authFailures.Add(1)
 			return nil, false
 		}
+		tenantID, playerID, _, err := iss.parseUsername(username)
+		if err != nil {
+			s.authFailures.Add(1)
+			return nil, false
+		}
+		// Per-player throttle: a single credential can't flood the node with
+		// allocations and starve the global pool. A legit client's op rate is
+		// far below this; a flood is answered 401 with no allocation created.
+		if !s.playerLimiter.allow(tenantID, playerID) {
+			s.allocThrottled.Add(1)
+			return nil, false
+		}
 		pw, ok := iss.passwordForAuth(username)
 		if !ok {
 			s.authFailures.Add(1)
@@ -235,3 +254,7 @@ func (s *Server) RejectedAllocations() int64 {
 
 // AuthFailures reports the cumulative count of rejected TURN auth attempts.
 func (s *Server) AuthFailures() int64 { return s.authFailures.Load() }
+
+// AllocThrottled reports the cumulative count of authenticated TURN ops refused
+// by the per-player rate limit.
+func (s *Server) AllocThrottled() int64 { return s.allocThrottled.Load() }

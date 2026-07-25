@@ -1,1 +1,1 @@
-DROP TABLE relay_session_usage;
+DROP TABLE IF EXISTS relay_session_usage;

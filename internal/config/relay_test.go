@@ -68,7 +68,7 @@ func TestLoadRelayDefaultsMaxAllocations(t *testing.T) {
 	rc, err := config.LoadRelay()
 
 	require.NoError(t, err)
-	assert.Equal(t, 1000, rc.MaxAllocations)
+	assert.Equal(t, 4000, rc.MaxAllocations)
 }
 
 func TestLoadRelayAcceptsPortRange(t *testing.T) {

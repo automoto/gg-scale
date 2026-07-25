@@ -141,7 +141,11 @@ type Config struct {
 	RelayMaxPort int `env:"RELAY_MAX_PORT" envDefault:"0"`
 	// RelayMaxAllocations caps concurrently-live relay allocations node-wide so
 	// a single credential can't exhaust the port range. 0 = unlimited.
-	RelayMaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"1000"`
+	RelayMaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"4000"`
+	// RelayPlayerAllocPerMinute/RelayPlayerAllocBurst throttle authenticated
+	// TURN ops per player so one credential can't monopolise the pool. 0 = off.
+	RelayPlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
+	RelayPlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
 	// RelayURLs is the comma-separated list of TURN/TURNS URIs clients dial,
 	// reported verbatim in every issued credential set. Required when the relay
 	// credential issuer is enabled (FEATURE_P2P_RELAY_ENABLED with a shared

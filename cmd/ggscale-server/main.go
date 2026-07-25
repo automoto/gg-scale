@@ -178,18 +178,20 @@ func runRelayCommand() error {
 
 	issuer := relay.NewIssuerWithSecrets(rc.Secrets(), rc.Realm, rc.CredTTL)
 	srv, err := relay.NewServer(relay.ServerConfig{
-		PublicIP:       rc.PublicIP,
-		BindAddr:       rc.BindAddr,
-		BindPort:       rc.UDPPort,
-		TCPPort:        rc.TCPPort,
-		TLSPort:        rc.TLSPort,
-		TLSCertFile:    rc.TLSCertFile,
-		TLSKeyFile:     rc.TLSKeyFile,
-		RelayMinPort:   rc.MinPort,
-		RelayMaxPort:   rc.MaxPort,
-		MaxAllocations: rc.MaxAllocations,
-		Logger:         logger,
-		Issuer:         issuer,
+		PublicIP:             rc.PublicIP,
+		BindAddr:             rc.BindAddr,
+		BindPort:             rc.UDPPort,
+		TCPPort:              rc.TCPPort,
+		TLSPort:              rc.TLSPort,
+		TLSCertFile:          rc.TLSCertFile,
+		TLSKeyFile:           rc.TLSKeyFile,
+		RelayMinPort:         rc.MinPort,
+		RelayMaxPort:         rc.MaxPort,
+		MaxAllocations:       rc.MaxAllocations,
+		PlayerAllocPerMinute: rc.PlayerAllocPerMinute,
+		PlayerAllocBurst:     rc.PlayerAllocBurst,
+		Logger:               logger,
+		Issuer:               issuer,
 	})
 	if err != nil {
 		return fmt.Errorf("relay: %w", err)
@@ -231,6 +233,10 @@ func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 		Name: "ggscale_relay_auth_failures_total",
 		Help: "Rejected TURN auth attempts (bad/expired/unknown credentials or wrong realm).",
 	}, func() float64 { return float64(srv.AuthFailures()) }))
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "ggscale_relay_alloc_throttled_total",
+		Help: "Authenticated TURN ops refused by the per-player allocation rate limit.",
+	}, func() float64 { return float64(srv.AllocThrottled()) }))
 }
 
 // startRelayHealth serves /healthz and /metrics for the monitoring host to
@@ -461,14 +467,16 @@ func run() error {
 		relayIssuer.SetURLs(cfg.RelayURLs)
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
-				PublicIP:       cfg.RelayPublicIP,
-				BindAddr:       cfg.RelayBindAddr,
-				BindPort:       cfg.RelayUDPPort,
-				RelayMinPort:   cfg.RelayMinPort,
-				RelayMaxPort:   cfg.RelayMaxPort,
-				MaxAllocations: cfg.RelayMaxAllocations,
-				Logger:         logger,
-				Issuer:         relayIssuer,
+				PublicIP:             cfg.RelayPublicIP,
+				BindAddr:             cfg.RelayBindAddr,
+				BindPort:             cfg.RelayUDPPort,
+				RelayMinPort:         cfg.RelayMinPort,
+				RelayMaxPort:         cfg.RelayMaxPort,
+				MaxAllocations:       cfg.RelayMaxAllocations,
+				PlayerAllocPerMinute: cfg.RelayPlayerAllocPerMinute,
+				PlayerAllocBurst:     cfg.RelayPlayerAllocBurst,
+				Logger:               logger,
+				Issuer:               relayIssuer,
 			})
 			if rerr != nil {
 				return fmt.Errorf("relay: %w", rerr)

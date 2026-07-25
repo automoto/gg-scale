@@ -38,8 +38,17 @@ type RelayConfig struct {
 
 	// MaxAllocations caps concurrently-live relay allocations node-wide so a
 	// single (possibly leaked) credential can't exhaust the port range. 0 =
-	// unlimited. Default 1000 matches the documented firewall port-range width.
-	MaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"1000"`
+	// unlimited. Default 4000 matches the documented firewall port-range width;
+	// it must stay <= (RELAY_MAX_PORT - RELAY_MIN_PORT + 1) when a range is set.
+	MaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"4000"`
+
+	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated TURN ops per
+	// player so one credential can't monopolise the global pool with an
+	// allocation flood. A legit client's op rate is far below these; 0 disables.
+	// Roughly bounds one credential to rate×allocation-lifetime concurrent
+	// allocations. Default 6/min, burst 20.
+	PlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
+	PlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
 
 	// HealthAddr, when set (e.g. ":9091"), serves /healthz and /metrics for the
 	// monitoring host to scrape the relay node over the tailnet.

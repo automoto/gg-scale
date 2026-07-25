@@ -31,12 +31,26 @@ and `docs/relay-ops.md` (runbook).
 - **Per-player relay issuance rate limit** so one player can't drain a tenant's
   monthly allowance in a burst. New metric `ggscale_relay_issue_throttled_total`;
   relay nodes expose `ggscale_relay_up`.
+- **Global relay allocation cap** (`RELAY_MAX_ALLOCATIONS`, default 4000) so a
+  single (possibly leaked) credential can't exhaust the relay node's port range.
+  New relay-node metrics `ggscale_relay_active_allocations`,
+  `ggscale_relay_allocations_rejected_total`, and `ggscale_relay_auth_failures_total`,
+  plus the pion server log wired to slog. Optional `RELAY_METRICS_TOKEN` puts a
+  bearer guard on the relay-node `/metrics`.
+- **Per-player relay allocation throttle** (`RELAY_PLAYER_ALLOC_PER_MIN` default
+  6, `RELAY_PLAYER_ALLOC_BURST` default 20) so a single credential can't flood a
+  relay node with allocations and monopolise the pool — a per-`(tenant,player)`
+  token bucket in the TURN AuthHandler. Metric `ggscale_relay_alloc_throttled_total`.
 
 #### Changed
 
 - Removed the always-`null` per-peer `relay` field from the game-session peer
   response (server + Go/C# SDKs + OpenAPI); relay credentials come from
   `POST /v1/relay/credentials`, not the peer roster.
+- **`RELAY_PUBLIC_IP` must be IPv4** and a half-set `RELAY_MIN_PORT`/`RELAY_MAX_PORT`
+  now fails startup loudly, instead of silently binding an unreachable address or
+  the whole ephemeral range. The per-player rate-limit check now runs before the
+  ban lookup so a throttled caller costs no DB query.
 
 ### Matchmaking GA
 
