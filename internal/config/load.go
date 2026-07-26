@@ -165,6 +165,7 @@ func (c *Config) normalize() {
 	c.DockerRegistryAllowlist = normalizeCSV(c.DockerRegistryAllowlist)
 	c.TrustedProxyCIDRs = normalizeCSV(c.TrustedProxyCIDRs)
 	c.RelayURLs = normalizeCSV(c.RelayURLs)
+	c.RelaySTUNURLs = normalizeCSV(c.RelaySTUNURLs)
 }
 
 func normalizeCSV(in []string) []string {

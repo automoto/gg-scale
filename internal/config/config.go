@@ -153,8 +153,9 @@ type Config struct {
 	// Points at the relay VM(s); list every transport so client ICE can fall
 	// back when UDP is blocked, e.g.
 	// "turn:relay-us-east.ggscale.io:3478?transport=udp,turns:relay-us-east.ggscale.io:5349?transport=tcp".
-	RelayURLs   []string `env:"RELAY_URLS"`
-	DatabaseURL string   `env:"DATABASE_URL,required" envFile:"true"`
+	RelayURLs     []string `env:"RELAY_URLS"`
+	RelaySTUNURLs []string `env:"RELAY_STUN_URLS"`
+	DatabaseURL   string   `env:"DATABASE_URL,required" envFile:"true"`
 	// DBMigrateURL is an elevated DSN used only to apply schema
 	// migrations at startup (DDL, CREATE ROLE, FORCE RLS, CREATE POLICY).
 	// It is required in production; outside production, empty falls back to

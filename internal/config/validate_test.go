@@ -267,6 +267,31 @@ func TestValidateRejectsRelayMalformedURL(t *testing.T) {
 	assert.ErrorContains(t, err, "RELAY_URLS")
 }
 
+func TestValidateAcceptsSTUNSchemes(t *testing.T) {
+	for _, stun := range []string{"stun:relay.example.com:3478", "stuns:relay.example.com:5349"} {
+		t.Run(stun, func(t *testing.T) {
+			c := baseProd()
+			c.FeatureP2PRelayEnabled = true
+			c.RelaySharedSecret = strings.Repeat("a", 32)
+			c.RelayPublicIP = "203.0.113.10"
+			c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
+			c.RelaySTUNURLs = []string{stun}
+			assert.NoError(t, c.Validate())
+		})
+	}
+}
+
+func TestValidateRejectsRelayMalformedSTUNURL(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
+	c.RelaySTUNURLs = []string{"https://relay.example.com"}
+	err := c.Validate()
+	assert.ErrorContains(t, err, "RELAY_STUN_URLS")
+}
+
 func TestValidateAcceptsTURNSAndTCPURLs(t *testing.T) {
 	c := baseProd()
 	c.FeatureP2PRelayEnabled = true

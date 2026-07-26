@@ -96,6 +96,15 @@ func TestIssueIncludesConfiguredURLs(t *testing.T) {
 	assert.Equal(t, urls, creds.URLs)
 }
 
+func TestIssueIncludesConfiguredSTUNURLs(t *testing.T) {
+	issuer := relay.NewIssuer(strings.Repeat("a", 32), "realm", time.Minute)
+	issuer.SetSTUNURLs([]string{"stun:relay.example.com:3478"})
+
+	creds, err := issuer.Issue(7, 42)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"stun:relay.example.com:3478"}, creds.STUNURLs)
+}
+
 func TestVerifyAcceptsFreshCredentials(t *testing.T) {
 	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
 	creds, err := issuer.Issue(1, 42)

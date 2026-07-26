@@ -68,17 +68,23 @@ func SweepExpiredGameSessions(ctx context.Context, pool *db.Pool) error {
 		return fmt.Errorf("list tenants: %w", err)
 	}
 
-	var sessions, invites, failed int64
+	var sessions, invites, signals, failed int64
 	for _, tenantID := range tenantIDs {
 		tctx := db.WithTenant(ctx, tenantID)
-		var s, i int64
+		var s, i, sig int64
 		if err := pool.Q(tctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			var qerr error
 			if s, qerr = q.DeleteExpiredGameSessionsForTenant(tctx); qerr != nil {
 				return qerr
 			}
-			i, qerr = q.DeleteExpiredGameInvitesForTenant(tctx)
+			if i, qerr = q.DeleteExpiredGameInvitesForTenant(tctx); qerr != nil {
+				return qerr
+			}
+			// Sessions that outlive their signals leave expired rows behind;
+			// the session/tenant cascade only fires when the session itself is
+			// deleted, so prune the stragglers here too.
+			sig, qerr = q.DeleteExpiredGameSessionSignalsForTenant(tctx)
 			return qerr
 		}); err != nil {
 			slog.WarnContext(ctx, "game session GC: delete for tenant", "err", err, "tenant_id", tenantID)
@@ -87,9 +93,10 @@ func SweepExpiredGameSessions(ctx context.Context, pool *db.Pool) error {
 		}
 		sessions += s
 		invites += i
+		signals += sig
 	}
-	if sessions > 0 || invites > 0 {
-		slog.InfoContext(ctx, "game session GC", "sessions_deleted", sessions, "invites_deleted", invites)
+	if sessions > 0 || invites > 0 || signals > 0 {
+		slog.InfoContext(ctx, "game session GC", "sessions_deleted", sessions, "invites_deleted", invites, "signals_deleted", signals)
 	}
 	if failed > 0 {
 		return fmt.Errorf("game session GC: %d tenant(s) failed", failed)

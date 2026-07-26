@@ -144,7 +144,30 @@ func (c *Config) checkRelay() error {
 			return fmt.Errorf("RELAY_URLS %q: %w", raw, err)
 		}
 	}
+	for _, raw := range c.RelaySTUNURLs {
+		if err := validateSTUNURI(raw); err != nil {
+			return fmt.Errorf("RELAY_STUN_URLS %q: %w", raw, err)
+		}
+	}
 	return validatePortRange(c.RelayMinPort, c.RelayMaxPort)
+}
+
+// validateSTUNURI accepts the RFC 7064 stun:/stuns: URI forms. Like turn:,
+// STUN URIs are opaque (stun:host:port), so the host lands in Opaque rather
+// than Host after url.Parse. stuns: (STUN over TLS) mirrors the turns: form
+// the TURN path already accepts.
+func validateSTUNURI(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "stun" && u.Scheme != "stuns" {
+		return fmt.Errorf("must use the stun: or stuns: scheme")
+	}
+	if u.Opaque == "" && u.Host == "" {
+		return fmt.Errorf("missing host")
+	}
+	return nil
 }
 
 // validateTURNURI accepts the turn:/turns: URI forms clients dial. TURN URIs

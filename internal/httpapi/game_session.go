@@ -125,6 +125,7 @@ type gameSessionHeartbeatOutput struct {
 }
 
 func registerGameSessionRoutes(api huma.API, d Deps) {
+	registerGameSessionSignalRoutes(api, d)
 	huma.Register(api, huma.Operation{
 		OperationID:   "createGameSession",
 		Method:        http.MethodPost,

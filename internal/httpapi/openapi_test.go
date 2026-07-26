@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"os"
 	"sort"
 	"testing"
 
@@ -34,6 +35,7 @@ var expectedV1Paths = []string{
 	"/v1/game-session/{id}",
 	"/v1/game-session/{id}/heartbeat",
 	"/v1/game-session/{id}/join",
+	"/v1/game-session/{id}/signals",
 	"/v1/healthz",
 	"/v1/invite",
 	"/v1/invite/{id}",
@@ -76,6 +78,24 @@ func TestOpenAPIDoc_never_documents_internal_surface(t *testing.T) {
 		assert.NotContains(t, p, "/internal",
 			"the entitlement API must stay out of the generated spec")
 	}
+}
+
+// TestOpenAPIDoc_committed_spec_is_current fails when the checked-in
+// openapi.yaml no longer matches what the handlers generate. The path-set test
+// above only guards the in-memory doc, so a route (or a schema field like
+// Credentials.stun_urls) can be added without regenerating the committed file
+// that SDKs are generated from. This regenerates and diffs, telling the
+// contributor to run `make openapi`. specVersion mirrors cmd/openapi-dump.
+func TestOpenAPIDoc_committed_spec_is_current(t *testing.T) {
+	const specVersion = "1.0.0"
+	want, err := OpenAPIDoc(specVersion).YAML()
+	require.NoError(t, err)
+
+	got, err := os.ReadFile("../../openapi.yaml")
+	require.NoError(t, err)
+
+	assert.Equal(t, string(want), string(got),
+		"committed openapi.yaml is stale; run `make openapi` and commit the result")
 }
 
 func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {

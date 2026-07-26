@@ -465,6 +465,7 @@ func run() error {
 	if cfg.FeatureP2PRelayEnabled && cfg.RelaySharedSecret != "" {
 		relayIssuer = relay.NewIssuerWithSecrets(cfg.RelaySecrets(), cfg.RelayRealm, cfg.RelayCredTTL)
 		relayIssuer.SetURLs(cfg.RelayURLs)
+		relayIssuer.SetSTUNURLs(cfg.RelaySTUNURLs)
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
 				PublicIP:             cfg.RelayPublicIP,

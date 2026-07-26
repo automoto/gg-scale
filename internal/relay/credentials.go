@@ -40,6 +40,7 @@ type Credentials struct {
 	TTLSeconds int64    `json:"ttl"`
 	Realm      string   `json:"realm"`
 	URLs       []string `json:"urls,omitempty"`
+	STUNURLs   []string `json:"stun_urls,omitempty"`
 }
 
 // secretEntry is one accepted shared secret plus its stable key id.
@@ -51,12 +52,13 @@ type secretEntry struct {
 // Issuer mints and verifies short-lived TURN-REST credentials. One Issuer
 // per process; safe for concurrent use once constructed.
 type Issuer struct {
-	secrets []secretEntry // secrets[0] signs new credentials; all are accepted
-	byKID   map[string]secretEntry
-	realm   string
-	ttl     time.Duration
-	urls    []string
-	now     func() time.Time
+	secrets  []secretEntry // secrets[0] signs new credentials; all are accepted
+	byKID    map[string]secretEntry
+	realm    string
+	ttl      time.Duration
+	urls     []string
+	stunURLs []string
+	now      func() time.Time
 }
 
 // NewIssuer returns an Issuer with a single shared secret and realm. ttl is
@@ -97,6 +99,10 @@ func kidFor(secret string) string {
 // SetURLs sets the list of TURN URIs reported in issued credentials.
 func (i *Issuer) SetURLs(urls []string) { i.urls = urls }
 
+// SetSTUNURLs sets the discovery-only STUN URIs returned alongside TURN
+// credentials so WebRTC clients can gather direct server-reflexive candidates.
+func (i *Issuer) SetSTUNURLs(urls []string) { i.stunURLs = urls }
+
 // Issue returns a fresh credential pair scoped to (tenantID, playerID), signed
 // by the active secret and tagged with its key id.
 func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
@@ -112,6 +118,7 @@ func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
 		TTLSeconds: int64(i.ttl.Seconds()),
 		Realm:      i.realm,
 		URLs:       i.urls,
+		STUNURLs:   i.stunURLs,
 	}, nil
 }
 

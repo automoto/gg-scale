@@ -76,6 +76,13 @@ type Querier interface {
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
+	// Counts how many of the given players are ACTIVE members (last_seen within
+	// 30 s, matching ListGameSessionPeers/CountActiveGameSessionPeers) of an
+	// open, unexpired session in this project. The signal handlers pass both
+	// endpoints for a send (expecting 2) or just the caller for a poll
+	// (expecting 1), so the count defines "both peers are in the same live
+	// session" without diverging from the roster the clients themselves see.
+	CountActiveSignalMembers(ctx context.Context, arg CountActiveSignalMembersParams) (int64, error)
 	CountAllocationsForProject(ctx context.Context, arg CountAllocationsForProjectParams) (int64, error)
 	CountControlPanelTOTPBackupCodesRemaining(ctx context.Context, controlPanelUserID int64) (int64, error)
 	CountControlPanelUsers(ctx context.Context) (int64, error)
@@ -98,6 +105,9 @@ type Querier interface {
 	CountPlayersForTenant(ctx context.Context) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
+	// Signals this player has sent into this session in the trailing minute; the
+	// handler rejects once it reaches the per-minute cap.
+	CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
 	// New keys start with the matchmaker scope: matchmaking is a zero-config
@@ -171,6 +181,10 @@ type Querier interface {
 	// Removes invites past their expiry for the current tenant. Called per
 	// tenant by the GC goroutine.
 	DeleteExpiredGameInvitesForTenant(ctx context.Context) (int64, error)
+	// Removes signals past their two-minute expiry for the current tenant. Called
+	// per tenant by the game-session GC sweep so long-lived sessions don't
+	// accumulate expired rows (session/tenant deletion already cascades the rest).
+	DeleteExpiredGameSessionSignalsForTenant(ctx context.Context) (int64, error)
 	// Removes sessions past their expiry for the current tenant. Called once
 	// per tenant by the GC goroutine.
 	DeleteExpiredGameSessionsForTenant(ctx context.Context) (int64, error)
@@ -380,6 +394,7 @@ type Querier interface {
 	InsertAllocationEvent(ctx context.Context, arg InsertAllocationEventParams) error
 	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
 	InsertControlPanelTOTPBackupCodes(ctx context.Context, arg []InsertControlPanelTOTPBackupCodesParams) (int64, error)
+	InsertGameSessionSignal(ctx context.Context, arg InsertGameSessionSignalParams) (int64, error)
 	InsertMatchmakerMatch(ctx context.Context, arg InsertMatchmakerMatchParams) error
 	InsertMatchmakingTicket(ctx context.Context, arg InsertMatchmakingTicketParams) (InsertMatchmakingTicketRow, error)
 	// Bulk-inserts a fresh backup-code set in one round-trip (pgx COPY).
@@ -445,6 +460,10 @@ type Querier interface {
 	// Returns active peers (last_seen within 30 s) with each peer's optional
 	// xuid. RLS on game_session_peer scopes rows to the current tenant.
 	ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error)
+	// Recipient-scoped, cursor-ordered, unexpired signals. The to_player_id filter
+	// plus RLS ensure a player only ever reads signals addressed to them, and the
+	// id > after_id cursor makes repeat polls return only new signals.
+	ListGameSessionSignalsForRecipient(ctx context.Context, arg ListGameSessionSignalsForRecipientParams) ([]ListGameSessionSignalsForRecipientRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
 	// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 	// bucket for the current tenant's project, plus oldest queued ticket and
@@ -498,6 +517,11 @@ type Querier interface {
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
+	// Serializes a player's concurrent signal sends within the transaction so the
+	// per-minute count+insert below can't be raced past the cap under READ
+	// COMMITTED. player_id (project_players.id) is globally unique, so the lock
+	// key never collides across tenants. Released on commit/rollback.
+	LockSignalRate(ctx context.Context, fromPlayerID int64) error
 	// Transaction-scoped advisory lock serializing concurrent writes (put/delete)
 	// to a single storage object so the read-modify-write of the tenant byte
 	// counter can't be raced past. Released on commit/rollback.

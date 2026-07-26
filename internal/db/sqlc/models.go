@@ -362,6 +362,19 @@ type GameSessionPeer struct {
 	LastSeen  pgtype.Timestamptz
 }
 
+type GameSessionSignal struct {
+	ID            int64
+	TenantID      int64
+	SessionID     string
+	FromPlayerID  int64
+	ToPlayerID    int64
+	NegotiationID string
+	Kind          string
+	Payload       string
+	CreatedAt     pgtype.Timestamptz
+	ExpiresAt     pgtype.Timestamptz
+}
+
 type Leaderboard struct {
 	ID        int64
 	TenantID  int64

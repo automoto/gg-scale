@@ -43,6 +43,15 @@ func seedGCFixtures(t *testing.T, c *cluster, token string) int64 {
 		tenantID, projectID, hostID, "gs_"+token, "JC"+token)
 	require.NoError(t, err)
 
+	// Both signals hang off the LIVE session so the reaper (not the session
+	// cascade) is what must remove the expired one.
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session_signal (tenant_id, session_id, from_player_id, to_player_id, negotiation_id, kind, payload, expires_at) VALUES
+		   ($1, $3||'_live', $2, $2, 'neg-exp',  'offer', 'v=0', now() - interval '1 minute'),
+		   ($1, $3||'_live', $2, $2, 'neg-live', 'offer', 'v=0', now() + interval '1 minute')`,
+		tenantID, hostID, "gs_"+token)
+	require.NoError(t, err)
+
 	return tenantID
 }
 
@@ -63,6 +72,7 @@ func TestGameSessionGC_sweep_deletes_only_expired(t *testing.T) {
 
 	assert.Equal(t, 1, countRows(t, c, "game_session", tenantID), "only the live session should remain")
 	assert.Equal(t, 1, countRows(t, c, "game_invite", tenantID), "only the live invite should remain")
+	assert.Equal(t, 1, countRows(t, c, "game_session_signal", tenantID), "only the live signal should remain")
 }
 
 // End-to-end through River: validates the client wiring and, critically, that
@@ -105,4 +115,5 @@ func TestGameSessionGC_runs_via_river(t *testing.T) {
 
 	assert.Equal(t, 1, countRows(t, c, "game_session", tenantID), "river job should delete the expired session")
 	assert.Equal(t, 1, countRows(t, c, "game_invite", tenantID), "river job should delete the expired invite")
+	assert.Equal(t, 1, countRows(t, c, "game_session_signal", tenantID), "river job should delete the expired signal")
 }
