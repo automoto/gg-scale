@@ -185,10 +185,11 @@ func (a *allocatorRecorder) Deallocate(_ context.Context, _ fleet.AllocationID) 
 }
 
 // TestPGQueueListenWakesWorkerOnInsert is the load-bearing assertion for
-// the LISTEN/NOTIFY pivot: a ticket inserted into matchmaking_tickets fires
-// the trigger, the PGQueue listener decodes the payload, the worker wakes,
-// and the bucket is processed — well under the fallback ticker would have
-// fired.
+// the LISTEN/NOTIFY pivot: Enqueue commits the ticket, then sends the
+// post-commit app-side NOTIFY (the per-row AFTER INSERT trigger was removed
+// in 0024), the PGQueue listener decodes the payload, the worker wakes, and
+// the bucket is processed — well under the one-hour fallback ticker, proving
+// the wake came from NOTIFY and not the fallback tick.
 func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	pool := startMigratedDB(t)
 	appPool := db.NewPool(pool)
@@ -241,6 +242,83 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	require.Eventually(t, func() bool { return alloc.called.Load() == 1 },
 		2*time.Second, 20*time.Millisecond,
 		"worker did not wake within 2s — LISTEN/NOTIFY round-trip failed")
+}
+
+// TestMatchmakerNotifyTriggerRemoved proves migration 0024 applied: the
+// in-transaction per-row NOTIFY trigger and its function are gone, so the
+// enqueue commit no longer takes the cluster-global notify lock. Wakeups now
+// come from the app-side post-commit NOTIFY instead.
+func TestMatchmakerNotifyTriggerRemoved(t *testing.T) {
+	pool := startMigratedDB(t)
+	ctx := context.Background()
+
+	var triggers int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM pg_trigger WHERE tgname = 'matchmaking_tickets_notify'`).Scan(&triggers))
+	assert.Equal(t, 0, triggers, "matchmaking_tickets_notify trigger must be dropped by 0024")
+
+	var funcs int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM pg_proc WHERE proname = 'notify_matchmaker_ticket'`).Scan(&funcs))
+	assert.Equal(t, 0, funcs, "notify_matchmaker_ticket() must be dropped by 0024")
+}
+
+// TestPGQueueEnqueueDebounceDoesNotStrandTickets is the safety net for the
+// debounce: two tickets enqueued to the same bucket in quick succession may
+// have the second wakeup coalesced away, but neither ticket is ever stranded.
+// With a short fallback tick the worker still processes both — this proves a
+// debounced (or lost) NOTIFY only defers a ticket to the fallback, never drops
+// it.
+func TestPGQueueEnqueueDebounceDoesNotStrandTickets(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID, playerA, playerB int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-debounce') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-a') RETURNING id`,
+		tenantID, projectID).Scan(&playerA))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-b') RETURNING id`,
+		tenantID, projectID).Scan(&playerB))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+
+	queue := matchmaker.NewPGQueue(appPool)
+	alloc := &allocatorRecorder{address: "10.0.0.9:7777"}
+	w := matchmaker.NewWorker(queue, alloc, nil, matchmaker.WorkerConfig{
+		// Short fallback so a coalesced-away second wakeup is still caught
+		// quickly, keeping the test deterministic.
+		Interval: 250 * time.Millisecond,
+	})
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(runCtx)
+	time.Sleep(100 * time.Millisecond)
+
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	// Two players, same bucket, back to back. The second enqueue's NOTIFY
+	// falls inside the 100ms debounce window and is very likely coalesced.
+	for _, playerID := range []int64{playerA, playerB} {
+		_, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+			TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+			PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
+		})
+		require.NoError(t, err)
+	}
+
+	require.Eventually(t, func() bool { return alloc.called.Load() == 2 },
+		3*time.Second, 20*time.Millisecond,
+		"both tickets must be matched even if the second wakeup was debounced")
 }
 
 // TestPGQueueConcurrentClaimsCannotStrandTickets is the C1 regression. Two

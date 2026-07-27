@@ -20,17 +20,35 @@ import (
 
 const notifyChannel = "matchmaker_ticket"
 
+// notifyDebounce coalesces post-commit wakeups to at most one per bucket per
+// interval. Kept well under the worker's fallback ticker (default 5s) so a
+// debounced enqueue is picked up promptly.
+const notifyDebounce = 100 * time.Millisecond
+
 // PGQueue is the production Queue, backed by Postgres. Tenant-scoped reads
 // (Enqueue, Get, Cancel) run inside db.Pool.Q so RLS receives app.tenant_id;
 // privileged paths called by the worker run inside db.Pool.BootstrapQ.
 type PGQueue struct {
 	pool     *db.Pool
 	failures FailureRecorder
+	notify   *notifyLimiter
 }
 
 // NewPGQueue returns a Queue backed by the given pool.
 func NewPGQueue(pool *db.Pool) *PGQueue {
-	return &PGQueue{pool: pool}
+	return &PGQueue{pool: pool, notify: newNotifyLimiter(notifyDebounce)}
+}
+
+// ticketNotifyPayload is the matchmaker_ticket NOTIFY body. Its shape mirrors
+// what the (now removed) matchmaking_tickets_notify trigger emitted so the
+// Listen consumer is unchanged.
+type ticketNotifyPayload struct {
+	TenantID  int64  `json:"tenant_id"`
+	ProjectID int64  `json:"project_id"`
+	Mode      string `json:"mode"`
+	FleetID   *int64 `json:"fleet_id"`
+	Region    string `json:"region"`
+	GameMode  string `json:"game_mode"`
 }
 
 // WithFailureRecorder wires a hook that counts tickets flipped to 'failed' by
@@ -140,7 +158,41 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		return nil, fmt.Errorf("matchmaker: enqueue: %w", err)
 	}
 	q.recordFailures(failureReasonExpired, expiredStale)
+	q.notifyEnqueued(ctx, ticket)
 	return ticket, nil
+}
+
+// notifyEnqueued wakes matchmaker workers for the ticket's bucket after the
+// enqueue has committed. Replaces the per-row AFTER INSERT trigger that ran
+// pg_notify inside the enqueue transaction (taking the cluster-global notify
+// lock through the commit fsync). Debounced per bucket; loss is tolerated by
+// the worker's fallback ticker, so send failures are logged and swallowed.
+func (q *PGQueue) notifyEnqueued(ctx context.Context, t *Ticket) {
+	var fleetID *int64
+	if t.FleetID != 0 {
+		f := t.FleetID
+		fleetID = &f
+	}
+	payload, err := json.Marshal(ticketNotifyPayload{
+		TenantID:  t.TenantID,
+		ProjectID: t.ProjectID,
+		Mode:      string(t.Mode),
+		FleetID:   fleetID,
+		Region:    t.Region,
+		GameMode:  t.GameMode,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "matchmaker: marshal notify payload", "err", err)
+		return
+	}
+	// Identical buckets marshal to identical payloads, so the payload string
+	// is itself the debounce key.
+	if q.notify != nil && !q.notify.allow(string(payload)) {
+		return
+	}
+	if err := q.pool.Notify(ctx, notifyChannel, string(payload)); err != nil {
+		slog.WarnContext(ctx, "matchmaker: post-commit notify failed", "err", err)
+	}
 }
 
 // activeTicketError builds the TicketActiveError for a rejected duplicate

@@ -336,10 +336,16 @@ func (c *Config) checkAgonesAuth() error {
 
 // warnLowDBPool logs a non-fatal hint when the pool is small for a deployment
 // that also runs the matchmaker (which parks the LISTEN socket on one slot).
+//
+// Note on the server-side connection budget: the matchmaker LISTEN socket is
+// acquired from the pool, so it counts within DB_MAX_CONNS. River's notifier
+// is not — riverpgxv5 does Acquire() then Hijack(), removing that connection
+// from pgxpool tracking, so actual Postgres connections per process are
+// DB_MAX_CONNS + 1 when River is running. Size max_connections accordingly.
 func (c *Config) warnLowDBPool() {
 	if c.DBMaxConns < 8 && c.FleetBackend != "" {
 		slog.Warn("DB_MAX_CONNS is low for an enabled matchmaker", "value", c.DBMaxConns,
-			"hint", "the LISTEN socket holds one slot, leaving DB_MAX_CONNS-1 for request traffic + cleanup")
+			"hint", "the LISTEN socket holds one pool slot; River's hijacked notifier adds one more beyond DB_MAX_CONNS")
 	}
 }
 

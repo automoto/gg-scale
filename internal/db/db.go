@@ -178,6 +178,19 @@ func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payloa
 	}
 }
 
+// Notify sends a NOTIFY on channel with payload on a pooled connection,
+// outside any transaction. Use this for post-commit wakeups: issuing NOTIFY
+// inside a writing transaction takes a cluster-global lock held through the
+// commit's fsync, serializing those commits. Sending it afterwards on its own
+// keeps that lock off the write path. Best-effort by design — callers that
+// have a fallback poll can log and ignore the error.
+func (p *Pool) Notify(ctx context.Context, channel, payload string) error {
+	if _, err := p.pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload); err != nil {
+		return fmt.Errorf("notify %s: %w", channel, err)
+	}
+	return nil
+}
+
 // BootstrapQ runs fn inside a transaction before a tenant context exists.
 // Keep this for narrow bootstrap paths such as control panel tenant creation;
 // tenant-scoped request handlers should use Q so RLS receives app.tenant_id.
