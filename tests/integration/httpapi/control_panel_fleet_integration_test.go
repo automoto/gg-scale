@@ -414,6 +414,51 @@ func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing
 	assert.Contains(t, body, "queued")
 }
 
+// The dedicated-server view pages (fleet config, allocations, matchmaker
+// queue) must require the per-object read scope, not just the coarse
+// project:manage route gate. A tenant_admin holds project:manage but not
+// project:*:fleet/allocation/matchmaker, so must be denied; an owner may view.
+func TestControlPanelFleet_view_pages_require_object_read_scope(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-scope")
+
+	// Seed memberships before the server so its authorizer loads them.
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+
+	backend := newStubBackend("stub")
+	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
+
+	base := fmt.Sprintf("%s/v1/control-panel/tenants/%d/projects/%d", srv.URL, tenantID, projectID)
+	pages := []string{base + "/matchmaker", base + "/allocations", base + "/fleets"}
+
+	adminCookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	for _, p := range pages {
+		assert.Equal(t, http.StatusForbidden, getStatusWithCookie(t, p, adminCookie),
+			"tenant admin must not view %s", p)
+	}
+
+	ownerCookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	for _, p := range pages {
+		assert.Equal(t, http.StatusOK, getStatusWithCookie(t, p, ownerCookie),
+			"tenant owner may view %s", p)
+	}
+}
+
+func getStatusWithCookie(t *testing.T, urlStr string, cookie *http.Cookie) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, urlStr, nil)
+	require.NoError(t, err)
+	req.AddCookie(cookie)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	_, _ = io.ReadAll(resp.Body)
+	return resp.StatusCode
+}
+
 func TestControlPanelPlugins_page_no_backend_shows_empty_state(t *testing.T) {
 	c := startCluster(t)
 	platformID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", true)

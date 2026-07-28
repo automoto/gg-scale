@@ -346,6 +346,18 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
 		return
 	}
+	// Confirm the allocation belongs to this project before mutating it. RLS
+	// already confines the row to the tenant, but the authorization object is
+	// project-scoped, so a project boundary must be enforced here too — the
+	// read paths do this via loadAllocationDetail; the mutating path must match.
+	if _, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID); err != nil {
+		if errors.Is(err, fleet.ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
+		return
+	}
 	if err := h.fleet.Deallocate(tenantCtx, fleet.AllocationID(allocID)); err != nil {
 		slog.ErrorContext(r.Context(), "manual deallocate failed", "err", err, "alloc", allocID)
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)

@@ -82,9 +82,12 @@ WHERE id = sqlc.arg(id)
   AND revoked_at IS NULL;
 
 -- name: RevokeControlPanelInvitation :exec
+-- Runs under the RLS-bypassing bootstrap role, so scope to the tenant in SQL
+-- rather than relying solely on the caller's precheck.
 UPDATE control_panel_invitations
 SET revoked_at = now()
 WHERE id = sqlc.arg(id)
+  AND tenant_id = sqlc.arg(tenant_id)
   AND accepted_at IS NULL
   AND revoked_at IS NULL;
 

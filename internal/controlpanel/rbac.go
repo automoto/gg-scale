@@ -69,6 +69,32 @@ func (h *Handler) requireControlPanelFeature(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
+// requireProjectRead gates a project-scoped read route on ActionRead for the
+// object built from the {projectID} path param. The dedicated-server GET pages
+// (fleet config, allocations, matchmaker queue) sit under the coarse
+// project:manage route gate, which tenant_admin holds without the finer
+// fleet/allocation/matchmaker scopes; this restores the per-object read check
+// the write handlers already enforce, so a role can't view infrastructure it
+// has no grant to read.
+func (h *Handler) requireProjectRead(objectFor func(int64) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tenantID, ok := parsePathID(w, r, "tenantID")
+			if !ok {
+				return
+			}
+			projectID, ok := parsePathID(w, r, "projectID")
+			if !ok {
+				return
+			}
+			if !h.requireControlPanelPermission(w, r, tenantID, objectFor(projectID), rbac.ActionRead) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func (h *Handler) requireControlPanelFleetMutation(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
 	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectFleetObject(projectID), rbac.ActionManage) {
 		return false

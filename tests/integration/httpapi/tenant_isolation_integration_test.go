@@ -4,7 +4,6 @@ package httpapi_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -61,24 +60,18 @@ func TestTenantIsolation_leaderboard_cross_tenant_fetch_returns_404(t *testing.T
 		"kb", tokB, map[string]int64{"score": 200})
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
+	// A leaderboard outside the caller's project/tenant resolves to no
+	// accessible row → 404 (the same not-found contract submit already returned
+	// under RLS), so a tenant can't even confirm a sibling board exists.
 	resp, body := authedReq(t, http.MethodGet,
 		fmt.Sprintf("%s/v1/leaderboards/%d/top?limit=10", srv.URL, lbA),
 		"kb", tokB, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var topCross struct {
-		Entries []struct {
-			Score int64 `json:"score"`
-		} `json:"entries"`
-	}
-	require.NoError(t, json.Unmarshal(body, &topCross))
-	assert.Empty(t, topCross.Entries, "tenant B must not see tenant A leaderboard rows")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "tenant B must not read tenant A's board: %s", body)
 
 	resp, body = authedReq(t, http.MethodGet,
 		fmt.Sprintf("%s/v1/leaderboards/%d/top?limit=10", srv.URL, lbB),
 		"ka", tokA, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	require.NoError(t, json.Unmarshal(body, &topCross))
-	assert.Empty(t, topCross.Entries, "tenant A must not see tenant B leaderboard rows")
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "tenant A must not read tenant B's board: %s", body)
 
 	resp, body = authedReq(t, http.MethodGet,
 		fmt.Sprintf("%s/v1/leaderboards/%d/top?limit=10", srv.URL, lbA),

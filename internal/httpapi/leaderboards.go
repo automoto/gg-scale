@@ -120,10 +120,16 @@ func leaderboardSubmit(d Deps) func(context.Context, *leaderboardSubmitInput) (*
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
+		projectID, ok := playerauth.ProjectIDFromContext(ctx)
+		if !ok {
+			return nil, huma.Error401Unauthorized("no player project")
+		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if _, err := q.GetLeaderboard(ctx, in.ID); err != nil {
+			// Project-scoped: a leaderboard in a sibling project resolves to no
+			// rows, so the score can never land on another project's board.
+			if _, err := q.GetLeaderboard(ctx, sqlcgen.GetLeaderboardParams{ID: in.ID, ProjectID: projectID}); err != nil {
 				return err
 			}
 			_, err := q.SubmitScore(ctx, sqlcgen.SubmitScoreParams{
@@ -153,6 +159,15 @@ func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leader
 	return func(ctx context.Context, in *leaderboardTopInput) (*leaderboardTopOutput, error) {
 		limit := parseLimit(in.Limit, leaderboardTopCachedLimit, 100)
 		tenantID, _ := db.TenantFromContext(ctx)
+		projectID, ok := playerauth.ProjectIDFromContext(ctx)
+		if !ok {
+			return nil, huma.Error401Unauthorized("no player project")
+		}
+		// Gate before the cache: a sibling-project board must 404, never be
+		// served from a cache entry keyed only by leaderboard id.
+		if err := leaderboardInProject(ctx, d, in.ID, projectID); err != nil {
+			return nil, err
+		}
 
 		cacheable := d.Cache != nil && limit == leaderboardTopCachedLimit
 		cacheKey := leaderboardTopCacheKey(tenantID, in.ID, limit)
@@ -165,7 +180,7 @@ func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leader
 			}
 		}
 
-		entries, err := topFromPostgres(ctx, d, in.ID, limit)
+		entries, err := topFromPostgres(ctx, d, in.ID, projectID, limit)
 		if err != nil {
 			return nil, serverError(ctx, "leaderboard top: postgres", err)
 		}
@@ -188,8 +203,15 @@ func leaderboardAroundMe(d Deps) func(context.Context, *leaderboardAroundMeInput
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
+		projectID, ok := playerauth.ProjectIDFromContext(ctx)
+		if !ok {
+			return nil, huma.Error401Unauthorized("no player project")
+		}
+		if err := leaderboardInProject(ctx, d, in.ID, projectID); err != nil {
+			return nil, err
+		}
 
-		entries, selfRank, err := aroundMeFromPostgres(ctx, d, in.ID, userID, int64(radius))
+		entries, selfRank, err := aroundMeFromPostgres(ctx, d, in.ID, projectID, userID, int64(radius))
 		if err != nil {
 			return nil, serverError(ctx, "leaderboard around-me", err)
 		}
@@ -197,11 +219,28 @@ func leaderboardAroundMe(d Deps) func(context.Context, *leaderboardAroundMeInput
 	}
 }
 
-func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int32) ([]leaderboardEntry, error) {
+// leaderboardInProject returns a huma 404 unless leaderboard id belongs to the
+// caller's project (tenant scoping comes from RLS). Run this before any cached
+// read so a sibling-project board is never served from cache.
+func leaderboardInProject(ctx context.Context, d Deps, id, projectID int64) error {
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+		_, e := sqlcgen.New(tx).GetLeaderboard(ctx, sqlcgen.GetLeaderboardParams{ID: id, ProjectID: projectID})
+		return e
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return huma.Error404NotFound("leaderboard not found")
+	}
+	if err != nil {
+		return serverError(ctx, "leaderboard lookup", err)
+	}
+	return nil
+}
+
+func topFromPostgres(ctx context.Context, d Deps, leaderboardID, projectID int64, limit int32) ([]leaderboardEntry, error) {
 	out := make([]leaderboardEntry, 0)
 	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		rows, qerr := sqlcgen.New(tx).TopN(ctx, sqlcgen.TopNParams{
-			LeaderboardID: leaderboardID, Limit: limit,
+			LeaderboardID: leaderboardID, ProjectID: projectID, RowLimit: limit,
 		})
 		if qerr != nil {
 			return qerr
@@ -216,14 +255,14 @@ func topFromPostgres(ctx context.Context, d Deps, leaderboardID int64, limit int
 	return out, err
 }
 
-func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, radius int64) ([]leaderboardEntry, int64, error) {
+func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, projectID, userID, radius int64) ([]leaderboardEntry, int64, error) {
 	entries := make([]leaderboardEntry, 0)
 	selfRank := int64(-1)
 
 	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		rank, rerr := q.LeaderboardUserRank(ctx, sqlcgen.LeaderboardUserRankParams{
-			LeaderboardID: leaderboardID, PlayerID: userID,
+			LeaderboardID: leaderboardID, ProjectID: projectID, PlayerID: userID,
 		})
 		if errors.Is(rerr, pgx.ErrNoRows) {
 			return nil
@@ -239,6 +278,7 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, userID, ra
 		}
 		rows, qerr := q.LeaderboardRangeByRank(ctx, sqlcgen.LeaderboardRangeByRankParams{
 			LeaderboardID: leaderboardID,
+			ProjectID:     projectID,
 			RankLow:       low,
 			RankHigh:      rank + radius,
 		})

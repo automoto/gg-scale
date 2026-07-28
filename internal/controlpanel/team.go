@@ -213,9 +213,12 @@ func (h *Handler) listPlatformTeam(ctx context.Context) ([]TeamMemberView, []Pen
 // revokeInvite marks an invite revoked. Caller must have already verified
 // that the actor is allowed to revoke this invite (platform admin always,
 // tenant admin only if the invite's tenant matches).
-func (h *Handler) revokeInvite(ctx context.Context, actorID, inviteID int64) error {
+func (h *Handler) revokeInvite(ctx context.Context, actorID, tenantID, inviteID int64) error {
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		if err := sqlcgen.New(tx).RevokeControlPanelInvitation(ctx, inviteID); err != nil {
+		if err := sqlcgen.New(tx).RevokeControlPanelInvitation(ctx, sqlcgen.RevokeControlPanelInvitationParams{
+			ID:       inviteID,
+			TenantID: &tenantID,
+		}); err != nil {
 			return err
 		}
 		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.invite.revoke", strconv.FormatInt(inviteID, 10), nil)

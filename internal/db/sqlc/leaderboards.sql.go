@@ -52,16 +52,22 @@ SELECT id, sort_order
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
+  AND project_id = $2
   AND deleted_at IS NULL
 `
+
+type GetLeaderboardParams struct {
+	ID        int64
+	ProjectID int64
+}
 
 type GetLeaderboardRow struct {
 	ID        int64
 	SortOrder string
 }
 
-func (q *Queries) GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error) {
-	row := q.db.QueryRow(ctx, getLeaderboard, id)
+func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) (GetLeaderboardRow, error) {
+	row := q.db.QueryRow(ctx, getLeaderboard, arg.ID, arg.ProjectID)
 	var i GetLeaderboardRow
 	err := row.Scan(&i.ID, &i.SortOrder)
 	return i, err
@@ -115,21 +121,23 @@ WITH ranked AS (
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
-      AND le.leaderboard_id = $1
+      AND le.leaderboard_id = $3
       AND l.tenant_id = le.tenant_id
+      AND l.project_id = $4
       AND l.deleted_at IS NULL
     GROUP BY player_id
 )
 SELECT player_id, best_score, r::bigint AS rank
 FROM ranked
-WHERE r BETWEEN $2::bigint AND $3::bigint
+WHERE r BETWEEN $1::bigint AND $2::bigint
 ORDER BY r
 `
 
 type LeaderboardRangeByRankParams struct {
-	LeaderboardID int64
 	RankLow       int64
 	RankHigh      int64
+	LeaderboardID int64
+	ProjectID     int64
 }
 
 type LeaderboardRangeByRankRow struct {
@@ -139,7 +147,12 @@ type LeaderboardRangeByRankRow struct {
 }
 
 func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error) {
-	rows, err := q.db.Query(ctx, leaderboardRangeByRank, arg.LeaderboardID, arg.RankLow, arg.RankHigh)
+	rows, err := q.db.Query(ctx, leaderboardRangeByRank,
+		arg.RankLow,
+		arg.RankHigh,
+		arg.LeaderboardID,
+		arg.ProjectID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -170,23 +183,25 @@ WITH ranked AS (
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
-      AND le.leaderboard_id = $1
+      AND le.leaderboard_id = $2
       AND l.tenant_id = le.tenant_id
+      AND l.project_id = $3
       AND l.deleted_at IS NULL
     GROUP BY player_id
 )
 SELECT r::bigint AS rank
 FROM ranked
-WHERE player_id = $2
+WHERE player_id = $1
 `
 
 type LeaderboardUserRankParams struct {
-	LeaderboardID int64
 	PlayerID      int64
+	LeaderboardID int64
+	ProjectID     int64
 }
 
 func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error) {
-	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.LeaderboardID, arg.PlayerID)
+	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.PlayerID, arg.LeaderboardID, arg.ProjectID)
 	var rank int64
 	err := row.Scan(&rank)
 	return rank, err
@@ -293,18 +308,20 @@ JOIN leaderboards l ON l.id = le.leaderboard_id
 WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND le.leaderboard_id = $1
   AND l.tenant_id = le.tenant_id
+  AND l.project_id = $2
   AND l.deleted_at IS NULL
 GROUP BY le.player_id
 ORDER BY
   CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
   CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
   le.player_id ASC
-LIMIT $2
+LIMIT $3
 `
 
 type TopNParams struct {
 	LeaderboardID int64
-	Limit         int32
+	ProjectID     int64
+	RowLimit      int32
 }
 
 type TopNRow struct {
@@ -314,7 +331,7 @@ type TopNRow struct {
 }
 
 func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
-	rows, err := q.db.Query(ctx, topN, arg.LeaderboardID, arg.Limit)
+	rows, err := q.db.Query(ctx, topN, arg.LeaderboardID, arg.ProjectID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}

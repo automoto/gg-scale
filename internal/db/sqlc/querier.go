@@ -295,7 +295,7 @@ type Querier interface {
 	// Most-specific-wins: a project-scoped row overrides a tenant-wide row for the
 	// same kind. Used by the invite throttle.
 	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)
-	GetLeaderboard(ctx context.Context, id int64) (GetLeaderboardRow, error)
+	GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) (GetLeaderboardRow, error)
 	GetLeaderboardForControlPanel(ctx context.Context, arg GetLeaderboardForControlPanelParams) (GetLeaderboardForControlPanelRow, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
@@ -624,7 +624,9 @@ type Querier interface {
 	RevokeActivePlayerSessions(ctx context.Context, arg RevokeActivePlayerSessionsParams) (int64, error)
 	RevokeAllControlPanelSessionsForUser(ctx context.Context, controlPanelUserID int64) error
 	RevokeAllPlayerAccountSessions(ctx context.Context, playerAccountID pgtype.UUID) error
-	RevokeControlPanelInvitation(ctx context.Context, id int64) error
+	// Runs under the RLS-bypassing bootstrap role, so scope to the tenant in SQL
+	// rather than relying solely on the caller's precheck.
+	RevokeControlPanelInvitation(ctx context.Context, arg RevokeControlPanelInvitationParams) error
 	RevokeControlPanelSession(ctx context.Context, id int64) error
 	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
 	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.

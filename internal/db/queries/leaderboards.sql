@@ -2,7 +2,8 @@
 SELECT id, sort_order
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
+  AND id = sqlc.arg(id)
+  AND project_id = sqlc.arg(project_id)
   AND deleted_at IS NULL;
 
 -- name: CreateLeaderboard :one
@@ -30,15 +31,16 @@ SELECT le.player_id,
 FROM leaderboard_entries le
 JOIN leaderboards l ON l.id = le.leaderboard_id
 WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND le.leaderboard_id = $1
+  AND le.leaderboard_id = sqlc.arg(leaderboard_id)
   AND l.tenant_id = le.tenant_id
+  AND l.project_id = sqlc.arg(project_id)
   AND l.deleted_at IS NULL
 GROUP BY le.player_id
 ORDER BY
   CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
   CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
   le.player_id ASC
-LIMIT $2;
+LIMIT sqlc.arg(row_limit);
 
 -- name: CountEntries :one
 SELECT COUNT(*)::bigint
@@ -58,14 +60,15 @@ WITH ranked AS (
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
-      AND le.leaderboard_id = $1
+      AND le.leaderboard_id = sqlc.arg(leaderboard_id)
       AND l.tenant_id = le.tenant_id
+      AND l.project_id = sqlc.arg(project_id)
       AND l.deleted_at IS NULL
     GROUP BY player_id
 )
 SELECT r::bigint AS rank
 FROM ranked
-WHERE player_id = $2;
+WHERE player_id = sqlc.arg(player_id);
 
 -- name: LeaderboardRangeByRank :many
 WITH ranked AS (
@@ -80,8 +83,9 @@ WITH ranked AS (
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
-      AND le.leaderboard_id = $1
+      AND le.leaderboard_id = sqlc.arg(leaderboard_id)
       AND l.tenant_id = le.tenant_id
+      AND l.project_id = sqlc.arg(project_id)
       AND l.deleted_at IS NULL
     GROUP BY player_id
 )

@@ -20,6 +20,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/remoteaddr"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -391,6 +392,9 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
+		return
+	}
 	if !webutil.ParseForm(w, r) {
 		return
 	}
@@ -508,6 +512,9 @@ func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
+		return
+	}
 	playerID, ok := parsePathID(w, r, "playerID")
 	if !ok {
 		return
@@ -572,6 +579,9 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	}
 	projectID, ok := parsePathID(w, r, "projectID")
 	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
 		return
 	}
 	playerID, ok := parsePathID(w, r, "playerID")
@@ -667,6 +677,9 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 	}
 	projectID, ok := parsePathID(w, r, "projectID")
 	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
 		return
 	}
 	playerID, ok := parsePathID(w, r, "playerID")

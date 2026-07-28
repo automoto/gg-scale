@@ -212,21 +212,35 @@ func New(d Deps) http.Handler {
 			// can't configure a feature the process refuses to run.
 			r.Group(func(r chi.Router) {
 				r.Use(h.requireFleetFeature)
-				r.Get("/projects/{projectID}/matchmaker", h.matchmakerQueuePage)
-				r.Get("/projects/{projectID}/matchmaker/table", h.matchmakerQueueFragment)
-				r.Get("/projects/{projectID}/allocations", h.allocationsListPage)
-				r.Get("/projects/{projectID}/allocations/table", h.allocationsListFragment)
-				r.Get("/projects/{projectID}/allocations/new", h.allocationsNewPage)
+				// Read-only views require the per-object read capability
+				// (project:*:matchmaker / :allocation / :fleet), which
+				// tenant_admin lacks. Mutations keep their own stronger checks
+				// in-handler and stay outside the read gate because in this
+				// RBAC `manage` does not imply `read`.
+				r.Group(func(r chi.Router) {
+					r.Use(h.requireProjectRead(rbac.ProjectMatchmakerObject))
+					r.Get("/projects/{projectID}/matchmaker", h.matchmakerQueuePage)
+					r.Get("/projects/{projectID}/matchmaker/table", h.matchmakerQueueFragment)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(h.requireProjectRead(rbac.ProjectAllocationObject))
+					r.Get("/projects/{projectID}/allocations", h.allocationsListPage)
+					r.Get("/projects/{projectID}/allocations/table", h.allocationsListFragment)
+					r.Get("/projects/{projectID}/allocations/new", h.allocationsNewPage)
+					r.Get("/projects/{projectID}/allocations/{allocID}", h.allocationsDetailPage)
+					r.Get("/projects/{projectID}/allocations/{allocID}/events", h.allocationsDetailFragment)
+					r.Get("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocatePage)
+				})
 				r.Post("/projects/{projectID}/allocations", h.allocationsAllocateHandler)
-				r.Get("/projects/{projectID}/allocations/{allocID}", h.allocationsDetailPage)
-				r.Get("/projects/{projectID}/allocations/{allocID}/events", h.allocationsDetailFragment)
-				r.Get("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocatePage)
 				r.Post("/projects/{projectID}/allocations/{allocID}/deallocate", h.allocationsDeallocateHandler)
-				r.Get("/projects/{projectID}/fleets", h.fleetsListPage)
-				r.Get("/projects/{projectID}/fleets/new", h.fleetsNewPage)
-				r.Get("/projects/{projectID}/fleets/new/form", h.fleetsNewFormFragment)
+				r.Group(func(r chi.Router) {
+					r.Use(h.requireProjectRead(rbac.ProjectFleetObject))
+					r.Get("/projects/{projectID}/fleets", h.fleetsListPage)
+					r.Get("/projects/{projectID}/fleets/new", h.fleetsNewPage)
+					r.Get("/projects/{projectID}/fleets/new/form", h.fleetsNewFormFragment)
+					r.Get("/projects/{projectID}/fleets/{fleetID}", h.fleetsEditPage)
+				})
 				r.Post("/projects/{projectID}/fleets", h.fleetsCreateHandler)
-				r.Get("/projects/{projectID}/fleets/{fleetID}", h.fleetsEditPage)
 				r.Post("/projects/{projectID}/fleets/{fleetID}", h.fleetsUpdateHandler)
 				r.Post("/projects/{projectID}/fleets/{fleetID}/delete", h.fleetsDeleteHandler)
 				r.Get("/fleet/backends", h.fleetBackendsPage)

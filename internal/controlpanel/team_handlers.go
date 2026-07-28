@@ -165,7 +165,7 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := h.revokeInvite(r.Context(), session.User.ID, inviteID); err != nil {
+	if err := h.revokeInvite(r.Context(), session.User.ID, tenantID, inviteID); err != nil {
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}

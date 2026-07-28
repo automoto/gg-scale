@@ -238,6 +238,44 @@ func TestControlPanelCreateTenant_non_platform_admin_denied(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, pageResp.StatusCode, "the new-tenant page is platform-admin only")
 }
 
+// Deny-by-default at the route tier: a plain tenant member (no admin/owner
+// role, not a platform admin) must be rejected by every admin/platform
+// mutation. This catches the Bug-2 class end to end — a sensitive route
+// slipping into a weaker middleware group would let the member through.
+func TestControlPanelDenyByDefault_member_cannot_reach_admin_mutations(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "deny")
+	memberID := seedControlPanelUser(t, c, "member@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, memberID, tenantID, "member")
+	var playerID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1, $2, 'victim') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "member@example.com", "correct-horse-battery-staple")
+
+	base := srv.URL + "/v1/control-panel"
+	cases := []struct {
+		name string
+		path string
+		form url.Values
+	}{
+		{"create tenant", "/tenants", url.Values{"tenant_name": {"x"}, "project_name": {"y"}, "label": {"z"}}},
+		{"create project", fmt.Sprintf("/tenants/%d/projects", tenantID), url.Values{"name": {"x"}}},
+		{"create api key", fmt.Sprintf("/tenants/%d/api-keys", tenantID), url.Values{"key_type": {"publishable"}, "label": {"x"}}},
+		{"disable player", fmt.Sprintf("/tenants/%d/projects/%d/players/%d/disable", tenantID, projectID, playerID), url.Values{}},
+		{"change tier", fmt.Sprintf("/tenants/%d/settings/tier", tenantID), url.Values{"tier": {"1"}}},
+		{"invite teammate", fmt.Sprintf("/tenants/%d/team/invite", tenantID), url.Values{"email": {"a@example.com"}, "role": {"admin"}}},
+	}
+	for _, tc := range cases {
+		tc.form.Set("_csrf", csrf)
+		resp := postForm(t, noRedirectClient(), base+tc.path, tc.form, cookie)
+		resp.Body.Close()
+		assert.Equalf(t, http.StatusForbidden, resp.StatusCode, "member must be denied: %s", tc.name)
+	}
+}
+
 func TestControlPanelTenantIsolation_second_user_cannot_see_first_users_tenant(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")

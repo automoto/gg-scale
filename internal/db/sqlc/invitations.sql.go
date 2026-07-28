@@ -946,12 +946,20 @@ const revokeControlPanelInvitation = `-- name: RevokeControlPanelInvitation :exe
 UPDATE control_panel_invitations
 SET revoked_at = now()
 WHERE id = $1
+  AND tenant_id = $2
   AND accepted_at IS NULL
   AND revoked_at IS NULL
 `
 
-func (q *Queries) RevokeControlPanelInvitation(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, revokeControlPanelInvitation, id)
+type RevokeControlPanelInvitationParams struct {
+	ID       int64
+	TenantID *int64
+}
+
+// Runs under the RLS-bypassing bootstrap role, so scope to the tenant in SQL
+// rather than relying solely on the caller's precheck.
+func (q *Queries) RevokeControlPanelInvitation(ctx context.Context, arg RevokeControlPanelInvitationParams) error {
+	_, err := q.db.Exec(ctx, revokeControlPanelInvitation, arg.ID, arg.TenantID)
 	return err
 }
 
