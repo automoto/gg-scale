@@ -194,13 +194,19 @@ templ HomePage(vm HomeView) {
 				<h1>Tenants</h1>
 				<p class="subtitle">Tenants you have access to.</p>
 			</div>
-			<a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+			if vm.IsPlatformAdmin {
+				<a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+			}
 		</div>
 		<section class="card">
 			if len(vm.Tenants) == 0 {
 				<div class="empty-state">
 					<p>No tenants yet.</p>
-					<p><a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">Create your first tenant</a></p>
+					if vm.IsPlatformAdmin {
+						<p><a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">Create your first tenant</a></p>
+					} else {
+						<p>Ask a platform admin to invite you to a tenant.</p>
+					}
 				</div>
 			} else {
 				<table class="data-table">
@@ -2472,6 +2478,26 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 					</label>
 					<button type="submit" class="btn-inline">Save tier</button>
 				</form>
+				if len(vm.AdminFeatureGrants) > 0 {
+					<h3>Feature grants</h3>
+					for _, f := range vm.AdminFeatureGrants {
+						<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/features") } class="settings-form" data-confirm="Change this tenant's feature grant?">
+							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+							<input type="hidden" name="feature" value={ f.Value }/>
+							if f.Enabled {
+								<input type="hidden" name="enabled" value="off"/>
+								<span>{ f.Label } — <strong>on</strong></span>
+								<button type="submit" class="btn-inline">Disable</button>
+							} else if f.EnvAllowed {
+								<input type="hidden" name="enabled" value="on"/>
+								<span>{ f.Label } — off</span>
+								<button type="submit" class="btn-inline">Enable</button>
+							} else {
+								<span>{ f.Label } — off <span class="muted">(server switch off)</span></span>
+							}
+						</form>
+					}
+				}
 			}
 			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
 		</section>

@@ -404,6 +404,20 @@ type TenantSettingsView struct {
 	UpgradeTargets    []FeatureOptionView // class targets above the current tier
 	FeatureOptions    []FeatureOptionView
 	CanRequestUpgrade bool
+	// AdminFeatureGrants lets a platform admin toggle a tenant's feature grants
+	// directly (mirroring the direct tier change). Rendered only when
+	// IsPlatformAdmin is set.
+	AdminFeatureGrants []AdminFeatureGrantView
+}
+
+// AdminFeatureGrantView is one directly-grantable feature shown to a platform
+// admin, with its current enabled state and whether the server-side switch
+// permits serving it.
+type AdminFeatureGrantView struct {
+	Value      string
+	Label      string
+	Enabled    bool
+	EnvAllowed bool
 }
 
 // FeatureOptionView is one requestable feature offered in the change-request

@@ -28,12 +28,16 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/httpapi"
 	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/tenant"
 )
 
-const branchPlayerLimit = int64(250_000)
+// branchPlayerLimit is the registered-player ceiling for the class-0 tenants
+// these tests provision, derived from the live ladder so a tier rework can't
+// silently strand the quota assertions.
+var branchPlayerLimit = quota.LimitsForClass(tenant.Tier0).Players
 
 func tenantProjectCreateURL(base string, tenantID int64) string {
 	return fmt.Sprintf("%s/v1/control-panel/tenants/%d/projects", base, tenantID)
@@ -316,7 +320,14 @@ func TestBranchFollowup_player_quota_caps_all_growth_and_preserves_existing_path
 	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
 	targetPlayer := seedExternalIDOnlyPlayer(t, c, tenantID, projectID, "existing-link-target")
 
-	srv, rec := newControlPanelAndPlayerServer(t, c)
+	// Allow-all limiter: this test probes the quota boundary with many
+	// back-to-back auth/invite calls, and per-IP throttling is explicitly not
+	// part of its assertions.
+	srv, rec := newControlPanelAndPlayerServerWithLimiter(t, c, controlpanel.Config{
+		Mount:    true,
+		BaseURL:  "http://app.example.test",
+		MailFrom: "no-reply@example.test",
+	}, branchAllowAllLimiter{})
 	adminCookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL,
 		"player-quota-admin@example.test", "correct-horse-battery-staple")
 

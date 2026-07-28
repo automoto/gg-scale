@@ -145,8 +145,13 @@ func New(d Deps) http.Handler {
 		r.Use(h.requireCSRF)
 		r.Get("/", h.home)
 		r.Get("/help", h.helpPage)
-		r.Get("/tenants/new", h.newTenantPage)
-		r.Post("/tenants", h.createTenantHandler)
+		// Tenant creation is platform-admin only; everyone else gets tenants
+		// via team invites or the approved public-signup flow.
+		r.Group(func(r chi.Router) {
+			r.Use(h.requirePlatformAdmin)
+			r.Get("/tenants/new", h.newTenantPage)
+			r.Post("/tenants", h.createTenantHandler)
+		})
 		r.Get("/tenants", h.openTenant)
 		r.Get("/account/password", h.accountPage)
 		r.Post("/account/password", h.updatePassword)
@@ -198,6 +203,7 @@ func New(d Deps) http.Handler {
 			// a sanitized redirect_to).
 			r.Get("/settings", h.tenantSettingsPage)
 			r.Post("/settings/tier", h.updateTenantTierHandler)
+			r.Post("/settings/features", h.updateTenantFeatureHandler)
 			r.Post("/settings/change-requests", h.submitChangeRequestHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			// Dedicated-server fleet surface (fleets, allocations, and the
@@ -578,10 +584,9 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			map[string]string{"key_type": "Pick a key type"}, "")
 		return
 	}
-	// Secret keys can submit scores and verify sessions, so creating one is
-	// owner-only; admins are limited to publishable keys. The shared roleAdmin
-	// route guard only checks project:manage, so enforce the key-type boundary
-	// here (api_key:secret vs api_key:publishable).
+	// The shared roleAdmin route guard only checks project:manage, so enforce
+	// the key-type capability here (api_key:secret vs api_key:publishable) —
+	// roles without the matching grant (e.g. analyst) are denied.
 	keyObject, _ := apiKeyObjectForType(keyType)
 	if !h.requireControlPanelPermission(w, r, tenantID, keyObject, rbac.ActionManage) {
 		return

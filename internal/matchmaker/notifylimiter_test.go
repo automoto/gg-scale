@@ -48,6 +48,30 @@ func TestNotifyLimiterAllow(t *testing.T) {
 	})
 }
 
+func TestNotifyLimiterForget(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+
+	t.Run("should_allow_again_immediately_after_forget", func(t *testing.T) {
+		now := base
+		l := newNotifyLimiter(100 * time.Millisecond)
+		l.now = func() time.Time { return now }
+
+		assert.True(t, l.allow("bucket-a"))
+		l.forget("bucket-a")
+		now = base.Add(50 * time.Millisecond)
+		assert.True(t, l.allow("bucket-a"))
+	})
+
+	t.Run("should_ignore_unknown_key", func(t *testing.T) {
+		l := newNotifyLimiter(100 * time.Millisecond)
+		l.now = func() time.Time { return base }
+
+		assert.True(t, l.allow("bucket-a"))
+		l.forget("bucket-b")
+		assert.False(t, l.allow("bucket-a"))
+	})
+}
+
 func TestNotifyLimiterPrunesStaleKeys(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	l := newNotifyLimiter(100 * time.Millisecond)

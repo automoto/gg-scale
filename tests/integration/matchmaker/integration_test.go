@@ -165,23 +165,37 @@ func matchmakerDSNForDatabase(dsn, dbName string) (string, error) {
 	return u.String(), nil
 }
 
+// allocatorRecorder is a fake fleet allocator that persists real
+// game_server_allocations rows, so worker-created matches exercise the real
+// matchmaker_matches_allocation_id_fkey. The previous fake minted IDs without
+// rows, which made every fleet-mode CreateMatch fail that FK and quietly
+// release the group.
 type allocatorRecorder struct {
+	pool        *pgxpool.Pool
 	address     string
 	protocol    string
 	called      atomic.Int64
 	deallocated atomic.Int64
-	nextID      atomic.Int64
 }
 
-func (a *allocatorRecorder) Allocate(_ context.Context, _ fleet.AllocationRequest) (*fleet.Allocation, error) {
+func (a *allocatorRecorder) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
 	a.called.Add(1)
-	id := fleet.AllocationID(a.nextID.Add(1))
-	return &fleet.Allocation{ID: id, Address: a.address, Protocol: a.protocol, Status: fleet.StatusReady}, nil
+	var id int64
+	err := a.pool.QueryRow(ctx,
+		`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, region, address, status)
+		 VALUES ($1, $2, $3, 'fake', $4, $5, 'ready') RETURNING id`,
+		req.TenantID, req.ProjectID, req.FleetID, req.Region, a.address).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	return &fleet.Allocation{ID: fleet.AllocationID(id), Address: a.address, Protocol: a.protocol, Status: fleet.StatusReady}, nil
 }
 
-func (a *allocatorRecorder) Deallocate(_ context.Context, _ fleet.AllocationID) error {
+func (a *allocatorRecorder) Deallocate(ctx context.Context, id fleet.AllocationID) error {
 	a.deallocated.Add(1)
-	return nil
+	_, err := a.pool.Exec(ctx,
+		`UPDATE game_server_allocations SET status = 'shutdown', released_at = now() WHERE id = $1`, int64(id))
+	return err
 }
 
 // TestPGQueueListenWakesWorkerOnInsert is the load-bearing assertion for
@@ -214,7 +228,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 		tenantID, projectID).Scan(&fleetID))
 
 	queue := matchmaker.NewPGQueue(appPool)
-	alloc := &allocatorRecorder{address: "10.0.0.7:7777"}
+	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.7:7777"}
 	w := matchmaker.NewWorker(queue, alloc, nil, matchmaker.WorkerConfig{
 		// Long enough that any sub-second wakeup proves it came from
 		// LISTEN/NOTIFY, not the fallback tick.
@@ -229,7 +243,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	tenantCtx := db.WithTenant(ctx, tenantID)
-	_, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		FleetID:   fleetID,
@@ -242,6 +256,12 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	require.Eventually(t, func() bool { return alloc.called.Load() == 1 },
 		2*time.Second, 20*time.Millisecond,
 		"worker did not wake within 2s — LISTEN/NOTIFY round-trip failed")
+	require.Eventually(t, func() bool {
+		got, gerr := queue.Get(tenantCtx, ticket.ID, playerID)
+		return gerr == nil && got.Status == matchmaker.StatusMatched
+	}, 2*time.Second, 20*time.Millisecond,
+		"ticket must reach matched after the NOTIFY wake")
+	assert.Zero(t, alloc.deallocated.Load(), "no orphan releases on the happy path")
 }
 
 // TestMatchmakerNotifyTriggerRemoved proves migration 0024 applied: the
@@ -294,7 +314,7 @@ func TestPGQueueEnqueueDebounceDoesNotStrandTickets(t *testing.T) {
 		tenantID, projectID).Scan(&fleetID))
 
 	queue := matchmaker.NewPGQueue(appPool)
-	alloc := &allocatorRecorder{address: "10.0.0.9:7777"}
+	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.9:7777"}
 	w := matchmaker.NewWorker(queue, alloc, nil, matchmaker.WorkerConfig{
 		// Short fallback so a coalesced-away second wakeup is still caught
 		// quickly, keeping the test deterministic.
@@ -308,17 +328,100 @@ func TestPGQueueEnqueueDebounceDoesNotStrandTickets(t *testing.T) {
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	// Two players, same bucket, back to back. The second enqueue's NOTIFY
 	// falls inside the 100ms debounce window and is very likely coalesced.
+	tickets := make([]*matchmaker.Ticket, 0, 2)
 	for _, playerID := range []int64{playerA, playerB} {
-		_, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+		ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 			TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
 			PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
 		})
 		require.NoError(t, err)
+		tickets = append(tickets, ticket)
 	}
 
-	require.Eventually(t, func() bool { return alloc.called.Load() == 2 },
-		3*time.Second, 20*time.Millisecond,
+	require.Eventually(t, func() bool {
+		for _, ticket := range tickets {
+			got, gerr := queue.Get(tenantCtx, ticket.ID, ticket.PlayerID)
+			if gerr != nil || got.Status != matchmaker.StatusMatched {
+				return false
+			}
+		}
+		return true
+	}, 3*time.Second, 20*time.Millisecond,
 		"both tickets must be matched even if the second wakeup was debounced")
+	assert.Equal(t, int64(2), alloc.called.Load(), "one allocation per singleton match, no retries")
+	assert.Zero(t, alloc.deallocated.Load(), "no orphan releases on the happy path")
+}
+
+// TestPGQueueNotifyWakesWorkerForSecondSameBucketPlayer pins the enqueue
+// debounce keying: the second player's enqueue must wake the worker via
+// NOTIFY even when it lands inside the first player's debounce window. The
+// worker runs the production 5s fallback interval, so a coalesced second
+// wakeup would leave the formable pair waiting on the tick — the removed
+// per-row AFTER INSERT trigger fired for that enqueue too, making that wait
+// a regression.
+func TestPGQueueNotifyWakesWorkerForSecondSameBucketPlayer(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID, playerA, playerB int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-second-wake') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-a') RETURNING id`,
+		tenantID, projectID).Scan(&playerA))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-b') RETURNING id`,
+		tenantID, projectID).Scan(&playerB))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+
+	queue := matchmaker.NewPGQueue(appPool)
+	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.11:7777"}
+	// Interval left zero so NewWorker applies the production 5s default:
+	// only a NOTIFY-driven wake can match the pair inside the 2s deadline.
+	w := matchmaker.NewWorker(queue, alloc, nil, matchmaker.WorkerConfig{})
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	go w.Run(runCtx)
+	time.Sleep(100 * time.Millisecond)
+
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	tickets := make([]*matchmaker.Ticket, 0, 2)
+	for i, playerID := range []int64{playerA, playerB} {
+		if i == 1 {
+			// Inside the first enqueue's 100ms debounce window, but late
+			// enough that the first wakeup pass has come and gone.
+			time.Sleep(60 * time.Millisecond)
+		}
+		ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+			TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+			PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
+			MinCount: 2, MaxCount: 2,
+		})
+		require.NoError(t, err)
+		tickets = append(tickets, ticket)
+	}
+
+	require.Eventually(t, func() bool {
+		for _, ticket := range tickets {
+			got, gerr := queue.Get(tenantCtx, ticket.ID, ticket.PlayerID)
+			if gerr != nil || got.Status != matchmaker.StatusMatched {
+				return false
+			}
+		}
+		return true
+	}, 2*time.Second, 20*time.Millisecond,
+		"second same-bucket enqueue must wake the worker via NOTIFY, not the 5s fallback tick")
+	assert.Equal(t, int64(1), alloc.called.Load(), "one allocation for the pair")
+	assert.Zero(t, alloc.deallocated.Load(), "no orphan releases on the happy path")
 }
 
 // TestPGQueueConcurrentClaimsCannotStrandTickets is the C1 regression. Two

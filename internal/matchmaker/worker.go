@@ -129,6 +129,13 @@ type Worker struct {
 	hub   Notifier
 	cfg   WorkerConfig
 	log   *slog.Logger
+
+	// mu guards inflight: the per-bucket serialization state for the
+	// consumer pool. A bucket key is present while a consumer processes it;
+	// true means at least one same-bucket event arrived mid-run and exactly
+	// one rerun is queued behind.
+	mu       sync.Mutex
+	inflight map[Bucket]bool
 }
 
 // NewWorker constructs a Worker. The queue is required; alloc may be nil
@@ -157,7 +164,8 @@ func NewWorker(q Queue, alloc Allocator, hub Notifier, cfg WorkerConfig) *Worker
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	return &Worker{queue: q, alloc: alloc, hub: hub, cfg: cfg, log: cfg.Logger}
+	return &Worker{queue: q, alloc: alloc, hub: hub, cfg: cfg, log: cfg.Logger,
+		inflight: make(map[Bucket]bool)}
 }
 
 // eventsBuffer is the bucket-event channel depth. Larger than the previous
@@ -300,13 +308,56 @@ func (w *Worker) runConsumer(ctx context.Context, events <-chan Bucket) {
 		case <-ctx.Done():
 			return
 		case b := <-events:
-			if err := w.processBucket(ctx, b); err != nil && !errors.Is(err, context.Canceled) {
-				w.log.Warn("matchmaker: bucket failed",
-					"tenant_id", b.TenantID, "project_id", b.ProjectID,
-					"region", b.Region, "game_mode", b.GameMode, "err", err)
-			}
+			w.consumeEvent(ctx, b)
 		}
 	}
+}
+
+// consumeEvent serializes processBucket per bucket across the consumer pool.
+// Two concurrent runs for one bucket would split its queued tickets across
+// disjoint claims (neither side able to form a min-size group), deferring a
+// formable match to the fallback tick; instead a duplicate event queues one
+// rerun behind the in-flight run so no wakeup is lost.
+func (w *Worker) consumeEvent(ctx context.Context, b Bucket) {
+	if !w.tryAcquire(b) {
+		return
+	}
+	for {
+		if err := w.processBucket(ctx, b); err != nil && !errors.Is(err, context.Canceled) {
+			w.log.Warn("matchmaker: bucket failed",
+				"tenant_id", b.TenantID, "project_id", b.ProjectID,
+				"region", b.Region, "game_mode", b.GameMode, "err", err)
+		}
+		if !w.finish(b) || ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// tryAcquire marks b in flight. When b is already in flight it coalesces the
+// event into a single queued rerun and reports false.
+func (w *Worker) tryAcquire(b Bucket) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, running := w.inflight[b]; running {
+		w.inflight[b] = true
+		return false
+	}
+	w.inflight[b] = false
+	return true
+}
+
+// finish releases b unless a same-bucket event arrived mid-run, in which case
+// b stays in flight and the caller processes it once more.
+func (w *Worker) finish(b Bucket) (rerun bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.inflight[b] {
+		w.inflight[b] = false
+		return true
+	}
+	delete(w.inflight, b)
+	return false
 }
 
 // runHousekeeping runs the periodic stale-claim sweep and the queue-stats

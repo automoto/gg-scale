@@ -10,10 +10,11 @@ import (
 // to roughly the set of buckets active within one interval.
 const notifyLimiterPruneThreshold = 1024
 
-// notifyLimiter coalesces matchmaker wakeups: at most one NOTIFY per bucket
-// per interval. The worker tolerates lost notifications via its fallback
-// ticker, so debouncing an extra enqueue only defers its wakeup by at most one
-// interval. Mirrors River's client-side notify debounce.
+// notifyLimiter coalesces matchmaker wakeups: at most one NOTIFY per key
+// (the enqueuing player) per interval. The worker tolerates lost
+// notifications via its fallback ticker, so debouncing an extra enqueue only
+// defers its wakeup by at most one interval. Mirrors River's client-side
+// notify debounce.
 type notifyLimiter struct {
 	mu       sync.Mutex
 	interval time.Duration
@@ -41,6 +42,18 @@ func (l *notifyLimiter) allow(key string) bool {
 	l.prune(now)
 	l.last[key] = now
 	return true
+}
+
+// forget releases key's debounce reservation so the next allow succeeds
+// immediately. Called when the NOTIFY that reserved the window failed to
+// send, so a failed send doesn't consume the window. A concurrent allow for
+// the same key between the failed send and the forget would be rolled back
+// too, but a key covers a single player's enqueues and the one-active-ticket
+// constraint keeps those sequential in practice.
+func (l *notifyLimiter) forget(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.last, key)
 }
 
 // prune drops stale keys once the map grows past the threshold. Called under

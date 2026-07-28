@@ -98,6 +98,18 @@ func (h *Handler) loadChangeRequestSection(ctx context.Context, tenantID int64, 
 			view.FeatureOptions = append(view.FeatureOptions, FeatureOptionView{Value: f.Value, Label: f.Label})
 		}
 
+		// A platform admin sees every grantable feature with its current state,
+		// including ones already held (to revoke) or the server can't serve.
+		for _, f := range requestableFeatures {
+			_, held := heldSet[f.Value]
+			view.AdminFeatureGrants = append(view.AdminFeatureGrants, AdminFeatureGrantView{
+				Value:      f.Value,
+				Label:      f.Label,
+				Enabled:    held,
+				EnvAllowed: h.featureEnabledByEnv(f.Value),
+			})
+		}
+
 		for t := int(current) + 1; t <= int(tenant.Tier3); t++ {
 			view.UpgradeTargets = append(view.UpgradeTargets, FeatureOptionView{
 				Value: strconv.Itoa(t),

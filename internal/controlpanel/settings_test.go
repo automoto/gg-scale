@@ -19,6 +19,15 @@ func TestSetTenantTier_rejects_out_of_range_class_before_database_access(t *test
 	}
 }
 
+func TestSetTenantFeatureGrant_rejects_unknown_feature_before_database_access(t *testing.T) {
+	h := &Handler{}
+
+	changed, err := h.setTenantFeatureGrant(context.Background(), 1, 2, "not_a_feature", true)
+
+	assert.False(t, changed)
+	assert.ErrorIs(t, err, errInvalidFeature)
+}
+
 func TestSafeReturnPath(t *testing.T) {
 	const fallback = "/v1/control-panel/tenants/1/projects"
 	cases := []struct {
@@ -75,6 +84,49 @@ func TestTenantSettingsPage_hides_tier_form_for_non_platform_admin(t *testing.T)
 	assert.NotContains(t, html, "/settings/tier")
 	// The API limit card is not on this page for anyone now.
 	assert.NotContains(t, html, "Save API limit")
+}
+
+func TestTenantSettingsPage_renders_feature_grant_controls_for_platform_admin(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID: 3, TenantName: "acme", Tier: "tier_0", IsPlatformAdmin: true,
+		AdminFeatureGrants: []AdminFeatureGrantView{
+			{Value: "p2p_relay", Label: "P2P relay (TURN)", Enabled: false, EnvAllowed: true},
+			{Value: "dedicated_servers", Label: "Dedicated game-server fleets", Enabled: true, EnvAllowed: true},
+		},
+	}))
+	// The form posts to the admin feature-grant route with the feature name.
+	assert.Contains(t, html, `/v1/control-panel/tenants/3/settings/features`)
+	assert.Contains(t, html, `name="feature" value="p2p_relay"`)
+	assert.Contains(t, html, `name="feature" value="dedicated_servers"`)
+	// An off feature with the env switch on offers an Enable (enabled=on) action.
+	assert.Contains(t, html, `value="on"`)
+	assert.Contains(t, html, "Enable")
+	// An on feature offers a Disable (enabled=off) action.
+	assert.Contains(t, html, `value="off"`)
+	assert.Contains(t, html, "Disable")
+}
+
+func TestTenantSettingsPage_shows_env_off_note_and_no_enable_action(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID: 3, IsPlatformAdmin: true,
+		AdminFeatureGrants: []AdminFeatureGrantView{
+			{Value: "p2p_relay", Label: "P2P relay (TURN)", Enabled: false, EnvAllowed: false},
+		},
+	}))
+	// A disabled feature the server can't serve is shown but not enable-able.
+	assert.NotContains(t, html, `value="on"`)
+	assert.NotContains(t, html, ">Enable</button>")
+}
+
+func TestTenantSettingsPage_hides_feature_grant_controls_for_non_platform_admin(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID: 3, IsPlatformAdmin: false,
+		AdminFeatureGrants: []AdminFeatureGrantView{
+			{Value: "p2p_relay", Label: "P2P relay (TURN)", Enabled: false, EnvAllowed: true},
+		},
+	}))
+	assert.NotContains(t, html, "/settings/features")
+	assert.NotContains(t, html, `name="feature"`)
 }
 
 func TestProjectSettingsPage_shows_invite_quota_forms(t *testing.T) {

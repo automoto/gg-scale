@@ -15,15 +15,14 @@ import (
 	"github.com/ggscale/ggscale/internal/rbac"
 )
 
-// adminHandlerRequest builds a request carrying a tenant-admin session and the
-// {tenantID} path param, so a handler's authorization guard can be exercised in
-// isolation. A tenant admin holds project:manage (the shared route guard) but
-// not the finer capabilities these handlers now enforce.
-func adminHandlerRequest(t *testing.T, form url.Values) (*rbac.Authorizer, *http.Request) {
+// roleHandlerRequest builds a request carrying a session with the given
+// membership role and the {tenantID} path param, so a handler's authorization
+// guard can be exercised in isolation.
+func roleHandlerRequest(t *testing.T, role string, form url.Values) (*rbac.Authorizer, *http.Request) {
 	t.Helper()
 	auth, err := rbac.NewMemoryAuthorizer()
 	require.NoError(t, err)
-	require.NoError(t, auth.SetControlPanelMembershipRole(5, 7, "admin"))
+	require.NoError(t, auth.SetControlPanelMembershipRole(5, 7, role))
 
 	var body *strings.Reader
 	if form != nil {
@@ -41,14 +40,22 @@ func adminHandlerRequest(t *testing.T, form url.Values) (*rbac.Authorizer, *http
 	return auth, req.WithContext(ctx)
 }
 
-func TestCreateAPIKeyHandler_admin_cannot_create_secret_key(t *testing.T) {
-	auth, req := adminHandlerRequest(t, url.Values{"key_type": {"secret"}})
+// adminHandlerRequest is roleHandlerRequest for a tenant admin, who holds
+// project:manage (the shared route guard) but not the finer capabilities some
+// handlers enforce.
+func adminHandlerRequest(t *testing.T, form url.Values) (*rbac.Authorizer, *http.Request) {
+	t.Helper()
+	return roleHandlerRequest(t, "admin", form)
+}
+
+func TestCreateAPIKeyHandler_member_cannot_create_secret_key(t *testing.T) {
+	auth, req := roleHandlerRequest(t, "member", url.Values{"key_type": {"secret"}})
 	h := &Handler{rbac: auth}
 
 	rr := httptest.NewRecorder()
 	h.createAPIKeyHandler(rr, req)
 
-	assert.Equal(t, http.StatusForbidden, rr.Code, "tenant admin must not create secret keys")
+	assert.Equal(t, http.StatusForbidden, rr.Code, "members must not create secret keys")
 }
 
 func TestInviteTeammateHandler_admin_denied(t *testing.T) {

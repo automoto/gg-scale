@@ -5,6 +5,7 @@ package httpapi_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -376,20 +377,23 @@ func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
-	// Seed a player we can foreign-key from the tickets table.
-	var playerID, fleetID int64
-	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-		`INSERT INTO project_players (tenant_id, project_id, external_id, email, email_verified_at)
-		 VALUES ($1, $2, 'ext-1', 'mm-player@example.com', now()) RETURNING id`,
-		tenantID, projectID).Scan(&playerID))
+	var fleetID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
 		 VALUES ($1, $2, 'mm-fleet', 'stub', '{}'::jsonb) RETURNING id`,
 		tenantID, projectID).Scan(&fleetID))
-	// Seed 3 queued tickets across two (region, game_mode) buckets.
-	for _, tup := range []struct{ region, mode string }{
+	// Seed 3 queued tickets across two (region, game_mode) buckets. One
+	// player per ticket: matchmaking_tickets_one_active_idx allows a player
+	// only one queued ticket per project.
+	for i, tup := range []struct{ region, mode string }{
 		{"us-east-1", "ranked"}, {"us-east-1", "ranked"}, {"eu-1", "casual"},
 	} {
+		var playerID int64
+		require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+			`INSERT INTO project_players (tenant_id, project_id, external_id, email, email_verified_at)
+			 VALUES ($1, $2, $3, $4, now()) RETURNING id`,
+			tenantID, projectID, fmt.Sprintf("ext-%d", i+1),
+			fmt.Sprintf("mm-player-%d@example.com", i+1)).Scan(&playerID))
 		_, err := c.bootstrapPool.Exec(context.Background(),
 			`INSERT INTO matchmaking_tickets (tenant_id, project_id, fleet_id, player_id, region, game_mode)
 			 VALUES ($1, $2, $3, $4, $5, $6)`,

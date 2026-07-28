@@ -325,6 +325,145 @@ func TestWorkerProcessesBucketOnListenerEvent(t *testing.T) {
 	require.Eventually(t, func() bool { return len(hub.Sent()) == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
+// gatedListenerQueue is a listenerQueue whose ClaimBucket blocks until the
+// gate closes, and which records how many claims entered per bucket and the
+// maximum that ran concurrently. It exercises the consumer pool's per-bucket
+// serialization without Postgres.
+type gatedListenerQueue struct {
+	*matchmaker.MemQueue
+	events  chan matchmaker.Bucket
+	gate    chan struct{}
+	mu      sync.Mutex
+	entered map[matchmaker.Bucket]int
+	active  map[matchmaker.Bucket]int
+	maxSeen map[matchmaker.Bucket]int
+}
+
+func newGatedListenerQueue() *gatedListenerQueue {
+	return &gatedListenerQueue{
+		MemQueue: matchmaker.NewMemQueue(),
+		events:   make(chan matchmaker.Bucket, 8),
+		gate:     make(chan struct{}),
+		entered:  make(map[matchmaker.Bucket]int),
+		active:   make(map[matchmaker.Bucket]int),
+		maxSeen:  make(map[matchmaker.Bucket]int),
+	}
+}
+
+func (q *gatedListenerQueue) Listen(ctx context.Context, fn func(matchmaker.Bucket)) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case b := <-q.events:
+			fn(b)
+		}
+	}
+}
+
+func (q *gatedListenerQueue) ClaimBucket(ctx context.Context, b matchmaker.Bucket, max int, ttl time.Duration) (*matchmaker.Claim, error) {
+	q.mu.Lock()
+	q.entered[b]++
+	q.active[b]++
+	if q.active[b] > q.maxSeen[b] {
+		q.maxSeen[b] = q.active[b]
+	}
+	q.mu.Unlock()
+	defer func() {
+		q.mu.Lock()
+		q.active[b]--
+		q.mu.Unlock()
+	}()
+	select {
+	case <-q.gate:
+	case <-ctx.Done():
+	}
+	return q.MemQueue.ClaimBucket(ctx, b, max, ttl)
+}
+
+func (q *gatedListenerQueue) enteredCount(b matchmaker.Bucket) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.entered[b]
+}
+
+func (q *gatedListenerQueue) maxConcurrent(b matchmaker.Bucket) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.maxSeen[b]
+}
+
+func TestWorkerSerializesSameBucketAcrossConsumerPool(t *testing.T) {
+	q := newGatedListenerQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{
+		Interval:      time.Hour,
+		SweepInterval: time.Hour,
+		WorkerCount:   4,
+	})
+	enqueue(t, q.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 41, Region: "us-east-1", GameMode: "1v1"})
+	enqueue(t, q.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Region: "us-east-1", GameMode: "coop"})
+	bucketA := matchmaker.Bucket{TenantID: 1, ProjectID: 7, Mode: matchmaker.ModeFleetAllocation, FleetID: 5, Region: "us-east-1", GameMode: "1v1"}
+	bucketB := matchmaker.Bucket{TenantID: 1, ProjectID: 7, Mode: matchmaker.ModeFleetAllocation, FleetID: 5, Region: "us-east-1", GameMode: "coop"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	// The startup drain delivers one event per bucket; both block at the
+	// closed gate, proving distinct buckets run in parallel.
+	require.Eventually(t, func() bool {
+		return q.enteredCount(bucketA) == 1 && q.enteredCount(bucketB) == 1
+	}, 2*time.Second, 10*time.Millisecond, "one claim per bucket should be in flight")
+
+	// Duplicate same-bucket events must coalesce behind the in-flight run
+	// instead of entering a concurrent claim.
+	q.events <- bucketA
+	q.events <- bucketA
+	assert.Never(t, func() bool { return q.enteredCount(bucketA) > 1 },
+		300*time.Millisecond, 20*time.Millisecond,
+		"duplicate events for an in-flight bucket must not claim concurrently")
+
+	close(q.gate)
+
+	// The coalesced duplicates trigger exactly one rerun after the first
+	// pass finishes.
+	require.Eventually(t, func() bool { return q.enteredCount(bucketA) == 2 },
+		2*time.Second, 10*time.Millisecond, "queued-behind rerun should re-claim the bucket")
+	assert.Equal(t, 1, q.maxConcurrent(bucketA), "same-bucket claims must never overlap")
+	assert.Equal(t, 1, q.maxConcurrent(bucketB))
+}
+
+func TestWorkerCoalescesSameBucketEventsIntoOneRerun(t *testing.T) {
+	q := newGatedListenerQueue()
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	w := matchmaker.NewWorker(q, alloc, nil, matchmaker.WorkerConfig{
+		Interval:      time.Hour,
+		SweepInterval: time.Hour,
+		WorkerCount:   4,
+	})
+	enqueue(t, q.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 41, Region: "us-east-1", GameMode: "1v1"})
+	bucket := matchmaker.Bucket{TenantID: 1, ProjectID: 7, Mode: matchmaker.ModeFleetAllocation, FleetID: 5, Region: "us-east-1", GameMode: "1v1"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+
+	require.Eventually(t, func() bool { return q.enteredCount(bucket) == 1 },
+		2*time.Second, 10*time.Millisecond)
+
+	for range 3 {
+		q.events <- bucket
+	}
+	close(q.gate)
+
+	require.Eventually(t, func() bool { return q.enteredCount(bucket) == 2 },
+		2*time.Second, 10*time.Millisecond, "mid-run events should coalesce into one rerun")
+	assert.Never(t, func() bool { return q.enteredCount(bucket) > 2 },
+		300*time.Millisecond, 20*time.Millisecond,
+		"three mid-run events must produce exactly one rerun, not one each")
+}
+
 // When the only matched player is no longer connected, the allocation stays
 // alive until the match lease expires so polling can still recover it.
 func TestWorkerKeepsAllocationWhenNoClientIsReachableForPolling(t *testing.T) {

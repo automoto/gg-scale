@@ -41,6 +41,14 @@ func newControlPanelAndPlayerServer(t *testing.T, c *cluster) (*httptest.Server,
 
 func newControlPanelAndPlayerServerWithConfig(t *testing.T, c *cluster, cfg controlpanel.Config) (*httptest.Server, *mailer.Recorder) {
 	t.Helper()
+	return newControlPanelAndPlayerServerWithLimiter(t, c, cfg, ratelimit.NewCacheLimiter(c.cache))
+}
+
+// newControlPanelAndPlayerServerWithLimiter is the WithConfig variant with an
+// injectable rate limiter, for tests whose assertions must not depend on the
+// per-IP limits (e.g. quota boundaries probed by many back-to-back calls).
+func newControlPanelAndPlayerServerWithLimiter(t *testing.T, c *cluster, cfg controlpanel.Config, limiter ratelimit.Limiter) (*httptest.Server, *mailer.Recorder) {
+	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	rec := &mailer.Recorder{}
@@ -54,7 +62,7 @@ func newControlPanelAndPlayerServerWithConfig(t *testing.T, c *cluster, cfg cont
 		Commit:                "test",
 		Pool:                  pool,
 		Lookup:                tenant.NewSQLLookup(c.appPool),
-		Limiter:               ratelimit.NewCacheLimiter(c.cache),
+		Limiter:               limiter,
 		Signer:                signer,
 		Cache:                 c.cache,
 		Mailer:                rec,

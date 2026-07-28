@@ -82,6 +82,34 @@ func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *t
 	}
 }
 
+func TestDefaultPolicy_allows_tenant_admin_to_manage_api_keys(t *testing.T) {
+	for _, obj := range []string{rbac.ObjectAPIKeyPublic, rbac.ObjectAPIKeySecret} {
+		t.Run(obj, func(t *testing.T) {
+			a := newAuthorizer(t)
+			require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
+
+			allowed, err := a.CanControlPanel(42, 7, obj, rbac.ActionManage)
+
+			require.NoError(t, err)
+			assert.True(t, allowed)
+		})
+	}
+}
+
+func TestDefaultPolicy_denies_member_api_key_management(t *testing.T) {
+	for _, obj := range []string{rbac.ObjectAPIKeyPublic, rbac.ObjectAPIKeySecret} {
+		t.Run(obj, func(t *testing.T) {
+			a := newAuthorizer(t)
+			require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
+
+			allowed, err := a.CanControlPanel(42, 7, obj, rbac.ActionManage)
+
+			require.NoError(t, err)
+			assert.False(t, allowed)
+		})
+	}
+}
+
 func TestDefaultPolicy_denies_member_leaderboard_management(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))
@@ -169,19 +197,6 @@ func TestTenantOwner_manages_both_api_key_types(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, allowed, "owner manages %s", obj)
 	}
-}
-
-func TestTenantAdmin_manages_only_publishable_api_keys(t *testing.T) {
-	a := newAuthorizer(t)
-	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
-
-	pub, err := a.CanControlPanel(42, 7, rbac.ObjectAPIKeyPublic, rbac.ActionManage)
-	require.NoError(t, err)
-	assert.True(t, pub, "admin manages publishable keys")
-
-	sec, err := a.CanControlPanel(42, 7, rbac.ObjectAPIKeySecret, rbac.ActionManage)
-	require.NoError(t, err)
-	assert.False(t, sec, "admin must not create/manage secret keys")
 }
 
 func TestTeamManagement_is_owner_only(t *testing.T) {

@@ -171,6 +171,127 @@ func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, ta
 	return changed, err
 }
 
+var errInvalidFeature = errors.New("control panel: feature is not directly grantable")
+
+// isGrantableFeature reports whether feature is one a platform admin may grant
+// directly — the same umbrella set a tenant can request.
+func isGrantableFeature(feature string) bool {
+	for _, f := range requestableFeatures {
+		if f.Value == feature {
+			return true
+		}
+	}
+	return false
+}
+
+// updateTenantFeatureHandler applies a direct platform-admin feature grant or
+// revoke. Unlike tenant self-service, this skips the change-request queue and
+// writes the grant immediately.
+func (h *Handler) updateTenantFeatureHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	if !session.User.IsPlatformAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	feature := r.Form.Get("feature")
+	if !isGrantableFeature(feature) {
+		h.redirectTenantSettings(w, r, tenantID, "Choose a valid feature to grant.")
+		return
+	}
+	enable := r.Form.Get("enabled") == "on"
+	if enable && !h.featureEnabledByEnv(feature) {
+		h.redirectTenantSettings(w, r, tenantID, "That feature's server switch is off; enable it in server settings first.")
+		return
+	}
+	changed, err := h.setTenantFeatureGrant(r.Context(), session.User.ID, tenantID, feature, enable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		webutil.InternalError(w, "tenant feature: update", err)
+		return
+	}
+	if changed {
+		h.reloadRBACPolicy(r.Context())
+	}
+	switch {
+	case !changed && enable:
+		h.redirectTenantSettings(w, r, tenantID, "Feature is already enabled.")
+	case !changed:
+		h.redirectTenantSettings(w, r, tenantID, "Feature is already disabled.")
+	case enable:
+		h.redirectTenantSettings(w, r, tenantID, "Feature enabled.")
+	default:
+		h.redirectTenantSettings(w, r, tenantID, "Feature disabled.")
+	}
+}
+
+// setTenantFeatureGrant enables or disables a tenant-level feature grant in the
+// tenant's RLS context and audits the change. changed is false when the grant
+// is already in the requested state.
+func (h *Handler) setTenantFeatureGrant(ctx context.Context, actorID, tenantID int64, feature string, enable bool) (bool, error) {
+	if !isGrantableFeature(feature) {
+		return false, errInvalidFeature
+	}
+	var changed bool
+	tctx := db.WithTenant(ctx, tenantID)
+	err := h.pool.Q(tctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		// Reject soft-deleted/absent tenants (GetTenantFacts filters
+		// deleted_at IS NULL) so a stale admin page can't re-grant a paid
+		// feature to a deleted tenant — matching the tier handler, and making
+		// the caller's ErrNoRows→404 branch live.
+		if _, err := q.GetTenantFacts(tctx, tenantID); err != nil {
+			return err
+		}
+		if enable {
+			held, err := q.ListTenantEnabledFeatures(tctx)
+			if err != nil {
+				return err
+			}
+			for _, f := range held {
+				if f == feature {
+					return nil // already enabled: no-op, no audit
+				}
+			}
+			if err := q.UpsertTenantFeatureGrant(tctx, sqlcgen.UpsertTenantFeatureGrantParams{
+				Feature:    feature,
+				ApprovedBy: &actorID,
+				Reason:     strPtr("platform admin direct grant"),
+			}); err != nil {
+				return err
+			}
+		} else {
+			n, err := q.DisableTenantFeatureGrant(tctx, sqlcgen.DisableTenantFeatureGrantParams{
+				Feature: feature,
+				Reason:  strPtr("platform admin direct revoke"),
+			})
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return nil // already disabled: no-op, no audit
+			}
+		}
+		changed = true
+		return auditlog.WritePlatform(tctx, tx, actorID, "control_panel.tenant.feature_grant",
+			strconv.FormatInt(tenantID, 10), map[string]any{
+				"tenant_id": tenantID,
+				"feature":   feature,
+				"enabled":   enable,
+			})
+	})
+	return changed, err
+}
+
 // projectSettingsPage consolidates per-project configuration (invite quotas,
 // project facts).
 func (h *Handler) projectSettingsPage(w http.ResponseWriter, r *http.Request) {

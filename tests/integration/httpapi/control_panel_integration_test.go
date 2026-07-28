@@ -202,6 +202,42 @@ func TestControlPanelCreateTenant_makes_creator_owner_and_writes_membership_and_
 	assert.Contains(t, auditPayload, strconv.FormatInt(apiKeyID, 10))
 }
 
+func TestControlPanelCreateTenant_non_platform_admin_denied(t *testing.T) {
+	c := startCluster(t)
+	seedControlPanelUser(t, c, "dev@example.com", "correct-horse-battery-staple", false)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "dev@example.com", "correct-horse-battery-staple")
+
+	form := url.Values{
+		"_csrf":        {csrf},
+		"tenant_name":  {"Rogue Tenant"},
+		"project_name": {"Doomerang"},
+		"label":        {"Default key"},
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/control-panel/tenants", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "tenant creation is platform-admin only")
+
+	var tenants int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM tenants WHERE name = $1`, "Rogue Tenant").Scan(&tenants))
+	assert.Equal(t, 0, tenants, "no tenant row must be created")
+
+	pageReq, err := http.NewRequest(http.MethodGet, srv.URL+"/v1/control-panel/tenants/new", nil)
+	require.NoError(t, err)
+	pageReq.AddCookie(cookie)
+	pageResp, err := http.DefaultClient.Do(pageReq)
+	require.NoError(t, err)
+	defer pageResp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, pageResp.StatusCode, "the new-tenant page is platform-admin only")
+}
+
 func TestControlPanelTenantIsolation_second_user_cannot_see_first_users_tenant(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "existing-key")
@@ -495,7 +531,8 @@ func TestControlPanelAPIKeyMutations_authorizeAgainstKeyType(t *testing.T) {
 		wantStatus    int
 	}{
 		{name: "tenant_admin_publishable", actorRole: "admin", keyType: "publishable", wantStatus: http.StatusSeeOther},
-		{name: "tenant_admin_secret", actorRole: "admin", keyType: "secret", wantStatus: http.StatusForbidden},
+		{name: "tenant_admin_secret", actorRole: "admin", keyType: "secret", wantStatus: http.StatusSeeOther},
+		{name: "member_secret", actorRole: "member", keyType: "secret", wantStatus: http.StatusForbidden},
 		{name: "owner_secret", actorRole: "owner", keyType: "secret", wantStatus: http.StatusSeeOther},
 		{name: "other_tenant", actorRole: "owner", keyType: "secret", foreignTenant: true, wantStatus: http.StatusNotFound},
 	}

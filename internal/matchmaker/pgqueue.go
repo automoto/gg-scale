@@ -20,9 +20,10 @@ import (
 
 const notifyChannel = "matchmaker_ticket"
 
-// notifyDebounce coalesces post-commit wakeups to at most one per bucket per
-// interval. Kept well under the worker's fallback ticker (default 5s) so a
-// debounced enqueue is picked up promptly.
+// notifyDebounce coalesces post-commit wakeups to at most one per enqueuing
+// player per interval, so one client's enqueue churn can't spam NOTIFYs while
+// a second player joining the bucket still wakes the worker. Kept well under
+// the worker's fallback ticker (default 5s).
 const notifyDebounce = 100 * time.Millisecond
 
 // PGQueue is the production Queue, backed by Postgres. Tenant-scoped reads
@@ -165,8 +166,10 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 // notifyEnqueued wakes matchmaker workers for the ticket's bucket after the
 // enqueue has committed. Replaces the per-row AFTER INSERT trigger that ran
 // pg_notify inside the enqueue transaction (taking the cluster-global notify
-// lock through the commit fsync). Debounced per bucket; loss is tolerated by
-// the worker's fallback ticker, so send failures are logged and swallowed.
+// lock through the commit fsync). Debounced per enqueuing player — a bucket
+// key would coalesce away the wakeup of a second player whose enqueue makes
+// the group formable, deferring the match to the fallback tick. Loss is
+// tolerated by that ticker, so send failures are logged and swallowed.
 func (q *PGQueue) notifyEnqueued(ctx context.Context, t *Ticket) {
 	var fleetID *int64
 	if t.FleetID != 0 {
@@ -185,12 +188,16 @@ func (q *PGQueue) notifyEnqueued(ctx context.Context, t *Ticket) {
 		slog.WarnContext(ctx, "matchmaker: marshal notify payload", "err", err)
 		return
 	}
-	// Identical buckets marshal to identical payloads, so the payload string
-	// is itself the debounce key.
-	if q.notify != nil && !q.notify.allow(string(payload)) {
+	// Project IDs are globally unique, so project+player identifies the
+	// enqueuer without the tenant.
+	key := fmt.Sprintf("%d:%d", t.ProjectID, t.PlayerID)
+	if q.notify != nil && !q.notify.allow(key) {
 		return
 	}
 	if err := q.pool.Notify(ctx, notifyChannel, string(payload)); err != nil {
+		if q.notify != nil {
+			q.notify.forget(key)
+		}
 		slog.WarnContext(ctx, "matchmaker: post-commit notify failed", "err", err)
 	}
 }
