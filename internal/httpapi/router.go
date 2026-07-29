@@ -68,6 +68,9 @@ type Deps struct {
 	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
 	// overrides. Wrap the DB store in a CachedOverrideStore.
 	RateLimitOverrides ratelimit.OverrideStore
+	// TokenIPLimits (may be nil) overrides the tier→per-IP bucket derivation
+	// for the token auth routes; nil uses ratelimit.TokenIPLimitsForTier.
+	TokenIPLimits func(tenant.Tier) ratelimit.Limits
 	// StorageMaxValueBytes is the platform default cap on a storage object's
 	// value; 0 uses the compiled fallback (1 MiB).
 	StorageMaxValueBytes int64
@@ -313,13 +316,20 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
 
 				// /v1/auth/* — tenant-scoped, player-anonymous (api_key
-				// suffices). Auth endpoints get an additional per-IP
-				// limiter on top of the per-api-key bucket because each
-				// login/signup runs bcrypt (~250ms CPU) and a single
-				// api_key holder must not be able to burn shared CPU.
+				// suffices). signup/login keep the fixed per-IP cap:
+				// bcrypt (~250ms CPU per attempt) is an absolute cost no
+				// tier should scale. The token routes swap that cap
+				// (which bound them ~6000× below advertised tier rates)
+				// for a tier-scaled per-(tenant, IP) cap on publishable
+				// keys — see ratelimit.NewTokenIPLimiter for the threat
+				// model and the secret-key exemption.
 				r.Group(func(r chi.Router) {
 					r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, reg))
-					registerAuthRoutes(groupAPI(r, humaCfg), d)
+					registerAuthPasswordRoutes(groupAPI(r, humaCfg), d)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(ratelimit.NewTokenIPLimiter(d.Limiter, d.TokenIPLimits, d.ProxyTrust, reg))
+					registerAuthTokenRoutes(groupAPI(r, humaCfg), d)
 				})
 
 				// /v1/server/player-sessions/verify — server-tier endpoint used by

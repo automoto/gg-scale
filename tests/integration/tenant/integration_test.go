@@ -98,7 +98,7 @@ func seedAPIKey(t *testing.T, pool *pgxpool.Pool, tenantID, projectID int64, tok
 	t.Helper()
 	sum := sha256.Sum256([]byte(token))
 	_, err := pool.Exec(context.Background(),
-		`INSERT INTO api_keys (tenant_id, project_id, key_hash) VALUES ($1, $2, $3)`,
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type) VALUES ($1, $2, $3, 'secret')`,
 		tenantID, projectID, sum[:])
 	require.NoError(t, err)
 }
@@ -253,8 +253,8 @@ func TestMiddleware_revoked_key_in_DB_returns_403(t *testing.T) {
 	tenantA, projectA := seedTenant(t, bootstrap, "a")
 	sum := sha256.Sum256([]byte("revoked-token"))
 	_, err := bootstrap.Exec(context.Background(),
-		`INSERT INTO api_keys (tenant_id, project_id, key_hash, revoked_at)
-		 VALUES ($1, $2, $3, now())`,
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type, revoked_at)
+		 VALUES ($1, $2, $3, 'secret', now())`,
 		tenantA, projectA, sum[:])
 	require.NoError(t, err)
 

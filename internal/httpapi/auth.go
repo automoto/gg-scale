@@ -137,19 +137,10 @@ type customTokenInput struct {
 	Body customTokenRequest
 }
 
-// registerAuthRoutes registers the tenant-scoped, player-anonymous
-// /v1/auth/* operations. They share the per-IP rate-limiter group the adapter
-// binds to.
-func registerAuthRoutes(api huma.API, d Deps) {
-	huma.Register(api, huma.Operation{
-		OperationID: "authAnonymous",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth/anonymous",
-		Summary:     "Create an anonymous player session",
-		Tags:        []string{"/v1"},
-		Security:    apiKeySecurity,
-	}, authAnonymous(d))
-
+// registerAuthPasswordRoutes registers the bcrypt-heavy /v1/auth/*
+// operations (signup, login); the router mounts them behind the fixed
+// per-IP limiter.
+func registerAuthPasswordRoutes(api huma.API, d Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID:   "authSignup",
 		Method:        http.MethodPost,
@@ -161,15 +152,6 @@ func registerAuthRoutes(api huma.API, d Deps) {
 	}, authSignup(d))
 
 	huma.Register(api, huma.Operation{
-		OperationID: "authVerify",
-		Method:      http.MethodPost,
-		Path:        "/v1/auth/verify",
-		Summary:     "Verify an email address with a code",
-		Tags:        []string{"/v1"},
-		Security:    apiKeySecurity,
-	}, authVerify(d))
-
-	huma.Register(api, huma.Operation{
 		OperationID: "authLogin",
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/login",
@@ -177,6 +159,29 @@ func registerAuthRoutes(api huma.API, d Deps) {
 		Tags:        []string{"/v1"},
 		Security:    apiKeySecurity,
 	}, authLogin(d))
+}
+
+// registerAuthTokenRoutes registers the non-bcrypt /v1/auth/*
+// operations; the router mounts them behind the tier-scaled
+// per-(tenant, IP) limiter (see ratelimit.NewTokenIPLimiter).
+func registerAuthTokenRoutes(api huma.API, d Deps) {
+	huma.Register(api, huma.Operation{
+		OperationID: "authAnonymous",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/anonymous",
+		Summary:     "Create an anonymous player session",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authAnonymous(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authVerify",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/verify",
+		Summary:     "Verify an email address with a code",
+		Tags:        []string{"/v1"},
+		Security:    apiKeySecurity,
+	}, authVerify(d))
 
 	huma.Register(api, huma.Operation{
 		OperationID: "authRefresh",

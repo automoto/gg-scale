@@ -22,7 +22,8 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	var d Deps
 
 	registerHealthz(api, d)
-	registerAuthRoutes(api, d)
+	registerAuthPasswordRoutes(api, d)
+	registerAuthTokenRoutes(api, d)
 	registerPlayerSessionVerify(api, d)
 	registerServerRemoteAddr(api, d)
 	registerFleetHeartbeat(api, d)

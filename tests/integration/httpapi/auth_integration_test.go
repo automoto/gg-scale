@@ -221,13 +221,20 @@ func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier int16, token st
 		tenantID, "project-"+token).Scan(&projectID))
 	sum := sha256.Sum256([]byte(token))
 	_, err := pool.Exec(ctx,
-		`INSERT INTO api_keys (tenant_id, project_id, key_hash) VALUES ($1, $2, $3)`,
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type) VALUES ($1, $2, $3, 'secret')`,
 		tenantID, projectID, sum[:])
 	require.NoError(t, err)
 	return
 }
 
 func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
+	return newServerWithTokenIPLimits(t, c, nil)
+}
+
+// newServerWithTokenIPLimits builds the server with an injected token-route
+// per-IP limit table so limiter tests stay deterministic; nil uses the
+// tier-derived default.
+func newServerWithTokenIPLimits(t *testing.T, c *cluster, limits func(tenant.Tier) ratelimit.Limits) *httptest.Server {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
@@ -237,14 +244,15 @@ func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 	t.Cleanup(authorizer.Close)
 
 	h := httpapi.NewRouter(httpapi.Deps{
-		Version: "v1",
-		Commit:  "test",
-		Pool:    pool,
-		Lookup:  tenant.NewSQLLookup(c.appPool),
-		Limiter: ratelimit.NewCacheLimiter(c.cache),
-		Signer:  signer,
-		Cache:   c.cache,
-		RBAC:    authorizer,
+		Version:       "v1",
+		Commit:        "test",
+		Pool:          pool,
+		Lookup:        tenant.NewSQLLookup(c.appPool),
+		Limiter:       ratelimit.NewCacheLimiter(c.cache),
+		Signer:        signer,
+		Cache:         c.cache,
+		RBAC:          authorizer,
+		TokenIPLimits: limits,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

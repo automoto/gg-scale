@@ -12,8 +12,8 @@ import (
 )
 
 const createAPIKey = `-- name: CreateAPIKey :one
-INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, created_at
 `
 
@@ -22,6 +22,7 @@ type CreateAPIKeyParams struct {
 	ProjectID *int64
 	KeyHash   []byte
 	Label     *string
+	KeyType   string
 	Scopes    []string
 }
 
@@ -30,12 +31,15 @@ type CreateAPIKeyRow struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// key_type is a security boundary (the token-route per-IP limiter exempts
+// secret keys), so it is an explicit parameter — never the column default.
 func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error) {
 	row := q.db.QueryRow(ctx, createAPIKey,
 		arg.TenantID,
 		arg.ProjectID,
 		arg.KeyHash,
 		arg.Label,
+		arg.KeyType,
 		arg.Scopes,
 	)
 	var i CreateAPIKeyRow

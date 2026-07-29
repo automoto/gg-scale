@@ -16,8 +16,10 @@ SET revoked_at = now()
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
 -- name: CreateAPIKey :one
-INSERT INTO api_keys (tenant_id, project_id, key_hash, label, scopes)
-VALUES ($1, $2, $3, $4, $5)
+-- key_type is a security boundary (the token-route per-IP limiter exempts
+-- secret keys), so it is an explicit parameter — never the column default.
+INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, created_at;
 
 -- name: CreateControlPanelAPIKey :one

@@ -80,7 +80,7 @@ func seedProjectWithAPIKey(t *testing.T, c *cluster, tenantID int64, token strin
 		tenantID, "project-"+token).Scan(&projectID))
 	sum := sha256.Sum256([]byte(token))
 	_, err := c.bootstrapPool.Exec(ctx,
-		`INSERT INTO api_keys (tenant_id, project_id, key_hash) VALUES ($1, $2, $3)`,
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type) VALUES ($1, $2, $3, 'secret')`,
 		tenantID, projectID, sum[:])
 	require.NoError(t, err)
 	return projectID

@@ -108,6 +108,8 @@ type Querier interface {
 	// Signals this player has sent into this session in the trailing minute; the
 	// handler rejects once it reaches the per-minute cap.
 	CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error)
+	// key_type is a security boundary (the token-route per-IP limiter exempts
+	// secret keys), so it is an explicit parameter — never the column default.
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
 	// New keys start with the matchmaker scope: matchmaking is a zero-config
