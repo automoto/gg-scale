@@ -113,6 +113,28 @@ func (q *Queries) DeleteGameSession(ctx context.Context, id string) error {
 	return err
 }
 
+const extendGameSessionExpiry = `-- name: ExtendGameSessionExpiry :exec
+UPDATE game_session
+SET expires_at = greatest(expires_at, $1)
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $2
+  AND id = $3
+`
+
+type ExtendGameSessionExpiryParams struct {
+	ExpiresAt pgtype.Timestamptz
+	ProjectID int64
+	ID        string
+}
+
+// Pushes a session's expiry out to the given time when that is later. The
+// join handler uses it to promote a short-lived pending matchmade session
+// to its full lifetime once a player actually joins.
+func (q *Queries) ExtendGameSessionExpiry(ctx context.Context, arg ExtendGameSessionExpiryParams) error {
+	_, err := q.db.Exec(ctx, extendGameSessionExpiry, arg.ExpiresAt, arg.ProjectID, arg.ID)
+	return err
+}
+
 const getGameSession = `-- name: GetGameSession :one
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session

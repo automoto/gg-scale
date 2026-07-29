@@ -525,20 +525,21 @@ func run() error {
 	}
 	gameSessions := gamesession.NewService(appPool)
 	worker := matchmaker.NewWorker(mmQueue, mmAlloc, hub, matchmaker.WorkerConfig{
-		RelaxAfter:         cfg.MatchmakerRelaxAfter,
-		RegionRelaxAfter:   cfg.MatchmakerRegionRelaxAfter,
-		Interval:           cfg.MatchmakerInterval,
-		ClaimTTL:           cfg.MatchmakerClaimTTL,
-		MaxAttempts:        cfg.MatchmakerMaxAttempts,
-		WorkerCount:        cfg.MatchmakerWorkerCount,
-		SweepInterval:      cfg.MatchmakerSweepInterval,
-		MatchCounter:       matchCounter{metrics},
-		ShortCommitCounter: shortCommitCounter{metrics},
-		Sessions:           gamesession.NewMatchAdapter(gameSessions),
-		QueryRejectCounter: queryRejectCounter{metrics},
-		TimeToMatch:        timeToMatchObserver{metrics},
-		QueueGauge:         queueGauge{metrics},
-		Logger:             logger,
+		RelaxAfter:            cfg.MatchmakerRelaxAfter,
+		RegionRelaxAfter:      cfg.MatchmakerRegionRelaxAfter,
+		Interval:              cfg.MatchmakerInterval,
+		ClaimTTL:              cfg.MatchmakerClaimTTL,
+		MaxAttempts:           cfg.MatchmakerMaxAttempts,
+		WorkerCount:           cfg.MatchmakerWorkerCount,
+		SweepInterval:         cfg.MatchmakerSweepInterval,
+		MatchCounter:          matchCounter{metrics},
+		ShortCommitCounter:    shortCommitCounter{metrics},
+		CapacityReturnCounter: capacityReturnCounter{metrics},
+		Sessions:              gamesession.NewMatchAdapter(gameSessions),
+		QueryRejectCounter:    queryRejectCounter{metrics},
+		TimeToMatch:           timeToMatchObserver{metrics},
+		QueueGauge:            queueGauge{metrics},
+		Logger:                logger,
 	})
 	go func() {
 		defer close(workerDone)
@@ -673,6 +674,10 @@ func (c matchCounter) Inc() { c.m.MatchmakerMatch() }
 type shortCommitCounter struct{ m *observability.Metrics }
 
 func (c shortCommitCounter) Inc() { c.m.MatchmakerShortCommit() }
+
+type capacityReturnCounter struct{ m *observability.Metrics }
+
+func (c capacityReturnCounter) Inc() { c.m.MatchmakerCapacityReturn() }
 
 type queryRejectCounter struct{ m *observability.Metrics }
 

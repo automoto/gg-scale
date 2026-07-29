@@ -788,6 +788,35 @@ func TestWorkerGameSessionModeFailsTicketsWhenSessionCreationFails(t *testing.T)
 		"session-creation failure follows the allocation-failure path")
 }
 
+func TestWorkerGameSessionModeLeavesTicketsQueuedOnCapacityError(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	sessions := &fakeSessionCreator{err: fmt.Errorf("create session: %w", matchmaker.ErrCapacity)}
+	w := matchmaker.NewWorker(q, nil, nil, matchmaker.WorkerConfig{MaxAttempts: 1, Sessions: sessions})
+
+	ticket := enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Mode: matchmaker.ModeGameSession})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	got, err := q.Get(db.WithTenant(context.Background(), 1), ticket.ID, 42)
+	require.NoError(t, err)
+	assert.Equal(t, matchmaker.StatusQueued, got.Status,
+		"a capacity error must not consume the attempt budget")
+}
+
+func TestWorkerCountsCapacityReturns(t *testing.T) {
+	q := matchmaker.NewMemQueue()
+	sessions := &fakeSessionCreator{err: fmt.Errorf("create session: %w", matchmaker.ErrCapacity)}
+	counter := &countingCounter{}
+	w := matchmaker.NewWorker(q, nil, nil, matchmaker.WorkerConfig{
+		MaxAttempts: 1, Sessions: sessions, CapacityReturnCounter: counter})
+
+	enqueue(t, q, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, PlayerID: 42, Mode: matchmaker.ModeGameSession})
+
+	require.NoError(t, w.Tick(context.Background()))
+
+	assert.Equal(t, int64(1), counter.n.Load())
+}
+
 func TestWorkerMatchOnlyDesignatesHostAndSurfacesPeerAttributes(t *testing.T) {
 	q := matchmaker.NewMemQueue()
 	hub := &fakeNotifier{}

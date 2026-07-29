@@ -22,12 +22,17 @@ import (
 
 const (
 	// DefaultTTL bounds how long a session stays joinable.
-	DefaultTTL          = 4 * time.Hour
+	DefaultTTL = 4 * time.Hour
+	// MatchPendingTTL is the initial lifetime of a matchmade session. It
+	// covers the window between match formation and the first join; the
+	// first join extends the session to DefaultTTL. Keeps sessions nobody
+	// ever joins from holding an open-session cap slot for hours.
+	MatchPendingTTL     = 10 * time.Minute
 	joinCodeAlphabet    = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no I O 0 1 (ambiguous)
 	joinCodeLen         = 6
 	joinCodeMaxAttempts = 5
 	// MaxOpenSessionsPerProject caps live sessions per project.
-	MaxOpenSessionsPerProject = 100
+	MaxOpenSessionsPerProject = 1000
 	// MaxPlayersLimit caps a single session's roster size.
 	MaxPlayersLimit = 64
 )
@@ -170,6 +175,18 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 		return nil, err
 	}
 	return &Created{SessionID: sess.ID, JoinCode: sess.JoinCode, State: sess.State, Peers: peers}, nil
+}
+
+// IsMatchmade reports whether the session props carry the matchmade flag the
+// matchmaker adapter sets. Unparsable props count as not matchmade.
+func IsMatchmade(props []byte) bool {
+	var p struct {
+		Matchmade bool `json:"matchmade"`
+	}
+	if err := json.Unmarshal(props, &p); err != nil {
+		return false
+	}
+	return p.Matchmade
 }
 
 func newJoinCode() (string, error) {

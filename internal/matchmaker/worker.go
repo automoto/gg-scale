@@ -103,6 +103,9 @@ type WorkerConfig struct {
 	// drifted between claim and commit, so the group was rolled back and the
 	// survivors returned). Optional; nil disables.
 	ShortCommitCounter Counter
+	// CapacityReturnCounter is incremented once per group returned to the
+	// queue because the backend reported ErrCapacity. Optional; nil disables.
+	CapacityReturnCounter Counter
 	// MatchTTL is the retention window for committed matchmaker_matches
 	// rows (the poll-recovery record). Defaults to 24h.
 	MatchTTL time.Duration
@@ -542,6 +545,22 @@ func (w *Worker) releaseOnError(ctx context.Context, claim *Claim, group []*Tick
 	return err
 }
 
+// returnOnCapacity un-claims a group penalty-free after a transient
+// capacity error: the tickets stay queued and rematch on a later pass, once
+// the backend has room again. Terminal failure stays reserved for real
+// errors — under the NOTIFY retry cadence a capacity error would otherwise
+// exhaust MaxAttempts within milliseconds.
+func (w *Worker) returnOnCapacity(ctx context.Context, claim *Claim, group []*Ticket, err error) error {
+	if w.cfg.CapacityReturnCounter != nil {
+		w.cfg.CapacityReturnCounter.Inc()
+	}
+	w.log.Warn("matchmaker: backend at capacity, group returned to queue", "err", err, "tickets", len(group))
+	if retErr := w.queue.ReturnTickets(ctx, claim, ticketIDs(group)); retErr != nil {
+		return fmt.Errorf("return tickets after capacity error: %w", retErr)
+	}
+	return nil
+}
+
 // finalizeMatch persists the match, commits the claimed group, meters it, and
 // fans out the matched event. Shared by the backend-free modes (match_only,
 // game_session) whose commit tail is identical; the fleet path stays separate
@@ -618,6 +637,9 @@ func (w *Worker) commitGameSession(ctx, tenantCtx context.Context, b Bucket, cla
 		players = append(players, t.PlayerID)
 	}
 	sessionID, joinCode, err := w.cfg.Sessions.CreateMatchSession(tenantCtx, b.ProjectID, b.GameMode, players)
+	if errors.Is(err, ErrCapacity) {
+		return w.returnOnCapacity(ctx, claim, group, err)
+	}
 	if err != nil {
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("create session: %w", err))
 	}

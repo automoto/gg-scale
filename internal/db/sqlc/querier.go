@@ -232,6 +232,10 @@ type Querier interface {
 	// ExpireMatchmakerTickets but scoped to the one player; claimed tickets are
 	// left for the claim path to settle.
 	ExpirePlayerQueuedTicket(ctx context.Context, arg ExpirePlayerQueuedTicketParams) (int64, error)
+	// Pushes a session's expiry out to the given time when that is later. The
+	// join handler uses it to promote a short-lived pending matchmade session
+	// to its full lifetime once a player actually joins.
+	ExtendGameSessionExpiry(ctx context.Context, arg ExtendGameSessionExpiryParams) error
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.

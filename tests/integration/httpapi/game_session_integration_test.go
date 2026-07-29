@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ggscale/ggscale/internal/gamesession"
 )
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -233,6 +236,58 @@ func TestGameSession_expired_not_joinable(t *testing.T) {
 	assert.Equal(t, http.StatusGone, resp.StatusCode, string(body))
 }
 
+func TestGameSession_join_extends_matchmade_expiry(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	ctx := context.Background()
+	tokJ, joinerID := anonymousLoginWithID(t, srv.URL, "k")
+	// A matchmade session starts with a short pending expiry; the joiner is
+	// the host so the private-session check admits them.
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, private, expires_at)
+		 VALUES ('gs_mm', 'MM1234', $1, $2, $3, 'open', '{"matchmade": true}', 2, true, now() + interval '10 minutes')`,
+		tenantID, projectID, joinerID)
+	require.NoError(t, err)
+
+	resp, body := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_mm/join", "k", tokJ,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var expires time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT expires_at FROM game_session WHERE id = 'gs_mm'`).Scan(&expires))
+	assert.Greater(t, time.Until(expires), time.Hour,
+		"join must extend a matchmade session past its pending TTL")
+}
+
+func TestGameSession_join_keeps_plain_session_expiry(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	ctx := context.Background()
+	tokJ, joinerID := anonymousLoginWithID(t, srv.URL, "k")
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 VALUES ('gs_plain', 'PL1234', $1, $2, $3, 'open', '{}', 2, now() + interval '10 minutes')`,
+		tenantID, projectID, joinerID)
+	require.NoError(t, err)
+
+	resp, body := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_plain/join", "k", tokJ,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var expires time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT expires_at FROM game_session WHERE id = 'gs_plain'`).Scan(&expires))
+	assert.Less(t, time.Until(expires), time.Hour,
+		"join must not extend a player-created session")
+}
+
 func TestGameSession_cap_rejects_overflow(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
@@ -243,13 +298,12 @@ func TestGameSession_cap_rejects_overflow(t *testing.T) {
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
 		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1,$2,'cap_host') RETURNING id`,
 		tenantID, projectID).Scan(&hostID))
-	for i := 0; i < 100; i++ {
-		_, err := c.bootstrapPool.Exec(ctx,
-			`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
-			 VALUES ($1, $2, $3, $4, $5, 'open', '{}', 2, now() + interval '4 hours')`,
-			fmt.Sprintf("gs_cap_%04d", i), fmt.Sprintf("C%05d", i), tenantID, projectID, hostID)
-		require.NoError(t, err)
-	}
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 SELECT 'gs_cap_' || lpad(g::text, 4, '0'), 'C' || lpad(g::text, 5, '0'), $1, $2, $3, 'open', '{}', 2, now() + interval '4 hours'
+		 FROM generate_series(1, $4) AS g`,
+		tenantID, projectID, hostID, gamesession.MaxOpenSessionsPerProject)
+	require.NoError(t, err)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
 	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,

@@ -303,6 +303,13 @@ func (e *TicketActiveError) Unwrap() error { return ErrTicketActive }
 // formed with a partial roster.
 var ErrShortCommit = errors.New("matchmaker: commit did not cover the whole group")
 
+// ErrCapacity marks a transient "no room right now" backend condition (e.g.
+// the per-project game-session cap). The worker returns the group to the
+// queue penalty-free instead of burning its attempt budget, so tickets wait
+// for capacity rather than terminally failing within milliseconds under the
+// NOTIFY-driven retry cadence.
+var ErrCapacity = errors.New("matchmaker: backend capacity unavailable")
+
 // Listener is an optional capability a Queue can implement to wake the
 // worker on ticket inserts instead of forcing a polling tick. The Postgres
 // queue uses LISTEN/NOTIFY; the in-memory queue doesn't implement it and

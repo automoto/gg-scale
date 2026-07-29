@@ -74,6 +74,16 @@ WHERE project_id = sqlc.arg('project_id')
   AND state     != 'ended'
   AND expires_at > now();
 
+-- name: ExtendGameSessionExpiry :exec
+-- Pushes a session's expiry out to the given time when that is later. The
+-- join handler uses it to promote a short-lived pending matchmade session
+-- to its full lifetime once a player actually joins.
+UPDATE game_session
+SET expires_at = greatest(expires_at, sqlc.arg('expires_at'))
+WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg('project_id')
+  AND id = sqlc.arg('id');
+
 -- name: DeleteExpiredGameSessionsForTenant :execrows
 -- Removes sessions past their expiry for the current tenant. Called once
 -- per tenant by the GC goroutine.

@@ -21,6 +21,7 @@ type Metrics struct {
 	matchmakerTicket         prometheus.Counter
 	matchmakerMatch          prometheus.Counter
 	matchmakerShortCommit    prometheus.Counter
+	matchmakerCapacityReturn prometheus.Counter
 	matchmakerQueryReject    prometheus.Counter
 	matchmakerTicketFailures *prometheus.CounterVec
 	matchmakerTimeToMatch    prometheus.Histogram
@@ -167,6 +168,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_matchmaker_short_commits_total",
 			Help: "Groups rolled back because a member drifted between claim and commit; survivors were returned to the queue.",
 		}),
+		matchmakerCapacityReturn: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_matchmaker_capacity_returns_total",
+			Help: "Groups returned to the queue because the session/allocation backend was at capacity; tickets keep waiting instead of failing.",
+		}),
 		matchmakerQueryReject: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "ggscale_matchmaker_query_rejections_total",
 			Help: "Candidate pairings rejected by mutual query acceptance; high values point at overly strict ticket queries.",
@@ -213,7 +218,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
-		m.matchmakerShortCommit, m.matchmakerQueryReject, m.matchmakerTicketFailures,
+		m.matchmakerShortCommit, m.matchmakerCapacityReturn, m.matchmakerQueryReject, m.matchmakerTicketFailures,
 		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
 		m.relayCreds, m.relayIssueThrottled, m.mailSends, m.quotaRejections, m.entitlementApplies,
 	)
@@ -307,6 +312,15 @@ func (m *Metrics) MatchmakerShortCommit() {
 		return
 	}
 	m.matchmakerShortCommit.Inc()
+}
+
+// MatchmakerCapacityReturn counts a group returned to the queue because the
+// backend was at capacity.
+func (m *Metrics) MatchmakerCapacityReturn() {
+	if m == nil {
+		return
+	}
+	m.matchmakerCapacityReturn.Inc()
 }
 
 // MatchmakerQueryReject counts a candidate pairing rejected by mutual

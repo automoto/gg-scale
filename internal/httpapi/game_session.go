@@ -9,6 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
@@ -431,6 +432,17 @@ func gameSessionJoin(d Deps) func(context.Context, *gameSessionJoinInput) (*game
 				Qos:       []byte("{}"),
 			}); qerr != nil {
 				return qerr
+			}
+			// A matchmade session starts on the short pending TTL; the first
+			// join proves the match is live, so promote it to a full lifetime.
+			if gamesession.IsMatchmade(sess.Props) {
+				if qerr := q.ExtendGameSessionExpiry(ctx, sqlcgen.ExtendGameSessionExpiryParams{
+					ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(gamesession.DefaultTTL), Valid: true},
+					ProjectID: projectID,
+					ID:        sessionID,
+				}); qerr != nil {
+					return qerr
+				}
 			}
 			peers, qerr = q.ListGameSessionPeers(ctx, sessionID)
 			return qerr
