@@ -100,9 +100,6 @@ type Querier interface {
 	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
 	CountPlayerAccountTOTPBackupCodesRemaining(ctx context.Context, playerAccountID pgtype.UUID) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
-	// Registered (non-soft-deleted) player count for the current tenant, across
-	// all its projects.
-	CountPlayersForTenant(ctx context.Context) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
 	// Signals this player has sent into this session in the trailing minute; the
@@ -371,9 +368,17 @@ type Querier interface {
 	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error)
-	// The current tenant's class and quota-enforcement flag. Read inside an
-	// RLS-scoped tx (app.tenant_id set) before a quota-gated growth operation.
+	// Lock-free snapshot of the current tenant's class, enforcement flag, and
+	// registered-player count. Read inside an RLS-scoped tx (app.tenant_id set)
+	// before a quota-gated growth operation. Deliberately NOT FOR UPDATE: the
+	// authoritative player gate is ReserveTenantPlayerSlot, so this read must
+	// never serialize concurrent creates on the tenant row.
 	GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error)
+	// FOR UPDATE variant for rare growth paths (project create, storage writes)
+	// whose check-then-apply exactness relies on tenant-row serialization. Never
+	// use it on the player-create path — that gate is ReserveTenantPlayerSlot,
+	// and the whole point of the split is that creates don't serialize.
+	GetTenantQuotaContextLocked(ctx context.Context) (GetTenantQuotaContextLockedRow, error)
 	// Acceptance lookup: only an approved request with a live code is acceptable.
 	GetTenantSignupRequestByCodeHash(ctx context.Context, codeHash []byte) (GetTenantSignupRequestByCodeHashRow, error)
 	GetTenantSignupRequestByID(ctx context.Context, id int64) (GetTenantSignupRequestByIDRow, error)
@@ -601,6 +606,16 @@ type Querier interface {
 	// Atomic check-and-bump (see ReserveControlPanelVerifyAttempt for the
 	// TOCTOU explanation). Returns 0 rows when already at cap.
 	ReservePlayerVerifyAttempt(ctx context.Context, arg ReservePlayerVerifyAttemptParams) (ReservePlayerVerifyAttemptRow, error)
+	// Authoritative player-quota gate: atomically claims one registered-player
+	// slot by bumping player_count, refusing at the class cap (0 rows affected).
+	// Run it as the LAST statement before commit so the tenant-row lock is held
+	// for a single round trip instead of across the whole create transaction.
+	// player_limit is quota.Limits.Players; -1 is quota.Unlimited. The
+	// NOT enforce_quotas arm admits unenforced tenants while still counting
+	// them, so player_count stays exact for every tenant and flipping
+	// enforce_quotas on later needs no recompute. Out-of-band player writes
+	// (bulk seeds, imports) must maintain the counter themselves.
+	ReserveTenantPlayerSlot(ctx context.Context, playerLimit int64) (int64, error)
 	ResetControlPanelTOTPAttempts(ctx context.Context, controlPanelUserID int64) error
 	ResetPlayerAccountTOTPAttempts(ctx context.Context, playerAccountID pgtype.UUID) error
 	// Tenant-scoped: maps a set of accounts back to their player in a specific
@@ -684,7 +699,9 @@ type Querier interface {
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
 	SetPublicSignupEnabled(ctx context.Context, arg SetPublicSignupEnabledParams) error
 	// Flip the per-tenant enforcement flag. Used by provisioning when the operator
-	// has enabled quota enforcement for new tenants. Runs in a bootstrap tx.
+	// has enabled quota enforcement for new tenants. player_count is maintained
+	// for unenforced tenants too, so flipping this on later is safe as long as
+	// players were only ever created through the app's create paths.
 	SetTenantEnforceQuotas(ctx context.Context, arg SetTenantEnforceQuotasParams) error
 	SetTenantPublicJoining(ctx context.Context, enabled bool) error
 	SetTenantStorageNotifiedThreshold(ctx context.Context, arg SetTenantStorageNotifiedThresholdParams) error

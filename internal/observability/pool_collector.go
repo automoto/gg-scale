@@ -43,5 +43,10 @@ func RegisterPoolStats(reg prometheus.Registerer, name string, stat func() *pgxp
 			Help:        "Cumulative acquires that had to wait for a connection (pool was empty).",
 			ConstLabels: labels,
 		}, func() float64 { return float64(stat().EmptyAcquireCount()) }),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Name:        "ggscale_db_pool_acquire_duration_seconds_total",
+			Help:        "Cumulative time spent acquiring connections, including waits on an exhausted pool. Query-duration metrics do not include this wait.",
+			ConstLabels: labels,
+		}, func() float64 { return stat().AcquireDuration().Seconds() }),
 	)
 }

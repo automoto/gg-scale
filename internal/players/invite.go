@@ -170,6 +170,8 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		if qerr != nil {
 			return fmt.Errorf("tenant quota context: %w", qerr)
 		}
+		limits := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
+		created := false
 		emailPtr := &row.Email
 		existing, eerr := q.GetPlayerForAccountLink(r.Context(), sqlcgen.GetPlayerForAccountLinkParams{
 			ProjectID: projectID, Email: emailPtr,
@@ -186,11 +188,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		case errors.Is(eerr, pgx.ErrNoRows):
 			if qc.EnforceQuotas {
-				count, cerr := q.CountPlayersForTenant(r.Context())
-				if cerr != nil {
-					return fmt.Errorf("count players: %w", cerr)
-				}
-				if cerr := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckPlayers(count); cerr != nil {
+				if cerr := limits.CheckPlayers(qc.PlayerCount); cerr != nil {
 					return cerr
 				}
 			}
@@ -209,10 +207,27 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				return cerr
 			}
+			created = true
 		default:
 			return eerr
 		}
-		return q.MarkPlayerInvitationAccepted(r.Context(), row.ID)
+		if merr := q.MarkPlayerInvitationAccepted(r.Context(), row.ID); merr != nil {
+			return merr
+		}
+		if !created {
+			return nil
+		}
+		// Authoritative quota gate, last so the tenant-row lock spans a
+		// single round trip; also counts unenforced tenants so the counter
+		// stays exact (see httpapi.reservePlayerSlot).
+		rows, rerr := q.ReserveTenantPlayerSlot(r.Context(), limits.Players)
+		if rerr != nil {
+			return fmt.Errorf("reserve player slot: %w", rerr)
+		}
+		if rows == 0 {
+			return &quota.ErrQuotaExceeded{Axis: quota.AxisPlayers, Limit: limits.Players, Current: qc.PlayerCount}
+		}
+		return nil
 	})
 	switch {
 	case errors.Is(err, errInviteNotFound), errors.Is(err, errInviteExpired):

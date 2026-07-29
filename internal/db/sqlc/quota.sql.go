@@ -9,22 +9,6 @@ import (
 	"context"
 )
 
-const countPlayersForTenant = `-- name: CountPlayersForTenant :one
-SELECT count(*)::bigint
-FROM project_players
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL
-`
-
-// Registered (non-soft-deleted) player count for the current tenant, across
-// all its projects.
-func (q *Queries) CountPlayersForTenant(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countPlayersForTenant)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const countProjectsForTenant = `-- name: CountProjectsForTenant :one
 SELECT count(*)::bigint
 FROM projects
@@ -41,25 +25,80 @@ func (q *Queries) CountProjectsForTenant(ctx context.Context) (int64, error) {
 }
 
 const getTenantQuotaContext = `-- name: GetTenantQuotaContext :one
-SELECT tier, enforce_quotas
+SELECT tier, enforce_quotas, player_count
+FROM tenants
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type GetTenantQuotaContextRow struct {
+	Tier          int16
+	EnforceQuotas bool
+	PlayerCount   int64
+}
+
+// Lock-free snapshot of the current tenant's class, enforcement flag, and
+// registered-player count. Read inside an RLS-scoped tx (app.tenant_id set)
+// before a quota-gated growth operation. Deliberately NOT FOR UPDATE: the
+// authoritative player gate is ReserveTenantPlayerSlot, so this read must
+// never serialize concurrent creates on the tenant row.
+func (q *Queries) GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error) {
+	row := q.db.QueryRow(ctx, getTenantQuotaContext)
+	var i GetTenantQuotaContextRow
+	err := row.Scan(&i.Tier, &i.EnforceQuotas, &i.PlayerCount)
+	return i, err
+}
+
+const getTenantQuotaContextLocked = `-- name: GetTenantQuotaContextLocked :one
+SELECT tier, enforce_quotas, player_count
 FROM tenants
 WHERE id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 FOR UPDATE
 `
 
-type GetTenantQuotaContextRow struct {
+type GetTenantQuotaContextLockedRow struct {
 	Tier          int16
 	EnforceQuotas bool
+	PlayerCount   int64
 }
 
-// The current tenant's class and quota-enforcement flag. Read inside an
-// RLS-scoped tx (app.tenant_id set) before a quota-gated growth operation.
-func (q *Queries) GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error) {
-	row := q.db.QueryRow(ctx, getTenantQuotaContext)
-	var i GetTenantQuotaContextRow
-	err := row.Scan(&i.Tier, &i.EnforceQuotas)
+// FOR UPDATE variant for rare growth paths (project create, storage writes)
+// whose check-then-apply exactness relies on tenant-row serialization. Never
+// use it on the player-create path — that gate is ReserveTenantPlayerSlot,
+// and the whole point of the split is that creates don't serialize.
+func (q *Queries) GetTenantQuotaContextLocked(ctx context.Context) (GetTenantQuotaContextLockedRow, error) {
+	row := q.db.QueryRow(ctx, getTenantQuotaContextLocked)
+	var i GetTenantQuotaContextLockedRow
+	err := row.Scan(&i.Tier, &i.EnforceQuotas, &i.PlayerCount)
 	return i, err
+}
+
+const reserveTenantPlayerSlot = `-- name: ReserveTenantPlayerSlot :execrows
+UPDATE tenants
+SET player_count = player_count + 1
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND (NOT enforce_quotas
+       OR $1::bigint = -1
+       OR player_count < $1::bigint)
+`
+
+// Authoritative player-quota gate: atomically claims one registered-player
+// slot by bumping player_count, refusing at the class cap (0 rows affected).
+// Run it as the LAST statement before commit so the tenant-row lock is held
+// for a single round trip instead of across the whole create transaction.
+// player_limit is quota.Limits.Players; -1 is quota.Unlimited. The
+// NOT enforce_quotas arm admits unenforced tenants while still counting
+// them, so player_count stays exact for every tenant and flipping
+// enforce_quotas on later needs no recompute. Out-of-band player writes
+// (bulk seeds, imports) must maintain the counter themselves.
+func (q *Queries) ReserveTenantPlayerSlot(ctx context.Context, playerLimit int64) (int64, error) {
+	result, err := q.db.Exec(ctx, reserveTenantPlayerSlot, playerLimit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setTenantEnforceQuotas = `-- name: SetTenantEnforceQuotas :exec
@@ -74,7 +113,9 @@ type SetTenantEnforceQuotasParams struct {
 }
 
 // Flip the per-tenant enforcement flag. Used by provisioning when the operator
-// has enabled quota enforcement for new tenants. Runs in a bootstrap tx.
+// has enabled quota enforcement for new tenants. player_count is maintained
+// for unenforced tenants too, so flipping this on later is safe as long as
+// players were only ever created through the app's create paths.
 func (q *Queries) SetTenantEnforceQuotas(ctx context.Context, arg SetTenantEnforceQuotasParams) error {
 	_, err := q.db.Exec(ctx, setTenantEnforceQuotas, arg.EnforceQuotas, arg.TenantID)
 	return err

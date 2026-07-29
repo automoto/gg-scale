@@ -295,6 +295,14 @@ func fillPlayersTo(t *testing.T, c *cluster, tenantID, projectID, target int64, 
 		SELECT $1, $2, $3 || '-' || g::text
 		FROM generate_series(1, $4::bigint) AS g`, tenantID, projectID, prefix, missing)
 	require.NoError(t, err)
+	// Out-of-band seeding bypasses ReserveTenantPlayerSlot; maintain the
+	// counter the same way the 0027 backfill does.
+	_, err = c.bootstrapPool.Exec(context.Background(), `
+		UPDATE tenants SET player_count = (
+			SELECT count(*) FROM project_players
+			WHERE tenant_id = $1 AND deleted_at IS NULL
+		) WHERE id = $1`, tenantID)
+	require.NoError(t, err)
 }
 
 func signCustomToken(t *testing.T, secret []byte, externalID string) string {
@@ -611,11 +619,16 @@ func TestBranchFollowup_player_quota_mixed_concurrency_is_tenant_wide(t *testing
 		`SELECT count(*) FROM project_players WHERE tenant_id = $1 AND deleted_at IS NULL`, tenantID).Scan(&count))
 	assert.Equal(t, branchPlayerLimit, count)
 
-	// One soft delete frees exactly one tenant-wide slot.
+	// One soft delete frees exactly one tenant-wide slot. Like any
+	// out-of-band player write, the manual soft-delete maintains
+	// tenants.player_count itself (no app delete path exists yet).
 	_, err = c.bootstrapPool.Exec(context.Background(), `
 		UPDATE project_players SET deleted_at = now()
 		WHERE id = (SELECT id FROM project_players WHERE tenant_id = $1 AND project_id = $2 AND deleted_at IS NULL LIMIT 1)`,
 		tenantID, projectB)
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`UPDATE tenants SET player_count = GREATEST(player_count - 1, 0) WHERE id = $1`, tenantID)
 	require.NoError(t, err)
 	status, err := postJSONStatus(srvA.URL+"/v1/auth/anonymous", "player-race-a", nil)
 	require.NoError(t, err)

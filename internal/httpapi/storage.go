@@ -237,7 +237,9 @@ func putStorageObject(ctx context.Context, d Deps, projectID, ownerID int64, in 
 // reads, deletes, and shrinking overwrites (delta<=0) always pass. The
 // per-value max_value_bytes cap in storagePut is orthogonal (abuse guard).
 func storageWriteDelta(ctx context.Context, q *sqlcgen.Queries, projectID, ownerID int64, key string, value []byte) (int64, error) {
-	qc, err := q.GetTenantQuotaContext(ctx)
+	// Locked: concurrent storage writes must serialize tenant-wide so the
+	// usage check and the applied delta stay exact.
+	qc, err := q.GetTenantQuotaContextLocked(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("tenant quota context: %w", err)
 	}

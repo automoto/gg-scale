@@ -717,6 +717,7 @@ type Tenant struct {
 	PublicJoiningEnabled bool
 	Tier                 int16
 	EnforceQuotas        bool
+	PlayerCount          int64
 }
 
 type TenantChangeRequest struct {

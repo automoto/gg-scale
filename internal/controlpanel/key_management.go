@@ -382,7 +382,9 @@ func (h *Handler) createProject(ctx context.Context, tenantID int64, name string
 // is already at its class project limit. A no-op for unenforced tenants
 // (zero-config self-host stays uncapped). Runs inside the create tx.
 func checkProjectQuota(ctx context.Context, q *sqlcgen.Queries) error {
-	qc, err := q.GetTenantQuotaContext(ctx)
+	// Locked: project creation is rare, and the count-then-create check
+	// relies on tenant-row serialization to stay exact under concurrency.
+	qc, err := q.GetTenantQuotaContextLocked(ctx)
 	if err != nil {
 		return fmt.Errorf("tenant quota context: %w", err)
 	}

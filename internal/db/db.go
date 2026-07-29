@@ -116,18 +116,16 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 		}
 	}()
 
-	if _, err = tx.Exec(ctx,
-		"SELECT set_config('app.tenant_id', $1, true)",
-		strconv.FormatInt(tenantID, 10),
-	); err != nil {
-		return fmt.Errorf("set app.tenant_id: %w", err)
-	}
-
+	// Both GUCs in one statement: set_config(..., true) is SET LOCAL, and one
+	// round trip instead of two matters on the cross-region write path.
+	setup := "SELECT set_config('app.tenant_id', $1, true)"
+	args := []any{strconv.FormatInt(tenantID, 10)}
 	if p.statementTimeout > 0 {
-		ms := p.statementTimeout.Milliseconds()
-		if _, err = tx.Exec(ctx, fmt.Sprintf("SET LOCAL statement_timeout = %d", ms)); err != nil {
-			return fmt.Errorf("set statement_timeout: %w", err)
-		}
+		setup = "SELECT set_config('app.tenant_id', $1, true), set_config('statement_timeout', $2, true)"
+		args = append(args, strconv.FormatInt(p.statementTimeout.Milliseconds(), 10))
+	}
+	if _, err = tx.Exec(ctx, setup, args...); err != nil {
+		return fmt.Errorf("set app.tenant_id: %w", err)
 	}
 
 	if err = fn(tx); err != nil {

@@ -233,7 +233,11 @@ func authAnonymous(d Deps) func(context.Context, *struct{}) (*anonymousOutput, e
 		var playerID int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if err := checkPlayerQuota(ctx, q); err != nil {
+			qc, err := playerQuotaContext(ctx, q)
+			if err != nil {
+				return err
+			}
+			if err := checkPlayerQuotaSnapshot(qc); err != nil {
 				return err
 			}
 			user, err := q.CreateAnonymousPlayer(ctx, sqlcgen.CreateAnonymousPlayerParams{
@@ -247,7 +251,10 @@ func authAnonymous(d Deps) func(context.Context, *struct{}) (*anonymousOutput, e
 			if err := insertSession(ctx, tx, projectID, user.ID, refreshToken, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID})
+			if err := auditlog.Write(ctx, tx, user.ID, "auth.anonymous", "", map[string]any{"external_id": externalID}); err != nil {
+				return err
+			}
+			return reservePlayerSlot(ctx, q, qc)
 		})
 		if err != nil {
 			var qe *quota.ErrQuotaExceeded
@@ -306,7 +313,11 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			if err := checkPlayerQuota(ctx, q); err != nil {
+			qc, err := playerQuotaContext(ctx, q)
+			if err != nil {
+				return err
+			}
+			if err := checkPlayerQuotaSnapshot(qc); err != nil {
 				return err
 			}
 			email := in.Body.Email
@@ -323,7 +334,10 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 			if err != nil {
 				return fmt.Errorf("insert player: %w", err)
 			}
-			return auditlog.Write(ctx, tx, id, "auth.signup", email, nil)
+			if err := auditlog.Write(ctx, tx, id, "auth.signup", email, nil); err != nil {
+				return err
+			}
+			return reservePlayerSlot(ctx, q, qc)
 		})
 		if err != nil {
 			var qe *quota.ErrQuotaExceeded
@@ -717,11 +731,12 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 				ProjectID: projectID, ExternalID: parsed.External,
 			})
 			var id int64
+			created := false
 			switch {
 			case err == nil:
 				id = existing.ID
 			case errors.Is(err, pgx.ErrNoRows):
-				if err := checkPlayerQuotaLocked(ctx, q, qc); err != nil {
+				if err := checkPlayerQuotaSnapshot(qc); err != nil {
 					return err
 				}
 				id, err = q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
@@ -730,6 +745,10 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 				if err != nil {
 					return fmt.Errorf("upsert player: %w", err)
 				}
+				// A lost upsert race (concurrent create of the same
+				// external_id) reserves a slot for a player that already
+				// counted; the rare over-count only under-admits later.
+				created = true
 			default:
 				return fmt.Errorf("find player: %w", err)
 			}
@@ -740,10 +759,16 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 			if sessionEpoch, err = playerEpoch(ctx, q, id); err != nil {
 				return err
 			}
+			if err := auditlog.Write(ctx, tx, id, "auth.custom_token", parsed.External, nil); err != nil {
+				return err
+			}
 			if err := insertSession(ctx, tx, projectID, id, refreshTok, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, id, "auth.custom_token", parsed.External, nil)
+			if created {
+				return reservePlayerSlot(ctx, q, qc)
+			}
+			return nil
 		})
 		switch {
 		case errors.Is(err, errCustomTokenNotConfigured):
@@ -888,18 +913,6 @@ func playerBanCheck(ctx context.Context, q *sqlcgen.Queries, playerID int64) err
 	return nil
 }
 
-// checkPlayerQuota rejects registering a new player when the tenant enforces
-// quotas and is already at its class registered-player limit. A no-op for
-// unenforced tenants (zero-config self-host stays uncapped). Existing players
-// are never affected. Runs inside the signup tx (app.tenant_id set).
-func checkPlayerQuota(ctx context.Context, q *sqlcgen.Queries) error {
-	qc, err := playerQuotaContext(ctx, q)
-	if err != nil {
-		return err
-	}
-	return checkPlayerQuotaLocked(ctx, q, qc)
-}
-
 func playerQuotaContext(ctx context.Context, q *sqlcgen.Queries) (sqlcgen.GetTenantQuotaContextRow, error) {
 	qc, err := q.GetTenantQuotaContext(ctx)
 	if err != nil {
@@ -908,15 +921,39 @@ func playerQuotaContext(ctx context.Context, q *sqlcgen.Queries) (sqlcgen.GetTen
 	return qc, nil
 }
 
-func checkPlayerQuotaLocked(ctx context.Context, q *sqlcgen.Queries, qc sqlcgen.GetTenantQuotaContextRow) error {
+// checkPlayerQuotaSnapshot cheaply rejects an at-cap tenant before any insert
+// work, from the lock-free quota-context snapshot. A no-op for unenforced
+// tenants (zero-config self-host stays uncapped). The authoritative gate is
+// reservePlayerSlot — a concurrent create can invalidate this snapshot,
+// never the reservation.
+func checkPlayerQuotaSnapshot(qc sqlcgen.GetTenantQuotaContextRow) error {
 	if !qc.EnforceQuotas {
 		return nil
 	}
-	count, err := q.CountPlayersForTenant(ctx)
+	return playerLimits(qc).CheckPlayers(qc.PlayerCount)
+}
+
+// reservePlayerSlot atomically claims a registered-player slot via the
+// conditional increment of tenants.player_count. Call it as the LAST
+// statement before commit: the tenant-row lock is then held for a single
+// round trip, so concurrent creates for one tenant no longer serialize
+// across the whole transaction. It runs for unenforced tenants too — always
+// admitted, but counted, so the counter stays exact if enforcement is ever
+// flipped on.
+func reservePlayerSlot(ctx context.Context, q *sqlcgen.Queries, qc sqlcgen.GetTenantQuotaContextRow) error {
+	limits := playerLimits(qc)
+	rows, err := q.ReserveTenantPlayerSlot(ctx, limits.Players)
 	if err != nil {
-		return fmt.Errorf("count players: %w", err)
+		return fmt.Errorf("reserve player slot: %w", err)
 	}
-	return quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckPlayers(count)
+	if rows == 0 {
+		return &quota.ErrQuotaExceeded{Axis: quota.AxisPlayers, Limit: limits.Players, Current: qc.PlayerCount}
+	}
+	return nil
+}
+
+func playerLimits(qc sqlcgen.GetTenantQuotaContextRow) quota.Limits {
+	return quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
 }
 
 func isPlayerQuotaError(err error) bool {
