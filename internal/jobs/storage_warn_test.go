@@ -36,9 +36,15 @@ func TestStorageThreshold_crossings(t *testing.T) {
 	}
 }
 
-func TestStorageThreshold_unlimited_or_unknown_never_warns(t *testing.T) {
-	assert.Equal(t, int16(0), storageThreshold(1<<40, -1), "unlimited")
-	assert.Equal(t, int16(0), storageThreshold(1<<40, 0), "zero limit")
+func TestStorageThreshold_unlimited_never_warns(t *testing.T) {
+	assert.Equal(t, int16(0), storageThreshold(1<<40, -1), "unlimited sentinel")
+}
+
+func TestStorageThreshold_zero_limit_is_a_hard_cap(t *testing.T) {
+	// A 0 override deliberately blocks every growing write, so the tenant is
+	// at 100% of its limit — that must warn, not read as "unknown".
+	assert.Equal(t, int16(100), storageThreshold(1<<40, 0), "usage over a zero limit")
+	assert.Equal(t, int16(100), storageThreshold(0, 0), "empty usage still sits at the cap")
 }
 
 func TestHumanizeBytes(t *testing.T) {

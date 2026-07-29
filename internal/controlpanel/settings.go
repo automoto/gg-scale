@@ -68,12 +68,25 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 			if err != nil {
 				return err
 			}
-			limit := quota.LimitsForClass(tier).StorageBytes
+			limits, err := resolvedTenantLimits(ctx, q, tenantID, tier)
+			if err != nil {
+				return err
+			}
+			limit := limits.StorageBytes
 			view.StorageUsedBytes = used
 			view.StorageLimitBytes = limit
 			view.StorageUsedLabel = formatBytes(used)
-			view.StorageLimitLabel = formatBytes(limit)
-			if limit > 0 {
+			switch limit {
+			case quota.Unlimited:
+				view.StorageLimitLabel = "unlimited"
+			case 0:
+				// A zero override is a deliberate hard cap: every growing
+				// write is blocked, so the tenant sits at 100%.
+				view.StorageLimitLabel = formatBytes(0)
+				view.StoragePercent = 100
+				view.StorageWarn = true
+			default:
+				view.StorageLimitLabel = formatBytes(limit)
 				view.StoragePercent = int(used * 100 / limit)
 				view.StorageWarn = used*100 >= limit*80
 			}

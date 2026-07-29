@@ -2,10 +2,12 @@ package controlpanel
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 
+	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
@@ -82,6 +84,39 @@ func (h *Handler) updateTenantRecipientInviteLimitHandler(w http.ResponseWriter,
 		return
 	}
 	h.redirectRateLimits(w, r, tenantID, "Recipient burst updated.")
+}
+
+// updateQuotaOverrideHandler sets or clears one per-tenant quota-axis
+// override. Platform-admin only — tenant admins can't lift their own quotas;
+// they file a change request instead.
+func (h *Handler) updateQuotaOverrideHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	if !session.User.IsPlatformAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	axis := r.Form.Get("axis")
+	if err := h.setQuotaOverride(r.Context(), session.User.ID, tenantID, axis, r.Form.Get("limit")); err != nil {
+		switch {
+		case errors.Is(err, errInvalidLimit):
+			h.redirectRateLimits(w, r, tenantID, "Enter a limit of 0 or more (-1 for unlimited), or leave blank to restore the tier default.")
+		case errors.Is(err, errOverrideAboveHardCap):
+			h.redirectRateLimits(w, r, tenantID, fmt.Sprintf(
+				"Open game sessions per project can't exceed %d (the platform-wide cap) and can't be unlimited.",
+				gamesession.SessionsHardCap))
+		default:
+			http.Error(w, "quota override update failed", http.StatusInternalServerError)
+		}
+		return
+	}
+	h.redirectRateLimits(w, r, tenantID, "Quota override updated.")
 }
 
 // updateProjectInviteLimitHandler sets per-project invite quotas (tenant admin).

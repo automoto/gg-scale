@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ggscale/ggscale/internal/gamesession"
 )
 
 func TestParseRequestedTier(t *testing.T) {
@@ -31,6 +33,64 @@ func TestParseRequestedTier(t *testing.T) {
 		assert.NoError(t, err, "in=%q", tc.in)
 		assert.Equal(t, tc.want, got, "in=%q", tc.in)
 	}
+}
+
+func TestParseRequestedLimit(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"0", 0, false},
+		{"500", 500, false},
+		{" 2500 ", 2500, false},
+		{"-1", -1, false},
+		{"-2", 0, true},
+		{"", 0, true},
+		{"lots", 0, true},
+	}
+	for _, tc := range cases {
+		got, err := parseRequestedLimit(tc.in)
+		if tc.wantErr {
+			assert.Error(t, err, "in=%q", tc.in)
+			continue
+		}
+		assert.NoError(t, err, "in=%q", tc.in)
+		assert.Equal(t, tc.want, got, "in=%q", tc.in)
+	}
+}
+
+func TestValidateOverrideLimit_open_sessions_bounded_by_hard_cap(t *testing.T) {
+	assert.NoError(t, validateOverrideLimit("open_sessions", 0))
+	assert.NoError(t, validateOverrideLimit("open_sessions", gamesession.SessionsHardCap))
+	assert.Error(t, validateOverrideLimit("open_sessions", gamesession.SessionsHardCap+1),
+		"an override above the hard cap promises capacity creation will never grant")
+	assert.Error(t, validateOverrideLimit("open_sessions", -1),
+		"unlimited is impossible under the absolute hard cap")
+}
+
+func TestValidateOverrideLimit_other_axes_allow_unlimited(t *testing.T) {
+	assert.NoError(t, validateOverrideLimit("players", -1))
+	assert.NoError(t, validateOverrideLimit("relay_sessions", 0))
+	assert.NoError(t, validateOverrideLimit("storage", 1<<40))
+}
+
+func TestIsQuotaAxis(t *testing.T) {
+	assert.True(t, isQuotaAxis("open_sessions"))
+	assert.True(t, isQuotaAxis("players"))
+	assert.False(t, isQuotaAxis("p2p_relay"), "features are not quota axes")
+	assert.False(t, isQuotaAxis(""))
+}
+
+func TestQuotaOverrideDetail(t *testing.T) {
+	axis := "open_sessions"
+	limit := int64(9000)
+	unlimited := int64(-1)
+
+	assert.Equal(t, "Open game sessions per project → 9000", quotaOverrideDetail(&axis, &limit))
+	assert.Equal(t, "Open game sessions per project → unlimited", quotaOverrideDetail(&axis, &unlimited))
+	assert.Equal(t, "", quotaOverrideDetail(nil, &limit), "missing axis renders empty")
+	assert.Equal(t, "", quotaOverrideDetail(&axis, nil), "missing limit renders empty")
 }
 
 func TestTierIsUpgrade(t *testing.T) {

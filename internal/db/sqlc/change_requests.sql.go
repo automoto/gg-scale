@@ -33,8 +33,8 @@ func (q *Queries) ApproveTenantChangeRequest(ctx context.Context, arg ApproveTen
 }
 
 const createTenantChangeRequest = `-- name: CreateTenantChangeRequest :one
-INSERT INTO tenant_change_requests (tenant_id, requested_by_user_id, kind, requested_tier, feature, note)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO tenant_change_requests (tenant_id, requested_by_user_id, kind, requested_tier, feature, requested_limit, note)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id
 `
 
@@ -44,6 +44,7 @@ type CreateTenantChangeRequestParams struct {
 	Kind              string
 	RequestedTier     *int16
 	Feature           *string
+	RequestedLimit    *int64
 	Note              string
 }
 
@@ -56,6 +57,7 @@ func (q *Queries) CreateTenantChangeRequest(ctx context.Context, arg CreateTenan
 		arg.Kind,
 		arg.RequestedTier,
 		arg.Feature,
+		arg.RequestedLimit,
 		arg.Note,
 	)
 	var id int64
@@ -87,19 +89,20 @@ func (q *Queries) DenyTenantChangeRequest(ctx context.Context, arg DenyTenantCha
 }
 
 const getTenantChangeRequestByID = `-- name: GetTenantChangeRequestByID :one
-SELECT id, tenant_id, kind, requested_tier, feature, note, status
+SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status
 FROM tenant_change_requests
 WHERE id = $1
 `
 
 type GetTenantChangeRequestByIDRow struct {
-	ID            int64
-	TenantID      int64
-	Kind          string
-	RequestedTier *int16
-	Feature       *string
-	Note          string
-	Status        string
+	ID             int64
+	TenantID       int64
+	Kind           string
+	RequestedTier  *int16
+	Feature        *string
+	RequestedLimit *int64
+	Note           string
+	Status         string
 }
 
 func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error) {
@@ -111,6 +114,7 @@ func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (Get
 		&i.Kind,
 		&i.RequestedTier,
 		&i.Feature,
+		&i.RequestedLimit,
 		&i.Note,
 		&i.Status,
 	)
@@ -119,7 +123,7 @@ func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (Get
 
 const listPendingTenantChangeRequests = `-- name: ListPendingTenantChangeRequests :many
 SELECT r.id, r.tenant_id, t.name AS tenant_name, t.tier AS current_tier,
-       r.kind, r.requested_tier, r.feature, r.note, r.created_at,
+       r.kind, r.requested_tier, r.feature, r.requested_limit, r.note, r.created_at,
        COALESCE(u.email::text, ''::text)::text AS requester_email
 FROM tenant_change_requests r
 JOIN tenants t ON t.id = r.tenant_id
@@ -137,6 +141,7 @@ type ListPendingTenantChangeRequestsRow struct {
 	Kind           string
 	RequestedTier  *int16
 	Feature        *string
+	RequestedLimit *int64
 	Note           string
 	CreatedAt      pgtype.Timestamptz
 	RequesterEmail string
@@ -161,6 +166,7 @@ func (q *Queries) ListPendingTenantChangeRequests(ctx context.Context) ([]ListPe
 			&i.Kind,
 			&i.RequestedTier,
 			&i.Feature,
+			&i.RequestedLimit,
 			&i.Note,
 			&i.CreatedAt,
 			&i.RequesterEmail,
@@ -176,7 +182,7 @@ func (q *Queries) ListPendingTenantChangeRequests(ctx context.Context) ([]ListPe
 }
 
 const listTenantChangeRequests = `-- name: ListTenantChangeRequests :many
-SELECT id, kind, requested_tier, feature, note, status, review_reason, created_at, reviewed_at
+SELECT id, kind, requested_tier, feature, requested_limit, note, status, review_reason, created_at, reviewed_at
 FROM tenant_change_requests
 WHERE tenant_id = $1
 ORDER BY created_at DESC
@@ -184,15 +190,16 @@ LIMIT 50
 `
 
 type ListTenantChangeRequestsRow struct {
-	ID            int64
-	Kind          string
-	RequestedTier *int16
-	Feature       *string
-	Note          string
-	Status        string
-	ReviewReason  *string
-	CreatedAt     pgtype.Timestamptz
-	ReviewedAt    pgtype.Timestamptz
+	ID             int64
+	Kind           string
+	RequestedTier  *int16
+	Feature        *string
+	RequestedLimit *int64
+	Note           string
+	Status         string
+	ReviewReason   *string
+	CreatedAt      pgtype.Timestamptz
+	ReviewedAt     pgtype.Timestamptz
 }
 
 // The tenant's own requests (any status) for the settings page. Filters by
@@ -211,6 +218,7 @@ func (q *Queries) ListTenantChangeRequests(ctx context.Context, tenantID int64) 
 			&i.Kind,
 			&i.RequestedTier,
 			&i.Feature,
+			&i.RequestedLimit,
 			&i.Note,
 			&i.Status,
 			&i.ReviewReason,

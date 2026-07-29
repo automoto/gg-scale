@@ -13,7 +13,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 // StorageWarnKind is the River job kind for the storage-quota warning sweep.
@@ -62,7 +61,12 @@ func (w *StorageWarnWorker) sweep(ctx context.Context) error {
 	}
 
 	for _, r := range rows {
-		limit := quota.LimitsForClass(tenant.ClampTier(int(r.Tier))).StorageBytes
+		limits, rerr := quota.ResolveSnapshot(int(r.Tier), r.Overrides)
+		if rerr != nil {
+			slog.ErrorContext(ctx, "storage warn: resolve limits", "err", rerr, "tenant_id", r.TenantID)
+			continue
+		}
+		limit := limits.StorageBytes
 		want := storageThreshold(r.TotalBytes, limit)
 		if want == r.LastNotifiedThreshold {
 			continue
@@ -90,10 +94,12 @@ func (w *StorageWarnWorker) sweep(ctx context.Context) error {
 }
 
 // storageThreshold returns the highest crossed warning threshold (0, 80, or
-// 100) for total bytes against limit. Unlimited/unknown limits never warn.
+// 100) for total bytes against limit. The Unlimited sentinel (negative)
+// never warns; a zero limit is a deliberate hard cap — every growing write
+// is blocked, so the tenant sits at 100%.
 func storageThreshold(total, limit int64) int16 {
 	switch {
-	case limit <= 0:
+	case limit < 0:
 		return 0
 	case total >= limit:
 		return 100

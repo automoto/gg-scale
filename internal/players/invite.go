@@ -19,7 +19,6 @@ import (
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -170,7 +169,10 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		if qerr != nil {
 			return fmt.Errorf("tenant quota context: %w", qerr)
 		}
-		limits := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
+		limits, qerr := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+		if qerr != nil {
+			return qerr
+		}
 		created := false
 		emailPtr := &row.Email
 		existing, eerr := q.GetPlayerForAccountLink(r.Context(), sqlcgen.GetPlayerForAccountLinkParams{

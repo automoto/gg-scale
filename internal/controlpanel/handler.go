@@ -177,6 +177,7 @@ func New(d Deps) http.Handler {
 			r.Post("/rate-limits/projects/{projectID}/invites", h.updateProjectInviteLimitHandler)
 			r.Post("/rate-limits/storage", h.updateTenantStorageLimitHandler)
 			r.Post("/rate-limits/projects/{projectID}/storage", h.updateProjectStorageLimitHandler)
+			r.Post("/rate-limits/quotas", h.updateQuotaOverrideHandler)
 			r.Get("/team", h.teamPage)
 			r.Get(segTeamInvite, h.inviteTeamPage)
 			r.Post(segTeamInvite, h.inviteTeammateHandler)

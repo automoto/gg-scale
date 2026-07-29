@@ -21,7 +21,6 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 // Meter counts relay credential issuances per tenant per calendar month and
@@ -57,7 +56,18 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) error {
 		}
 		allowance = quota.Unlimited
 		if qc.EnforceQuotas {
-			allowance = quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).RelaySessionsPerMonth
+			limits, rerr := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+			if rerr != nil {
+				return rerr
+			}
+			allowance = limits.RelaySessionsPerMonth
+		}
+		// A zero allowance blocks all issuance. Refuse before the upsert:
+		// its allowance predicate only guards the conflict update, so the
+		// first insert of an empty month would slip through (and fire both
+		// warning thresholds).
+		if allowance == 0 {
+			return &quota.ErrQuotaExceeded{Axis: quota.AxisRelaySessions, Limit: 0, Current: 0}
 		}
 
 		sessions, err = q.IncrementRelaySessions(tctx, sqlcgen.IncrementRelaySessionsParams{

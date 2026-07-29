@@ -90,6 +90,18 @@ func TestUpdateTenantStorageLimitHandler_non_platform_admin_denied(t *testing.T)
 	assert.Equal(t, http.StatusForbidden, rr.Code, "tenant storage ceiling is platform-admin only")
 }
 
+func TestUpdateQuotaOverrideHandler_non_platform_admin_denied(t *testing.T) {
+	// adminHandlerRequest builds a non-platform-admin session; tenants must
+	// not lift their own quota limits — they file a change request instead.
+	auth, req := adminHandlerRequest(t, url.Values{"axis": {"open_sessions"}, "limit": {"9000"}})
+	h := &Handler{rbac: auth}
+
+	rr := httptest.NewRecorder()
+	h.updateQuotaOverrideHandler(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code, "quota overrides are platform-admin only")
+}
+
 func TestUpdateTenantTierHandler_non_platform_admin_denied(t *testing.T) {
 	auth, req := adminHandlerRequest(t, url.Values{"tier": {"0"}})
 	h := &Handler{rbac: auth}

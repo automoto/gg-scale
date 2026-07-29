@@ -733,6 +733,7 @@ type TenantChangeRequest struct {
 	ReviewedAt        pgtype.Timestamptz
 	ReviewReason      *string
 	CreatedAt         pgtype.Timestamptz
+	RequestedLimit    *int64
 }
 
 type TenantPlayerBan struct {
@@ -742,6 +743,14 @@ type TenantPlayerBan struct {
 	Reason          *string
 	CreatedBy       *int64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type TenantQuotaOverride struct {
+	TenantID  int64
+	Axis      string
+	Limit     int64
+	UpdatedBy *int64
+	UpdatedAt pgtype.Timestamptz
 }
 
 type TenantSignupRequest struct {

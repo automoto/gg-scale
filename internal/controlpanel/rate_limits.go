@@ -77,7 +77,16 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		defaults := ratelimit.LimitsForTier(clamped)
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst
-		view.StorageTotalBytes = quota.LimitsForClass(clamped).StorageBytes
+		overrideRows, err := q.ListQuotaOverridesForTenant(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		overrides := make(map[string]int64, len(overrideRows))
+		for _, row := range overrideRows {
+			overrides[row.Axis] = row.Limit
+		}
+		view.StorageTotalBytes = quota.Resolve(clamped, overrides).StorageBytes
+		view.QuotaOverrides = buildQuotaOverrideRows(clamped, overrides)
 
 		rows, err := q.ListAllRateLimitOverridesForTenant(ctx, tenantID)
 		if err != nil {
@@ -333,6 +342,110 @@ func storageMB(n int64) string {
 // storageGB renders a byte count as gigabytes (GiB) without trailing zeros.
 func storageGB(n int64) string {
 	return strconv.FormatFloat(float64(n)/float64(bytesPerGiB), 'f', -1, 64)
+}
+
+// storageTotalLabel renders the tenant's total storage quota, handling the
+// Unlimited sentinel (which storageGB would print as a negative fraction).
+func storageTotalLabel(n int64) string {
+	if n == quota.Unlimited {
+		return "unlimited"
+	}
+	return storageGB(n) + " GB"
+}
+
+// resolvedTenantLimits layers the tenant's quota overrides over its class
+// ladder, for the control-panel views (cold path; one extra query in the
+// transaction the caller already holds).
+func resolvedTenantLimits(ctx context.Context, q *sqlcgen.Queries, tenantID int64, tier tenant.Tier) (quota.Limits, error) {
+	rows, err := q.ListQuotaOverridesForTenant(ctx, tenantID)
+	if err != nil {
+		return quota.Limits{}, err
+	}
+	overrides := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		overrides[r.Axis] = r.Limit
+	}
+	return quota.Resolve(tier, overrides), nil
+}
+
+// buildQuotaOverrideRows pairs every quota axis with its ladder default and
+// any active override, in the stable quotaOverrideAxes order.
+func buildQuotaOverrideRows(tier tenant.Tier, overrides map[string]int64) []QuotaOverrideRowView {
+	ladder := quota.LimitsForClass(tier)
+	defaults := map[string]int64{
+		quota.AxisProjects:      int64(ladder.Projects),
+		quota.AxisPlayers:       ladder.Players,
+		quota.AxisStorage:       ladder.StorageBytes,
+		quota.AxisRelaySessions: ladder.RelaySessionsPerMonth,
+		quota.AxisOpenSessions:  ladder.OpenSessionsPerProject,
+	}
+	rows := make([]QuotaOverrideRowView, 0, len(quotaOverrideAxes))
+	for _, a := range quotaOverrideAxes {
+		row := QuotaOverrideRowView{Axis: a.Value, Label: a.Label, DefaultLabel: quotaLimitLabel(defaults[a.Value])}
+		if v, ok := overrides[a.Value]; ok {
+			value := v
+			row.Override = &value
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// setQuotaOverride writes (or, with a blank value, clears) one per-tenant
+// quota-axis override. Platform-admin only.
+func (h *Handler) setQuotaOverride(ctx context.Context, actorID, tenantID int64, axis, limitStr string) error {
+	if !isQuotaAxis(axis) {
+		return errInvalidLimit
+	}
+	clear := strings.TrimSpace(limitStr) == ""
+	var limit int64
+	if !clear {
+		var err error
+		limit, err = parseRequestedLimit(limitStr)
+		if err != nil {
+			return errInvalidLimit
+		}
+		if err := validateOverrideLimit(axis, limit); err != nil {
+			return err
+		}
+	}
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if clear {
+			if err := q.DeleteQuotaOverride(ctx, sqlcgen.DeleteQuotaOverrideParams{
+				TenantID: tenantID, Axis: axis,
+			}); err != nil {
+				return err
+			}
+			return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.quota_override.clear",
+				strconv.FormatInt(tenantID, 10), map[string]any{"tenant_id": tenantID, "axis": axis})
+		}
+		if err := q.UpsertQuotaOverride(ctx, sqlcgen.UpsertQuotaOverrideParams{
+			TenantID: tenantID, Axis: axis, LimitValue: limit, UpdatedBy: &actorID,
+		}); err != nil {
+			return err
+		}
+		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.quota_override.set",
+			strconv.FormatInt(tenantID, 10), map[string]any{"tenant_id": tenantID, "axis": axis, "limit": limit})
+	})
+}
+
+// quotaLimitLabel renders a quota value; the Unlimited sentinel shows as the
+// word rather than -1.
+func quotaLimitLabel(n int64) string {
+	if n == quota.Unlimited {
+		return "unlimited"
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+// quotaOverrideValue formats an override form field: blank when unset so the
+// placeholder shows the ladder default.
+func quotaOverrideValue(v *int64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatInt(*v, 10)
 }
 
 // storageMBValue formats a storage-limit form field in MB: blank when unset (0)

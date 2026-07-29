@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countProjectsForTenant = `-- name: CountProjectsForTenant :one
@@ -24,43 +26,74 @@ func (q *Queries) CountProjectsForTenant(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const deleteQuotaOverride = `-- name: DeleteQuotaOverride :exec
+DELETE FROM tenant_quota_overrides
+WHERE tenant_id = $1
+  AND axis = $2
+`
+
+type DeleteQuotaOverrideParams struct {
+	TenantID int64
+	Axis     string
+}
+
+// Clear one axis override so the class ladder applies again.
+func (q *Queries) DeleteQuotaOverride(ctx context.Context, arg DeleteQuotaOverrideParams) error {
+	_, err := q.db.Exec(ctx, deleteQuotaOverride, arg.TenantID, arg.Axis)
+	return err
+}
+
 const getTenantQuotaContext = `-- name: GetTenantQuotaContext :one
-SELECT tier, enforce_quotas, player_count
-FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL
+SELECT t.tier, t.enforce_quotas, t.player_count,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
+FROM tenants t
+WHERE t.id = current_setting('app.tenant_id', true)::bigint
+  AND t.deleted_at IS NULL
 `
 
 type GetTenantQuotaContextRow struct {
 	Tier          int16
 	EnforceQuotas bool
 	PlayerCount   int64
+	Overrides     []byte
 }
 
-// Lock-free snapshot of the current tenant's class, enforcement flag, and
-// registered-player count. Read inside an RLS-scoped tx (app.tenant_id set)
-// before a quota-gated growth operation. Deliberately NOT FOR UPDATE: the
+// Lock-free snapshot of the current tenant's class, enforcement flag,
+// registered-player count, and quota overrides (axis→limit jsonb; NULL when
+// none). Read inside an RLS-scoped tx (app.tenant_id set) before a
+// quota-gated growth operation. Deliberately NOT FOR UPDATE: the
 // authoritative player gate is ReserveTenantPlayerSlot, so this read must
 // never serialize concurrent creates on the tenant row.
 func (q *Queries) GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error) {
 	row := q.db.QueryRow(ctx, getTenantQuotaContext)
 	var i GetTenantQuotaContextRow
-	err := row.Scan(&i.Tier, &i.EnforceQuotas, &i.PlayerCount)
+	err := row.Scan(
+		&i.Tier,
+		&i.EnforceQuotas,
+		&i.PlayerCount,
+		&i.Overrides,
+	)
 	return i, err
 }
 
 const getTenantQuotaContextLocked = `-- name: GetTenantQuotaContextLocked :one
-SELECT tier, enforce_quotas, player_count
-FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL
-FOR UPDATE
+SELECT t.tier, t.enforce_quotas, t.player_count,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
+FROM tenants t
+WHERE t.id = current_setting('app.tenant_id', true)::bigint
+  AND t.deleted_at IS NULL
+FOR UPDATE OF t
 `
 
 type GetTenantQuotaContextLockedRow struct {
 	Tier          int16
 	EnforceQuotas bool
 	PlayerCount   int64
+	Overrides     []byte
 }
 
 // FOR UPDATE variant for rare growth paths (project create, storage writes)
@@ -70,8 +103,49 @@ type GetTenantQuotaContextLockedRow struct {
 func (q *Queries) GetTenantQuotaContextLocked(ctx context.Context) (GetTenantQuotaContextLockedRow, error) {
 	row := q.db.QueryRow(ctx, getTenantQuotaContextLocked)
 	var i GetTenantQuotaContextLockedRow
-	err := row.Scan(&i.Tier, &i.EnforceQuotas, &i.PlayerCount)
+	err := row.Scan(
+		&i.Tier,
+		&i.EnforceQuotas,
+		&i.PlayerCount,
+		&i.Overrides,
+	)
 	return i, err
+}
+
+const listQuotaOverridesForTenant = `-- name: ListQuotaOverridesForTenant :many
+SELECT axis, "limit", updated_at
+FROM tenant_quota_overrides
+WHERE tenant_id = $1
+ORDER BY axis
+`
+
+type ListQuotaOverridesForTenantRow struct {
+	Axis      string
+	Limit     int64
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Per-axis overrides for one tenant, for the control-panel views and the
+// platform-admin editor. Hot paths never call this — they get the same rows
+// aggregated into the quota-context snapshot above.
+func (q *Queries) ListQuotaOverridesForTenant(ctx context.Context, tenantID int64) ([]ListQuotaOverridesForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listQuotaOverridesForTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListQuotaOverridesForTenantRow
+	for rows.Next() {
+		var i ListQuotaOverridesForTenantRow
+		if err := rows.Scan(&i.Axis, &i.Limit, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const reserveTenantPlayerSlot = `-- name: ReserveTenantPlayerSlot :execrows
@@ -118,5 +192,33 @@ type SetTenantEnforceQuotasParams struct {
 // players were only ever created through the app's create paths.
 func (q *Queries) SetTenantEnforceQuotas(ctx context.Context, arg SetTenantEnforceQuotasParams) error {
 	_, err := q.db.Exec(ctx, setTenantEnforceQuotas, arg.EnforceQuotas, arg.TenantID)
+	return err
+}
+
+const upsertQuotaOverride = `-- name: UpsertQuotaOverride :exec
+INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit", updated_by, updated_at)
+VALUES ($1, $2, $3, $4, now())
+ON CONFLICT (tenant_id, axis)
+DO UPDATE SET "limit" = EXCLUDED."limit",
+              updated_by = EXCLUDED.updated_by,
+              updated_at = now()
+`
+
+type UpsertQuotaOverrideParams struct {
+	TenantID   int64
+	Axis       string
+	LimitValue int64
+	UpdatedBy  *int64
+}
+
+// Write one axis override. Platform-admin only (directly or via an approved
+// change request); the axis CHECK constraint rejects unknown axes.
+func (q *Queries) UpsertQuotaOverride(ctx context.Context, arg UpsertQuotaOverrideParams) error {
+	_, err := q.db.Exec(ctx, upsertQuotaOverride,
+		arg.TenantID,
+		arg.Axis,
+		arg.LimitValue,
+		arg.UpdatedBy,
+	)
 	return err
 }

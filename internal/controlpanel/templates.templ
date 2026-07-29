@@ -727,7 +727,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 				Maximum size (MB) of a single stored value. Blank = default. Platform default:
 				{ storageMB(vm.StoragePlatformDefault) } MB.
 			</p>
-			<p class="card-subtitle">Total tenant storage: { storageGB(vm.StorageTotalBytes) } GB.</p>
+			<p class="card-subtitle">Total tenant storage: { storageTotalLabel(vm.StorageTotalBytes) }.</p>
 			if vm.IsPlatformAdmin {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/storage") } class="rate-limit-row">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
@@ -751,6 +751,45 @@ templ RateLimitsPage(vm RateLimitsView) {
 					</label>
 					<button type="submit" class="btn-inline">Save</button>
 				</form>
+			}
+		</section>
+		<section class="card">
+			<h2>Tenant quotas</h2>
+			<p class="card-subtitle">
+				Per-axis limits for this tenant's class, applied when quota enforcement is on.
+				Blank = tier default; -1 = unlimited.
+			</p>
+			if vm.IsPlatformAdmin {
+				for _, qo := range vm.QuotaOverrides {
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/quotas") } class="rate-limit-row">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<input type="hidden" name="axis" value={ qo.Axis }/>
+						<strong>{ qo.Label }</strong>
+						<label>Limit
+							<input name="limit" type="number" step="1" min="-1" value={ quotaOverrideValue(qo.Override) } placeholder={ qo.DefaultLabel }/>
+						</label>
+						<button type="submit" class="btn-inline">Save</button>
+					</form>
+				}
+			} else {
+				<table>
+					<thead><tr><th>Quota</th><th>Limit</th></tr></thead>
+					<tbody>
+						for _, qo := range vm.QuotaOverrides {
+							<tr>
+								<td>{ qo.Label }</td>
+								<td>
+									if qo.Override != nil {
+										{ quotaLimitLabel(*qo.Override) } <span class="muted">(override)</span>
+									} else {
+										{ qo.DefaultLabel }
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<p class="muted">Only platform admins can change quotas. Request a change from tenant settings.</p>
 			}
 		</section>
 	}
@@ -2509,6 +2548,8 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 						Using { vm.StorageUsedLabel } of { vm.StorageLimitLabel } ({ stringFromInt(int64(vm.StoragePercent)) }%).
 						New writes are blocked at 100%. Request a tier upgrade to raise the limit.
 					</p>
+				} else if vm.StorageLimitBytes < 0 {
+					<p>Using { vm.StorageUsedLabel } of { vm.StorageLimitLabel }.</p>
 				} else {
 					<p>Using { vm.StorageUsedLabel } of { vm.StorageLimitLabel } ({ stringFromInt(int64(vm.StoragePercent)) }%).</p>
 				}
@@ -2562,6 +2603,27 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 						<button type="submit" class="btn-inline">Request feature</button>
 					</form>
 				}
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/change-requests") } class="settings-form">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<input type="hidden" name="kind" value="quota_override"/>
+					<label>
+						Quota
+						<select name="axis" required>
+							for _, opt := range vm.QuotaAxisOptions {
+								<option value={ opt.Value }>{ opt.Label }</option>
+							}
+						</select>
+					</label>
+					<label>
+						Requested limit
+						<input name="requested_limit" type="number" step="1" min="-1" required/>
+					</label>
+					<label>
+						Note <span class="muted">(optional)</span>
+						<input name="note"/>
+					</label>
+					<button type="submit" class="btn-inline">Request quota change</button>
+				</form>
 			}
 			if len(vm.ChangeRequests) > 0 {
 				<h3>Your requests</h3>

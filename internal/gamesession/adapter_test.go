@@ -3,12 +3,14 @@ package gamesession
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/matchmaker"
+	"github.com/ggscale/ggscale/internal/quota"
 )
 
 type fakeCreator struct {
@@ -31,6 +33,17 @@ func TestMatchAdapter_should_map_project_cap_to_capacity_error(t *testing.T) {
 	_, _, err := a.CreateMatchSession(context.Background(), 7, "1v1", []int64{1, 2})
 
 	assert.ErrorIs(t, err, matchmaker.ErrCapacity)
+}
+
+func TestMatchAdapter_should_map_quota_capped_create_to_capacity_error(t *testing.T) {
+	quotaErr := fmt.Errorf("%w: %w", ErrProjectCapped,
+		&quota.ErrQuotaExceeded{Axis: quota.AxisOpenSessions, Limit: 500, Current: 500})
+	a := &MatchAdapter{svc: &fakeCreator{err: quotaErr}}
+
+	_, _, err := a.CreateMatchSession(context.Background(), 7, "1v1", []int64{1, 2})
+
+	assert.ErrorIs(t, err, matchmaker.ErrCapacity,
+		"a quota-capped project must keep the group waiting, not fail it")
 }
 
 func TestMatchAdapter_should_keep_other_errors_unmapped(t *testing.T) {

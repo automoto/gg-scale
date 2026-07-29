@@ -395,7 +395,10 @@ func checkProjectQuota(ctx context.Context, q *sqlcgen.Queries) error {
 	if err != nil {
 		return fmt.Errorf("count projects: %w", err)
 	}
-	limits := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
+	limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+	if err != nil {
+		return err
+	}
 	return limits.CheckProjects(count)
 }
 

@@ -17,12 +17,21 @@ import (
 
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const (
-	// DefaultTTL bounds how long a session stays joinable.
-	DefaultTTL = 4 * time.Hour
+	// DefaultTTL is a session's lifetime window. Member heartbeats slide it
+	// forward (see HeartbeatExtendThreshold), so an active session lives as
+	// long as its match while an idle or abandoned one frees its cap slot
+	// within the hour. Hosts should still DELETE the session when the match
+	// ends — that frees the slot immediately.
+	DefaultTTL = time.Hour
+	// HeartbeatExtendThreshold gates the sliding extension: a heartbeat
+	// pushes expires_at out to now+DefaultTTL only when less than this
+	// remains, so steady heartbeats don't rewrite the row on every call.
+	HeartbeatExtendThreshold = 30 * time.Minute
 	// MatchPendingTTL is the initial lifetime of a matchmade session. It
 	// covers the window between match formation and the first join; the
 	// first join extends the session to DefaultTTL. Keeps sessions nobody
@@ -31,14 +40,19 @@ const (
 	joinCodeAlphabet    = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no I O 0 1 (ambiguous)
 	joinCodeLen         = 6
 	joinCodeMaxAttempts = 5
-	// MaxOpenSessionsPerProject caps live sessions per project.
-	MaxOpenSessionsPerProject = 1000
+	// SessionsHardCap is the absolute per-project live-session ceiling for
+	// every tenant, enforced or not — it protects the server, not the
+	// business model. Enforced tenants additionally sit under the (lower)
+	// per-class quota.Limits.OpenSessionsPerProject.
+	SessionsHardCap = 10_000
 	// MaxPlayersLimit caps a single session's roster size.
 	MaxPlayersLimit = 64
 )
 
-// ErrProjectCapped is returned by Create when the project already has
-// MaxOpenSessionsPerProject open sessions.
+// ErrProjectCapped is returned by Create when the project is at its
+// open-session limit — the hard cap, or the class quota for enforced
+// tenants. The quota case additionally wraps *quota.ErrQuotaExceeded so
+// callers can label the rejection metric.
 var ErrProjectCapped = errors.New("game session: project cap reached")
 
 // Addr is a peer's announced public endpoint.
@@ -130,8 +144,8 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 			if qerr != nil {
 				return qerr
 			}
-			if openCount >= MaxOpenSessionsPerProject {
-				return ErrProjectCapped
+			if qerr := checkOpenSessionLimit(ctx, q, openCount); qerr != nil {
+				return qerr
 			}
 			sess, qerr = q.CreateGameSession(ctx, sqlcgen.CreateGameSessionParams{
 				ID:           sessionID,
@@ -175,6 +189,33 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 		return nil, err
 	}
 	return &Created{SessionID: sess.ID, JoinCode: sess.JoinCode, State: sess.State, Peers: peers}, nil
+}
+
+// checkOpenSessionLimit gates session creation on the project's open-session
+// count: the absolute hard cap applies to everyone; enforced tenants also sit
+// under their class quota. Runs inside the create transaction, after the
+// per-project lock, so the check-then-insert cannot be raced past. Both
+// rejections satisfy errors.Is(err, ErrProjectCapped); the quota one also
+// carries *quota.ErrQuotaExceeded for the rejection metric.
+func checkOpenSessionLimit(ctx context.Context, q *sqlcgen.Queries, openCount int64) error {
+	if openCount >= SessionsHardCap {
+		return ErrProjectCapped
+	}
+	qc, err := q.GetTenantQuotaContext(ctx)
+	if err != nil {
+		return fmt.Errorf("game session: tenant quota context: %w", err)
+	}
+	if !qc.EnforceQuotas {
+		return nil
+	}
+	limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+	if err != nil {
+		return fmt.Errorf("game session: %w", err)
+	}
+	if err := limits.CheckOpenSessions(openCount); err != nil {
+		return fmt.Errorf("%w: %w", ErrProjectCapped, err)
+	}
+	return nil
 }
 
 // IsMatchmade reports whether the session props carry the matchmade flag the

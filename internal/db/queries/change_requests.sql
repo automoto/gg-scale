@@ -1,14 +1,14 @@
 -- name: CreateTenantChangeRequest :one
 -- Submit a tenant change request. The pending-unique index rejects a second
 -- open request of the same kind/feature (surfaced as a friendly message).
-INSERT INTO tenant_change_requests (tenant_id, requested_by_user_id, kind, requested_tier, feature, note)
-VALUES ($1, $2, $3, sqlc.narg(requested_tier), sqlc.narg(feature), sqlc.arg(note))
+INSERT INTO tenant_change_requests (tenant_id, requested_by_user_id, kind, requested_tier, feature, requested_limit, note)
+VALUES ($1, $2, $3, sqlc.narg(requested_tier), sqlc.narg(feature), sqlc.narg(requested_limit), sqlc.arg(note))
 RETURNING id;
 
 -- name: ListTenantChangeRequests :many
 -- The tenant's own requests (any status) for the settings page. Filters by
 -- explicit tenant_id (the table has no RLS).
-SELECT id, kind, requested_tier, feature, note, status, review_reason, created_at, reviewed_at
+SELECT id, kind, requested_tier, feature, requested_limit, note, status, review_reason, created_at, reviewed_at
 FROM tenant_change_requests
 WHERE tenant_id = $1
 ORDER BY created_at DESC
@@ -27,7 +27,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 -- Platform-admin review queue: pending requests with tenant name + current
 -- class. Read cross-tenant (bootstrap tx).
 SELECT r.id, r.tenant_id, t.name AS tenant_name, t.tier AS current_tier,
-       r.kind, r.requested_tier, r.feature, r.note, r.created_at,
+       r.kind, r.requested_tier, r.feature, r.requested_limit, r.note, r.created_at,
        COALESCE(u.email::text, ''::text)::text AS requester_email
 FROM tenant_change_requests r
 JOIN tenants t ON t.id = r.tenant_id
@@ -37,7 +37,7 @@ WHERE r.status = 'pending'
 ORDER BY r.created_at ASC;
 
 -- name: GetTenantChangeRequestByID :one
-SELECT id, tenant_id, kind, requested_tier, feature, note, status
+SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status
 FROM tenant_change_requests
 WHERE id = $1;
 

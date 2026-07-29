@@ -1,24 +1,31 @@
 -- name: GetTenantQuotaContext :one
--- Lock-free snapshot of the current tenant's class, enforcement flag, and
--- registered-player count. Read inside an RLS-scoped tx (app.tenant_id set)
--- before a quota-gated growth operation. Deliberately NOT FOR UPDATE: the
+-- Lock-free snapshot of the current tenant's class, enforcement flag,
+-- registered-player count, and quota overrides (axis→limit jsonb; NULL when
+-- none). Read inside an RLS-scoped tx (app.tenant_id set) before a
+-- quota-gated growth operation. Deliberately NOT FOR UPDATE: the
 -- authoritative player gate is ReserveTenantPlayerSlot, so this read must
 -- never serialize concurrent creates on the tenant row.
-SELECT tier, enforce_quotas, player_count
-FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL;
+SELECT t.tier, t.enforce_quotas, t.player_count,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
+FROM tenants t
+WHERE t.id = current_setting('app.tenant_id', true)::bigint
+  AND t.deleted_at IS NULL;
 
 -- name: GetTenantQuotaContextLocked :one
 -- FOR UPDATE variant for rare growth paths (project create, storage writes)
 -- whose check-then-apply exactness relies on tenant-row serialization. Never
 -- use it on the player-create path — that gate is ReserveTenantPlayerSlot,
 -- and the whole point of the split is that creates don't serialize.
-SELECT tier, enforce_quotas, player_count
-FROM tenants
-WHERE id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL
-FOR UPDATE;
+SELECT t.tier, t.enforce_quotas, t.player_count,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
+FROM tenants t
+WHERE t.id = current_setting('app.tenant_id', true)::bigint
+  AND t.deleted_at IS NULL
+FOR UPDATE OF t;
 
 -- name: CountProjectsForTenant :one
 -- Live (non-soft-deleted) project count for the current tenant.
@@ -53,3 +60,28 @@ WHERE id = current_setting('app.tenant_id', true)::bigint
 UPDATE tenants
 SET enforce_quotas = sqlc.arg(enforce_quotas)
 WHERE id = sqlc.arg(tenant_id);
+
+-- name: ListQuotaOverridesForTenant :many
+-- Per-axis overrides for one tenant, for the control-panel views and the
+-- platform-admin editor. Hot paths never call this — they get the same rows
+-- aggregated into the quota-context snapshot above.
+SELECT axis, "limit", updated_at
+FROM tenant_quota_overrides
+WHERE tenant_id = sqlc.arg(tenant_id)
+ORDER BY axis;
+
+-- name: UpsertQuotaOverride :exec
+-- Write one axis override. Platform-admin only (directly or via an approved
+-- change request); the axis CHECK constraint rejects unknown axes.
+INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit", updated_by, updated_at)
+VALUES (sqlc.arg(tenant_id), sqlc.arg(axis), sqlc.arg(limit_value), sqlc.arg(updated_by), now())
+ON CONFLICT (tenant_id, axis)
+DO UPDATE SET "limit" = EXCLUDED."limit",
+              updated_by = EXCLUDED.updated_by,
+              updated_at = now();
+
+-- name: DeleteQuotaOverride :exec
+-- Clear one axis override so the class ladder applies again.
+DELETE FROM tenant_quota_overrides
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND axis = sqlc.arg(axis);

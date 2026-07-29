@@ -77,7 +77,10 @@ func (q *Queries) GetTenantStorageUsageByID(ctx context.Context, tenantID int64)
 }
 
 const listEnforcedTenantStorage = `-- name: ListEnforcedTenantStorage :many
-SELECT u.tenant_id, t.name, t.tier, u.total_bytes, u.last_notified_threshold
+SELECT u.tenant_id, t.name, t.tier, u.total_bytes, u.last_notified_threshold,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
 FROM tenant_storage_usage u
 JOIN tenants t ON t.id = u.tenant_id
 WHERE t.enforce_quotas = true
@@ -90,10 +93,12 @@ type ListEnforcedTenantStorageRow struct {
 	Tier                  int16
 	TotalBytes            int64
 	LastNotifiedThreshold int16
+	Overrides             []byte
 }
 
-// Name, usage, class, and last-notified threshold for every quota-enforced
-// tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
+// Name, usage, class, quota overrides, and last-notified threshold for every
+// quota-enforced tenant. Read cross-tenant by the storage-warn River job
+// (bootstrap tx).
 func (q *Queries) ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforcedTenantStorageRow, error) {
 	rows, err := q.db.Query(ctx, listEnforcedTenantStorage)
 	if err != nil {
@@ -109,6 +114,7 @@ func (q *Queries) ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforced
 			&i.Tier,
 			&i.TotalBytes,
 			&i.LastNotifiedThreshold,
+			&i.Overrides,
 		); err != nil {
 			return nil, err
 		}

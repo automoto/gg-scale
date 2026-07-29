@@ -1467,6 +1467,7 @@ paths:
       tags:
         - /v1
     post:
+      description: Creates a session with a one-hour lifetime window. Member heartbeats slide the window forward, so an active session stays alive for the length of the match while an idle one expires within the hour. When the match ends, the host should DELETE the session — that frees the project's open-session slot immediately instead of waiting for expiry.
       operationId: createGameSession
       requestBody:
         content:
@@ -1495,6 +1496,7 @@ paths:
         - /v1
   /v1/game-session/{id}:
     delete:
+      description: A joiner is removed from the roster; the host ends the session for everyone. Call this from the host when the match ends — an ended session stops counting against the project's open-session limit immediately.
       operationId: leaveGameSession
       parameters:
         - in: path
@@ -1546,6 +1548,7 @@ paths:
         - /v1
   /v1/game-session/{id}/heartbeat:
     post:
+      description: Marks the caller's peer as alive and returns the current roster. A member heartbeat also extends the session's expiry when under 30 minutes remain, keeping active matches alive past the one-hour default window.
       operationId: heartbeatGameSession
       parameters:
         - in: path

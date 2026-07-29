@@ -325,8 +325,20 @@ type RateLimitsView struct {
 	StoragePlatformDefault int64
 	StorageTenantOverride  int64
 	StorageTotalBytes      int64
-	Message                string
-	Error                  string
+	// QuotaOverrides lists every quota axis with its tier default and any
+	// active per-tenant override (platform-admin editable).
+	QuotaOverrides []QuotaOverrideRowView
+	Message        string
+	Error          string
+}
+
+// QuotaOverrideRowView is one quota axis on the rate-limits page: the class
+// ladder default and the active override, if any.
+type QuotaOverrideRowView struct {
+	Axis         string
+	Label        string
+	DefaultLabel string
+	Override     *int64
 }
 
 // ProjectInviteLimitView is one project's invite-quota override (0 = default)
@@ -399,10 +411,12 @@ type TenantSettingsView struct {
 	BillingPortalURL    string
 	BillingUpgradeURL   string
 	BillingUpgradeToken string
-	// Change requests (tier upgrades / feature grants) — tenant self-service.
+	// Change requests (tier upgrades / feature grants / quota overrides) —
+	// tenant self-service.
 	ChangeRequests    []ChangeRequestView
 	UpgradeTargets    []FeatureOptionView // class targets above the current tier
 	FeatureOptions    []FeatureOptionView
+	QuotaAxisOptions  []FeatureOptionView // quota axes a tenant may request an override for
 	CanRequestUpgrade bool
 	// AdminFeatureGrants lets a platform admin toggle a tenant's feature grants
 	// directly (mirroring the direct tier change). Rendered only when

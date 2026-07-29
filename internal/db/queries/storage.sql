@@ -94,9 +94,13 @@ SELECT COALESCE((SELECT total_bytes FROM tenant_storage_usage
                  WHERE tenant_id = sqlc.arg(tenant_id)), 0)::bigint;
 
 -- name: ListEnforcedTenantStorage :many
--- Name, usage, class, and last-notified threshold for every quota-enforced
--- tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
-SELECT u.tenant_id, t.name, t.tier, u.total_bytes, u.last_notified_threshold
+-- Name, usage, class, quota overrides, and last-notified threshold for every
+-- quota-enforced tenant. Read cross-tenant by the storage-warn River job
+-- (bootstrap tx).
+SELECT u.tenant_id, t.name, t.tier, u.total_bytes, u.last_notified_threshold,
+       (SELECT jsonb_object_agg(o.axis, o."limit")
+        FROM tenant_quota_overrides o
+        WHERE o.tenant_id = t.id) AS overrides
 FROM tenant_storage_usage u
 JOIN tenants t ON t.id = u.tenant_id
 WHERE t.enforce_quotas = true

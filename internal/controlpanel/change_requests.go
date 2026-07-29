@@ -15,7 +15,9 @@ import (
 	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -25,8 +27,9 @@ const (
 	auditChangeRequestApprove = "control_panel.change_request.approve"
 	auditChangeRequestDeny    = "control_panel.change_request.deny"
 
-	changeKindTierUpgrade = "tier_upgrade"
-	changeKindFeature     = "feature"
+	changeKindTierUpgrade   = "tier_upgrade"
+	changeKindFeature       = "feature"
+	changeKindQuotaOverride = "quota_override"
 )
 
 // errNotAnUpgrade rejects a tier-upgrade request whose target class is not
@@ -51,6 +54,75 @@ func tierIsUpgrade(requested, current int16) bool {
 var requestableFeatures = []struct{ Value, Label string }{
 	{"p2p_relay", "P2P relay (TURN)"},
 	{"dedicated_servers", "Dedicated game-server fleets"},
+}
+
+// quotaOverrideAxes are the per-tenant quota axes a tenant may request an
+// override for (and a platform admin may set directly). The Value strings are
+// the internal/quota Axis* constants, carried in the change request's feature
+// column and in tenant_quota_overrides.axis.
+var quotaOverrideAxes = []struct{ Value, Label string }{
+	{quota.AxisProjects, "Projects"},
+	{quota.AxisPlayers, "Registered players"},
+	{quota.AxisStorage, "Storage (bytes)"},
+	{quota.AxisRelaySessions, "Relay sessions per month"},
+	{quota.AxisOpenSessions, "Open game sessions per project"},
+}
+
+func isQuotaAxis(axis string) bool {
+	for _, a := range quotaOverrideAxes {
+		if a.Value == axis {
+			return true
+		}
+	}
+	return false
+}
+
+func quotaAxisLabel(axis string) string {
+	for _, a := range quotaOverrideAxes {
+		if a.Value == axis {
+			return a.Label
+		}
+	}
+	return axis
+}
+
+// parseRequestedLimit parses a quota-override limit: a non-negative count, or
+// -1 for unlimited.
+func parseRequestedLimit(s string) (int64, error) {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil || n < -1 {
+		return 0, errors.New("invalid limit")
+	}
+	return n, nil
+}
+
+// errOverrideAboveHardCap rejects an open_sessions override the service can
+// never honor: session creation stops at gamesession.SessionsHardCap for
+// every tenant, so an override above it (or "unlimited") would overpromise.
+var errOverrideAboveHardCap = fmt.Errorf(
+	"open_sessions override exceeds the absolute per-project cap (%d)", gamesession.SessionsHardCap)
+
+// validateOverrideLimit applies per-axis bounds on top of parseRequestedLimit.
+func validateOverrideLimit(axis string, limit int64) error {
+	if axis != quota.AxisOpenSessions {
+		return nil
+	}
+	if limit == quota.Unlimited || limit > gamesession.SessionsHardCap {
+		return errOverrideAboveHardCap
+	}
+	return nil
+}
+
+// quotaOverrideDetail renders "axis → limit" for request lists and emails.
+func quotaOverrideDetail(axis *string, limit *int64) string {
+	if axis == nil || limit == nil {
+		return ""
+	}
+	value := strconv.FormatInt(*limit, 10)
+	if *limit == quota.Unlimited {
+		value = "unlimited"
+	}
+	return quotaAxisLabel(*axis) + " → " + value
 }
 
 // featureEnabledByEnv reports whether a requestable feature's server-side kill
@@ -110,6 +182,10 @@ func (h *Handler) loadChangeRequestSection(ctx context.Context, tenantID int64, 
 			})
 		}
 
+		for _, a := range quotaOverrideAxes {
+			view.QuotaAxisOptions = append(view.QuotaAxisOptions, FeatureOptionView{Value: a.Value, Label: a.Label})
+		}
+
 		for t := int(current) + 1; t <= int(tenant.Tier3); t++ {
 			view.UpgradeTargets = append(view.UpgradeTargets, FeatureOptionView{
 				Value: strconv.Itoa(t),
@@ -131,6 +207,8 @@ func changeRequestView(row sqlcgen.ListTenantChangeRequestsRow) ChangeRequestVie
 	switch {
 	case row.Kind == changeKindTierUpgrade && row.RequestedTier != nil:
 		v.Detail = tenant.ClampTier(int(*row.RequestedTier)).String()
+	case row.Kind == changeKindQuotaOverride:
+		v.Detail = quotaOverrideDetail(row.Feature, row.RequestedLimit)
 	case row.Feature != nil:
 		v.Detail = *row.Feature
 	}
@@ -178,6 +256,25 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		params.Feature = &feature
+	case changeKindQuotaOverride:
+		axis := r.Form.Get("axis")
+		if !isQuotaAxis(axis) {
+			h.redirectTenantSettings(w, r, tenantID, "Choose a valid quota to request a change for.")
+			return
+		}
+		limit, perr := parseRequestedLimit(r.Form.Get("requested_limit"))
+		if perr != nil {
+			h.redirectTenantSettings(w, r, tenantID, "Enter a limit of 0 or more (or -1 for unlimited).")
+			return
+		}
+		if verr := validateOverrideLimit(axis, limit); verr != nil {
+			h.redirectTenantSettings(w, r, tenantID, fmt.Sprintf(
+				"Open game sessions per project can't exceed %d (the platform-wide cap) and can't be unlimited.",
+				gamesession.SessionsHardCap))
+			return
+		}
+		params.Feature = &axis
+		params.RequestedLimit = &limit
 	default:
 		h.redirectTenantSettings(w, r, tenantID, "Unknown request type.")
 		return
@@ -288,6 +385,8 @@ func pendingChangeRequestView(row sqlcgen.ListPendingTenantChangeRequestsRow) Pe
 	switch {
 	case row.Kind == changeKindTierUpgrade && row.RequestedTier != nil:
 		v.Target = tenant.ClampTier(int(*row.RequestedTier)).String()
+	case row.Kind == changeKindQuotaOverride:
+		v.Target = quotaOverrideDetail(row.Feature, row.RequestedLimit)
 	case row.Feature != nil:
 		v.Target = *row.Feature
 	}
@@ -364,6 +463,10 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 			h.redirectChangeAdmin(w, r, "The tenant is already at or above the requested class; the request was not approved.")
 			return
 		}
+		if errors.Is(err, errOverrideAboveHardCap) {
+			h.redirectChangeAdmin(w, r, "The requested limit exceeds the platform-wide session cap; the request was not approved. Deny it with a reason instead.")
+			return
+		}
 		webutil.InternalError(w, "change request: approve", err)
 		return
 	}
@@ -392,6 +495,18 @@ func (h *Handler) applyChangeRequest(ctx context.Context, q *sqlcgen.Queries, re
 			Feature:    *req.Feature,
 			ApprovedBy: &actorID,
 			Reason:     strPtr("approved change request " + strconv.FormatInt(req.ID, 10)),
+		})
+	case req.Kind == changeKindQuotaOverride && req.Feature != nil && req.RequestedLimit != nil:
+		// Re-validate at apply time: submit-side validation can't cover a
+		// request that predates a bounds change.
+		if err := validateOverrideLimit(*req.Feature, *req.RequestedLimit); err != nil {
+			return err
+		}
+		return q.UpsertQuotaOverride(ctx, sqlcgen.UpsertQuotaOverrideParams{
+			TenantID:   req.TenantID,
+			Axis:       *req.Feature,
+			LimitValue: *req.RequestedLimit,
+			UpdatedBy:  &actorID,
 		})
 	default:
 		return fmt.Errorf("change request %d has an inconsistent shape", req.ID)
@@ -483,8 +598,11 @@ func (h *Handler) sendChangeRequestDecisionEmail(ctx context.Context, req sqlcge
 
 func changeRequestDecisionEmail(req sqlcgen.GetTenantChangeRequestByIDRow, approved bool, reason string) (subject, body string) {
 	what := "feature " + deref(req.Feature)
-	if req.Kind == changeKindTierUpgrade && req.RequestedTier != nil {
+	switch {
+	case req.Kind == changeKindTierUpgrade && req.RequestedTier != nil:
 		what = "upgrade to " + tenant.ClampTier(int(*req.RequestedTier)).String()
+	case req.Kind == changeKindQuotaOverride:
+		what = "quota override " + quotaOverrideDetail(req.Feature, req.RequestedLimit)
 	}
 	if approved {
 		return "Your ggscale change request was approved",

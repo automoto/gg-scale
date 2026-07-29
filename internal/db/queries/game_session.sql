@@ -84,6 +84,20 @@ WHERE tenant_id  = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg('project_id')
   AND id = sqlc.arg('id');
 
+-- name: ExtendGameSessionExpiryOnHeartbeat :execrows
+-- Sliding-window extension for member heartbeats: push the expiry out only
+-- when less than the threshold remains, so steady heartbeats don't rewrite
+-- the row every few seconds (self-gating, single statement — deliberately
+-- NOT the greatest-wins ExtendGameSessionExpiry, which writes on every
+-- call). Never revives an ended or already-expired session.
+UPDATE game_session
+SET expires_at = sqlc.arg('expires_at')
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = sqlc.arg('id')
+  AND state != 'ended'
+  AND expires_at > now()
+  AND expires_at < sqlc.arg('threshold');
+
 -- name: DeleteExpiredGameSessionsForTenant :execrows
 -- Removes sessions past their expiry for the current tenant. Called once
 -- per tenant by the GC goroutine.

@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/gamesession"
+	"github.com/ggscale/ggscale/internal/quota"
+	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -259,7 +261,7 @@ func TestGameSession_join_extends_matchmade_expiry(t *testing.T) {
 	var expires time.Time
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
 		`SELECT expires_at FROM game_session WHERE id = 'gs_mm'`).Scan(&expires))
-	assert.Greater(t, time.Until(expires), time.Hour,
+	assert.Greater(t, time.Until(expires), 45*time.Minute,
 		"join must extend a matchmade session past its pending TTL")
 }
 
@@ -288,11 +290,132 @@ func TestGameSession_join_keeps_plain_session_expiry(t *testing.T) {
 		"join must not extend a player-created session")
 }
 
-func TestGameSession_cap_rejects_overflow(t *testing.T) {
+// seedSessionWithMember inserts one open session plus a peer row for the
+// given player, expiring after ttl, so heartbeat tests control the remaining
+// lifetime precisely.
+func seedSessionWithMember(t *testing.T, c *cluster, tenantID, projectID, playerID int64, sessionID string, ttl time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, 'open', '{}', 4, now() + $6::interval)`,
+		sessionID, "J"+sessionID[len(sessionID)-5:], tenantID, projectID, playerID,
+		fmt.Sprintf("%d seconds", int(ttl.Seconds())))
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session_peer (tenant_id, session_id, player_id, ip, port)
+		 VALUES ($1, $2, $3, '1.2.3.4', 9000)`,
+		tenantID, sessionID, playerID)
+	require.NoError(t, err)
+}
+
+func sessionExpiry(t *testing.T, c *cluster, sessionID string) time.Time {
+	t.Helper()
+	var expires time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM game_session WHERE id = $1`, sessionID).Scan(&expires))
+	return expires
+}
+
+func TestGameSession_heartbeat_extends_expiring_session(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
 	srv := newServerForCluster(t, c)
 
+	tok, playerID := anonymousLoginWithID(t, srv.URL, "k")
+	// 10 minutes left — under the 30-minute extension threshold.
+	seedSessionWithMember(t, c, tenantID, projectID, playerID, "gs_hb_low", 10*time.Minute)
+
+	resp, body := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_hb_low/heartbeat", "k", tok, map[string]any{})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	assert.Greater(t, time.Until(sessionExpiry(t, c, "gs_hb_low")), 50*time.Minute,
+		"a member heartbeat under the threshold must slide the expiry out to the full window")
+}
+
+func TestGameSession_heartbeat_keeps_ample_expiry(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	tok, playerID := anonymousLoginWithID(t, srv.URL, "k")
+	// 45 minutes left — above the threshold, so the heartbeat must not write.
+	seedSessionWithMember(t, c, tenantID, projectID, playerID, "gs_hb_high", 45*time.Minute)
+	before := sessionExpiry(t, c, "gs_hb_high")
+
+	resp, body := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_hb_high/heartbeat", "k", tok, map[string]any{})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	assert.Equal(t, before, sessionExpiry(t, c, "gs_hb_high"),
+		"a heartbeat with ample lifetime left must not touch the expiry")
+}
+
+func TestGameSession_heartbeat_from_non_member_never_extends(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	_, memberID := anonymousLoginWithID(t, srv.URL, "k")
+	tokOutsider, _ := anonymousLoginWithID(t, srv.URL, "k")
+	seedSessionWithMember(t, c, tenantID, projectID, memberID, "gs_hb_out", 10*time.Minute)
+	before := sessionExpiry(t, c, "gs_hb_out")
+
+	resp, _ := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_hb_out/heartbeat", "k", tokOutsider, map[string]any{})
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+
+	assert.Equal(t, before, sessionExpiry(t, c, "gs_hb_out"),
+		"a non-member heartbeat must not extend the session")
+}
+
+func TestGameSession_matchmade_lifecycle_join_heartbeat_hostend(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	ctx := context.Background()
+	tok, playerID := anonymousLoginWithID(t, srv.URL, "k")
+	// Matchmade pending session, host = the player, 10-minute pending TTL.
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 VALUES ('gs_life', 'LIFE01', $1, $2, $3, 'open', '{"matchmade": true}', 2, now() + interval '10 minutes')`,
+		tenantID, projectID, playerID)
+	require.NoError(t, err)
+
+	// Join promotes past the pending TTL.
+	resp, body := authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_life/join", "k", tok,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Greater(t, time.Until(sessionExpiry(t, c, "gs_life")), 45*time.Minute,
+		"join must promote a matchmade session past its pending TTL")
+
+	// Simulate most of the window elapsing, then a heartbeat sustains it.
+	_, err = c.bootstrapPool.Exec(ctx,
+		`UPDATE game_session SET expires_at = now() + interval '15 minutes' WHERE id = 'gs_life'`)
+	require.NoError(t, err)
+	resp, body = authedReq(t, http.MethodPost,
+		srv.URL+"/v1/game-session/gs_life/heartbeat", "k", tok, map[string]any{})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	require.Greater(t, time.Until(sessionExpiry(t, c, "gs_life")), 50*time.Minute,
+		"heartbeat must sustain an active session past the old expiry")
+
+	// Host ends the match → the slot frees immediately.
+	resp, _ = authedReq(t, http.MethodDelete,
+		srv.URL+"/v1/game-session/gs_life", "k", tok, nil)
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	var state string
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT state FROM game_session WHERE id = 'gs_life'`).Scan(&state))
+	assert.Equal(t, "ended", state)
+}
+
+// seedOpenSessions bulk-inserts n open sessions for the project so cap tests
+// don't create them one HTTP call at a time.
+func seedOpenSessions(t *testing.T, c *cluster, tenantID, projectID int64, n int64) {
+	t.Helper()
 	ctx := context.Background()
 	var hostID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
@@ -300,15 +423,80 @@ func TestGameSession_cap_rejects_overflow(t *testing.T) {
 		tenantID, projectID).Scan(&hostID))
 	_, err := c.bootstrapPool.Exec(ctx,
 		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
-		 SELECT 'gs_cap_' || lpad(g::text, 4, '0'), 'C' || lpad(g::text, 5, '0'), $1, $2, $3, 'open', '{}', 2, now() + interval '4 hours'
+		 SELECT 'gs_cap_' || lpad(g::text, 5, '0'), 'C' || lpad(g::text, 5, '0'), $1, $2, $3, 'open', '{}', 2, now() + interval '4 hours'
 		 FROM generate_series(1, $4) AS g`,
-		tenantID, projectID, hostID, gamesession.MaxOpenSessionsPerProject)
+		tenantID, projectID, hostID, n)
 	require.NoError(t, err)
+}
+
+func TestGameSession_hard_cap_rejects_overflow_without_enforcement(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	seedOpenSessions(t, c, tenantID, projectID, gamesession.SessionsHardCap)
 
 	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
 	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
 		map[string]any{"public_addr": addr("1.2.3.4", 9000)})
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
+}
+
+func TestGameSession_quota_caps_enforced_tenant_at_class_limit(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	ctx := context.Background()
+	_, err := c.bootstrapPool.Exec(ctx,
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
+	require.NoError(t, err)
+	seedOpenSessions(t, c, tenantID, projectID,
+		quota.LimitsForClass(tenant.Tier0).OpenSessionsPerProject)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
+		map[string]any{"public_addr": addr("1.2.3.4", 9000)})
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
+}
+
+func TestGameSession_quota_override_replaces_class_limit(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	// tier_0 allows 500 open sessions; the override lowers it to 3, so the
+	// fourth create must be refused.
+	ctx := context.Background()
+	_, err := c.bootstrapPool.Exec(ctx,
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit") VALUES ($1, 'open_sessions', 3)`,
+		tenantID)
+	require.NoError(t, err)
+	seedOpenSessions(t, c, tenantID, projectID, 3)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
+		map[string]any{"public_addr": addr("1.2.3.4", 9000)})
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
+}
+
+func TestGameSession_quota_ignored_for_unenforced_tenant(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	// At the tier_0 class limit but enforce_quotas=false: only the hard cap
+	// applies, so creation must still succeed.
+	seedOpenSessions(t, c, tenantID, projectID,
+		quota.LimitsForClass(tenant.Tier0).OpenSessionsPerProject)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
+		map[string]any{"public_addr": addr("1.2.3.4", 9000)})
+	assert.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
 }
 
 // ── presence ────────────────────────────────────────────────────────────────

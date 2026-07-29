@@ -135,6 +135,35 @@ func (q *Queries) ExtendGameSessionExpiry(ctx context.Context, arg ExtendGameSes
 	return err
 }
 
+const extendGameSessionExpiryOnHeartbeat = `-- name: ExtendGameSessionExpiryOnHeartbeat :execrows
+UPDATE game_session
+SET expires_at = $1
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $2
+  AND state != 'ended'
+  AND expires_at > now()
+  AND expires_at < $3
+`
+
+type ExtendGameSessionExpiryOnHeartbeatParams struct {
+	ExpiresAt pgtype.Timestamptz
+	ID        string
+	Threshold pgtype.Timestamptz
+}
+
+// Sliding-window extension for member heartbeats: push the expiry out only
+// when less than the threshold remains, so steady heartbeats don't rewrite
+// the row every few seconds (self-gating, single statement — deliberately
+// NOT the greatest-wins ExtendGameSessionExpiry, which writes on every
+// call). Never revives an ended or already-expired session.
+func (q *Queries) ExtendGameSessionExpiryOnHeartbeat(ctx context.Context, arg ExtendGameSessionExpiryOnHeartbeatParams) (int64, error) {
+	result, err := q.db.Exec(ctx, extendGameSessionExpiryOnHeartbeat, arg.ExpiresAt, arg.ID, arg.Threshold)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getGameSession = `-- name: GetGameSession :one
 SELECT id, join_code, project_id, title_id, host_player_id, state, props, max_players, private, created_at, expires_at
 FROM game_session

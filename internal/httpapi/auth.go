@@ -24,7 +24,6 @@ import (
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/observability"
 	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/verifycode"
 	"github.com/ggscale/ggscale/internal/webutil"
 )
@@ -930,7 +929,11 @@ func checkPlayerQuotaSnapshot(qc sqlcgen.GetTenantQuotaContextRow) error {
 	if !qc.EnforceQuotas {
 		return nil
 	}
-	return playerLimits(qc).CheckPlayers(qc.PlayerCount)
+	limits, err := playerLimits(qc)
+	if err != nil {
+		return err
+	}
+	return limits.CheckPlayers(qc.PlayerCount)
 }
 
 // reservePlayerSlot atomically claims a registered-player slot via the
@@ -941,7 +944,10 @@ func checkPlayerQuotaSnapshot(qc sqlcgen.GetTenantQuotaContextRow) error {
 // admitted, but counted, so the counter stays exact if enforcement is ever
 // flipped on.
 func reservePlayerSlot(ctx context.Context, q *sqlcgen.Queries, qc sqlcgen.GetTenantQuotaContextRow) error {
-	limits := playerLimits(qc)
+	limits, err := playerLimits(qc)
+	if err != nil {
+		return err
+	}
 	rows, err := q.ReserveTenantPlayerSlot(ctx, limits.Players)
 	if err != nil {
 		return fmt.Errorf("reserve player slot: %w", err)
@@ -952,8 +958,8 @@ func reservePlayerSlot(ctx context.Context, q *sqlcgen.Queries, qc sqlcgen.GetTe
 	return nil
 }
 
-func playerLimits(qc sqlcgen.GetTenantQuotaContextRow) quota.Limits {
-	return quota.LimitsForClass(tenant.ClampTier(int(qc.Tier)))
+func playerLimits(qc sqlcgen.GetTenantQuotaContextRow) (quota.Limits, error) {
+	return quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
 }
 
 func isPlayerQuotaError(err error) bool {

@@ -391,7 +391,7 @@ func (m *Metrics) MailSend(result string) {
 }
 
 // QuotaRejection counts a new-growth operation rejected by an enforced tenant
-// quota, labelled by axis (quota.AxisProjects / AxisPlayers / AxisStorage).
+// quota, labelled by axis (the quota.Axis* constants).
 func (m *Metrics) QuotaRejection(axis string) {
 	if m == nil {
 		return

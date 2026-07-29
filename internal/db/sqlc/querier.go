@@ -207,6 +207,8 @@ type Querier interface {
 	DeletePlayerAccountTOTP(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeletePlayerAccountTOTPBackupCodes(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeletePlayerAccountTrustedDevicesForAccount(ctx context.Context, playerAccountID pgtype.UUID) error
+	// Clear one axis override so the class ladder applies again.
+	DeleteQuotaOverride(ctx context.Context, arg DeleteQuotaOverrideParams) error
 	DeleteRateLimitOverride(ctx context.Context, arg DeleteRateLimitOverrideParams) error
 	DeleteTenantPlayerBan(ctx context.Context, arg DeleteTenantPlayerBanParams) (int64, error)
 	// GC (River job, leader-elected): drop matched/cancelled/failed tickets
@@ -236,6 +238,12 @@ type Querier interface {
 	// join handler uses it to promote a short-lived pending matchmade session
 	// to its full lifetime once a player actually joins.
 	ExtendGameSessionExpiry(ctx context.Context, arg ExtendGameSessionExpiryParams) error
+	// Sliding-window extension for member heartbeats: push the expiry out only
+	// when less than the threshold remains, so steady heartbeats don't rewrite
+	// the row every few seconds (self-gating, single statement — deliberately
+	// NOT the greatest-wins ExtendGameSessionExpiry, which writes on every
+	// call). Never revives an ended or already-expired session.
+	ExtendGameSessionExpiryOnHeartbeat(ctx context.Context, arg ExtendGameSessionExpiryOnHeartbeatParams) (int64, error)
 	FindAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
@@ -372,9 +380,10 @@ type Querier interface {
 	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
 	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
 	GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error)
-	// Lock-free snapshot of the current tenant's class, enforcement flag, and
-	// registered-player count. Read inside an RLS-scoped tx (app.tenant_id set)
-	// before a quota-gated growth operation. Deliberately NOT FOR UPDATE: the
+	// Lock-free snapshot of the current tenant's class, enforcement flag,
+	// registered-player count, and quota overrides (axis→limit jsonb; NULL when
+	// none). Read inside an RLS-scoped tx (app.tenant_id set) before a
+	// quota-gated growth operation. Deliberately NOT FOR UPDATE: the
 	// authoritative player gate is ReserveTenantPlayerSlot, so this read must
 	// never serialize concurrent creates on the tenant row.
 	GetTenantQuotaContext(ctx context.Context) (GetTenantQuotaContextRow, error)
@@ -455,8 +464,9 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
-	// Name, usage, class, and last-notified threshold for every quota-enforced
-	// tenant. Read cross-tenant by the storage-warn River job (bootstrap tx).
+	// Name, usage, class, quota overrides, and last-notified threshold for every
+	// quota-enforced tenant. Read cross-tenant by the storage-warn River job
+	// (bootstrap tx).
 	ListEnforcedTenantStorage(ctx context.Context) ([]ListEnforcedTenantStorageRow, error)
 	// GC candidates whose allocation lease elapsed without a poll or realtime
 	// delivery. Privileged — runs without a tenant GUC.
@@ -500,6 +510,10 @@ type Querier interface {
 	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
 	ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
+	// Per-axis overrides for one tenant, for the control-panel views and the
+	// platform-admin editor. Hot paths never call this — they get the same rows
+	// aggregated into the quota-context snapshot above.
+	ListQuotaOverridesForTenant(ctx context.Context, tenantID int64) ([]ListQuotaOverridesForTenantRow, error)
 	// Region is a bucket dimension only for fleet_allocation (the server must
 	// be placed in a concrete region); non-fleet modes mix regions inside one
 	// bucket and the worker applies the soft-region grouping rules in Go.
@@ -777,6 +791,9 @@ type Querier interface {
 	// (tenant, project) or create one. Idempotent across repeated calls.
 	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error)
 	UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error
+	// Write one axis override. Platform-admin only (directly or via an approved
+	// change request); the axis CHECK constraint rejects unknown axes.
+	UpsertQuotaOverride(ctx context.Context, arg UpsertQuotaOverrideParams) error
 	UpsertRateLimitOverride(ctx context.Context, arg UpsertRateLimitOverrideParams) error
 	// Auto-applied on feature-request approval. Tenant-level grant (project_id
 	// NULL); runs in tenant RLS context.

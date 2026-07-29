@@ -15,6 +15,7 @@ import (
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/gamesession"
 	"github.com/ggscale/ggscale/internal/playerauth"
+	"github.com/ggscale/ggscale/internal/quota"
 )
 
 var (
@@ -128,10 +129,16 @@ type gameSessionHeartbeatOutput struct {
 func registerGameSessionRoutes(api huma.API, d Deps) {
 	registerGameSessionSignalRoutes(api, d)
 	huma.Register(api, huma.Operation{
-		OperationID:   "createGameSession",
-		Method:        http.MethodPost,
-		Path:          "/v1/game-session",
-		Summary:       "Create a game session",
+		OperationID: "createGameSession",
+		Method:      http.MethodPost,
+		Path:        "/v1/game-session",
+		Summary:     "Create a game session",
+		Description: "Creates a session with a one-hour lifetime window. Member " +
+			"heartbeats slide the window forward, so an active session stays " +
+			"alive for the length of the match while an idle one expires within " +
+			"the hour. When the match ends, the host should DELETE the session " +
+			"— that frees the project's open-session slot immediately instead " +
+			"of waiting for expiry.",
 		Tags:          []string{"/v1"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
@@ -169,15 +176,23 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/game-session/{id}/heartbeat",
 		Summary:     "Heartbeat a game session peer",
-		Tags:        []string{"/v1"},
-		Security:    playerSecurity,
+		Description: "Marks the caller's peer as alive and returns the current " +
+			"roster. A member heartbeat also extends the session's expiry when " +
+			"under 30 minutes remain, keeping active matches alive past the " +
+			"one-hour default window.",
+		Tags:     []string{"/v1"},
+		Security: playerSecurity,
 	}, gameSessionHeartbeat(d))
 
 	huma.Register(api, huma.Operation{
-		OperationID:   "leaveGameSession",
-		Method:        http.MethodDelete,
-		Path:          "/v1/game-session/{id}",
-		Summary:       "Leave (or, for the host, end) a game session",
+		OperationID: "leaveGameSession",
+		Method:      http.MethodDelete,
+		Path:        "/v1/game-session/{id}",
+		Summary:     "Leave (or, for the host, end) a game session",
+		Description: "A joiner is removed from the roster; the host ends the " +
+			"session for everyone. Call this from the host when the match ends " +
+			"— an ended session stops counting against the project's " +
+			"open-session limit immediately.",
 		Tags:          []string{"/v1"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
@@ -228,6 +243,10 @@ func gameSessionCreate(d Deps) func(context.Context, *gameSessionCreateInput) (*
 		})
 		switch {
 		case errors.Is(err, gamesession.ErrProjectCapped):
+			var qe *quota.ErrQuotaExceeded
+			if errors.As(err, &qe) {
+				d.Metrics.QuotaRejection(qe.Axis)
+			}
 			return nil, huma.Error429TooManyRequests("session limit reached for this project")
 		case err != nil:
 			return nil, serverError(ctx, "game session create", err)
@@ -502,6 +521,17 @@ func gameSessionHeartbeat(d Deps) func(context.Context, *gameSessionHeartbeatInp
 				return nil
 			}
 			isMember = true
+			// Sliding lifetime: extend only when the session is close to
+			// expiring (the query self-gates on the threshold, so steady
+			// heartbeats don't rewrite the row).
+			now := time.Now()
+			if _, qerr := q.ExtendGameSessionExpiryOnHeartbeat(ctx, sqlcgen.ExtendGameSessionExpiryOnHeartbeatParams{
+				ExpiresAt: pgtype.Timestamptz{Time: now.Add(gamesession.DefaultTTL), Valid: true},
+				ID:        sessionID,
+				Threshold: pgtype.Timestamptz{Time: now.Add(gamesession.HeartbeatExtendThreshold), Valid: true},
+			}); qerr != nil {
+				return qerr
+			}
 			if _, qerr := q.PruneStaleGameSessionPeers(ctx, sessionID); qerr != nil {
 				return qerr
 			}

@@ -19,7 +19,6 @@ import (
 	"github.com/ggscale/ggscale/internal/playerauth"
 	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/storagelimit"
-	"github.com/ggscale/ggscale/internal/tenant"
 )
 
 const storageListMaxLimit = 100
@@ -251,7 +250,11 @@ func storageWriteDelta(ctx context.Context, q *sqlcgen.Queries, projectID, owner
 	}
 	delta := u.NewBytes - u.OldBytes
 	if qc.EnforceQuotas {
-		if err := quota.LimitsForClass(tenant.ClampTier(int(qc.Tier))).CheckStorage(u.TotalBytes, delta); err != nil {
+		limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+		if err != nil {
+			return 0, err
+		}
+		if err := limits.CheckStorage(u.TotalBytes, delta); err != nil {
 			return 0, err
 		}
 	}

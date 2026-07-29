@@ -7,6 +7,7 @@
 package quota
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -23,6 +24,7 @@ const (
 	AxisPlayers       = "players"
 	AxisStorage       = "storage"
 	AxisRelaySessions = "relay_sessions"
+	AxisOpenSessions  = "open_sessions"
 )
 
 const gb = int64(1) << 30
@@ -31,12 +33,15 @@ const gb = int64(1) << 30
 // StorageBytes, and RelaySessionsPerMonth are int64. Unlimited (-1) marks an
 // uncapped axis. RelaySessionsPerMonth caps managed-relay credential
 // issuances per calendar month; it only bites for tenants holding the
-// p2p_relay grant with enforce_quotas on.
+// p2p_relay grant with enforce_quotas on. OpenSessionsPerProject caps live
+// game sessions per project; every tenant additionally sits under
+// gamesession.SessionsHardCap regardless of enforcement.
 type Limits struct {
-	Projects              int
-	Players               int64
-	StorageBytes          int64
-	RelaySessionsPerMonth int64
+	Projects               int
+	Players                int64
+	StorageBytes           int64
+	RelaySessionsPerMonth  int64
+	OpenSessionsPerProject int64
 }
 
 // LimitsForClass returns the quota ladder for a tenant class.
@@ -44,14 +49,61 @@ type Limits struct {
 func LimitsForClass(t tenant.Tier) Limits {
 	switch t {
 	case tenant.Tier1:
-		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000}
+		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000, OpenSessionsPerProject: 2_000}
 	case tenant.Tier2:
-		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000}
+		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000, OpenSessionsPerProject: 5_000}
 	case tenant.Tier3:
-		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited}
+		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited, OpenSessionsPerProject: 10_000}
 	default:
-		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000}
+		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000, OpenSessionsPerProject: 500}
 	}
+}
+
+// Resolve layers per-tenant axis overrides (tenant_quota_overrides rows,
+// keyed by the Axis* constants) over the class ladder. Unknown axes are
+// ignored so an old binary tolerates rows written by a newer one.
+func Resolve(t tenant.Tier, overrides map[string]int64) Limits {
+	l := LimitsForClass(t)
+	for axis, v := range overrides {
+		switch axis {
+		case AxisProjects:
+			l.Projects = int(v)
+		case AxisPlayers:
+			l.Players = v
+		case AxisStorage:
+			l.StorageBytes = v
+		case AxisRelaySessions:
+			l.RelaySessionsPerMonth = v
+		case AxisOpenSessions:
+			l.OpenSessionsPerProject = v
+		}
+	}
+	return l
+}
+
+// ParseOverrides decodes the jsonb axis→limit object the tenant quota-context
+// queries aggregate from tenant_quota_overrides. Empty input (no override
+// rows) yields a nil map, which Resolve treats as "ladder only".
+func ParseOverrides(b []byte) (map[string]int64, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+	var m map[string]int64
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("quota overrides: %w", err)
+	}
+	return m, nil
+}
+
+// ResolveSnapshot resolves a tenant's effective limits from the raw tier and
+// overrides jsonb carried by the quota-context queries: clamp the class,
+// parse the overrides, layer them over the ladder.
+func ResolveSnapshot(tier int, overridesJSON []byte) (Limits, error) {
+	ov, err := ParseOverrides(overridesJSON)
+	if err != nil {
+		return Limits{}, err
+	}
+	return Resolve(tenant.ClampTier(tier), ov), nil
 }
 
 // ErrQuotaExceeded is returned by the Check helpers when new growth would cross
@@ -89,6 +141,13 @@ func (l Limits) CheckStorage(current, delta int64) error {
 		return &ErrQuotaExceeded{Axis: AxisStorage, Limit: l.StorageBytes, Current: current}
 	}
 	return nil
+}
+
+// CheckOpenSessions rejects creating another game session when the project's
+// current open-session count already meets or exceeds the class limit.
+// Existing sessions are never affected.
+func (l Limits) CheckOpenSessions(current int64) error {
+	return checkCount(AxisOpenSessions, l.OpenSessionsPerProject, current)
 }
 
 // checkCount is the shared "block new growth at the cap" rule for count axes.

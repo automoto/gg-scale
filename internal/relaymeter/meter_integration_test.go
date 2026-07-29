@@ -168,6 +168,30 @@ func TestAllow_warns_at_100_percent_then_refuses(t *testing.T) {
 	assert.Contains(t, subjects[1], "allowance")
 }
 
+func TestAllow_zero_allowance_refuses_first_issuance_of_month(t *testing.T) {
+	now := time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC)
+	m, owner, mails := newTestMeter(t, now)
+	// A relay_sessions override of 0 must block all issuance — including the
+	// very first one of an empty month, which the SQL upsert alone admits
+	// (the allowance predicate only guards the conflict update).
+	_, err := owner.Exec(context.Background(),
+		`INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit") VALUES ($1, 'relay_sessions', 0)`,
+		enforcedTenant)
+	require.NoError(t, err)
+
+	err = m.Allow(context.Background(), enforcedTenant)
+	var qe *quota.ErrQuotaExceeded
+	require.ErrorAs(t, err, &qe)
+	assert.Equal(t, quota.AxisRelaySessions, qe.Axis)
+	assert.Equal(t, int64(0), qe.Limit)
+
+	var months int
+	require.NoError(t, owner.QueryRow(context.Background(),
+		`SELECT count(*) FROM relay_session_usage WHERE tenant_id = $1`, enforcedTenant).Scan(&months))
+	assert.Zero(t, months, "a refused attempt must not create the month row")
+	assert.Empty(t, mails.subjects(), "a blocked tenant gets no 80%/100% warning mail")
+}
+
 func TestAllow_new_month_resets_the_allowance(t *testing.T) {
 	july := time.Date(2026, 7, 31, 23, 0, 0, 0, time.UTC)
 	m, owner, _ := newTestMeter(t, july)
