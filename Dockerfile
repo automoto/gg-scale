@@ -7,9 +7,12 @@ RUN go mod download
 
 COPY . .
 
-ARG GIT_COMMIT=unknown
+# GIT_COMMIT comes from the Makefile targets; GIT_REV is injected
+# automatically by Dokku on git-push deploys. Either one stamps the binary.
+ARG GIT_COMMIT=
+ARG GIT_REV=
 RUN CGO_ENABLED=0 go build \
-    -ldflags="-s -w -X main.commit=${GIT_COMMIT}" \
+    -ldflags="-s -w -X main.commit=${GIT_COMMIT:-${GIT_REV:-unknown}}" \
     -o /out/ggscale-server \
     ./cmd/ggscale-server
 

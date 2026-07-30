@@ -58,9 +58,6 @@ import (
 	"github.com/ggscale/ggscale/internal/verifycode"
 )
 
-// commit is overridden at build time via -ldflags.
-var commit = "unknown"
-
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -548,7 +545,7 @@ func run() error {
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
-		Commit:                commit,
+		Commit:                buildCommit(),
 		RequestTimeout:        cfg.HTTPRequestTimeout,
 		Pool:                  appPool,
 		ReadPool:              readPool,
@@ -640,7 +637,7 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("starting ggscale-server", "addr", cfg.HTTPAddr, "env", cfg.Env, "commit", commit)
+		slog.Info("starting ggscale-server", "addr", cfg.HTTPAddr, "env", cfg.Env, "commit", buildCommit())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
@@ -706,6 +703,22 @@ func (g queueGauge) SetQueueStats(stats []matchmaker.BucketStat) {
 	g.m.SetMatchmakerQueueStats(samples)
 }
 
+// riverPeriodicJobs maps the schedule in jobs.PeriodicRegistrations onto
+// River's periodic-job type.
+func riverPeriodicJobs() []*river.PeriodicJob {
+	regs := jobs.PeriodicRegistrations()
+	periodic := make([]*river.PeriodicJob, 0, len(regs))
+	for _, r := range regs {
+		args := r.Args
+		periodic = append(periodic, river.NewPeriodicJob(
+			river.PeriodicInterval(r.Interval),
+			func() (river.JobArgs, *river.InsertOpts) { return args, nil },
+			&river.PeriodicJobOpts{RunOnStart: true},
+		))
+	}
+	return periodic
+}
+
 // startRiverJobs boots the River client and its periodic maintenance jobs, then
 // returns a stop function, or nil if River couldn't start. River runs under
 // the app DB role via the pool's SET ROLE; its tables are granted in migration
@@ -724,33 +737,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 2},
 		},
-		PeriodicJobs: []*river.PeriodicJob{
-			river.NewPeriodicJob(
-				river.PeriodicInterval(24*time.Hour),
-				func() (river.JobArgs, *river.InsertOpts) { return jobs.GameSessionGCArgs{}, nil },
-				&river.PeriodicJobOpts{RunOnStart: true},
-			),
-			river.NewPeriodicJob(
-				river.PeriodicInterval(24*time.Hour),
-				func() (river.JobArgs, *river.InsertOpts) { return jobs.TrustedDeviceGCArgs{}, nil },
-				&river.PeriodicJobOpts{RunOnStart: true},
-			),
-			river.NewPeriodicJob(
-				river.PeriodicInterval(time.Hour),
-				func() (river.JobArgs, *river.InsertOpts) { return jobs.ConnectionGrantGCArgs{}, nil },
-				&river.PeriodicJobOpts{RunOnStart: true},
-			),
-			river.NewPeriodicJob(
-				river.PeriodicInterval(time.Hour),
-				func() (river.JobArgs, *river.InsertOpts) { return jobs.MatchmakerGCArgs{}, nil },
-				&river.PeriodicJobOpts{RunOnStart: true},
-			),
-			river.NewPeriodicJob(
-				river.PeriodicInterval(time.Hour),
-				func() (river.JobArgs, *river.InsertOpts) { return jobs.StorageWarnArgs{}, nil },
-				&river.PeriodicJobOpts{RunOnStart: true},
-			),
-		},
+		PeriodicJobs: riverPeriodicJobs(),
 	})
 	if err != nil {
 		logger.Error("river: client init failed; background jobs disabled", "error", err)

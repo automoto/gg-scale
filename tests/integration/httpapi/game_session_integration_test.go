@@ -483,6 +483,40 @@ func TestGameSession_quota_override_replaces_class_limit(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
 }
 
+func TestGameSession_expired_sessions_do_not_count_toward_cap(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	// 2 live + 5 expired open sessions against a limit of 3: only live
+	// sessions may count, so the create must succeed.
+	ctx := context.Background()
+	_, err := c.bootstrapPool.Exec(ctx,
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit") VALUES ($1, 'open_sessions', 3)`,
+		tenantID)
+	require.NoError(t, err)
+	seedOpenSessions(t, c, tenantID, projectID, 2)
+
+	var hostID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1,$2,'exp_host') RETURNING id`,
+		tenantID, projectID).Scan(&hostID))
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 SELECT 'gs_exp_' || lpad(g::text, 5, '0'), 'X' || lpad(g::text, 5, '0'), $1, $2, $3, 'open', '{}', 2, now() - interval '1 hour'
+		 FROM generate_series(1, 5) AS g`,
+		tenantID, projectID, hostID)
+	require.NoError(t, err)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/game-session", "k", tok,
+		map[string]any{"public_addr": addr("1.2.3.4", 9000)})
+	assert.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+}
+
 func TestGameSession_quota_ignored_for_unenforced_tenant(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
