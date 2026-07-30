@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/ggscale/ggscale/internal/db"
 	"github.com/ggscale/ggscale/internal/fleet"
 	"github.com/ggscale/ggscale/internal/gamesession"
+	"github.com/ggscale/ggscale/internal/jobs"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/matchmaker"
 	"github.com/ggscale/ggscale/internal/middleware"
@@ -83,6 +85,10 @@ type Deps struct {
 	Signer     *auth.Signer
 	Mailer     mailer.Mailer
 	MailFrom   string
+	// EnqueuePasswordReset inserts the durable forgot-password delivery job
+	// (jobs.PasswordResetEmailArgs). nil = no job queue; the web handlers
+	// fall back to in-process delivery.
+	EnqueuePasswordReset func(ctx context.Context, surface, email string) error
 	// TwoFactor encrypts TOTP secrets and signs 2FA pending cookies for the
 	// control panel and player surfaces. nil = 2FA enrollment unavailable.
 	TwoFactor *twofactor.Cipher
@@ -104,6 +110,9 @@ type Deps struct {
 	Hub                  *realtime.Hub
 	RealtimeMaxPerTenant int64
 	RealtimeMaxPerPlayer int64
+	// RealtimeHeartbeat overrides the WS heartbeat/revalidation interval.
+	// Zero uses the production default (30s); tests shorten it.
+	RealtimeHeartbeat time.Duration
 	// TenantConnectionCap coordinates regional capacity through PostgreSQL
 	// leases while keeping socket admission in process memory.
 	TenantConnectionCap ratelimit.ConnectionCap
@@ -276,37 +285,39 @@ func NewRouter(d Deps) http.Handler {
 		r.Mount("/assets", webassets.Handler())
 		if d.ControlPanel.Enabled() {
 			r.Mount("/control-panel", controlpanel.New(controlpanel.Deps{
-				Pool:               d.Pool,
-				Cache:              d.Cache,
-				Limiter:            d.Limiter,
-				RateLimitOverrides: d.RateLimitOverrides,
-				ProxyTrust:         d.ProxyTrust,
-				Registry:           reg,
-				Metrics:            d.Metrics,
-				Config:             d.ControlPanel,
-				Bootstrap:          d.ControlPanelBootstrap,
-				Mailer:             d.Mailer,
-				Fleet:              d.Fleet,
-				RBAC:               d.RBAC,
-				PluginInfo:         d.ControlPanelPluginInfo,
-				TwoFactor:          d.TwoFactor,
-				VerifySigningKey:   d.EmailVerifySigningKey,
-				StorageLimits:      d.StorageLimits,
-				BillingHandoffKey:  d.BillingHandoffKey,
+				Pool:                 d.Pool,
+				Cache:                d.Cache,
+				Limiter:              d.Limiter,
+				RateLimitOverrides:   d.RateLimitOverrides,
+				ProxyTrust:           d.ProxyTrust,
+				Registry:             reg,
+				Metrics:              d.Metrics,
+				Config:               d.ControlPanel,
+				Bootstrap:            d.ControlPanelBootstrap,
+				Mailer:               d.Mailer,
+				Fleet:                d.Fleet,
+				RBAC:                 d.RBAC,
+				PluginInfo:           d.ControlPanelPluginInfo,
+				TwoFactor:            d.TwoFactor,
+				VerifySigningKey:     d.EmailVerifySigningKey,
+				StorageLimits:        d.StorageLimits,
+				BillingHandoffKey:    d.BillingHandoffKey,
+				EnqueuePasswordReset: passwordResetEnqueuer(d, jobs.PasswordResetSurfaceControlPanel),
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {
 			r.Mount("/players", players.New(players.Deps{
-				Pool:             d.Pool,
-				Mailer:           d.Mailer,
-				MailFrom:         d.MailFrom,
-				Config:           d.Players,
-				Limiter:          d.Limiter,
-				ProxyTrust:       d.ProxyTrust,
-				Registry:         reg,
-				Metrics:          d.Metrics,
-				TwoFactor:        d.TwoFactor,
-				VerifySigningKey: d.EmailVerifySigningKey,
+				Pool:                 d.Pool,
+				Mailer:               d.Mailer,
+				MailFrom:             d.MailFrom,
+				Config:               d.Players,
+				Limiter:              d.Limiter,
+				ProxyTrust:           d.ProxyTrust,
+				Registry:             reg,
+				Metrics:              d.Metrics,
+				TwoFactor:            d.TwoFactor,
+				VerifySigningKey:     d.EmailVerifySigningKey,
+				EnqueuePasswordReset: passwordResetEnqueuer(d, jobs.PasswordResetSurfacePlayerAccount),
 			}))
 		}
 

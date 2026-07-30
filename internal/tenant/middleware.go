@@ -82,6 +82,10 @@ type APIKey struct {
 	Tier      Tier
 	Type      KeyType
 	Revoked   bool
+	// TenantDisabled reports that the owning tenant is disabled (by a tenant
+	// admin or the platform). Disabled tenants' keys stop resolving, which
+	// blocks all player traffic.
+	TenantDisabled bool
 	// Scopes are per-key feature grants (e.g. "fleet", "p2p_relay"). Empty by
 	// default: a key reaches a feature-gated route only when the matching
 	// scope is present. See RequireKeyScope.
@@ -146,7 +150,9 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 				http.Error(w, "internal error", http.StatusInternalServerError)
 				return
 			}
-			if key.Revoked {
+			// Revoked keys and disabled tenants get the same terse 403 — a
+			// clear "no access" that does not reveal which of the two it is.
+			if key.Revoked || key.TenantDisabled {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

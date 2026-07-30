@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/ggscale/ggscale/internal/webutil"
 )
 
 const (
@@ -122,6 +122,9 @@ func normalizeEmail(email string) string {
 }
 
 func validControlPanelEmail(email string) bool {
-	_, err := mail.ParseAddress(email)
+	// Shared validator: enforces the RFC 5321 254-byte cap (so an oversized
+	// address can never reach the durable job queue), rejects display-name
+	// forms, and normalises the domain.
+	_, err := webutil.ValidateEmail(email)
 	return err == nil
 }

@@ -33,6 +33,7 @@ type EpochValidator interface {
 
 type ctxKey struct{}
 type projectCtxKey struct{}
+type epochCtxKey struct{}
 
 // WithID returns a derived context carrying playerID.
 func WithID(ctx context.Context, playerID int64) context.Context {
@@ -63,6 +64,20 @@ func ProjectIDFromContext(ctx context.Context) (int64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// WithSessionEpoch returns a derived context carrying the verified token's
+// session_epoch claim.
+func WithSessionEpoch(ctx context.Context, epoch int64) context.Context {
+	return context.WithValue(ctx, epochCtxKey{}, epoch)
+}
+
+// SessionEpochFromContext extracts the session_epoch claim installed by the
+// middleware. Long-lived consumers (WebSockets) re-check it against the
+// stored epoch so revocation reaches connections that outlive the handshake.
+func SessionEpochFromContext(ctx context.Context) (int64, bool) {
+	v, ok := ctx.Value(epochCtxKey{}).(int64)
+	return v, ok
 }
 
 // New builds the middleware. The tenant middleware must run first so the
@@ -133,6 +148,7 @@ func New(signer *auth.Signer, validator EpochValidator) func(http.Handler) http.
 			}
 
 			ctx := WithID(r.Context(), claims.PlayerID)
+			ctx = WithSessionEpoch(ctx, claims.SessionEpoch)
 			if claims.ProjectID != 0 {
 				ctx = WithProjectID(ctx, claims.ProjectID)
 			}

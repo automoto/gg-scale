@@ -7,6 +7,7 @@
 package players
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,10 @@ const bcryptCost = webutil.BcryptCost
 type Config struct {
 	Mount        bool
 	CookieSecure bool
+	// BaseURL is the externally-visible origin (scheme + host) prepended to
+	// links in player-account emails (password reset). Empty means "use a
+	// relative path" — fine for dev but not for production.
+	BaseURL string
 }
 
 // Enabled reports whether the player site should be mounted.
@@ -72,6 +77,9 @@ type Deps struct {
 	// VerifySigningKey signs short-lived email-verification cookies. Startup
 	// supplies the same key to the player site and control panel.
 	VerifySigningKey []byte
+	// EnqueuePasswordReset inserts the durable forgot-password delivery job.
+	// nil = no job queue; the handler falls back to in-process delivery.
+	EnqueuePasswordReset func(ctx context.Context, email string) error
 }
 
 // Handler owns player UI HTTP routes.
@@ -84,8 +92,9 @@ type Handler struct {
 	metrics  *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the control panel.
-	verifySigningKey []byte
-	twoFactor        *twofactor.Cipher
+	verifySigningKey     []byte
+	twoFactor            *twofactor.Cipher
+	enqueuePasswordReset func(ctx context.Context, email string) error
 }
 
 // New builds the player UI router.
@@ -109,6 +118,8 @@ func New(d Deps) http.Handler {
 		}))
 		r.Use(webutil.RequireCSRF)
 		r.Get("/", h.accountHomePage)
+		r.Get("/projects/{playerID}/unlink", h.accountProjectUnlinkPage)
+		r.Post("/projects/{playerID}/unlink", h.accountProjectUnlink)
 		r.Get("/remote-addrs", h.accountRemoteAddrListPage)
 		r.Get("/remote-addrs/new", h.accountRemoteAddrNewPage)
 		r.Post("/remote-addrs", h.accountRemoteAddrCreate)
@@ -125,6 +136,10 @@ func New(d Deps) http.Handler {
 		r.Post("/friends/{accountID}/unblock", h.friendAction("unblock"))
 		r.Get("/login", h.accountLoginPage)
 		r.Post("/login", h.accountLogin)
+		r.Get("/forgot-password", h.accountForgotPasswordPage)
+		r.Post("/forgot-password", h.accountForgotPassword)
+		r.Get("/reset-password", h.accountResetPasswordPage)
+		r.Post("/reset-password", h.accountResetPassword)
 		r.Get("/login/2fa", h.accountTwoFactorChallengePage)
 		r.Post("/login/2fa", h.accountTwoFactorChallenge)
 		r.Get("/2fa", h.accountTwoFactorPage)
@@ -171,14 +186,15 @@ func newHandler(d Deps) *Handler {
 		panic(fmt.Sprintf("players: email verify signing key has %d bytes, want %d", len(d.VerifySigningKey), verifycode.SigningKeySize))
 	}
 	return &Handler{
-		pool:             d.Pool,
-		mailer:           d.Mailer,
-		mailFrom:         d.MailFrom,
-		cfg:              d.Config,
-		now:              time.Now,
-		metrics:          d.Metrics,
-		verifySigningKey: append([]byte(nil), d.VerifySigningKey...),
-		twoFactor:        d.TwoFactor,
+		pool:                 d.Pool,
+		mailer:               d.Mailer,
+		mailFrom:             d.MailFrom,
+		cfg:                  d.Config,
+		now:                  time.Now,
+		metrics:              d.Metrics,
+		verifySigningKey:     append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:            d.TwoFactor,
+		enqueuePasswordReset: d.EnqueuePasswordReset,
 	}
 }
 

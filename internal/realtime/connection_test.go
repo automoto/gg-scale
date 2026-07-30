@@ -108,7 +108,7 @@ func TestRunConnection_heartbeatPingFailureClosesConnectionAndReturns(t *testing
 	done := make(chan struct{})
 
 	go func() {
-		runConnectionWithClock(ctx, conn, time.Minute, nil, slog.Default(), clock)
+		runConnectionWithClock(ctx, conn, time.Minute, nil, nil, slog.Default(), clock)
 		close(done)
 	}()
 	select {
@@ -122,6 +122,33 @@ func TestRunConnection_heartbeatPingFailureClosesConnectionAndReturns(t *testing
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("runConnection did not return after heartbeat failure")
+	}
+	assert.Equal(t, int64(1), conn.closeCalls.Load())
+}
+
+func TestRunConnection_revalidateFailureClosesConnectionAndReturns(t *testing.T) {
+	conn := newFakeRealtimeConnection(0)
+	clock := newFakeConnectionClock()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	revalidate := func(context.Context) error { return errors.New("session revoked") }
+
+	go func() {
+		runConnectionWithClock(ctx, conn, time.Minute, nil, revalidate, slog.Default(), clock)
+		close(done)
+	}()
+	select {
+	case <-clock.tickerReady:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat ticker was not created")
+	}
+	clock.Tick()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("runConnection did not return after revalidation failure")
 	}
 	assert.Equal(t, int64(1), conn.closeCalls.Load())
 }
@@ -141,7 +168,7 @@ func TestRunConnection_rapidInboundFramesRefreshSlotsOncePerHeartbeatInterval(t 
 		hasParentValue.Store(refreshCtx.Value(connectionContextKey{}) == "connection")
 	}
 
-	runConnectionWithClock(ctx, conn, time.Minute, refreshSlots, slog.Default(), clock)
+	runConnectionWithClock(ctx, conn, time.Minute, refreshSlots, nil, slog.Default(), clock)
 
 	require.Equal(t, int64(1), refreshCalls.Load())
 	assert.True(t, hasDeadline.Load())

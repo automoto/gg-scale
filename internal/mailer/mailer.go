@@ -76,13 +76,26 @@ func New(provider, addr, user, password, from, tlsMode string) (Mailer, error) {
 
 // Recorder is a Mailer that captures every Send. Useful as a test double
 // and in dev when the operator just wants to see what would have been
-// sent without a real SMTP server.
+// sent without a real SMTP server. Reading Sent directly is only safe when
+// no Send can run concurrently (e.g. the forgot-password flow delivers
+// off-request); concurrent readers use Snapshot.
 type Recorder struct {
+	mu   sync.Mutex
 	Sent []Message
 }
 
 // Send records msg.
 func (r *Recorder) Send(_ context.Context, msg Message) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.Sent = append(r.Sent, msg)
 	return nil
+}
+
+// Snapshot returns a copy of the recorded messages, safe to call while
+// senders are still running.
+func (r *Recorder) Snapshot() []Message {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Message(nil), r.Sent...)
 }

@@ -25,13 +25,14 @@ func NewSQLLookup(pool *pgxpool.Pool) Lookup {
 			return nil, fmt.Errorf("api_keys lookup: %w", err)
 		}
 		return &APIKey{
-			ID:        row.ID,
-			TenantID:  row.TenantID,
-			ProjectID: row.ProjectID,
-			Tier:      ClampTier(int(row.Tier)),
-			Type:      KeyType(row.KeyType),
-			Revoked:   row.RevokedAt.Valid,
-			Scopes:    row.Scopes,
+			ID:             row.ID,
+			TenantID:       row.TenantID,
+			ProjectID:      row.ProjectID,
+			Tier:           ClampTier(int(row.Tier)),
+			Type:           KeyType(row.KeyType),
+			Revoked:        row.RevokedAt.Valid,
+			TenantDisabled: row.TenantDisabled,
+			Scopes:         row.Scopes,
 		}, nil
 	}
 }

@@ -1,0 +1,2 @@
+DROP INDEX player_account_password_resets_account_open_idx;
+DROP INDEX control_panel_password_resets_user_open_idx;

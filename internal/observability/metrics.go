@@ -32,6 +32,8 @@ type Metrics struct {
 	mailSends                *prometheus.CounterVec
 	quotaRejections          *prometheus.CounterVec
 	entitlementApplies       *prometheus.CounterVec
+	realtimeSweepFailures    prometheus.Counter
+	realtimeLifecycleCloses  *prometheus.CounterVec
 }
 
 // Signup kinds.
@@ -214,6 +216,14 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_entitlement_apply_total",
 			Help: "Entitlement API applies by outcome (changed/noop/rejected).",
 		}, []string{"outcome"}),
+		realtimeSweepFailures: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_realtime_lifecycle_sweep_failures_total",
+			Help: "WebSocket lifecycle sweeps that failed on a database error (per tenant per interval). A sustained rate precedes bounded-grace socket closes.",
+		}),
+		realtimeLifecycleCloses: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "ggscale_realtime_lifecycle_closes_total",
+			Help: "WebSocket connections closed by lifecycle revalidation, by reason (revoked/unverifiable).",
+		}, []string{"reason"}),
 	}
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
@@ -221,6 +231,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.matchmakerShortCommit, m.matchmakerCapacityReturn, m.matchmakerQueryReject, m.matchmakerTicketFailures,
 		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
 		m.relayCreds, m.relayIssueThrottled, m.mailSends, m.quotaRejections, m.entitlementApplies,
+		m.realtimeSweepFailures, m.realtimeLifecycleCloses,
 	)
 	return m
 }
@@ -388,6 +399,31 @@ func (m *Metrics) MailSend(result string) {
 		return
 	}
 	m.mailSends.WithLabelValues(result).Inc()
+}
+
+// Lifecycle-close reasons for RealtimeLifecycleClose.
+const (
+	RealtimeCloseRevoked      = "revoked"      // definitive: epoch bump, tenant disabled, row gone
+	RealtimeCloseUnverifiable = "unverifiable" // sweep failures exhausted the bounded grace
+)
+
+// RealtimeSweepFailure counts one failed lifecycle sweep (one tenant, one
+// interval). A sustained rate is the actionable signal that sockets will
+// start closing on the bounded grace.
+func (m *Metrics) RealtimeSweepFailure() {
+	if m == nil {
+		return
+	}
+	m.realtimeSweepFailures.Inc()
+}
+
+// RealtimeLifecycleClose counts a WebSocket closed by lifecycle
+// revalidation, by reason (RealtimeCloseRevoked / RealtimeCloseUnverifiable).
+func (m *Metrics) RealtimeLifecycleClose(reason string) {
+	if m == nil {
+		return
+	}
+	m.realtimeLifecycleCloses.WithLabelValues(reason).Inc()
 }
 
 // QuotaRejection counts a new-growth operation rejected by an enforced tenant

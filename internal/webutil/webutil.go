@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,10 @@ const (
 	// BcryptCost is the work factor every ggscale password hash uses.
 	// 12 ≈ 250ms on modern hardware — a deliberate per-attempt floor.
 	BcryptCost = 12
+
+	// PasswordResetTTL bounds how long a forgot-password link stays valid,
+	// for both the control panel and player-account flows.
+	PasswordResetTTL = time.Hour
 
 	// MaxFormBodyBytes caps the body size for HTML form POSTs.
 	MaxFormBodyBytes = 1 << 20

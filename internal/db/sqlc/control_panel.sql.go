@@ -81,8 +81,102 @@ func (q *Queries) CreateProjectForTenant(ctx context.Context, name string) (Crea
 	return i, err
 }
 
+const disableTenantByPlatformAdmin = `-- name: DisableTenantByPlatformAdmin :execrows
+UPDATE tenants
+SET disabled_at = COALESCE(disabled_at, now()),
+    disabled_by = 'platform'
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND (disabled_at IS NULL OR disabled_by = 'tenant')
+`
+
+// A platform disable supersedes an existing self-disable: it promotes
+// disabled_by to 'platform' in place, with no re-enable window. The original
+// disabled_at is kept. 0 rows only when already platform-disabled or gone.
+func (q *Queries) DisableTenantByPlatformAdmin(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, disableTenantByPlatformAdmin, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const disableTenantBySelf = `-- name: DisableTenantBySelf :execrows
+UPDATE tenants
+SET disabled_at = now(),
+    disabled_by = 'tenant'
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND disabled_at IS NULL
+`
+
+// Tenant self-disable; 0 rows means already disabled or gone.
+func (q *Queries) DisableTenantBySelf(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, disableTenantBySelf, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const enableTenantByPlatformAdmin = `-- name: EnableTenantByPlatformAdmin :execrows
+UPDATE tenants
+SET disabled_at = NULL,
+    disabled_by = NULL
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND disabled_at IS NOT NULL
+`
+
+func (q *Queries) EnableTenantByPlatformAdmin(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, enableTenantByPlatformAdmin, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const enableTenantByTenantAdmin = `-- name: EnableTenantByTenantAdmin :execrows
+UPDATE tenants
+SET disabled_at = NULL,
+    disabled_by = NULL
+WHERE id = $1
+  AND deleted_at IS NULL
+  AND disabled_by = 'tenant'
+`
+
+// A tenant admin can only undo a self-disable; 0 rows on a platform disable.
+func (q *Queries) EnableTenantByTenantAdmin(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, enableTenantByTenantAdmin, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getTenantDisabledState = `-- name: GetTenantDisabledState :one
+SELECT disabled_at, disabled_by
+FROM tenants
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+type GetTenantDisabledStateRow struct {
+	DisabledAt pgtype.Timestamptz
+	DisabledBy *string
+}
+
+// Lean per-request probe used by the control panel's tenant-access gate:
+// a platform-disabled tenant locks its tenant admins out.
+func (q *Queries) GetTenantDisabledState(ctx context.Context, id int64) (GetTenantDisabledStateRow, error) {
+	row := q.db.QueryRow(ctx, getTenantDisabledState, id)
+	var i GetTenantDisabledStateRow
+	err := row.Scan(&i.DisabledAt, &i.DisabledBy)
+	return i, err
+}
+
 const getTenantFacts = `-- name: GetTenantFacts :one
-SELECT name, tier, enforce_quotas, public_joining_enabled
+SELECT name, tier, enforce_quotas, public_joining_enabled, disabled_at, disabled_by
 FROM tenants
 WHERE id = $1
   AND deleted_at IS NULL
@@ -93,6 +187,8 @@ type GetTenantFactsRow struct {
 	Tier                 int16
 	EnforceQuotas        bool
 	PublicJoiningEnabled bool
+	DisabledAt           pgtype.Timestamptz
+	DisabledBy           *string
 }
 
 func (q *Queries) GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsRow, error) {
@@ -103,6 +199,8 @@ func (q *Queries) GetTenantFacts(ctx context.Context, id int64) (GetTenantFactsR
 		&i.Tier,
 		&i.EnforceQuotas,
 		&i.PublicJoiningEnabled,
+		&i.DisabledAt,
+		&i.DisabledBy,
 	)
 	return i, err
 }

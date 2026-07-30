@@ -205,6 +205,15 @@ type ControlPanelMembership struct {
 	CreatedAt          pgtype.Timestamptz
 }
 
+type ControlPanelPasswordReset struct {
+	ID                 int64
+	ControlPanelUserID int64
+	TokenHash          []byte
+	ExpiresAt          pgtype.Timestamptz
+	UsedAt             pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+}
+
 type ControlPanelSession struct {
 	ID                 int64
 	ControlPanelUserID int64
@@ -483,6 +492,15 @@ type PlayerAccount struct {
 	RemoteAddrIroh                    *string
 }
 
+type PlayerAccountPasswordReset struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+	TokenHash       []byte
+	ExpiresAt       pgtype.Timestamptz
+	UsedAt          pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
 type PlayerAccountSession struct {
 	ID              int64
 	PlayerAccountID pgtype.UUID
@@ -571,6 +589,7 @@ type ProjectPlayer struct {
 	Xuid                              *string
 	PlayerAccountID                   pgtype.UUID
 	SessionEpoch                      int32
+	UnlinkedAt                        pgtype.Timestamptz
 }
 
 type RateLimitOverride struct {
@@ -718,6 +737,8 @@ type Tenant struct {
 	Tier                 int16
 	EnforceQuotas        bool
 	PlayerCount          int64
+	DisabledAt           pgtype.Timestamptz
+	DisabledBy           *string
 }
 
 type TenantChangeRequest struct {

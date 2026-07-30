@@ -57,6 +57,10 @@ func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {
 		if err := q.RevokeAllControlPanelSessionsForUser(r.Context(), session.User.ID); err != nil {
 			return err
 		}
+		// Any outstanding forgot-password links die with the old password.
+		if err := q.InvalidateControlPanelPasswordResets(r.Context(), session.User.ID); err != nil {
+			return err
+		}
 		// A password change is exactly when remembered devices should stop
 		// skipping the 2FA challenge.
 		if err := h.deleteTrustedDevices(r.Context(), tx, session.User.ID); err != nil {

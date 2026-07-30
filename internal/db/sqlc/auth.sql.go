@@ -133,6 +133,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND email = $2
   AND deleted_at IS NULL
   AND disabled_at IS NULL
+  AND unlinked_at IS NULL
 `
 
 type GetPlayerByEmailParams struct {
@@ -149,7 +150,8 @@ type GetPlayerByEmailRow struct {
 
 // Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
 // /v1/auth/login behaves identically to an unknown email — same dummy
-// bcrypt + invalid_credentials response.
+// bcrypt + invalid_credentials response. Same for players who unlinked
+// themselves from the project (unlinked_at): blocked until re-invited.
 func (q *Queries) GetPlayerByEmail(ctx context.Context, arg GetPlayerByEmailParams) (GetPlayerByEmailRow, error) {
 	row := q.db.QueryRow(ctx, getPlayerByEmail, arg.ProjectID, arg.Email)
 	var i GetPlayerByEmailRow
@@ -250,6 +252,7 @@ WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND s.refresh_hash = $2
   AND u.deleted_at IS NULL
   AND u.disabled_at IS NULL
+  AND u.unlinked_at IS NULL
 `
 
 type GetSessionByRefreshHashParams struct {
@@ -309,6 +312,42 @@ func (q *Queries) IncrementPlayerVerificationAttempts(ctx context.Context, id in
 	var email_verification_attempts int32
 	err := row.Scan(&email_verification_attempts)
 	return email_verification_attempts, err
+}
+
+const listPlayerSessionEpochs = `-- name: ListPlayerSessionEpochs :many
+SELECT id, session_epoch
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = ANY($1::bigint[])
+  AND deleted_at IS NULL
+`
+
+type ListPlayerSessionEpochsRow struct {
+	ID           int64
+	SessionEpoch int32
+}
+
+// Batched lifecycle sweep for live WebSockets: one query per tenant with
+// open sockets per sweep interval (O(tenants), not O(sockets)). A player
+// missing from the result (deleted) reads as revoked.
+func (q *Queries) ListPlayerSessionEpochs(ctx context.Context, ids []int64) ([]ListPlayerSessionEpochsRow, error) {
+	rows, err := q.db.Query(ctx, listPlayerSessionEpochs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPlayerSessionEpochsRow
+	for rows.Next() {
+		var i ListPlayerSessionEpochsRow
+		if err := rows.Scan(&i.ID, &i.SessionEpoch); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const lockPlayerVerification = `-- name: LockPlayerVerification :exec

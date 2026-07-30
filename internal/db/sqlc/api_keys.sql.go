@@ -101,20 +101,22 @@ func (q *Queries) CreateControlPanelAPIKey(ctx context.Context, arg CreateContro
 }
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier
+SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier,
+       (t.disabled_at IS NOT NULL)::bool AS tenant_disabled
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
 WHERE k.key_hash = $1
 `
 
 type GetAPIKeyByHashRow struct {
-	ID        int64
-	TenantID  int64
-	ProjectID *int64
-	KeyType   string
-	Scopes    []string
-	RevokedAt pgtype.Timestamptz
-	Tier      int16
+	ID             int64
+	TenantID       int64
+	ProjectID      *int64
+	KeyType        string
+	Scopes         []string
+	RevokedAt      pgtype.Timestamptz
+	Tier           int16
+	TenantDisabled bool
 }
 
 // Bootstrap query used by the tenant middleware to resolve a Bearer token
@@ -134,6 +136,7 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 		&i.Scopes,
 		&i.RevokedAt,
 		&i.Tier,
+		&i.TenantDisabled,
 	)
 	return i, err
 }

@@ -22,14 +22,16 @@ RETURNING id;
 -- name: GetPlayerByEmail :one
 -- Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
 -- /v1/auth/login behaves identically to an unknown email — same dummy
--- bcrypt + invalid_credentials response.
+-- bcrypt + invalid_credentials response. Same for players who unlinked
+-- themselves from the project (unlinked_at): blocked until re-invited.
 SELECT id, project_id, password_hash, email_verified_at
 FROM project_players
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND email = $2
   AND deleted_at IS NULL
-  AND disabled_at IS NULL;
+  AND disabled_at IS NULL
+  AND unlinked_at IS NULL;
 
 -- name: GetPlayerVerificationState :one
 SELECT
@@ -130,7 +132,8 @@ WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND s.project_id = sqlc.arg(project_id)
   AND s.refresh_hash = sqlc.arg(refresh_hash)
   AND u.deleted_at IS NULL
-  AND u.disabled_at IS NULL;
+  AND u.disabled_at IS NULL
+  AND u.unlinked_at IS NULL;
 
 -- name: RevokeSession :execrows
 -- Rotation path: the token is being superseded by a freshly-issued one, so a
@@ -161,6 +164,16 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg(project_id)
   AND player_id = sqlc.arg(player_id)
   AND revoked_at IS NULL;
+
+-- name: ListPlayerSessionEpochs :many
+-- Batched lifecycle sweep for live WebSockets: one query per tenant with
+-- open sockets per sweep interval (O(tenants), not O(sockets)). A player
+-- missing from the result (deleted) reads as revoked.
+SELECT id, session_epoch
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = ANY(sqlc.arg(ids)::bigint[])
+  AND deleted_at IS NULL;
 
 -- name: GetTenantCustomTokenSecret :one
 SELECT custom_token_secret

@@ -6,10 +6,55 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY name;
 
 -- name: GetTenantFacts :one
-SELECT name, tier, enforce_quotas, public_joining_enabled
+SELECT name, tier, enforce_quotas, public_joining_enabled, disabled_at, disabled_by
 FROM tenants
 WHERE id = $1
   AND deleted_at IS NULL;
+
+-- name: GetTenantDisabledState :one
+-- Lean per-request probe used by the control panel's tenant-access gate:
+-- a platform-disabled tenant locks its tenant admins out.
+SELECT disabled_at, disabled_by
+FROM tenants
+WHERE id = $1
+  AND deleted_at IS NULL;
+
+-- name: DisableTenantBySelf :execrows
+-- Tenant self-disable; 0 rows means already disabled or gone.
+UPDATE tenants
+SET disabled_at = now(),
+    disabled_by = 'tenant'
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND disabled_at IS NULL;
+
+-- name: DisableTenantByPlatformAdmin :execrows
+-- A platform disable supersedes an existing self-disable: it promotes
+-- disabled_by to 'platform' in place, with no re-enable window. The original
+-- disabled_at is kept. 0 rows only when already platform-disabled or gone.
+UPDATE tenants
+SET disabled_at = COALESCE(disabled_at, now()),
+    disabled_by = 'platform'
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND (disabled_at IS NULL OR disabled_by = 'tenant');
+
+-- name: EnableTenantByTenantAdmin :execrows
+-- A tenant admin can only undo a self-disable; 0 rows on a platform disable.
+UPDATE tenants
+SET disabled_at = NULL,
+    disabled_by = NULL
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND disabled_by = 'tenant';
+
+-- name: EnableTenantByPlatformAdmin :execrows
+UPDATE tenants
+SET disabled_at = NULL,
+    disabled_by = NULL
+WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
+  AND disabled_at IS NOT NULL;
 
 -- name: SetTenantTierByID :one
 -- Platform-admin direct tier changes may move in either direction. Capture the

@@ -77,6 +77,9 @@ type Deps struct {
 	// BillingHandoffKey signs the short-lived upgrade handoff tokens appended
 	// to Config.BillingUpgradeURL. nil = no upgrade link renders.
 	BillingHandoffKey []byte
+	// EnqueuePasswordReset inserts the durable forgot-password delivery job.
+	// nil = no job queue; the handler falls back to in-process delivery.
+	EnqueuePasswordReset func(ctx context.Context, email string) error
 }
 
 // PluginSnapshot is the read-only view the admin/plugins page renders.
@@ -110,10 +113,11 @@ type Handler struct {
 	metrics        *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the player site.
-	verifySigningKey  []byte
-	twoFactor         *twofactor.Cipher
-	storageLimits     storagelimit.LimitStore
-	billingHandoffKey []byte
+	verifySigningKey     []byte
+	twoFactor            *twofactor.Cipher
+	storageLimits        storagelimit.LimitStore
+	billingHandoffKey    []byte
+	enqueuePasswordReset func(ctx context.Context, email string) error
 }
 
 // New builds the control panel router. Callers should only mount it when
@@ -133,6 +137,10 @@ func New(d Deps) http.Handler {
 		r.Post("/setup", h.completeSetup)
 		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
+		r.Get("/forgot-password", h.forgotPasswordPage)
+		r.Post("/forgot-password", h.forgotPasswordHandler)
+		r.Get("/reset-password", h.resetPasswordPage)
+		r.Post("/reset-password", h.resetPasswordHandler)
 		r.Get("/login/2fa", h.twoFactorChallengePage)
 		r.Post("/login/2fa", h.twoFactorChallenge)
 		r.Get("/verify", h.verifyPage)
@@ -206,6 +214,8 @@ func New(d Deps) http.Handler {
 			r.Post("/settings/tier", h.updateTenantTierHandler)
 			r.Post("/settings/features", h.updateTenantFeatureHandler)
 			r.Post("/settings/change-requests", h.submitChangeRequestHandler)
+			r.Post("/settings/disable", h.disableTenantHandler)
+			r.Post("/settings/enable", h.enableTenantHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
@@ -318,24 +328,25 @@ func newHandler(d Deps) *Handler {
 		bootstrap = DisabledBootstrap()
 	}
 	h := &Handler{
-		pool:              d.Pool,
-		cache:             d.Cache,
-		limiter:           d.Limiter,
-		overrides:         d.RateLimitOverrides,
-		reg:               d.Registry,
-		cfg:               d.Config,
-		bootstrap:         bootstrap,
-		mailer:            d.Mailer,
-		fleet:             d.Fleet,
-		rbac:              d.RBAC,
-		pluginInfo:        d.PluginInfo,
-		now:               time.Now,
-		proxyTrust:        d.ProxyTrust,
-		metrics:           d.Metrics,
-		verifySigningKey:  append([]byte(nil), d.VerifySigningKey...),
-		twoFactor:         d.TwoFactor,
-		storageLimits:     d.StorageLimits,
-		billingHandoffKey: append([]byte(nil), d.BillingHandoffKey...),
+		pool:                 d.Pool,
+		cache:                d.Cache,
+		limiter:              d.Limiter,
+		overrides:            d.RateLimitOverrides,
+		reg:                  d.Registry,
+		cfg:                  d.Config,
+		bootstrap:            bootstrap,
+		mailer:               d.Mailer,
+		fleet:                d.Fleet,
+		rbac:                 d.RBAC,
+		pluginInfo:           d.PluginInfo,
+		now:                  time.Now,
+		proxyTrust:           d.ProxyTrust,
+		metrics:              d.Metrics,
+		verifySigningKey:     append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:            d.TwoFactor,
+		storageLimits:        d.StorageLimits,
+		billingHandoffKey:    append([]byte(nil), d.BillingHandoffKey...),
+		enqueuePasswordReset: d.EnqueuePasswordReset,
 	}
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
@@ -788,6 +799,20 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 			if !allowed {
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
+			}
+			// A platform-disabled tenant locks its own admins out; a
+			// self-disabled tenant keeps control-panel access so its admins
+			// can re-enable or export.
+			if !session.User.IsPlatformAdmin {
+				locked, lerr := h.tenantPlatformDisabled(r.Context(), tenantID)
+				if lerr != nil {
+					http.Error(w, "tenant access check failed", http.StatusInternalServerError)
+					return
+				}
+				if locked {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
 			}
 			next.ServeHTTP(w, r)
 		})

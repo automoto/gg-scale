@@ -1,0 +1,2 @@
+DROP TABLE player_account_password_resets;
+DROP TABLE control_panel_password_resets;

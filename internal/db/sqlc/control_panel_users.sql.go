@@ -60,6 +60,23 @@ func (q *Queries) ClearControlPanelVerificationCode(ctx context.Context, id int6
 	return err
 }
 
+const consumeControlPanelPasswordReset = `-- name: ConsumeControlPanelPasswordReset :one
+UPDATE control_panel_password_resets
+SET used_at = now()
+WHERE token_hash = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING control_panel_user_id
+`
+
+// Atomic single-use consume: 0 rows means unknown, expired, or already used.
+func (q *Queries) ConsumeControlPanelPasswordReset(ctx context.Context, tokenHash []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, consumeControlPanelPasswordReset, tokenHash)
+	var control_panel_user_id int64
+	err := row.Scan(&control_panel_user_id)
+	return control_panel_user_id, err
+}
+
 const countControlPanelUsers = `-- name: CountControlPanelUsers :one
 SELECT count(*)::bigint FROM control_panel_users
 `
@@ -96,6 +113,22 @@ func (q *Queries) CountEnabledPlatformAdmins(ctx context.Context) (int64, error)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const createControlPanelPasswordReset = `-- name: CreateControlPanelPasswordReset :exec
+INSERT INTO control_panel_password_resets (control_panel_user_id, token_hash, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateControlPanelPasswordResetParams struct {
+	ControlPanelUserID int64
+	TokenHash          []byte
+	ExpiresAt          pgtype.Timestamptz
+}
+
+func (q *Queries) CreateControlPanelPasswordReset(ctx context.Context, arg CreateControlPanelPasswordResetParams) error {
+	_, err := q.db.Exec(ctx, createControlPanelPasswordReset, arg.ControlPanelUserID, arg.TokenHash, arg.ExpiresAt)
+	return err
 }
 
 const createControlPanelSession = `-- name: CreateControlPanelSession :one
@@ -242,6 +275,21 @@ func (q *Queries) CreateVerifiedControlPanelUser(ctx context.Context, arg Create
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteExpiredControlPanelPasswordResets = `-- name: DeleteExpiredControlPanelPasswordResets :execrows
+DELETE FROM control_panel_password_resets
+WHERE expires_at < now() - interval '1 day'
+`
+
+// Retention sweep (password_reset_gc): rows are inert once expired — every
+// lookup filters expires_at — so deleting them a day later is pure hygiene.
+func (q *Queries) DeleteExpiredControlPanelPasswordResets(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredControlPanelPasswordResets)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getControlPanelMembership = `-- name: GetControlPanelMembership :one
@@ -489,6 +537,21 @@ func (q *Queries) IncrementControlPanelVerificationAttempts(ctx context.Context,
 	return email_verification_attempts, err
 }
 
+const invalidateControlPanelPasswordResets = `-- name: InvalidateControlPanelPasswordResets :exec
+UPDATE control_panel_password_resets
+SET used_at = now()
+WHERE control_panel_user_id = $1
+  AND used_at IS NULL
+`
+
+// Burns every outstanding reset link for the user. Run in the same
+// transaction as any password change so an older emailed link cannot reset
+// the password again afterwards.
+func (q *Queries) InvalidateControlPanelPasswordResets(ctx context.Context, controlPanelUserID int64) error {
+	_, err := q.db.Exec(ctx, invalidateControlPanelPasswordResets, controlPanelUserID)
+	return err
+}
+
 const listControlPanelTenantsForPlatformAdmin = `-- name: ListControlPanelTenantsForPlatformAdmin :many
 SELECT
     t.id,
@@ -701,6 +764,23 @@ WHERE id = $1
 func (q *Queries) MarkControlPanelUserVerified(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markControlPanelUserVerified, id)
 	return err
+}
+
+const peekControlPanelPasswordReset = `-- name: PeekControlPanelPasswordReset :one
+SELECT control_panel_user_id
+FROM control_panel_password_resets
+WHERE token_hash = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+`
+
+// Read-only validity probe for the GET form page; ConsumeControlPanelPasswordReset
+// is the single-use gate on the actual POST.
+func (q *Queries) PeekControlPanelPasswordReset(ctx context.Context, tokenHash []byte) (int64, error) {
+	row := q.db.QueryRow(ctx, peekControlPanelPasswordReset, tokenHash)
+	var control_panel_user_id int64
+	err := row.Scan(&control_panel_user_id)
+	return control_panel_user_id, err
 }
 
 const recordControlPanelLoginSuccess = `-- name: RecordControlPanelLoginSuccess :exec

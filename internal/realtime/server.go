@@ -46,6 +46,13 @@ type Options struct {
 	// uses 30s in production; tests pass a large value to disable.
 	HeartbeatInterval time.Duration
 
+	// Revalidate, when non-nil, re-checks the caller's lifecycle state on
+	// every heartbeat tick using the connection's request context (session
+	// epoch, tenant disabled). A non-nil error closes the connection, so a
+	// ban / unlink / tenant disable reaches sockets that outlive the
+	// handshake instead of only the next connect.
+	Revalidate func(ctx context.Context) error
+
 	// SlotTTL bounds how long a per-player slot survives without
 	// refresh. Defaults to HeartbeatInterval*3 (so two missed refreshes
 	// before reap).
@@ -54,10 +61,11 @@ type Options struct {
 	Logger *slog.Logger
 }
 
-const (
-	defaultHeartbeatInterval = 30 * time.Second
-	maxReadSize              = 1 << 20 // 1 MiB per inbound message
-)
+// DefaultHeartbeatInterval is the production WebSocket ping (and lifecycle
+// revalidation) cadence when Options.HeartbeatInterval is zero.
+const DefaultHeartbeatInterval = 30 * time.Second
+
+const maxReadSize = 1 << 20 // 1 MiB per inbound message
 
 // ServeWS returns the HTTP handler that upgrades to a WebSocket and ties
 // the connection into the Hub. The tenant + player middlewares must run
@@ -65,7 +73,7 @@ const (
 func ServeWS(opts Options) http.HandlerFunc {
 	heartbeat := opts.HeartbeatInterval
 	if heartbeat <= 0 {
-		heartbeat = defaultHeartbeatInterval
+		heartbeat = DefaultHeartbeatInterval
 	}
 	slotTTL := opts.SlotTTL
 	if slotTTL <= 0 {
@@ -159,7 +167,7 @@ func ServeWS(opts Options) http.HandlerFunc {
 		unregister := opts.Hub.Register(tenantID, playerID, writer)
 		defer unregister()
 
-		runConnection(r.Context(), conn, heartbeat, refreshPlayerSlot, logger)
+		runConnection(r.Context(), conn, heartbeat, refreshPlayerSlot, opts.Revalidate, logger)
 	}
 }
 
@@ -212,19 +220,19 @@ func (t wallConnectionTicker) Stop() {
 }
 
 // runConnection drives the per-client read loop alongside a heartbeat
-// ticker. It returns when the client disconnects, the heartbeat ping
-// fails, or ctx is cancelled.
-func runConnection(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger) {
-	runConnectionWithClock(ctx, conn, heartbeat, refreshSlots, logger, wallConnectionClock{})
+// ticker. It returns when the client disconnects, the heartbeat ping or
+// lifecycle revalidation fails, or ctx is cancelled.
+func runConnection(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), revalidate func(context.Context) error, logger *slog.Logger) {
+	runConnectionWithClock(ctx, conn, heartbeat, refreshSlots, revalidate, logger, wallConnectionClock{})
 }
 
-func runConnectionWithClock(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), logger *slog.Logger, clock connectionClock) {
+func runConnectionWithClock(ctx context.Context, conn realtimeConnection, heartbeat time.Duration, refreshSlots func(context.Context), revalidate func(context.Context) error, logger *slog.Logger, clock connectionClock) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	heartbeatErr := make(chan error, 1)
 	go func() {
-		err := runHeartbeatWithClock(ctx, conn, heartbeat, refreshSlots, clock)
+		err := runHeartbeatWithClock(ctx, conn, heartbeat, refreshSlots, revalidate, clock)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			cancel()
 			if closeErr := conn.CloseNow(); closeErr != nil {
@@ -262,7 +270,7 @@ func runConnectionWithClock(ctx context.Context, conn realtimeConnection, heartb
 	}
 }
 
-func runHeartbeatWithClock(ctx context.Context, conn realtimeConnection, interval time.Duration, refreshSlots func(context.Context), clock connectionClock) error {
+func runHeartbeatWithClock(ctx context.Context, conn realtimeConnection, interval time.Duration, refreshSlots func(context.Context), revalidate func(context.Context) error, clock connectionClock) error {
 	t := clock.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -277,6 +285,14 @@ func runHeartbeatWithClock(ctx context.Context, conn realtimeConnection, interva
 				return err
 			}
 			refreshSlotsWithTimeout(ctx, interval, refreshSlots)
+			if revalidate != nil {
+				revalCtx, revalCancel := context.WithTimeout(ctx, interval)
+				err := revalidate(revalCtx)
+				revalCancel()
+				if err != nil {
+					return err
+				}
+			}
 		}
 	}
 }

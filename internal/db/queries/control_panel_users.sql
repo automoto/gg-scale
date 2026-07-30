@@ -156,6 +156,43 @@ SET login_failures = login_failures + 1,
 WHERE id = sqlc.arg(id)
 RETURNING login_failures, locked_until;
 
+-- name: CreateControlPanelPasswordReset :exec
+INSERT INTO control_panel_password_resets (control_panel_user_id, token_hash, expires_at)
+VALUES (sqlc.arg(control_panel_user_id), sqlc.arg(token_hash), sqlc.arg(expires_at));
+
+-- name: PeekControlPanelPasswordReset :one
+-- Read-only validity probe for the GET form page; ConsumeControlPanelPasswordReset
+-- is the single-use gate on the actual POST.
+SELECT control_panel_user_id
+FROM control_panel_password_resets
+WHERE token_hash = sqlc.arg(token_hash)
+  AND used_at IS NULL
+  AND expires_at > now();
+
+-- name: ConsumeControlPanelPasswordReset :one
+-- Atomic single-use consume: 0 rows means unknown, expired, or already used.
+UPDATE control_panel_password_resets
+SET used_at = now()
+WHERE token_hash = sqlc.arg(token_hash)
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING control_panel_user_id;
+
+-- name: InvalidateControlPanelPasswordResets :exec
+-- Burns every outstanding reset link for the user. Run in the same
+-- transaction as any password change so an older emailed link cannot reset
+-- the password again afterwards.
+UPDATE control_panel_password_resets
+SET used_at = now()
+WHERE control_panel_user_id = sqlc.arg(control_panel_user_id)
+  AND used_at IS NULL;
+
+-- name: DeleteExpiredControlPanelPasswordResets :execrows
+-- Retention sweep (password_reset_gc): rows are inert once expired — every
+-- lookup filters expires_at — so deleting them a day later is pure hygiene.
+DELETE FROM control_panel_password_resets
+WHERE expires_at < now() - interval '1 day';
+
 -- name: UpdateControlPanelPassword :exec
 UPDATE control_panel_users
 SET password_hash = sqlc.arg(password_hash),

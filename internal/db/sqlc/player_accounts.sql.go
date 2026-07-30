@@ -15,7 +15,8 @@ const bindPlayerLinkedEmail = `-- name: BindPlayerLinkedEmail :execrows
 UPDATE project_players
 SET email = $1,
     email_verified_at = now(),
-    player_account_id = $2
+    player_account_id = $2,
+    unlinked_at = NULL
 WHERE id = $3
   AND deleted_at IS NULL
   AND (player_account_id IS NULL OR player_account_id = $2)
@@ -45,6 +46,23 @@ func (q *Queries) BindPlayerLinkedEmail(ctx context.Context, arg BindPlayerLinke
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const consumePlayerAccountPasswordReset = `-- name: ConsumePlayerAccountPasswordReset :one
+UPDATE player_account_password_resets
+SET used_at = now()
+WHERE token_hash = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING player_account_id
+`
+
+// Atomic single-use consume: 0 rows means unknown, expired, or already used.
+func (q *Queries) ConsumePlayerAccountPasswordReset(ctx context.Context, tokenHash []byte) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, consumePlayerAccountPasswordReset, tokenHash)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
 }
 
 const createLinkedPlayer = `-- name: CreateLinkedPlayer :one
@@ -132,6 +150,22 @@ func (q *Queries) CreatePlayerAccount(ctx context.Context, arg CreatePlayerAccou
 	return i, err
 }
 
+const createPlayerAccountPasswordReset = `-- name: CreatePlayerAccountPasswordReset :exec
+INSERT INTO player_account_password_resets (player_account_id, token_hash, expires_at)
+VALUES ($1, $2, $3)
+`
+
+type CreatePlayerAccountPasswordResetParams struct {
+	PlayerAccountID pgtype.UUID
+	TokenHash       []byte
+	ExpiresAt       pgtype.Timestamptz
+}
+
+func (q *Queries) CreatePlayerAccountPasswordReset(ctx context.Context, arg CreatePlayerAccountPasswordResetParams) error {
+	_, err := q.db.Exec(ctx, createPlayerAccountPasswordReset, arg.PlayerAccountID, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
+
 const createPlayerAccountSession = `-- name: CreatePlayerAccountSession :one
 INSERT INTO player_account_sessions (
     player_account_id, refresh_hash, session_epoch, expires_at
@@ -181,6 +215,21 @@ func (q *Queries) CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVer
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteExpiredPlayerAccountPasswordResets = `-- name: DeleteExpiredPlayerAccountPasswordResets :execrows
+DELETE FROM player_account_password_resets
+WHERE expires_at < now() - interval '1 day'
+`
+
+// Retention sweep (password_reset_gc): rows are inert once expired — every
+// lookup filters expires_at — so deleting them a day later is pure hygiene.
+func (q *Queries) DeleteExpiredPlayerAccountPasswordResets(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredPlayerAccountPasswordResets)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getPlayerAccountByEmail = `-- name: GetPlayerAccountByEmail :one
@@ -428,10 +477,26 @@ func (q *Queries) GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForA
 	return i, err
 }
 
+const invalidatePlayerAccountPasswordResets = `-- name: InvalidatePlayerAccountPasswordResets :exec
+UPDATE player_account_password_resets
+SET used_at = now()
+WHERE player_account_id = $1
+  AND used_at IS NULL
+`
+
+// Burns every outstanding reset link for the account. Run in the same
+// transaction as any password change so an older emailed link cannot reset
+// the password again afterwards.
+func (q *Queries) InvalidatePlayerAccountPasswordResets(ctx context.Context, playerAccountID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, invalidatePlayerAccountPasswordResets, playerAccountID)
+	return err
+}
+
 const linkPlayerToAccount = `-- name: LinkPlayerToAccount :exec
 
 UPDATE project_players
-SET player_account_id = $1
+SET player_account_id = $1,
+    unlinked_at = NULL
 WHERE id = $2
   AND deleted_at IS NULL
 `
@@ -447,6 +512,7 @@ type LinkPlayerToAccountParams struct {
 // tx.Query in internal/players (same approach as project_player_tenant).
 // Tenant-scoped (run under Pool.Q with app.tenant_id set): attaches a
 // per-project player to a global account. Guarded by RLS on project_players.
+// Clears unlinked_at: a re-invite restores an unlinked player's access.
 func (q *Queries) LinkPlayerToAccount(ctx context.Context, arg LinkPlayerToAccountParams) error {
 	_, err := q.db.Exec(ctx, linkPlayerToAccount, arg.PlayerAccountID, arg.ID)
 	return err
@@ -482,6 +548,23 @@ WHERE id = $1
 func (q *Queries) MarkPlayerAccountVerified(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markPlayerAccountVerified, id)
 	return err
+}
+
+const peekPlayerAccountPasswordReset = `-- name: PeekPlayerAccountPasswordReset :one
+SELECT player_account_id
+FROM player_account_password_resets
+WHERE token_hash = $1
+  AND used_at IS NULL
+  AND expires_at > now()
+`
+
+// Read-only validity probe for the GET form page; ConsumePlayerAccountPasswordReset
+// is the single-use gate on the actual POST.
+func (q *Queries) PeekPlayerAccountPasswordReset(ctx context.Context, tokenHash []byte) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, peekPlayerAccountPasswordReset, tokenHash)
+	var player_account_id pgtype.UUID
+	err := row.Scan(&player_account_id)
+	return player_account_id, err
 }
 
 const playerLinkTargetExists = `-- name: PlayerLinkTargetExists :one
@@ -750,14 +833,30 @@ func (q *Queries) SetPlayerAccountVerificationCode(ctx context.Context, arg SetP
 	return err
 }
 
-const unlinkPlayerFromAccount = `-- name: UnlinkPlayerFromAccount :exec
+const unlinkPlayerFromAccount = `-- name: UnlinkPlayerFromAccount :execrows
 UPDATE project_players
-SET player_account_id = NULL
+SET player_account_id = NULL,
+    unlinked_at = now(),
+    session_epoch = session_epoch + 1
 WHERE id = $1
+  AND player_account_id = $2
   AND deleted_at IS NULL
 `
 
-func (q *Queries) UnlinkPlayerFromAccount(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, unlinkPlayerFromAccount, id)
-	return err
+type UnlinkPlayerFromAccountParams struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+}
+
+// Player-initiated, non-destructive unlink. The row and its game data stay;
+// the account link goes inactive and player-credential auth is blocked
+// (unlinked_at filters on the auth queries). The epoch bump kills live access
+// tokens immediately; the caller also revokes the player's sessions. The
+// account guard stops one account from unlinking another account's player.
+func (q *Queries) UnlinkPlayerFromAccount(ctx context.Context, arg UnlinkPlayerFromAccountParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unlinkPlayerFromAccount, arg.ID, arg.PlayerAccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

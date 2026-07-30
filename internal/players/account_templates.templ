@@ -1,6 +1,9 @@
 package players
 
-import "fmt"
+import (
+	"fmt"
+	"strconv"
+)
 
 // Global player-account pages (project-agnostic). Kept deliberately minimal,
 // mirroring the per-project player templates in templates.templ.
@@ -29,6 +32,72 @@ templ AccountLoginPage(vm AccountLoginView) {
 			<button type="submit">Sign in</button>
 		</form>
 		<p><a href={ templ.URL("/v1/players/account/signup") }>Create an account</a></p>
+		<p><a href={ templ.URL("/v1/players/account/forgot-password") }>Forgot password?</a></p>
+	}
+}
+
+type AccountForgotPasswordView struct {
+	CSRFToken string
+	// Submitted switches to the constant "If an account matches" confirmation.
+	Submitted bool
+}
+
+type AccountResetPasswordView struct {
+	CSRFToken   string
+	Token       string
+	FieldErrors map[string]string
+}
+
+templ AccountForgotPasswordPage(vm AccountForgotPasswordView) {
+	@playerAuthLayout("Forgot password") {
+		<h1>Forgot password</h1>
+		if vm.Submitted {
+			<p>If an account matches that email, a reset link is on its way. The link works once and expires in 1 hour.</p>
+			<p><a href={ templ.URL("/v1/players/account/login") }>Back to sign in</a></p>
+		} else {
+			<p class="subtitle">Enter your email and we send you a reset link.</p>
+			<form method="post" action={ templ.URL("/v1/players/account/forgot-password") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>Email
+					<input name="email" type="email" autocomplete="username" required/>
+				</label>
+				<button type="submit">Send reset link</button>
+			</form>
+			<p><a href={ templ.URL("/v1/players/account/login") }>Back to sign in</a></p>
+		}
+	}
+}
+
+templ AccountResetPasswordPage(vm AccountResetPasswordView) {
+	@playerAuthLayout("Reset password") {
+		<h1>Set a new password</h1>
+		<form method="post" action={ templ.URL("/v1/players/account/reset-password") }>
+			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+			<input type="hidden" name="token" value={ vm.Token }/>
+			<label>New password
+				<input name="password" type="password" autocomplete="new-password" required/>
+			</label>
+			if msg, ok := vm.FieldErrors["password"]; ok {
+				<small class="field-error">{ msg }</small>
+			}
+			<button type="submit">Set new password</button>
+		</form>
+	}
+}
+
+templ AccountResetPasswordDonePage() {
+	@playerAuthLayout("Password updated") {
+		<h1>Password updated</h1>
+		<p>Your password is changed and every open session was signed out.</p>
+		<p><a href={ templ.URL("/v1/players/account/login") }>Sign in</a></p>
+	}
+}
+
+templ AccountResetPasswordInvalidPage() {
+	@playerAuthLayout("Reset link invalid") {
+		<h1>Reset link invalid</h1>
+		<p>This reset link is invalid, already used, or expired. Request a new one.</p>
+		<p><a href={ templ.URL("/v1/players/account/forgot-password") }>Request a new link</a></p>
 	}
 }
 
@@ -247,10 +316,19 @@ templ AccountTwoFactorBackupCodesPage(vm AccountTwoFactorBackupCodesView) {
 
 // LinkedProject is one project the account is linked to (via a project_players row).
 type LinkedProject struct {
+	PlayerID    int64
 	TenantID    int64
 	ProjectID   int64
 	ProjectName string
 	ExternalID  string
+}
+
+// UnlinkProjectView is the data for the unlink confirmation page.
+type UnlinkProjectView struct {
+	AccountEmail string
+	CSRFToken    string
+	PlayerID     int64
+	ProjectName  string
 }
 
 type AccountHomeView struct {
@@ -326,6 +404,7 @@ templ AccountHomePage(vm AccountHomeView) {
 						<tr>
 							<th>Game</th>
 							<th>Player ID</th>
+							<th></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -333,6 +412,9 @@ templ AccountHomePage(vm AccountHomeView) {
 							<tr>
 								<td>{ p.ProjectName }</td>
 								<td><code>{ p.ExternalID }</code></td>
+								<td class="actions-cell">
+									<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/unlink") } role="button" class="secondary outline btn-inline">Unlink</a>
+								</td>
 							</tr>
 						}
 					</tbody>
@@ -347,6 +429,30 @@ templ AccountHomePage(vm AccountHomeView) {
 				<p>{ fmt.Sprintf("%d configured", vm.RemoteAddrCount) }</p>
 			}
 			<p><a href={ templ.URL("/v1/players/account/remote-addrs") } role="button" class="btn-inline">Manage addresses</a></p>
+		</section>
+	}
+}
+
+templ UnlinkProjectPage(vm UnlinkProjectView) {
+	@playerLayout("Unlink game", playerNavAccount, vm.CSRFToken, vm.AccountEmail) {
+		<div class="page-header">
+			<div>
+				<h1>Unlink from { vm.ProjectName }</h1>
+			</div>
+		</div>
+		<section class="card">
+			<p>
+				Unlink your account from <strong>{ vm.ProjectName }</strong>?
+				You will not be able to sign in to this game until an admin invites you again.
+			</p>
+			<p>Your game data is kept. If you accept a new invite later, you get the same profile back.</p>
+			<form method="post" action={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(vm.PlayerID, 10) + "/unlink") }>
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<div class="form-actions">
+					<a href="/v1/players/account/" role="button" class="secondary outline btn-inline">Cancel</a>
+					<button type="submit" class="contrast btn-inline">Unlink game</button>
+				</div>
+			</form>
 		</section>
 	}
 }

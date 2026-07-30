@@ -99,6 +99,44 @@ func TestAccountHomePage_does_not_duplicate_nav_or_render_public_join_form(t *te
 	assert.NotContains(t, html, `name="project_id"`)
 }
 
+func TestAccountHomePage_should_offer_unlink_per_linked_project(t *testing.T) {
+	vm := AccountHomeView{
+		Email:     "p@example.com",
+		CSRFToken: "tok",
+		Projects:  []LinkedProject{{PlayerID: 42, ProjectName: "Abyssal Depths", ExternalID: "player-1"}},
+	}
+	var sb strings.Builder
+
+	err := AccountHomePage(vm).Render(context.Background(), &sb)
+
+	require.NoError(t, err)
+	html := sb.String()
+	// The home page links to a confirm page — no direct POST from the list.
+	assert.Contains(t, html, `/v1/players/account/projects/42/unlink`)
+	assert.Contains(t, html, "Unlink")
+}
+
+func TestUnlinkProjectPage_should_confirm_before_posting(t *testing.T) {
+	var sb strings.Builder
+
+	err := UnlinkProjectPage(UnlinkProjectView{
+		AccountEmail: "p@example.com",
+		CSRFToken:    "tok",
+		PlayerID:     42,
+		ProjectName:  "Abyssal Depths",
+	}).Render(context.Background(), &sb)
+
+	require.NoError(t, err)
+	html := sb.String()
+	assert.Contains(t, html, "Abyssal Depths")
+	assert.Contains(t, html, `action="/v1/players/account/projects/42/unlink"`)
+	assert.Contains(t, html, `name="_csrf"`)
+	// Non-destructive copy: the player's game data is kept.
+	assert.Contains(t, html, "data is kept")
+	// Cancel path back to the account home.
+	assert.Contains(t, html, `href="/v1/players/account/"`)
+}
+
 func TestConnectionAddressesPage_renders_empty_state_and_add_action(t *testing.T) {
 	var sb strings.Builder
 

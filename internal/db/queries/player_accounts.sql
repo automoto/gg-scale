@@ -109,6 +109,43 @@ SET email_verified_at            = now(),
     updated_at                   = now()
 WHERE id = sqlc.arg(id);
 
+-- name: CreatePlayerAccountPasswordReset :exec
+INSERT INTO player_account_password_resets (player_account_id, token_hash, expires_at)
+VALUES (sqlc.arg(player_account_id), sqlc.arg(token_hash), sqlc.arg(expires_at));
+
+-- name: PeekPlayerAccountPasswordReset :one
+-- Read-only validity probe for the GET form page; ConsumePlayerAccountPasswordReset
+-- is the single-use gate on the actual POST.
+SELECT player_account_id
+FROM player_account_password_resets
+WHERE token_hash = sqlc.arg(token_hash)
+  AND used_at IS NULL
+  AND expires_at > now();
+
+-- name: ConsumePlayerAccountPasswordReset :one
+-- Atomic single-use consume: 0 rows means unknown, expired, or already used.
+UPDATE player_account_password_resets
+SET used_at = now()
+WHERE token_hash = sqlc.arg(token_hash)
+  AND used_at IS NULL
+  AND expires_at > now()
+RETURNING player_account_id;
+
+-- name: InvalidatePlayerAccountPasswordResets :exec
+-- Burns every outstanding reset link for the account. Run in the same
+-- transaction as any password change so an older emailed link cannot reset
+-- the password again afterwards.
+UPDATE player_account_password_resets
+SET used_at = now()
+WHERE player_account_id = sqlc.arg(player_account_id)
+  AND used_at IS NULL;
+
+-- name: DeleteExpiredPlayerAccountPasswordResets :execrows
+-- Retention sweep (password_reset_gc): rows are inert once expired — every
+-- lookup filters expires_at — so deleting them a day later is pure hygiene.
+DELETE FROM player_account_password_resets
+WHERE expires_at < now() - interval '1 day';
+
 -- name: SetPlayerAccountPassword :exec
 -- Password change bumps session_epoch so every outstanding account session is
 -- invalidated on its next request.
@@ -180,15 +217,25 @@ WHERE player_account_id = sqlc.arg(player_account_id)
 -- name: LinkPlayerToAccount :exec
 -- Tenant-scoped (run under Pool.Q with app.tenant_id set): attaches a
 -- per-project player to a global account. Guarded by RLS on project_players.
+-- Clears unlinked_at: a re-invite restores an unlinked player's access.
 UPDATE project_players
-SET player_account_id = sqlc.arg(player_account_id)
+SET player_account_id = sqlc.arg(player_account_id),
+    unlinked_at = NULL
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL;
 
--- name: UnlinkPlayerFromAccount :exec
+-- name: UnlinkPlayerFromAccount :execrows
+-- Player-initiated, non-destructive unlink. The row and its game data stay;
+-- the account link goes inactive and player-credential auth is blocked
+-- (unlinked_at filters on the auth queries). The epoch bump kills live access
+-- tokens immediately; the caller also revokes the player's sessions. The
+-- account guard stops one account from unlinking another account's player.
 UPDATE project_players
-SET player_account_id = NULL
+SET player_account_id = NULL,
+    unlinked_at = now(),
+    session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id)
+  AND player_account_id = sqlc.arg(player_account_id)
   AND deleted_at IS NULL;
 
 -- name: BindPlayerLinkedEmail :execrows
@@ -206,7 +253,8 @@ WHERE id = sqlc.arg(id)
 UPDATE project_players
 SET email = sqlc.arg(email),
     email_verified_at = now(),
-    player_account_id = sqlc.arg(player_account_id)
+    player_account_id = sqlc.arg(player_account_id),
+    unlinked_at = NULL
 WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
   AND (player_account_id IS NULL OR player_account_id = sqlc.arg(player_account_id))

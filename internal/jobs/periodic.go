@@ -26,5 +26,6 @@ func PeriodicRegistrations() []PeriodicRegistration {
 		{Args: ConnectionGrantGCArgs{}, Interval: time.Hour},
 		{Args: MatchmakerGCArgs{}, Interval: time.Hour},
 		{Args: StorageWarnArgs{}, Interval: time.Hour},
+		{Args: PasswordResetGCArgs{}, Interval: 24 * time.Hour},
 	}
 }

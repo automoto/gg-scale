@@ -84,6 +84,18 @@ type LoginView struct {
 	FieldErrors map[string]string
 }
 
+// ForgotPasswordView is the data for the forgot-password request page.
+type ForgotPasswordView struct {
+	// Submitted switches to the constant "If an account matches" confirmation.
+	Submitted bool
+}
+
+// ResetPasswordView is the data for the set-a-new-password form.
+type ResetPasswordView struct {
+	Token       string
+	FieldErrors map[string]string
+}
+
 // SetupTokenView is the data rendered by step 1 of first-run setup.
 type SetupTokenView struct {
 	TokenFilePath string
@@ -390,10 +402,14 @@ type HelpView struct {
 
 // TenantSettingsView consolidates tenant-scoped configuration on one page.
 type TenantSettingsView struct {
-	UserEmail       string
-	CSRFToken       string
-	TenantID        int64
-	TenantName      string
+	UserEmail  string
+	CSRFToken  string
+	TenantID   int64
+	TenantName string
+	// Disabled/DisabledBy mirror tenants.disabled_at/disabled_by for the
+	// tenant-status card ("tenant" self-disable or "platform").
+	Disabled        bool
+	DisabledBy      string
 	Tier            string
 	TierClass       int
 	IsPlatformAdmin bool

@@ -147,6 +147,54 @@ templ LoginPage(vm LoginView) {
 			@fieldError(vm.FieldErrors, "password")
 			<button type="submit">Sign in</button>
 		</form>
+		<p><a href="/v1/control-panel/forgot-password">Forgot password?</a></p>
+	}
+}
+
+templ ForgotPasswordPage(vm ForgotPasswordView) {
+	@authLayout("Forgot password — ggscale") {
+		<h1>Forgot password</h1>
+		if vm.Submitted {
+			<p>If an account matches that email, a reset link is on its way. The link works once and expires in 1 hour.</p>
+			<p><a href="/v1/control-panel/login">Back to sign in</a></p>
+		} else {
+			<p class="subtitle">Enter your email and we send you a reset link.</p>
+			<form method="post" action="/v1/control-panel/forgot-password">
+				<label for="email">Email</label>
+				<input id="email" name="email" type="email" autocomplete="username" required/>
+				<button type="submit">Send reset link</button>
+			</form>
+			<p><a href="/v1/control-panel/login">Back to sign in</a></p>
+		}
+	}
+}
+
+templ ResetPasswordPage(vm ResetPasswordView) {
+	@authLayout("Reset password — ggscale") {
+		<h1>Set a new password</h1>
+		<form method="post" action="/v1/control-panel/reset-password">
+			<input type="hidden" name="token" value={ vm.Token }/>
+			<label for="password">New password</label>
+			<input id="password" name="password" type="password" autocomplete="new-password" required aria-describedby="password-error"/>
+			@fieldError(vm.FieldErrors, "password")
+			<button type="submit">Set new password</button>
+		</form>
+	}
+}
+
+templ ResetPasswordDonePage() {
+	@authLayout("Password updated — ggscale") {
+		<h1>Password updated</h1>
+		<p>Your password is changed and every open session was signed out.</p>
+		<p><a href="/v1/control-panel/login">Sign in</a></p>
+	}
+}
+
+templ ResetPasswordInvalidPage() {
+	@authLayout("Reset link invalid — ggscale") {
+		<h1>Reset link invalid</h1>
+		<p>This reset link is invalid, already used, or expired. Request a new one.</p>
+		<p><a href="/v1/control-panel/forgot-password">Request a new link</a></p>
 	}
 }
 
@@ -2565,6 +2613,29 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 				}
 			}
 			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
+		</section>
+		<section class="card">
+			<h2>Tenant status</h2>
+			if vm.Disabled {
+				<p role="alert">This tenant is disabled. API keys do not resolve and players cannot play.</p>
+				if vm.DisabledBy == "platform" && !vm.IsPlatformAdmin {
+					<p class="muted">Disabled by the platform. Contact support to re-enable it.</p>
+				} else {
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/enable") } data-confirm="Re-enable this tenant? API keys and player traffic resume immediately.">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="btn-inline">Re-enable tenant</button>
+					</form>
+				}
+			} else {
+				<p class="card-subtitle">
+					Disabling blocks the tenant's API keys and all player traffic.
+					Control-panel access stays, so you can re-enable or export data later.
+				</p>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/disable") } data-confirm="Disable this tenant? API keys and player traffic stop immediately.">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<button type="submit" class="contrast outline btn-inline">Disable tenant</button>
+				</form>
+			}
 		</section>
 		if vm.QuotasEnforced {
 			<section class="card">

@@ -5,7 +5,8 @@
 -- through. Note: this query does NOT filter by tenants table RLS because
 -- tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 -- a bootstrap policy on tenants, the JOIN keeps working.
-SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier
+SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier,
+       (t.disabled_at IS NOT NULL)::bool AS tenant_disabled
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
 WHERE k.key_hash = $1;

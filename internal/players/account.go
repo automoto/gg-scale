@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -1050,7 +1051,7 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 	var out []LinkedProject
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx,
-			`SELECT tenant_id, project_id, project_name, external_id
+			`SELECT player_id, tenant_id, project_id, project_name, external_id
 			 FROM player_account_linked_projects($1)`, toPgUUID(accountID))
 		if qerr != nil {
 			return qerr
@@ -1058,7 +1059,7 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 		defer rows.Close()
 		for rows.Next() {
 			var lp LinkedProject
-			if scanErr := rows.Scan(&lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID); scanErr != nil {
+			if scanErr := rows.Scan(&lp.PlayerID, &lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID); scanErr != nil {
 				return scanErr
 			}
 			out = append(out, lp)
@@ -1066,6 +1067,104 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 		return rows.Err()
 	})
 	return out, err
+}
+
+// --- project unlink ----------------------------------------------------------
+
+// linkedProjectForRequest resolves the {playerID} path param against the
+// session account's linked projects. Ownership check and lookup in one step:
+// a player id outside the account's links reads as not found. A database
+// failure is returned separately so callers answer 500, not 404.
+func (h *Handler) linkedProjectForRequest(r *http.Request, accountID uuid.UUID) (LinkedProject, bool, error) {
+	playerID, err := strconv.ParseInt(chi.URLParam(r, "playerID"), 10, 64)
+	if err != nil || playerID <= 0 {
+		return LinkedProject{}, false, nil
+	}
+	projects, err := h.listAccountLinkedProjects(r.Context(), accountID)
+	if err != nil {
+		return LinkedProject{}, false, err
+	}
+	for _, lp := range projects {
+		if lp.PlayerID == playerID {
+			return lp, true, nil
+		}
+	}
+	return LinkedProject{}, false, nil
+}
+
+// accountProjectUnlinkPage renders the confirmation step. The player site
+// ships no JavaScript, so the confirm is a dedicated GET page (same pattern
+// as the connection-address delete).
+func (h *Handler) accountProjectUnlinkPage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	lp, found, err := h.linkedProjectForRequest(r, sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account unlink: linked projects", err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	webutil.Render(r, w, UnlinkProjectPage(UnlinkProjectView{
+		AccountEmail: sess.Email,
+		CSRFToken:    h.csrf(r),
+		PlayerID:     lp.PlayerID,
+		ProjectName:  lp.ProjectName,
+	}))
+}
+
+func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	lp, found, err := h.linkedProjectForRequest(r, sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account unlink: linked projects", err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	if err := h.unlinkProjectPlayer(r.Context(), sess.AccountID, lp); err != nil {
+		webutil.InternalError(w, "account unlink", err)
+		return
+	}
+	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(
+		"Unlinked from "+lp.ProjectName+". Your game data is kept; accepting a new invite restores it."),
+		http.StatusSeeOther)
+}
+
+// unlinkProjectPlayer marks the link inactive and revokes the player's live
+// game sessions in one transaction under the project's tenant scope. The
+// account guard inside UnlinkPlayerFromAccount makes a lost race (admin
+// re-linked meanwhile, or a double submit) a no-op rather than an error.
+func (h *Handler) unlinkProjectPlayer(ctx context.Context, accountID uuid.UUID, lp LinkedProject) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
+			return err
+		}
+		q := sqlcgen.New(tx)
+		n, err := q.UnlinkPlayerFromAccount(ctx, sqlcgen.UnlinkPlayerFromAccountParams{
+			ID:              lp.PlayerID,
+			PlayerAccountID: toPgUUID(accountID),
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		_, err = q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
+			ProjectID: lp.ProjectID,
+			PlayerID:  lp.PlayerID,
+		})
+		return err
+	})
 }
 
 // --- verify-pending cookie (account variant) -------------------------------

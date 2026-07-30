@@ -58,6 +58,10 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 			return err
 		}
 		view.TenantName = facts.Name
+		view.Disabled = facts.DisabledAt.Valid
+		if facts.DisabledBy != nil {
+			view.DisabledBy = *facts.DisabledBy
+		}
 		tier := tenant.ClampTier(int(facts.Tier))
 		currentTier = tier
 		view.Tier = tier.String()
