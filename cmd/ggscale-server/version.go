@@ -1,25 +1,39 @@
 package main
 
-import "runtime/debug"
+import (
+	"os"
+	"runtime/debug"
+)
 
 // commit is overridden at build time via -ldflags (see Dockerfile and
-// Makefile). Binaries built without it fall back to the VCS revision the Go
-// toolchain embeds.
+// Makefile).
 var commit = "unknown"
 
 const commitShortLen = 12
 
-// buildCommit resolves the commit to report at startup: the -ldflags value
-// when stamped, else the embedded VCS revision, else "unknown".
+// buildCommit resolves the commit to report at startup, in order of trust:
+// the -ldflags stamp, the VCS revision the Go toolchain embeds, then the
+// GIT_REV environment variable set in the app container (Docker
+// builds copy no .git, so the embedded revision is absent there).
 func buildCommit() string {
-	if commit != "unknown" && commit != "" {
-		return commit
+	var settings []debug.BuildSetting
+	if info, ok := debug.ReadBuildInfo(); ok {
+		settings = info.Settings
 	}
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "unknown"
+	return resolveCommit(commit, settings, os.Getenv("GIT_REV"))
+}
+
+func resolveCommit(stamped string, settings []debug.BuildSetting, envRev string) string {
+	if stamped != "unknown" && stamped != "" {
+		return stamped
 	}
-	return commitFromBuildInfo(info.Settings)
+	if rev := commitFromBuildInfo(settings); rev != "unknown" {
+		return rev
+	}
+	if envRev != "" {
+		return shortRev(envRev)
+	}
+	return "unknown"
 }
 
 // commitFromBuildInfo extracts a short revision from the build settings,
@@ -37,11 +51,15 @@ func commitFromBuildInfo(settings []debug.BuildSetting) string {
 	if rev == "" {
 		return "unknown"
 	}
-	if len(rev) > commitShortLen {
-		rev = rev[:commitShortLen]
-	}
 	if dirty {
-		rev += "-dirty"
+		return shortRev(rev) + "-dirty"
+	}
+	return shortRev(rev)
+}
+
+func shortRev(rev string) string {
+	if len(rev) > commitShortLen {
+		return rev[:commitShortLen]
 	}
 	return rev
 }
