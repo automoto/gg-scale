@@ -99,7 +99,12 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.metrics.InviteSent(observability.InviteTeam)
-	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectControlPanel, "")
+	tenantName := h.tenantDisplayName(r.Context(), tenantID)
+	subject := inviteEmailSubjectControlPanel
+	if tenantName != "" {
+		subject = fmt.Sprintf("You've been invited to %s on ggscale", tenantName)
+	}
+	h.sendInviteEmail(r.Context(), res, subject, tenantName, h.roleExplanation(role))
 	target := tenantTeamPath(tenantID) + queryFlash + url.QueryEscape("Invite sent to "+res.Email)
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
@@ -301,7 +306,7 @@ func (h *Handler) invitePlatformAdminHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, InvitePlatformAdminPage(view))
 		return
 	}
-	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectPlatform, "")
+	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectPlatform, "", "")
 	http.Redirect(w, r, "/v1/control-panel/admin/team?flash="+url.QueryEscape("Invite sent to "+res.Email), http.StatusSeeOther)
 }
 
@@ -423,30 +428,91 @@ func (h *Handler) renderInviteLookupError(w http.ResponseWriter, r *http.Request
 }
 
 // sendInviteEmail mails the invite recipient the magic link. Failure is
-// logged but does not block the request — the inviter can re-send.
-func (h *Handler) sendInviteEmail(ctx context.Context, res inviteResult, subject, extra string) {
+// logged but does not block the request — the inviter can re-send. Suppressed
+// (unsubscribed) addresses are dropped; the invite itself still exists.
+// tenantName, when known, names the tenant the invite joins.
+func (h *Handler) sendInviteEmail(ctx context.Context, res inviteResult, subject, tenantName, extra string) {
 	if h.mailer == nil || h.cfg.MailFrom == "" {
 		slog.WarnContext(ctx, "control panel invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
 		return
 	}
+	if h.inviteEmailSuppressed(ctx, res.Email) {
+		return
+	}
 	link := h.inviteAcceptURL(res.Code)
+	intro := "You were invited to ggscale"
+	if tenantName != "" {
+		intro = fmt.Sprintf("You were invited to join %s on ggscale", tenantName)
+	}
+	unsubscribe := webutil.EmailUnsubscribeURL(h.cfg.BaseURL, h.verifySigningKey, res.Email)
 	body := strings.TrimSpace(fmt.Sprintf(
-		"You were invited to ggscale (%s role).\n\nClick to accept (expires %s):\n%s\n%s",
-		res.Role, res.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), link, extra,
+		"%s (%s role).\n\nClick to accept (expires %s):\n%s\n%s\n\nDon't want invite emails? Unsubscribe: %s",
+		intro, res.Role, res.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), link, extra, unsubscribe,
 	))
 	if err := h.mailer.Send(ctx, mailer.Message{
-		From:    h.cfg.MailFrom,
-		To:      []string{res.Email},
-		Subject: subject,
-		Body:    body,
+		From:            h.cfg.MailFrom,
+		To:              []string{res.Email},
+		Subject:         subject,
+		Body:            body,
+		ListUnsubscribe: unsubscribe,
 	}); err != nil {
 		slog.ErrorContext(ctx, "control panel invite mailer", "err", err, "invite_id", res.ID)
 	}
 }
 
+// tenantDisplayName resolves the tenant's name for invite copy; empty when
+// the lookup fails or the name is not header-safe (callers fall back to
+// generic wording).
+func (h *Handler) tenantDisplayName(ctx context.Context, tenantID int64) string {
+	var name string
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		facts, qerr := sqlcgen.New(tx).GetTenantFacts(ctx, tenantID)
+		if qerr != nil {
+			return qerr
+		}
+		name = facts.Name
+		return nil
+	})
+	if err != nil {
+		return ""
+	}
+	return headerSafeName(name, "")
+}
+
+// headerSafeName returns name when it can be embedded in a mail subject —
+// printable and small enough that the composed header stays far under RFC
+// 5322's line limit — else fallback. Resource names are user-controlled and
+// barely validated at creation; a weird name must degrade the email copy,
+// not break delivery (the SMTP send error would only be logged while the
+// operator sees a success flash).
+func headerSafeName(name, fallback string) string {
+	const maxNameBytes = 120
+	if name == "" || len(name) > maxNameBytes {
+		return fallback
+	}
+	if _, err := webutil.SanitizeHeader(name); err != nil {
+		return fallback
+	}
+	return name
+}
+
 func (h *Handler) inviteAcceptURL(code string) string {
 	base := strings.TrimRight(h.cfg.BaseURL, "/")
 	return base + "/v1/control-panel/invite/accept?code=" + url.QueryEscape(code)
+}
+
+// roleExplanation is the extra invite-email paragraph explaining what the
+// offered role can do, with a pointer to the help page's roles section
+// (readable once the invitee has signed in).
+func (h *Handler) roleExplanation(role string) string {
+	base := strings.TrimRight(h.cfg.BaseURL, "/")
+	helpLine := "\nMore on roles: " + base + "/v1/control-panel/help#roles"
+	switch role {
+	case roleInviteTenantMember:
+		return "\nAs a tenant member you have read-only access: you can view projects and players, but cannot change anything." + helpLine
+	default:
+		return "\nAs a tenant admin you manage everything in the tenant: projects, API keys, players, team, and settings." + helpLine
+	}
 }
 
 func tenantTeamPath(tenantID int64) string {

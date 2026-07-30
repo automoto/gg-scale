@@ -275,6 +275,11 @@ type ControlPanelUserTotpBackupCode struct {
 	CreatedAt          pgtype.Timestamptz
 }
 
+type EmailSuppression struct {
+	Email     string
+	CreatedAt pgtype.Timestamptz
+}
+
 type FeatureGrant struct {
 	ID                           int64
 	TenantID                     int64

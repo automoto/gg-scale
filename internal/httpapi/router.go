@@ -320,6 +320,19 @@ func NewRouter(d Deps) http.Handler {
 				EnqueuePasswordReset: passwordResetEnqueuer(d, jobs.PasswordResetSurfacePlayerAccount),
 			}))
 		}
+		// One-click invite-email unsubscribe. Mounted independently of the
+		// player site so the link in an invite email always resolves. Behind
+		// the signed-out per-IP cap like every other public surface: the
+		// signed token gates WHO can suppress an address, the limiter bounds
+		// how often a valid token can be replayed into database writes.
+		if d.Pool != nil && len(d.EmailVerifySigningKey) > 0 {
+			r.Group(func(r chi.Router) {
+				if d.Limiter != nil {
+					r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, reg))
+				}
+				r.Mount("/unsubscribe", players.NewUnsubscribeHandler(d.Pool, d.EmailVerifySigningKey))
+			})
+		}
 
 		if d.hasAuthDeps() {
 			r.Group(func(r chi.Router) {

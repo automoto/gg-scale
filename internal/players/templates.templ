@@ -49,7 +49,7 @@ templ playerLayout(title string, active playerNavDestination, csrfToken, account
 					<details class="dropdown nav-menu account-menu dropdown-right">
 						<summary>Account</summary>
 						<ul>
-							<li>@playerNavLink("/v1/players/account/", playerAccountNavLabel(accountEmail), active == playerNavAccount)</li>
+							<li><!--email_off-->@playerNavLink("/v1/players/account/", playerAccountNavLabel(accountEmail), active == playerNavAccount)<!--/email_off--></li>
 							<li>
 								<form method="post" action="/v1/players/account/logout">
 									<input type="hidden" name="_csrf" value={ csrfToken }/>
@@ -98,7 +98,7 @@ templ InviteAcceptPage(vm InviteAcceptView) {
 			<p role="alert">{ vm.Error }</p>
 		} else {
 			<p class="subtitle">You've been invited to <strong>{ vm.ProjectName }</strong>.</p>
-			<p>Email: <code>{ vm.Email }</code></p>
+			<p>Email: <!--email_off--><code>{ vm.Email }</code><!--/email_off--></p>
 			if vm.NewAccount {
 				<p>Accepting creates your gg-scale account and links it to this game.</p>
 			} else {

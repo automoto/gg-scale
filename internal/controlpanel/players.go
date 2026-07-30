@@ -28,8 +28,6 @@ import (
 
 const playersPerPage = 25
 
-const playerInviteSubject = "You've been invited to play"
-
 type playerInviteResult struct {
 	ID        int64
 	Email     string
@@ -153,29 +151,60 @@ func (h *Handler) createAndSendPlayerInvite(r *http.Request, tenantID, projectID
 		return playerInviteResult{}, 0, err
 	}
 	h.metrics.InviteSent(observability.InvitePlayer)
-	h.sendPlayerInviteEmail(r.Context(), res, projectID)
+	session, _ := sessionFromContext(r.Context())
+	h.sendPlayerInviteEmail(r.Context(), res, tenantID, projectID, session.User.Email)
 	return res, 0, nil
 }
 
 // sendPlayerInviteEmail mails the invite recipient a magic link into the
-// player site. Failure is logged but does not block the request.
-func (h *Handler) sendPlayerInviteEmail(ctx context.Context, res playerInviteResult, projectID int64) {
+// player site. Failure is logged but does not block the request. Suppressed
+// (unsubscribed) addresses are dropped; the invite itself still exists.
+func (h *Handler) sendPlayerInviteEmail(ctx context.Context, res playerInviteResult, tenantID, projectID int64, inviterEmail string) {
 	if h.mailer == nil || h.cfg.MailFrom == "" {
 		slog.WarnContext(ctx, "player invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
 		return
 	}
+	if h.inviteEmailSuppressed(ctx, res.Email) {
+		return
+	}
+	gameName := h.projectDisplayName(ctx, tenantID, projectID)
 	base := strings.TrimRight(h.cfg.BaseURL, "/")
 	link := base + "/v1/players/p/" + strconv.FormatInt(projectID, 10) + "/invite/accept?code=" + url.QueryEscape(res.Code)
-	body := fmt.Sprintf("You were invited to play. Click to set up your account (expires %s):\n%s",
-		res.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), link)
+	unsubscribe := webutil.EmailUnsubscribeURL(h.cfg.BaseURL, h.verifySigningKey, res.Email)
+	body := fmt.Sprintf(
+		"%s invited you to play %s.\n\n"+
+			"Accept the invite and set up your player account here:\n%s\n\n"+
+			"ggscale is the player-account service %s uses for sign-in, saves, friends, and leaderboards. "+
+			"One ggscale account works across every game built on it.\n\n"+
+			"This invite expires %s.\n\n"+
+			"Don't want invite emails? Unsubscribe: %s",
+		inviterEmail, gameName, link, gameName,
+		res.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), unsubscribe)
 	if err := h.mailer.Send(ctx, mailer.Message{
-		From:    h.cfg.MailFrom,
-		To:      []string{res.Email},
-		Subject: playerInviteSubject,
-		Body:    body,
+		From:            h.cfg.MailFrom,
+		To:              []string{res.Email},
+		Subject:         "You're invited to play " + gameName,
+		Body:            body,
+		ListUnsubscribe: unsubscribe,
 	}); err != nil {
 		slog.ErrorContext(ctx, "player invite mailer", "err", err, "invite_id", res.ID)
 	}
+}
+
+// projectDisplayName resolves the project (game) name for invite copy, with
+// a generic fallback when the lookup fails or the name is not header-safe.
+func (h *Handler) projectDisplayName(ctx context.Context, tenantID, projectID int64) string {
+	const fallback = "a game on ggscale"
+	projects, err := h.listProjects(ctx, tenantID)
+	if err != nil {
+		return fallback
+	}
+	for _, p := range projects {
+		if p.ID == projectID {
+			return headerSafeName(p.Name, fallback)
+		}
+	}
+	return fallback
 }
 
 // PlayerView is one row in the player list/detail page.

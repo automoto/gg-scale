@@ -226,6 +226,16 @@ func buildRFC5322(m mailer.Message) ([]byte, error) {
 	b.WriteString("Subject: ")
 	b.WriteString(subjectHeader)
 	b.WriteString("\r\n")
+	if m.ListUnsubscribe != "" {
+		unsubHeader, err := webutil.SanitizeHeader(m.ListUnsubscribe)
+		if err != nil {
+			return nil, fmt.Errorf("list-unsubscribe header: %w", err)
+		}
+		b.WriteString("List-Unsubscribe: <")
+		b.WriteString(unsubHeader)
+		b.WriteString(">\r\n")
+		b.WriteString("List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n")
+	}
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")

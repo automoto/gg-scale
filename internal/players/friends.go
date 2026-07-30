@@ -24,8 +24,12 @@ import (
 const friendsPath = accountBasePath + "/friends"
 
 // friendRequestSentFlash is shown whether or not the target exists, so the
-// form can't be used to enumerate which emails / display names have an account.
-const friendRequestSentFlash = "If an account matches, a friend request was sent."
+// form can't be used to enumerate which emails / display names have an
+// account. No email is sent — friend requests only reach existing gg-scale
+// accounts in-app — so the copy must not imply a delivery. Inviting someone
+// who has no account is the game admin's player-invite flow, not friends.
+const friendRequestSentFlash = "If an account matches, your friend request will appear in their friends list. " +
+	"No email is sent — ask friends without a gg-scale account to join through the game first."
 
 var (
 	errFriendTargetNotFound = errors.New("players: no account matches that email or name")

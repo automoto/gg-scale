@@ -127,7 +127,7 @@ func playerLayout(title string, active playerNavDestination, csrfToken, accountE
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</div><details class=\"dropdown nav-menu account-menu dropdown-right\"><summary>Account</summary><ul><li>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</div><details class=\"dropdown nav-menu account-menu dropdown-right\"><summary>Account</summary><ul><li><!--email_off-->")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -135,7 +135,7 @@ func playerLayout(title string, active playerNavDestination, csrfToken, accountE
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</li><li><form method=\"post\" action=\"/v1/players/account/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<!--/email_off--></li><li><form method=\"post\" action=\"/v1/players/account/logout\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -334,20 +334,20 @@ func InviteAcceptPage(vm InviteAcceptView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</strong>.</p><p>Email: <code>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</strong>.</p><p>Email: <!--email_off--><code>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Email)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 100, Col: 29}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/templates.templ`, Line: 100, Col: 45}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code></p>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</code><!--/email_off--></p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

@@ -722,6 +722,21 @@ func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) 
 	assert.Contains(t, html, `class="secondary outline btn-inline"`)
 }
 
+func TestInviteTeamPage_should_explain_roles_at_selection(t *testing.T) {
+	html := renderToString(t, InviteTeamPage(InviteTeamView{TenantID: 1}))
+
+	assert.Contains(t, html, "Tenant admins manage everything in the tenant")
+	assert.Contains(t, html, "Tenant members have read-only access")
+}
+
+func TestHelpPage_should_document_team_roles(t *testing.T) {
+	html := renderToString(t, HelpPage(HelpView{}))
+
+	assert.Contains(t, html, `id="roles"`)
+	assert.Contains(t, html, "Tenant admins manage everything in the tenant")
+	assert.Contains(t, html, "Tenant members have read-only access")
+}
+
 func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {
 	html := renderToString(t, PlayerDetailPage(PlayerDetailView{
 		Player: PlayerView{ID: 3, AccountID: "9f1c2d3e-0000-0000-0000-000000000000"},

@@ -459,6 +459,7 @@ type Querier interface {
 	// Edge id if EITHER account has blocked the other. Defense-in-depth gate on
 	// every interaction path (friend request, game invite, presence).
 	IsBlockedBetweenAccounts(ctx context.Context, arg IsBlockedBetweenAccountsParams) (int64, error)
+	IsEmailSuppressed(ctx context.Context, email string) (bool, error)
 	IsGameSessionMember(ctx context.Context, arg IsGameSessionMemberParams) (bool, error)
 	// Enforcement helper: is the given player's linked account tenant-banned in
 	// the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
@@ -791,6 +792,8 @@ type Querier interface {
 	// (app.tenant_id set), serialized per object by LockStorageObjectForWrite.
 	StorageUsageForWrite(ctx context.Context, arg StorageUsageForWriteParams) (StorageUsageForWriteRow, error)
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
+	// Idempotent: repeated unsubscribes are a no-op.
+	SuppressEmail(ctx context.Context, email string) error
 	// Release every claim whose lease has expired. Same accounting as
 	// ReleaseMatchmakerClaim (bump attempts, fail at the cap). Runs out of a
 	// detached context so it isn't tied to any request lifetime. Returns the

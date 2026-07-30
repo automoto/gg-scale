@@ -28,6 +28,13 @@ func friendLabel(f FriendRow) string {
 	return f.Email
 }
 
+// friendName wraps the row label in Cloudflare's email_off escape so Email
+// Address Obfuscation (when enabled at the proxy) cannot rewrite addresses
+// into "[email protected]".
+templ friendName(f FriendRow) {
+	<!--email_off-->{ friendLabel(f) }<!--/email_off-->
+}
+
 templ FriendsPage(vm FriendsView) {
 	@playerLayout("Friends", playerNavFriends, vm.CSRFToken, vm.AccountEmail) {
 		<h1>Friends</h1>
@@ -52,7 +59,7 @@ templ FriendsPage(vm FriendsView) {
 			<ul class="friends-list">
 				for _, f := range vm.Accepted {
 					<li>
-						{ friendLabel(f) }
+						@friendName(f)
 						@friendButton(vm.CSRFToken, f.AccountID, "unfriend", "Remove")
 						@friendButton(vm.CSRFToken, f.AccountID, "block", "Block")
 					</li>
@@ -66,7 +73,7 @@ templ FriendsPage(vm FriendsView) {
 			<ul class="friends-list">
 				for _, f := range vm.IncomingPending {
 					<li>
-						{ friendLabel(f) }
+						@friendName(f)
 						@friendButton(vm.CSRFToken, f.AccountID, "accept", "Accept")
 						@friendButton(vm.CSRFToken, f.AccountID, "reject", "Decline")
 						@friendButton(vm.CSRFToken, f.AccountID, "block", "Block")
@@ -81,7 +88,7 @@ templ FriendsPage(vm FriendsView) {
 			<ul class="friends-list">
 				for _, f := range vm.OutgoingPending {
 					<li>
-						{ friendLabel(f) }
+						@friendName(f)
 						@friendButton(vm.CSRFToken, f.AccountID, "unfriend", "Cancel")
 					</li>
 				}
@@ -94,7 +101,7 @@ templ FriendsPage(vm FriendsView) {
 			<ul class="friends-list">
 				for _, f := range vm.Blocked {
 					<li>
-						{ friendLabel(f) }
+						@friendName(f)
 						@friendButton(vm.CSRFToken, f.AccountID, "unblock", "Unblock")
 					</li>
 				}

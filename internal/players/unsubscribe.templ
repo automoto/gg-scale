@@ -1,0 +1,39 @@
+package players
+
+// Signed-out unsubscribe pages. The signed token in the link is the only
+// authorization — no login, one click.
+
+type UnsubscribeView struct {
+	Email string
+	Token string
+}
+
+templ UnsubscribePage(vm UnsubscribeView) {
+	@playerAuthLayout("Unsubscribe") {
+		<h1>Stop invite emails</h1>
+		<p>
+			Stop all future ggscale invite emails to
+			<!--email_off--><strong>{ vm.Email }</strong><!--/email_off-->?
+		</p>
+		<form method="post" action={ templ.URL("/v1/unsubscribe?token=" + vm.Token) }>
+			<button type="submit">Unsubscribe</button>
+		</form>
+	}
+}
+
+templ UnsubscribeDonePage(vm UnsubscribeView) {
+	@playerAuthLayout("Unsubscribed") {
+		<h1>Unsubscribed</h1>
+		<p>
+			<!--email_off--><strong>{ vm.Email }</strong><!--/email_off-->
+			will not receive ggscale invite emails anymore.
+		</p>
+	}
+}
+
+templ UnsubscribeInvalidPage() {
+	@playerAuthLayout("Link invalid") {
+		<h1>Link invalid</h1>
+		<p>This unsubscribe link is not valid. Use the link from a ggscale invite email.</p>
+	}
+}

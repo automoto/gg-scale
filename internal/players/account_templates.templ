@@ -148,7 +148,7 @@ type AccountVerifyView struct {
 templ AccountVerifyPage(vm AccountVerifyView) {
 	@playerAuthLayout("Verify email") {
 		<h1>Verify your email</h1>
-		<p class="subtitle">We sent a 6-digit code to <code>{ vm.Email }</code>.</p>
+		<p class="subtitle">We sent a 6-digit code to <!--email_off--><code>{ vm.Email }</code><!--/email_off-->.</p>
 		if vm.Error != "" {
 			<p role="alert">{ vm.Error }</p>
 		}
@@ -382,9 +382,9 @@ templ AccountHomePage(vm AccountHomeView) {
 			<div>
 				<h1>Your ggscale account</h1>
 				if vm.DisplayName != "" {
-					<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<code>{ vm.Email }</code>).</p>
+					<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<!--email_off--><code>{ vm.Email }</code><!--/email_off-->).</p>
 				} else {
-					<p class="subtitle">Signed in as <code>{ vm.Email }</code>.</p>
+					<p class="subtitle">Signed in as <!--email_off--><code>{ vm.Email }</code><!--/email_off-->.</p>
 				}
 			</div>
 		</div>

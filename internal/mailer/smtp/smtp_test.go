@@ -22,6 +22,33 @@ func TestBuildRFC5322RejectsHeaderInjection(t *testing.T) {
 	assert.Contains(t, err.Error(), "subject header")
 }
 
+func TestBuildRFC5322WritesListUnsubscribeHeaders(t *testing.T) {
+	body, err := buildRFC5322(mailer.Message{
+		From:            "no-reply@example.test",
+		To:              []string{"player@example.test"},
+		Subject:         "Invite",
+		Body:            "hello",
+		ListUnsubscribe: "https://app.example.test/v1/unsubscribe?token=abc",
+	})
+
+	require.NoError(t, err)
+	msg := string(body)
+	assert.Contains(t, msg, "List-Unsubscribe: <https://app.example.test/v1/unsubscribe?token=abc>\r\n")
+	assert.Contains(t, msg, "List-Unsubscribe-Post: List-Unsubscribe=One-Click\r\n")
+}
+
+func TestBuildRFC5322OmitsListUnsubscribeWhenUnset(t *testing.T) {
+	body, err := buildRFC5322(mailer.Message{
+		From:    "no-reply@example.test",
+		To:      []string{"player@example.test"},
+		Subject: "Verify",
+		Body:    "hello",
+	})
+
+	require.NoError(t, err)
+	assert.NotContains(t, string(body), "List-Unsubscribe")
+}
+
 func TestBuildRFC5322AcceptsDisplayNames(t *testing.T) {
 	body, err := buildRFC5322(mailer.Message{
 		From:    "GG Scale <no-reply@example.test>",

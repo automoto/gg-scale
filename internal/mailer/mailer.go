@@ -31,6 +31,10 @@ type Message struct {
 	To      []string
 	Subject string
 	Body    string
+	// ListUnsubscribe, when set, is the one-click unsubscribe URL emitted as
+	// RFC 8058 List-Unsubscribe + List-Unsubscribe-Post headers, so mail
+	// clients can offer their native unsubscribe control.
+	ListUnsubscribe string
 }
 
 // ProviderFunc constructs a Mailer from connection parameters.
