@@ -2,9 +2,31 @@ package gamesession
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestEffectiveState(t *testing.T) {
+	past := time.Now().Add(-time.Minute)
+	future := time.Now().Add(time.Hour)
+	tests := []struct {
+		name      string
+		state     string
+		expiresAt time.Time
+		want      string
+	}{
+		{"open_live", "open", future, "open"},
+		{"open_expired", "open", past, "expired"},
+		{"in_progress_expired", "in_progress", past, "expired"},
+		{"ended_stays_ended", "ended", past, "ended"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, EffectiveState(tt.state, tt.expiresAt))
+		})
+	}
+}
 
 func TestJoinCode_is_alphabet_and_six_chars(t *testing.T) {
 	code, err := newJoinCode()

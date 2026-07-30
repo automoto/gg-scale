@@ -297,6 +297,9 @@ components:
     GameSessionResponse:
       additionalProperties: false
       properties:
+        expires_at:
+          format: date-time
+          type: string
         join_code:
           type: string
         peers:
@@ -313,6 +316,7 @@ components:
         - session_id
         - join_code
         - state
+        - expires_at
         - peers
       type: object
     GameSessionSignalEntry:

@@ -170,7 +170,7 @@ func (q *Queries) GetAPIKeyType(ctx context.Context, id int64) (string, error) {
 }
 
 const listAPIKeys = `-- name: ListAPIKeys :many
-SELECT k.id, k.project_id, p.name AS project_name, k.label, k.scopes, k.created_at, k.revoked_at
+SELECT k.id, k.project_id, p.name AS project_name, k.label, k.key_type, k.scopes, k.created_at, k.revoked_at
 FROM api_keys k
 LEFT JOIN projects p ON p.id = k.project_id
 WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -182,6 +182,7 @@ type ListAPIKeysRow struct {
 	ProjectID   *int64
 	ProjectName *string
 	Label       *string
+	KeyType     string
 	Scopes      []string
 	CreatedAt   pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
@@ -201,6 +202,7 @@ func (q *Queries) ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error) {
 			&i.ProjectID,
 			&i.ProjectName,
 			&i.Label,
+			&i.KeyType,
 			&i.Scopes,
 			&i.CreatedAt,
 			&i.RevokedAt,

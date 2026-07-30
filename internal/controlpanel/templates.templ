@@ -48,7 +48,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/matchmaker", "Matchmaker", nav.IsActive(navMatchmaker))</li>
 									}
 								}
-								if nav.IsPlatformAdmin {
+								if nav.isPlatformAdmin(ctx) {
 									<li class="nav-section">Admin</li>
 									<li>@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))</li>
 									<li>@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))</li>
@@ -56,7 +56,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 									<li>@navLink("/v1/control-panel/admin/player-accounts", "Player accounts", nav.IsActive(navPlayerAccounts))</li>
 									<li>@navLink("/v1/control-panel/admin/team", "Platform admins", nav.IsActive(navPlatformTeam))</li>
 									<li>@navLink("/v1/control-panel/admin/settings", "Server settings", nav.IsActive(navServerSettings))</li>
-									if nav.PluginsEnabled {
+									if nav.pluginsEnabled(ctx) {
 										<li>@navLink("/v1/control-panel/admin/plugins", "Plugins", nav.IsActive(navPlugins))</li>
 									}
 								}
@@ -485,6 +485,7 @@ templ APIKeysPage(vm APIKeysView) {
 						<tr>
 							<th>Project</th>
 							<th>Key Name</th>
+							<th>Type</th>
 							<th>Feature access</th>
 							<th>Created</th>
 							<th>Status</th>
@@ -516,6 +517,7 @@ templ APIKeysPage(vm APIKeysView) {
 										</form>
 									</details>
 								</td>
+								<td>{ key.TypeLabel() }</td>
 								<td class="feature-cell">
 									if key.RevokedAt != nil {
 										<span class="muted">—</span>
@@ -676,7 +678,11 @@ templ RateLimitsPage(vm RateLimitsView) {
 		<div class="page-header">
 			<div>
 				<h1>Rate limits</h1>
-				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+				if vm.TenantName != "" {
+					<p class="subtitle">{ vm.TenantName } — tenant #{ stringFromInt(vm.TenantID) }</p>
+				} else {
+					<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+				}
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -2519,23 +2525,43 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 				</form>
 				if len(vm.AdminFeatureGrants) > 0 {
 					<h3>Feature grants</h3>
-					for _, f := range vm.AdminFeatureGrants {
-						<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/features") } class="settings-form" data-confirm="Change this tenant's feature grant?">
-							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-							<input type="hidden" name="feature" value={ f.Value }/>
-							if f.Enabled {
-								<input type="hidden" name="enabled" value="off"/>
-								<span>{ f.Label } — <strong>on</strong></span>
-								<button type="submit" class="btn-inline">Disable</button>
-							} else if f.EnvAllowed {
-								<input type="hidden" name="enabled" value="on"/>
-								<span>{ f.Label } — off</span>
-								<button type="submit" class="btn-inline">Enable</button>
-							} else {
-								<span>{ f.Label } — off <span class="muted">(server switch off)</span></span>
+					<table class="data-table">
+						<thead>
+							<tr>
+								<th>Feature</th>
+								<th>Status</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, f := range vm.AdminFeatureGrants {
+								<tr>
+									<td>{ f.Label }</td>
+									<td>
+										@boolBadge(f.Enabled)
+										if !f.Enabled && !f.EnvAllowed {
+											<span class="muted">(server switch off)</span>
+										}
+									</td>
+									<td class="actions-cell">
+										if f.Enabled || f.EnvAllowed {
+											<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/features") } data-confirm="Change this tenant's feature grant?">
+												<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+												<input type="hidden" name="feature" value={ f.Value }/>
+												if f.Enabled {
+													<input type="hidden" name="enabled" value="off"/>
+													<button type="submit" class="secondary outline btn-inline">Disable</button>
+												} else {
+													<input type="hidden" name="enabled" value="on"/>
+													<button type="submit" class="secondary outline btn-inline">Enable</button>
+												}
+											</form>
+										}
+									</td>
+								</tr>
 							}
-						</form>
-					}
+						</tbody>
+					</table>
 				}
 			}
 			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
@@ -2720,8 +2746,6 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 		<section class="card">
 			<h2>Features</h2>
 			<dl class="kv">
-				<dt>Control panel</dt>
-				<dd>@boolBadge(vm.Snapshot.ControlPanelEnabled)</dd>
 				<dt>Players</dt>
 				<dd>@boolBadge(vm.Snapshot.PlayersEnabled)</dd>
 				<dt>Fleet</dt>
@@ -2739,36 +2763,6 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
 			</dl>
 		</section>
-		<section class="card">
-			<h2>Mail</h2>
-			<dl class="kv">
-				<dt>Provider</dt>
-				<dd>{ orDash(vm.Snapshot.MailProvider) }</dd>
-				<dt>SMTP address</dt>
-				<dd>{ orDash(vm.Snapshot.SMTPAddr) }</dd>
-				<dt>SMTP user</dt>
-				<dd>{ orDash(vm.Snapshot.SMTPUser) }</dd>
-				<dt>SMTP TLS</dt>
-				<dd>{ orDash(vm.Snapshot.SMTPTLS) }</dd>
-				<dt>From</dt>
-				<dd>{ orDash(vm.Snapshot.MailFrom) }</dd>
-				<dt>SMTP password</dt>
-				<dd>@configuredBadge(vm.Snapshot.SMTPPasswordSet)</dd>
-			</dl>
-		</section>
-		<section class="card">
-			<h2>Network &amp; secrets</h2>
-			<dl class="kv">
-				<dt>CORS origins</dt>
-				<dd>{ orDash(joinComma(vm.Snapshot.CORSAllowedOrigins)) }</dd>
-				<dt>JWT signing key</dt>
-				<dd>@jwtKeyBadge(vm.Snapshot.JWTConfigured)</dd>
-				<dt>Relay shared secret</dt>
-				<dd>@configuredBadge(vm.Snapshot.RelaySecretSet)</dd>
-				<dt>Database</dt>
-				<dd>@configuredBadge(vm.Snapshot.DatabaseConfigured)</dd>
-			</dl>
-		</section>
 	}
 }
 
@@ -2777,24 +2771,5 @@ templ boolBadge(on bool) {
 		<span class="badge badge-active">on</span>
 	} else {
 		<span class="badge badge-revoked">off</span>
-	}
-}
-
-templ configuredBadge(set bool) {
-	if set {
-		<span class="badge badge-active">configured</span>
-	} else {
-		<span class="badge badge-revoked">not set</span>
-	}
-}
-
-// An unset JWT env key is not a missing secret: the auto-generated key
-// persists in server_secrets, so sessions survive restarts. Setting
-// JWT_SIGNING_KEY keeps it out of DB backups.
-templ jwtKeyBadge(envSet bool) {
-	if envSet {
-		<span class="badge badge-active">configured</span>
-	} else {
-		<span class="badge">database-stored</span>
 	}
 }

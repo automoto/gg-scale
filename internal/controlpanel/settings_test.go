@@ -141,31 +141,14 @@ func TestProjectSettingsPage_shows_invite_quota_forms(t *testing.T) {
 	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/projects/8/settings"`)
 }
 
-func TestServerSettingsPage_is_read_only_and_redacts_secrets(t *testing.T) {
+func TestServerSettingsPage_is_read_only(t *testing.T) {
 	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
-		Snapshot: ServerSettingsSnapshot{
-			Env: "production", HTTPAddr: ":8080",
-			ControlPanelEnabled: true,
-			SMTPPasswordSet:     true, JWTConfigured: true, DatabaseConfigured: true,
-			RelaySecretSet: false,
-		},
+		Snapshot: ServerSettingsSnapshot{Env: "production", HTTPAddr: ":8080"},
 	}))
 	assert.Contains(t, html, "production")
-	assert.Contains(t, html, "configured")
-	assert.Contains(t, html, "not set")
 	// Read-only: no settings forms or editable controls (the only <form> is the
 	// layout's logout form in the header chrome).
 	assert.Equal(t, 1, strings.Count(html, "<form"), "server settings page adds no forms")
 	assert.NotContains(t, html, `name="redirect_to"`)
 	assert.NotContains(t, html, "Save")
-}
-
-func TestServerSettingsPage_shows_database_stored_badge_for_zero_config_jwt_key(t *testing.T) {
-	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
-		Snapshot: ServerSettingsSnapshot{JWTConfigured: false},
-	}))
-
-	// The auto-generated key persists in server_secrets: informational, not
-	// the alarm styling used for genuinely missing secrets.
-	assert.Contains(t, html, "database-stored")
 }

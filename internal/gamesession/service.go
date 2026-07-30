@@ -86,6 +86,7 @@ type Created struct {
 	SessionID string
 	JoinCode  string
 	State     string
+	ExpiresAt time.Time
 	Peers     []sqlcgen.ListGameSessionPeersRow
 }
 
@@ -188,7 +189,7 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (*Created, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &Created{SessionID: sess.ID, JoinCode: sess.JoinCode, State: sess.State, Peers: peers}, nil
+	return &Created{SessionID: sess.ID, JoinCode: sess.JoinCode, State: sess.State, ExpiresAt: expires.Time, Peers: peers}, nil
 }
 
 // checkOpenSessionLimit gates session creation on the project's open-session
@@ -216,6 +217,15 @@ func checkOpenSessionLimit(ctx context.Context, q *sqlcgen.Queries, openCount in
 		return fmt.Errorf("%w: %w", ErrProjectCapped, err)
 	}
 	return nil
+}
+
+// EffectiveState is the state a client should see. A session past its expiry
+// must never read as live, even while the row lingers before GC removes it.
+func EffectiveState(state string, expiresAt time.Time) string {
+	if state != "ended" && !expiresAt.After(time.Now()) {
+		return "expired"
+	}
+	return state
 }
 
 // IsMatchmade reports whether the session props carry the matchmade flag the

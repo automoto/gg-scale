@@ -649,6 +649,79 @@ func TestPlayerDetail_renders_typed_remote_addrs_with_badges(t *testing.T) {
 	assert.Contains(t, html, "example.com:7777")
 }
 
+func TestAPIKeysPage_should_show_key_type_for_each_key(t *testing.T) {
+	html := renderToString(t, APIKeysPage(APIKeysView{
+		TenantID: 1,
+		Keys: []APIKeyView{
+			{ID: 1, Label: "client key", KeyType: "publishable"},
+			{ID: 2, Label: "server key", KeyType: "secret"},
+		},
+	}))
+
+	assert.Contains(t, html, "<th>Type</th>")
+	assert.Contains(t, html, "Publishable")
+	assert.Contains(t, html, "Secret")
+}
+
+func TestAppLayout_should_render_admin_menu_from_session_on_every_page(t *testing.T) {
+	h := &Handler{}
+	// HelpPage builds AppNav without IsPlatformAdmin — the session in the
+	// request context must still make the Admin section render.
+	adminCtx := h.sessionContext(context.Background(), controlPanelSession{
+		User: controlPanelUser{Email: "admin@example.com", IsPlatformAdmin: true},
+	})
+	var buf bytes.Buffer
+	require.NoError(t, HelpPage(HelpView{UserEmail: "admin@example.com"}).Render(adminCtx, &buf))
+	assert.Contains(t, buf.String(), `<li class="nav-section">Admin</li>`)
+
+	memberCtx := h.sessionContext(context.Background(), controlPanelSession{
+		User: controlPanelUser{Email: "member@example.com"},
+	})
+	buf.Reset()
+	require.NoError(t, HelpPage(HelpView{UserEmail: "member@example.com"}).Render(memberCtx, &buf))
+	assert.NotContains(t, buf.String(), `<li class="nav-section">Admin</li>`)
+}
+
+func TestRateLimitsPage_should_show_tenant_name(t *testing.T) {
+	html := renderToString(t, RateLimitsPage(RateLimitsView{
+		TenantID:   7,
+		TenantName: "Acme Games",
+	}))
+
+	assert.Contains(t, html, "Acme Games")
+}
+
+func TestServerSettingsPage_should_hide_mail_network_and_control_panel_rows(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{Env: "prod", PlayersEnabled: true},
+	}))
+
+	assert.NotContains(t, html, "<h2>Mail</h2>")
+	assert.NotContains(t, html, "Network &amp; secrets")
+	assert.NotContains(t, html, "<dt>Control panel</dt>")
+	assert.Contains(t, html, "<dt>Players</dt>")
+	assert.Contains(t, html, "<dt>Fleet</dt>")
+	assert.Contains(t, html, "<dt>P2P relay</dt>")
+}
+
+func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) {
+	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
+		TenantID:        1,
+		TenantName:      "Acme",
+		IsPlatformAdmin: true,
+		AdminFeatureGrants: []AdminFeatureGrantView{
+			{Value: "relay", Label: "P2P relay", Enabled: true, EnvAllowed: true},
+			{Value: "fleet", Label: "Dedicated servers", Enabled: false, EnvAllowed: false},
+		},
+	}))
+
+	assert.Contains(t, html, "<th>Feature</th>")
+	assert.Contains(t, html, "P2P relay")
+	assert.Contains(t, html, ">Disable</button>")
+	assert.Contains(t, html, "server switch off")
+	assert.Contains(t, html, `class="secondary outline btn-inline"`)
+}
+
 func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {
 	html := renderToString(t, PlayerDetailPage(PlayerDetailView{
 		Player: PlayerView{ID: 3, AccountID: "9f1c2d3e-0000-0000-0000-000000000000"},

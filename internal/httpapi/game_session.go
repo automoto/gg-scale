@@ -62,6 +62,7 @@ type gameSessionResponse struct {
 	SessionID string      `json:"session_id"`
 	JoinCode  string      `json:"join_code"`
 	State     string      `json:"state"`
+	ExpiresAt time.Time   `json:"expires_at"`
 	Peers     []peerEntry `json:"peers"`
 }
 
@@ -256,6 +257,7 @@ func gameSessionCreate(d Deps) func(context.Context, *gameSessionCreateInput) (*
 			SessionID: created.SessionID,
 			JoinCode:  created.JoinCode,
 			State:     created.State,
+			ExpiresAt: created.ExpiresAt,
 			Peers:     buildPeerEntries(created.Peers),
 		}}, nil
 	}
@@ -331,7 +333,8 @@ func gameSessionGet(d Deps) func(context.Context, *gameSessionIDInput) (*gameSes
 		return &gameSessionOutput{Body: gameSessionResponse{
 			SessionID: sess.ID,
 			JoinCode:  sess.JoinCode,
-			State:     sess.State,
+			State:     gamesession.EffectiveState(sess.State, sess.ExpiresAt.Time),
+			ExpiresAt: sess.ExpiresAt.Time,
 			Peers:     buildPeerEntries(peers),
 		}}, nil
 	}
@@ -455,12 +458,16 @@ func gameSessionJoin(d Deps) func(context.Context, *gameSessionJoinInput) (*game
 			// A matchmade session starts on the short pending TTL; the first
 			// join proves the match is live, so promote it to a full lifetime.
 			if gamesession.IsMatchmade(sess.Props) {
+				promoted := pgtype.Timestamptz{Time: time.Now().Add(gamesession.DefaultTTL), Valid: true}
 				if qerr := q.ExtendGameSessionExpiry(ctx, sqlcgen.ExtendGameSessionExpiryParams{
-					ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(gamesession.DefaultTTL), Valid: true},
+					ExpiresAt: promoted,
 					ProjectID: projectID,
 					ID:        sessionID,
 				}); qerr != nil {
 					return qerr
+				}
+				if promoted.Time.After(sess.ExpiresAt.Time) {
+					sess.ExpiresAt = promoted
 				}
 			}
 			peers, qerr = q.ListGameSessionPeers(ctx, sessionID)
@@ -481,6 +488,7 @@ func gameSessionJoin(d Deps) func(context.Context, *gameSessionJoinInput) (*game
 			SessionID: sess.ID,
 			JoinCode:  sess.JoinCode,
 			State:     sess.State,
+			ExpiresAt: sess.ExpiresAt.Time,
 			Peers:     buildPeerEntries(peers),
 		}}, nil
 	}

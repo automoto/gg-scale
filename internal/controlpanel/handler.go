@@ -744,7 +744,7 @@ func (h *Handler) requireSession(next http.Handler) http.Handler {
 			http.Redirect(w, r, pathControlPanelLogin, http.StatusSeeOther)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(contextWithSession(r.Context(), session)))
+		next.ServeHTTP(w, r.WithContext(h.sessionContext(r.Context(), session)))
 	})
 }
 

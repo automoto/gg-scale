@@ -69,11 +69,12 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		// Show the compiled default for the tenant's actual tier — enforcement
 		// keys off the same tier, so a hardcoded free-tier default would mislead
 		// a paid tenant about what clearing the override restores.
-		tier, err := q.GetTenantTier(ctx, tenantID)
+		facts, err := q.GetTenantFacts(ctx, tenantID)
 		if err != nil {
 			return err
 		}
-		clamped := tenant.ClampTier(int(tier))
+		view.TenantName = facts.Name
+		clamped := tenant.ClampTier(int(facts.Tier))
 		defaults := ratelimit.LimitsForTier(clamped)
 		view.APIDefaultRate = defaults.RatePerSecond
 		view.APIDefaultBurst = defaults.Burst

@@ -82,6 +82,7 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 				ProjectID:   row.ProjectID,
 				ProjectName: stringValue(row.ProjectName),
 				Label:       stringValue(row.Label),
+				KeyType:     row.KeyType,
 				Scopes:      row.Scopes,
 			}
 			if row.CreatedAt.Valid {
@@ -501,6 +502,18 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 		return nil
 	}
 	return h.cache.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
+}
+
+// TypeLabel renders the key type for the key table.
+func (v APIKeyView) TypeLabel() string {
+	switch tenant.KeyType(v.KeyType) {
+	case tenant.KeyTypePublishable:
+		return "Publishable"
+	case tenant.KeyTypeSecret:
+		return "Secret"
+	default:
+		return v.KeyType
+	}
 }
 
 func stringValue(s *string) string {

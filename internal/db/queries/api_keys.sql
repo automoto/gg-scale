@@ -51,7 +51,7 @@ CROSS JOIN args
 RETURNING id, created_at;
 
 -- name: ListAPIKeys :many
-SELECT k.id, k.project_id, p.name AS project_name, k.label, k.scopes, k.created_at, k.revoked_at
+SELECT k.id, k.project_id, p.name AS project_name, k.label, k.key_type, k.scopes, k.created_at, k.revoked_at
 FROM api_keys k
 LEFT JOIN projects p ON p.id = k.project_id
 WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint

@@ -2,6 +2,7 @@
 package controlpanel
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -55,34 +56,20 @@ type Config struct {
 }
 
 // ServerSettingsSnapshot is the read-only view of server-wide configuration
-// rendered on the platform-admin server settings page. Secrets are represented
-// as "configured" booleans only — never their values.
+// rendered on the platform-admin server settings page. Mail, network, and
+// secret configuration stay out of it — operators read those from the
+// environment, not the panel.
 type ServerSettingsSnapshot struct {
 	Env      string
 	LogLevel string
 	HTTPAddr string
 
-	ControlPanelEnabled    bool
 	PlayersEnabled         bool
 	FeatureFleetEnabled    bool
 	FeatureP2PRelayEnabled bool
 
 	FleetBackend string
 	FleetRegion  string
-
-	MailProvider    string
-	SMTPAddr        string
-	SMTPUser        string
-	SMTPTLS         string
-	MailFrom        string
-	SMTPPasswordSet bool
-
-	CORSAllowedOrigins []string
-
-	// Secrets — presence only, never the value.
-	JWTConfigured      bool
-	RelaySecretSet     bool
-	DatabaseConfigured bool
 }
 
 // Enabled reports whether the control panel should be mounted.
@@ -162,6 +149,18 @@ func (n AppNav) IsActive(dest navDestination) bool {
 	return n.Active == dest
 }
 
+// isPlatformAdmin reports whether the Admin nav section renders. The request
+// context (set once in requireSession) is the source of truth so the section
+// shows on every page; the explicit flag keeps direct renders working.
+func (n AppNav) isPlatformAdmin(ctx context.Context) bool {
+	return n.IsPlatformAdmin || navFactsFromContext(ctx).IsPlatformAdmin
+}
+
+// pluginsEnabled mirrors isPlatformAdmin for the Plugins nav entry.
+func (n AppNav) pluginsEnabled(ctx context.Context) bool {
+	return n.PluginsEnabled || navFactsFromContext(ctx).PluginsEnabled
+}
+
 // HomeView is the data rendered by the control panel landing page.
 type HomeView struct {
 	UserEmail       string
@@ -195,8 +194,10 @@ type APIKeyView struct {
 	ProjectID   *int64
 	ProjectName string
 	Label       string
-	CreatedAt   time.Time
-	RevokedAt   *time.Time
+	// KeyType is "publishable" or "secret" (tenant.KeyType values).
+	KeyType   string
+	CreatedAt time.Time
+	RevokedAt *time.Time
 	// Scopes are the per-key feature grants currently set (e.g. "fleet",
 	// "p2p_relay").
 	Scopes []string
@@ -298,6 +299,7 @@ type RateLimitsView struct {
 	UserEmail       string
 	CSRFToken       string
 	TenantID        int64
+	TenantName      string
 	IsPlatformAdmin bool
 	// API HTTP limit (tenant-wide, platform-admin editable).
 	APIOverridden   bool
@@ -1027,10 +1029,6 @@ func orDash(s string) string {
 		return "—"
 	}
 	return s
-}
-
-func joinComma(s []string) string {
-	return strings.Join(s, ", ")
 }
 
 // projectSettingsPathTpl builds the redirect_to target so a reused settings

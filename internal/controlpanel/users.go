@@ -50,6 +50,31 @@ func sessionFromContext(ctx context.Context) (controlPanelSession, bool) {
 	return session, ok
 }
 
+const navFactsContextKey contextKey = "control-panel-nav-facts"
+
+// navFacts are request-scoped chrome facts derived once per request so nav
+// rendering does not depend on which AppNav flags a page's view remembers to
+// set.
+type navFacts struct {
+	IsPlatformAdmin bool
+	PluginsEnabled  bool
+}
+
+// sessionContext installs the session and the nav facts every authenticated
+// render path needs. requireSession is the only production caller.
+func (h *Handler) sessionContext(ctx context.Context, session controlPanelSession) context.Context {
+	ctx = contextWithSession(ctx, session)
+	return context.WithValue(ctx, navFactsContextKey, navFacts{
+		IsPlatformAdmin: session.User.IsPlatformAdmin,
+		PluginsEnabled:  h.pluginInfo != nil,
+	})
+}
+
+func navFactsFromContext(ctx context.Context) navFacts {
+	facts, _ := ctx.Value(navFactsContextKey).(navFacts)
+	return facts
+}
+
 func (h *Handler) controlPanelQ(ctx context.Context, controlPanelUserID int64, fn func(pgx.Tx) error) error {
 	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.control_panel_user_id', $1, true)", stringFromInt(controlPanelUserID)); err != nil {

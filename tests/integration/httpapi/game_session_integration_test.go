@@ -238,6 +238,54 @@ func TestGameSession_expired_not_joinable(t *testing.T) {
 	assert.Equal(t, http.StatusGone, resp.StatusCode, string(body))
 }
 
+func TestGameSession_expired_session_not_open_on_get(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	ctx := context.Background()
+	// The caller is the host so the member-only roster check admits them.
+	tok, hostID := anonymousLoginWithID(t, srv.URL, "k")
+	_, err := c.bootstrapPool.Exec(ctx,
+		`INSERT INTO game_session (id, join_code, tenant_id, project_id, host_player_id, state, props, max_players, expires_at)
+		 VALUES ('gs_getexp', 'GX1234', $1, $2, $3, 'open', '{}', 4, now() - interval '1 hour')`,
+		tenantID, projectID, hostID)
+	require.NoError(t, err)
+
+	resp, body := authedReq(t, http.MethodGet,
+		srv.URL+"/v1/game-session/gs_getexp", "k", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var out struct {
+		State     string    `json:"state"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, "expired", out.State,
+		"a session past expires_at must not read as open")
+	assert.False(t, out.ExpiresAt.IsZero(), "GET must return expires_at")
+}
+
+func TestGameSession_get_returns_expires_at_for_live_session(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	srv := newServerForCluster(t, c)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "k")
+	sess := createSession(t, srv.URL, "k", tok, 2)
+
+	resp, body := authedReq(t, http.MethodGet,
+		srv.URL+"/v1/game-session/"+sess.SessionID, "k", tok, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var out struct {
+		State     string    `json:"state"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+	require.NoError(t, json.Unmarshal(body, &out))
+	assert.Equal(t, "open", out.State)
+	assert.Greater(t, time.Until(out.ExpiresAt), 30*time.Minute,
+		"a fresh session's expiry must be in the future")
+}
+
 func TestGameSession_join_extends_matchmade_expiry(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
