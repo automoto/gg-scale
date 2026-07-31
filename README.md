@@ -5,7 +5,7 @@ Open-source, self-hostable backend for multiplayer games. One Go binary and a Po
 ## Local Development & Quickstart
 
 ```bash
-git clone --recurse-submodules https://github.com/automoto/gg-scale.git
+git clone https://github.com/automoto/gg-scale.git
 cd gg-scale
 make up
 curl -s localhost:8080/v1/healthz
@@ -30,9 +30,22 @@ Run `make help` for the full list.
 | Target | What it does |
 |---|---|
 | `make up` / `make down` / `make clean` | Basic dev stack (server + Postgres + SMTP). |
-| `make up-fleet-docker` / `make down-fleet-docker` | Fleet feature with the Docker backend. |
 | `make test` | Unit tests with `-race`. |
+| `make test-integration` | Integration tests (Postgres via testcontainers). |
+| `make e2e` | End-to-end suite against the running `make up` stack. |
 | `make check` | Lint + unit tests, same gate as CI. |
+
+## Testing
+
+This repo is self-contained: every test target above runs with only Docker
+and this checkout, and covers the GA feature set — auth and players, game
+sessions and signaling, matchmaking, P2P relay, saves/storage, leaderboards,
+friends and invites, and the control panel.
+
+The game-server **fleet** feature is beta and not part of GA. Its
+self-contained Docker backend is still here (`make up-fleet-docker`,
+`make e2e-docker`); the k3s + Agones stack and cluster e2e tests live in the
+bw-ops repo (`dev/fleet-agones/`).
 
 ## Documentation
 

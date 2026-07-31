@@ -1,3 +1,0 @@
-[submodule "infra"]
-	path = infra
-	url = git@github.com:automoto/gg-scale-infra.git

@@ -3,18 +3,14 @@
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-fleet-docker down-fleet-docker \
-	up-fleet-agones down-fleet-agones agones-install \
 	up-full down-full \
 	docker-image docker-push \
-	preflight preflight-k8s clean clean-full
+	preflight clean clean-full
 
 .DEFAULT_GOAL := help
 
 FLEET_DOCKER_STACK := docker compose -f compose/fleet-docker.yml
 FULL_STACK         := docker compose -f compose/full.yml
-GGSCALE_INFRA_DIR ?= infra
-GGSCALE_INFRA_ABS := $(abspath $(GGSCALE_INFRA_DIR))
-FLEET_AGONES_STACK := GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) docker compose -f compose/fleet-agones.yml
 
 # Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
 DOCKER_IMAGE ?= buildwrangler/ggscale
@@ -53,7 +49,9 @@ e2e: ## End-to-end suite; run after the relevant `make up-*`
 e2e-docker: ## Docker fleet-backend test against the local daemon
 	go test -race -tags=integration -timeout=180s ./tests/integration/fleet/docker/...
 
-e2e-agones: ## Agones smoke test; after `make up-fleet-agones agones-install`
+# Needs a live k3s+Agones cluster: run the bw-ops dev/fleet-agones stack
+# first (the fleet feature is beta, not part of GA).
+e2e-agones: ## Beta: Agones backend test against a live cluster
 	AGONES_E2E=1 go test -tags=agones_e2e -timeout=180s ./tests/integration/fleet/agones/...
 
 # Already included in `make test-integration`; exists so the plugin path can
@@ -130,26 +128,15 @@ migrate-new: ## New migration pair: make migrate-new NAME=<descriptor>
 clean: ## Stop the basic stack and delete its volumes
 	docker compose down -v --remove-orphans
 
-# ─── Fleet feature: Docker backend ──────────────────────────────────────
+# ─── Fleet feature (beta, not part of GA): Docker backend ───────────────
+# The k3s + Agones fleet stack and its e2e tests live in the bw-ops repo
+# (dev/fleet-agones/) — they depend on external manifests and clusters.
 
-up-fleet-docker: preflight ## Basic stack + FLEET_BACKEND=docker
+up-fleet-docker: preflight ## Beta: basic stack + FLEET_BACKEND=docker
 	$(FLEET_DOCKER_STACK) up -d --wait
 
-down-fleet-docker: ## Stop the Docker-fleet stack
+down-fleet-docker: ## Beta: stop the Docker-fleet stack
 	$(FLEET_DOCKER_STACK) down --remove-orphans
-
-# ─── Fleet feature: k3s + Agones backend ────────────────────────────────
-
-up-fleet-agones: preflight-k8s ## Basic stack + k3s (macOS: Colima required)
-	mkdir -p .k3s
-	$(FLEET_AGONES_STACK) up -d --wait k3s
-
-down-fleet-agones: ## Stop the Agones stack and delete .k3s state
-	$(FLEET_AGONES_STACK) down --remove-orphans
-	rm -rf .k3s
-
-agones-install: ## Install the Agones controller into the k3s cluster
-	$(FLEET_AGONES_STACK) run --rm agones-install
 
 # ─── Full dev stack (prometheus + docker fleet) ─────────────────────────
 
@@ -184,6 +171,3 @@ docker-push: ## Build and push a multi-arch ($(PLATFORMS)) manifest to Docker Hu
 
 preflight: ## Verify docker daemon + .env before `up`
 	@bash scripts/preflight.sh
-
-preflight-k8s: ## Preflight plus Agones-profile checks (macOS: Colima)
-	@GGSCALE_INFRA_DIR=$(GGSCALE_INFRA_ABS) bash scripts/preflight.sh k8s

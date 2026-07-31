@@ -27,10 +27,11 @@ import (
 // build tag *and* the AGONES_E2E env var so accidental `go test ./...`
 // invocations don't surprise developers without a cluster.
 //
-// Setup:
+// Setup: run the bw-ops dev/fleet-agones compose stack (the fleet feature
+// is beta; its cluster tooling lives in bw-ops), point KUBECONFIG at its
+// kubeconfig, then:
 //
-//	make up-k8s && make agones-install
-//	AGONES_E2E=1 go test -tags=agones_e2e ./internal/fleet/agones/
+//	AGONES_E2E=1 go test -tags=agones_e2e ./tests/integration/fleet/agones/
 func TestBackend_RealCluster_Allocate_to_Deallocate(t *testing.T) {
 	if os.Getenv("AGONES_E2E") == "" {
 		t.Skip("AGONES_E2E not set")
@@ -149,7 +150,7 @@ func kubeconfigOrSkip(t *testing.T) string {
 	abs, err := filepath.Abs(filepath.Join("..", "..", "..", "..", ".k3s", "kubeconfig.yaml"))
 	require.NoError(t, err)
 	if _, err := os.Stat(abs); err != nil {
-		t.Skipf("kubeconfig not found at %s; run make up-k8s && make agones-install", abs)
+		t.Skipf("kubeconfig not found at %s; run the bw-ops dev/fleet-agones stack and set KUBECONFIG", abs)
 	}
 	return abs
 }
