@@ -800,12 +800,12 @@ func newDBPool(ctx context.Context, url string, maxConns, minConns int, cfg *con
 // buildFleet wires the configured fleet backend. Returns (nil, nil, nil) when
 // the operator hasn't configured one yet — the server still boots and the
 // matchmaker (M6) will surface a "not implemented" error to callers. Real
-// startup failures (invalid backend name, docker reachable but missing
-// image, plugin binary missing, …) return a non-nil error and abort startup.
+// startup failures (invalid backend name, cluster unreachable, plugin binary
+// missing, …) return a non-nil error and abort startup.
 //
 // The optional io.Closer is non-nil for plugin backends; the caller defers
 // Close() so the subprocess is reaped on shutdown. In-process backends
-// (docker, agones) return a nil closer.
+// (agones) return a nil closer.
 func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
 	if !cfg.FeatureFleetEnabled {
 		logger.Warn("fleet disabled: FEATURE_FLEET_ENABLED=false; matchmaker will reject Allocate")
@@ -816,24 +816,15 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		return nil, nil, nil
 	}
 
-	nanoCPUs := int64(cfg.DockerDefaultCPUs * 1e9)
 	backend, err := fleetbuild.New(fleetbuild.Config{
-		Backend:                 cfg.FleetBackend,
-		Region:                  cfg.FleetRegion,
-		PluginDir:               cfg.FleetPluginDir,
-		GameServerIP:            cfg.GameServerPublicIP,
-		DockerHost:              cfg.DockerHost,
-		AgonesNS:                cfg.AgonesNamespace,
-		AgonesKubecfg:           cfg.AgonesKubeconfig,
-		K3sAPIURL:               cfg.K3sAPIURL,
-		K3sSAToken:              cfg.K3sSAToken,
-		K3sCACertB64:            cfg.K3sCACertB64,
-		DockerBindIP:            cfg.DockerBindIP,
-		DockerDefaultMemory:     cfg.DockerDefaultMemory,
-		DockerDefaultNanoCPUs:   nanoCPUs,
-		DockerDefaultPids:       cfg.DockerDefaultPids,
-		DockerRegistryAllowlist: cfg.DockerRegistryAllowlist,
-		DockerRequireDigest:     cfg.DockerRequireDigest,
+		Backend:       cfg.FleetBackend,
+		Region:        cfg.FleetRegion,
+		PluginDir:     cfg.FleetPluginDir,
+		AgonesNS:      cfg.AgonesNamespace,
+		AgonesKubecfg: cfg.AgonesKubeconfig,
+		K3sAPIURL:     cfg.K3sAPIURL,
+		K3sSAToken:    cfg.K3sSAToken,
+		K3sCACertB64:  cfg.K3sCACertB64,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("fleet: %w", err)
@@ -853,8 +844,8 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 
 // pluginInfoFromCloser returns a snapshot closure for the control panel's
 // admin/plugins page when the fleet backend is a plugin supervisor. Returns
-// nil for non-plugin backends (docker, agones), in which case the page
-// renders "no plugin backend configured".
+// nil for non-plugin backends (agones), in which case the page renders
+// "no plugin backend configured".
 func pluginInfoFromCloser(ctx context.Context, mgr *fleet.Manager, closer io.Closer) func() *controlpanel.PluginSnapshot {
 	sup, ok := closer.(*fleetplugin.Supervisor)
 	if !ok {

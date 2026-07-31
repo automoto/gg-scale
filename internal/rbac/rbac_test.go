@@ -291,7 +291,7 @@ func TestFeatureEnabled_denies_by_default(t *testing.T) {
 	// A fresh authorizer with no feature_grants backing store must deny every
 	// high-risk feature — the entitlement layer is deny-by-default.
 	a := newAuthorizer(t)
-	for _, f := range []rbac.Feature{rbac.FeatureP2PRelay, rbac.FeatureDedicatedServers, rbac.FeatureFleetDockerBackend} {
+	for _, f := range []rbac.Feature{rbac.FeatureP2PRelay, rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend} {
 		enabled, err := a.FeatureEnabled(t.Context(), 7, 99, f)
 		require.NoError(t, err)
 		assert.False(t, enabled, "feature %q must be off until a feature_grants row enables it", f)
@@ -342,7 +342,6 @@ func TestBackendFeature_maps_backend_names(t *testing.T) {
 		want    rbac.Feature
 		ok      bool
 	}{
-		{"docker", rbac.FeatureFleetDockerBackend, true},
 		{"agones", rbac.FeatureFleetAgonesBackend, true},
 		{"plugin:ovh", rbac.FeatureFleetPluginBackend, true},
 		{"memory", "", false},

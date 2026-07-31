@@ -102,8 +102,8 @@ type Deps struct {
 	Now     func() time.Time
 
 	// Fleet is the allocator for game-server slots. nil until a backend is
-	// wired in M2 (Docker) and onward. The matchmaker (M6) checks for nil
-	// and degrades to a not-implemented error when unset.
+	// wired. The matchmaker checks for nil and degrades to a not-implemented
+	// error when unset.
 	Fleet *fleet.Manager
 
 	// Hub fans WS messages out to connected players. nil disables /v1/ws.

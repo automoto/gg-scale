@@ -180,8 +180,8 @@ func TestControlPanelConfirmFormsUseDataAttributes(t *testing.T) {
 			name: "edit fleet",
 			page: EditFleetPage(EditFleetView{
 				TenantID: 1, ProjectID: 2, FleetID: 5, Name: "primary",
-				Backend: "docker", BackendConfigured: "docker",
-				Config: map[string]string{"image": "x:1", "port": "80"},
+				Backend: "agones", BackendConfigured: "agones",
+				Config: map[string]string{"fleet_name": "doomerang"},
 			}),
 		},
 	}

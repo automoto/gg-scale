@@ -118,7 +118,6 @@ func TestMigrations_feature_grants_check_allows_every_code_feature(t *testing.T)
 	features := []rbac.Feature{
 		rbac.FeatureP2PRelay,
 		rbac.FeatureDedicatedServers,
-		rbac.FeatureFleetDockerBackend,
 		rbac.FeatureFleetAgonesBackend,
 		rbac.FeatureFleetPluginBackend,
 		rbac.FeatureMatchmaker,

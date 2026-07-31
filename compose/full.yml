@@ -1,7 +1,7 @@
 # Full development stack.
 #
-# Builds on the Docker fleet backend (`compose/fleet-docker.yml`) and adds
-# Prometheus for metrics scraping.
+# Builds on the base stack (`docker-compose.yml`) and adds Prometheus for
+# metrics scraping.
 #
 # Usage:
 #   make up-full
@@ -17,7 +17,7 @@
 name: ggscale
 
 include:
-  - path: ./fleet-docker.yml
+  - path: ../docker-compose.yml
 
 services:
 

@@ -9,7 +9,7 @@ import (
 
 func TestFleetsListPage_renders_empty_state_when_no_fleets(t *testing.T) {
 	html := renderToString(t, FleetsListPage(FleetsListView{
-		TenantID: 1, ProjectID: 2, BackendConfigured: "docker", Enabled: true,
+		TenantID: 1, ProjectID: 2, BackendConfigured: "agones", Enabled: true,
 	}))
 	assert.Contains(t, html, "Create your first fleet")
 	assert.NotContains(t, html, "<table")
@@ -24,26 +24,26 @@ func TestFleetsListPage_renders_disabled_state_when_no_backend(t *testing.T) {
 
 func TestFleetsListPage_lists_fleets_with_backend_mismatch_marker(t *testing.T) {
 	html := renderToString(t, FleetsListPage(FleetsListView{
-		TenantID: 1, ProjectID: 2, BackendConfigured: "docker", Enabled: true,
+		TenantID: 1, ProjectID: 2, BackendConfigured: "agones", Enabled: true,
 		Fleets: []FleetRowView{
-			{ID: 1, Name: "primary", Backend: "docker", BackendMatches: true, Summary: "traefik/whoami :80"},
-			{ID: 2, Name: "stale", Backend: "agones", BackendMatches: false, Summary: "doomerang"},
+			{ID: 1, Name: "primary", Backend: "agones", BackendMatches: true, Summary: "doomerang"},
+			{ID: 2, Name: "stale", Backend: "plugin:ovh", BackendMatches: false, Summary: "flavor=b2-7"},
 		},
 	}))
 	assert.Contains(t, html, "primary")
-	assert.Contains(t, html, "traefik/whoami :80")
+	assert.Contains(t, html, "doomerang")
 	assert.Contains(t, html, "stale")
 	assert.Contains(t, html, "not active")
 }
 
-func TestNewFleetPage_renders_docker_fields_by_default(t *testing.T) {
+func TestNewFleetPage_renders_agones_fields_by_default(t *testing.T) {
 	html := renderToString(t, NewFleetPage(NewFleetView{
-		TenantID: 1, ProjectID: 2, BackendConfigured: "docker", Backend: "docker",
+		TenantID: 1, ProjectID: 2, BackendConfigured: "agones", Backend: "",
 	}))
-	assert.Contains(t, html, `name="image"`)
-	assert.Contains(t, html, `name="port"`)
-	assert.Contains(t, html, `name="probe_type"`)
-	assert.NotContains(t, html, `name="fleet_name"`)
+	assert.Contains(t, html, `name="fleet_name"`)
+	assert.Contains(t, html, `name="namespace"`)
+	assert.Contains(t, html, `name="selector_key[]"`)
+	assert.NotContains(t, html, `name="image"`)
 }
 
 func TestNewFleetPage_renders_agones_fields_when_selected(t *testing.T) {
@@ -67,16 +67,16 @@ func TestNewFleetPage_renders_plugin_fields_when_selected(t *testing.T) {
 
 func TestNewFleetPage_shows_field_errors(t *testing.T) {
 	html := renderToString(t, NewFleetPage(NewFleetView{
-		TenantID: 1, ProjectID: 2, Backend: "docker",
-		FieldErrors: map[string]string{"image": "Image is required."},
+		TenantID: 1, ProjectID: 2, Backend: "agones",
+		FieldErrors: map[string]string{"fleet_name": "Fleet name is required."},
 	}))
-	assert.Contains(t, html, "Image is required.")
+	assert.Contains(t, html, "Fleet name is required.")
 }
 
 func TestEditFleetPage_warns_when_backend_does_not_match_configured(t *testing.T) {
 	html := renderToString(t, EditFleetPage(EditFleetView{
 		TenantID: 1, ProjectID: 2, FleetID: 5,
-		Name: "stale", Backend: "agones", BackendConfigured: "docker",
+		Name: "stale", Backend: "agones", BackendConfigured: "plugin:ovh",
 		Config: map[string]string{"fleet_name": "doomerang"},
 	}))
 	assert.Contains(t, html, "does not match configured backend")
@@ -86,45 +86,11 @@ func TestEditFleetPage_warns_when_backend_does_not_match_configured(t *testing.T
 func TestEditFleetPage_renders_delete_form(t *testing.T) {
 	html := renderToString(t, EditFleetPage(EditFleetView{
 		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "primary",
-		Backend: "docker", BackendConfigured: "docker",
-		Config: map[string]string{"image": "x:1", "port": "80"},
+		Backend: "agones", BackendConfigured: "agones",
+		Config: map[string]string{"fleet_name": "doomerang"},
 	}))
 	assert.Contains(t, html, "/delete")
 	assert.Contains(t, html, "Delete fleet")
-}
-
-func TestParseFleetConfigForm_docker_requires_image_and_port(t *testing.T) {
-	cfg, errs := parseFleetConfigForm("docker", url.Values{})
-	assert.Equal(t, "", cfg["image"])
-	assert.Contains(t, errs, "image")
-	assert.Contains(t, errs, "port")
-}
-
-func TestParseFleetConfigForm_docker_rejects_invalid_port(t *testing.T) {
-	cases := []string{"0", "-1", "abc", "99999"}
-	for _, p := range cases {
-		_, errs := parseFleetConfigForm("docker", url.Values{
-			"image": {"x:1"},
-			"port":  {p},
-		})
-		assert.Contains(t, errs, "port", p)
-	}
-}
-
-func TestParseFleetConfigForm_docker_passes_with_valid_inputs(t *testing.T) {
-	cfg, errs := parseFleetConfigForm("docker", url.Values{
-		"image":      {"traefik/whoami:latest"},
-		"port":       {"80"},
-		"probe_type": {"http"},
-		"probe_path": {"/healthz"},
-		"pull_image": {"on"},
-	})
-	assert.Empty(t, errs)
-	assert.Equal(t, "traefik/whoami:latest", cfg["image"])
-	assert.Equal(t, "80", cfg["port"])
-	assert.Equal(t, "http", cfg["probe_type"])
-	assert.Equal(t, "/healthz", cfg["probe_path"])
-	assert.Equal(t, "true", cfg["pull_image"])
 }
 
 func TestParseFleetConfigForm_agones_requires_fleet_name(t *testing.T) {
@@ -170,21 +136,20 @@ func TestParseFleetConfigForm_plugin_passes_arbitrary_kv(t *testing.T) {
 
 func TestSummarizeFleetConfig_per_backend(t *testing.T) {
 	assert.Equal(t,
-		"traefik/whoami:latest :80",
-		summarizeFleetConfig("docker", map[string]string{"image": "traefik/whoami:latest", "port": "80"}),
-	)
-	assert.Equal(t,
 		"doomerang",
 		summarizeFleetConfig("agones", map[string]string{"fleet_name": "doomerang"}),
+	)
+	assert.Equal(t,
+		"flavor=b2-7",
+		summarizeFleetConfig("plugin:ovh", map[string]string{"flavor": "b2-7"}),
 	)
 }
 
 func TestFleetBackendKind_buckets_plugin_variants(t *testing.T) {
-	assert.Equal(t, "docker", fleetBackendKind("docker"))
 	assert.Equal(t, "agones", fleetBackendKind("agones"))
 	assert.Equal(t, "plugin", fleetBackendKind("plugin"))
 	assert.Equal(t, "plugin", fleetBackendKind("plugin:ovh"))
-	assert.Equal(t, "docker", fleetBackendKind(""))
+	assert.Equal(t, "agones", fleetBackendKind(""))
 }
 
 func TestFleetSelectorLabels_strips_prefix(t *testing.T) {
@@ -199,13 +164,13 @@ func TestFleetSelectorLabels_strips_prefix(t *testing.T) {
 func TestEditToNewFleetView_projects_fields(t *testing.T) {
 	got := editToNewFleetView(EditFleetView{
 		TenantID: 1, ProjectID: 2, FleetID: 99,
-		Name: "n", Backend: "docker", Config: map[string]string{"image": "x"},
+		Name: "n", Backend: "agones", Config: map[string]string{"fleet_name": "doomerang"},
 		FieldErrors: map[string]string{"name": "required"},
 	})
 	assert.Equal(t, int64(1), got.TenantID)
 	assert.Equal(t, int64(2), got.ProjectID)
-	assert.Equal(t, "docker", got.Backend)
-	assert.Equal(t, "x", got.Config["image"])
+	assert.Equal(t, "agones", got.Backend)
+	assert.Equal(t, "doomerang", got.Config["fleet_name"])
 	assert.Contains(t, got.FieldErrors, "name")
 }
 
@@ -222,8 +187,8 @@ func TestNewFleetAllocationPage_renders_fleet_dropdown_with_mismatch_marker(t *t
 	html := renderToString(t, NewFleetAllocationPage(NewAllocationView{
 		TenantID: 1, ProjectID: 2, Enabled: true,
 		Fleets: []FleetOption{
-			{ID: 1, Name: "primary", Backend: "docker", BackendMatches: true},
-			{ID: 2, Name: "stale", Backend: "agones", BackendMatches: false, BackendConfigured: "docker"},
+			{ID: 1, Name: "primary", Backend: "agones", BackendMatches: true},
+			{ID: 2, Name: "stale", Backend: "plugin:ovh", BackendMatches: false, BackendConfigured: "agones"},
 		},
 	}))
 	assert.Contains(t, html, `name="fleet"`)

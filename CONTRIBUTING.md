@@ -14,9 +14,9 @@ All make targets use plain `docker` / `docker compose`; any Docker engine works
 4. `curl localhost:8080/v1/healthz` should return `200`.
 5. `make e2e` runs the end-to-end suite.
 
-**Fleet feature (beta, not part of GA):** the k3s + Agones dev stack will be in a seperate repo). This repo's dev
-tooling covers the GA features; the self-contained Docker fleet backend is
-still available via `make up-fleet-docker` for beta work.
+**Fleet feature (beta, not part of GA):** the k3s + Agones dev stack lives in
+a separate repo. This repo's dev tooling covers the GA features; the fleet
+feature ships only via the Agones and plugin backends.
 
 See `docs/ARCHITECTURE.md` for what's actually running.
 

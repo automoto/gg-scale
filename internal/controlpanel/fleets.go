@@ -342,37 +342,12 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 // Returns field-level errors for required-field violations.
 func parseFleetConfigForm(backend string, form url.Values) (map[string]string, map[string]string) {
 	switch backend {
-	case "docker":
-		return parseDockerFleetConfig(form)
 	case "agones":
 		return parseAgonesFleetConfig(form)
 	default:
 		// plugin:<name> — free-form key/value pairs.
 		return parsePluginFleetConfig(form)
 	}
-}
-
-func parseDockerFleetConfig(form url.Values) (map[string]string, map[string]string) {
-	cfg := map[string]string{
-		"image":      strings.TrimSpace(form.Get("image")),
-		"port":       strings.TrimSpace(form.Get("port")),
-		"probe_type": strings.TrimSpace(form.Get("probe_type")),
-		"probe_path": strings.TrimSpace(form.Get("probe_path")),
-	}
-	if form.Get("pull_image") == "on" || form.Get("pull_image") == "true" {
-		cfg["pull_image"] = "true"
-	}
-	errs := map[string]string{}
-	if cfg["image"] == "" {
-		errs["image"] = "Image is required."
-	}
-	switch n, err := strconv.Atoi(cfg["port"]); {
-	case cfg["port"] == "":
-		errs["port"] = "Port is required."
-	case err != nil || n <= 0 || n > 65535:
-		errs["port"] = "Port must be a number between 1 and 65535."
-	}
-	return cfg, errs
 }
 
 func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]string) {
@@ -440,8 +415,6 @@ const fleetFormKeyOrValueLenCap = 256
 // operators can scan templates without opening each one.
 func summarizeFleetConfig(backend string, cfg map[string]string) string {
 	switch backend {
-	case "docker":
-		return cfg["image"] + " :" + cfg["port"]
 	case "agones":
 		return cfg["fleet_name"]
 	default:

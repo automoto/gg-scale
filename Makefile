@@ -1,16 +1,14 @@
-.PHONY: help build fmt test test-integration test-plugins e2e e2e-docker e2e-agones \
+.PHONY: help build fmt test test-integration test-plugins e2e e2e-agones \
 	lint check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
-	up-fleet-docker down-fleet-docker \
 	up-full down-full \
 	docker-image docker-push \
 	preflight clean clean-full
 
 .DEFAULT_GOAL := help
 
-FLEET_DOCKER_STACK := docker compose -f compose/fleet-docker.yml
-FULL_STACK         := docker compose -f compose/full.yml
+FULL_STACK := docker compose -f compose/full.yml
 
 # Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
 DOCKER_IMAGE ?= buildwrangler/ggscale
@@ -43,11 +41,6 @@ test-integration: ## Integration tests (Postgres via testcontainers; needs Docke
 
 e2e: ## End-to-end suite; run after the relevant `make up-*`
 	go test -race -tags=e2e -timeout=180s ./tests/e2e/...
-
-# Requires a reachable Docker daemon and network access to pull
-# traefik/whoami on first run.
-e2e-docker: ## Docker fleet-backend test against the local daemon
-	go test -race -tags=integration -timeout=180s ./tests/integration/fleet/docker/...
 
 # Needs a live k3s+Agones cluster: run the bw-ops dev/fleet-agones stack
 # first (the fleet feature is beta, not part of GA).
@@ -128,19 +121,13 @@ migrate-new: ## New migration pair: make migrate-new NAME=<descriptor>
 clean: ## Stop the basic stack and delete its volumes
 	docker compose down -v --remove-orphans
 
-# ─── Fleet feature (beta, not part of GA): Docker backend ───────────────
+# ─── Fleet feature (beta, not part of GA) ───────────────────────────────
 # The k3s + Agones fleet stack and its e2e tests live in the bw-ops repo
 # (dev/fleet-agones/) — they depend on external manifests and clusters.
 
-up-fleet-docker: preflight ## Beta: basic stack + FLEET_BACKEND=docker
-	$(FLEET_DOCKER_STACK) up -d --wait
+# ─── Full dev stack (base + prometheus) ─────────────────────────────────
 
-down-fleet-docker: ## Beta: stop the Docker-fleet stack
-	$(FLEET_DOCKER_STACK) down --remove-orphans
-
-# ─── Full dev stack (prometheus + docker fleet) ─────────────────────────
-
-up-full: preflight ## Contributor stack: Docker fleet + Prometheus
+up-full: preflight ## Contributor stack: base + Prometheus
 	$(FULL_STACK) up -d --wait
 
 down-full: ## Stop the full stack

@@ -131,7 +131,7 @@ func (h *Handler) featureEnabledByEnv(feature string) bool {
 	switch feature {
 	case "p2p_relay":
 		return h.cfg.RelayEnabled
-	case "dedicated_servers", "fleet_docker_backend", "fleet_agones_backend", "fleet_plugin_backend":
+	case "dedicated_servers", "fleet_agones_backend", "fleet_plugin_backend":
 		return h.cfg.FleetEnabled
 	default:
 		return false

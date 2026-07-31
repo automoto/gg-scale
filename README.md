@@ -42,10 +42,10 @@ and this checkout, and covers the GA feature set — auth and players, game
 sessions and signaling, matchmaking, P2P relay, saves/storage, leaderboards,
 friends and invites, and the control panel.
 
-The game-server **fleet** feature is beta and not part of GA. Its
-self-contained Docker backend is still here (`make up-fleet-docker`,
-`make e2e-docker`); the k3s + Agones stack and cluster e2e tests live in the
-bw-ops repo (`dev/fleet-agones/`).
+The game-server **fleet** feature is beta and not part of GA. It ships only
+via the Agones and plugin backends that spin up game servers on separate
+instances; the k3s + Agones stack and cluster e2e tests live in the bw-ops
+repo (`dev/fleet-agones/`).
 
 ## Documentation
 

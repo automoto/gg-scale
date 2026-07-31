@@ -76,8 +76,8 @@ type Manager struct {
 // NewManager wires a Manager around the provided allocation store, fleet
 // template store, and backend. The backend's Name() is matched against each
 // fleet's stored backend on Allocate; mismatches fail closed so an operator
-// running ggscale with FLEET_BACKEND=docker can't accidentally route
-// allocations through an Agones template.
+// running ggscale with FLEET_BACKEND=agones can't accidentally route
+// allocations through a plugin template.
 func NewManager(store Store, fleets FleetStore, backend Backend, opts ManagerOptions) *Manager {
 	cfg := opts
 	if cfg.Clock == nil {

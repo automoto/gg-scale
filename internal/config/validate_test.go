@@ -154,45 +154,6 @@ func TestValidateRejectsShortMetricsToken(t *testing.T) {
 	assert.ErrorContains(t, err, "METRICS_AUTH_TOKEN must be >= 32 bytes")
 }
 
-func TestValidateRequiresDigestPinForDockerProd(t *testing.T) {
-	c := baseProd()
-	c.FleetBackend = "docker"
-	c.DockerRequireDigest = false
-	err := c.Validate()
-	assert.ErrorContains(t, err, "DOCKER_REQUIRE_DIGEST")
-}
-
-func TestValidateAcceptsDigestPinForDockerProd(t *testing.T) {
-	c := baseProd()
-	c.FleetBackend = "docker"
-	c.DockerRequireDigest = true
-	c.DockerRegistryAllowlist = []string{"ghcr.io/acme"}
-	assert.NoError(t, c.Validate())
-}
-
-func TestValidateRequiresRegistryAllowlistForDockerProd(t *testing.T) {
-	tests := []struct {
-		name      string
-		allowlist []string
-	}{
-		{name: "missing"},
-		{name: "blank", allowlist: []string{"  "}},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			c := baseProd()
-			c.FleetBackend = "docker"
-			c.DockerRequireDigest = true
-			c.DockerRegistryAllowlist = tc.allowlist
-
-			err := c.Validate()
-
-			assert.ErrorContains(t, err, "DOCKER_REGISTRY_ALLOWLIST")
-		})
-	}
-}
-
 func TestValidateRequiresPoolMinimum(t *testing.T) {
 	c := baseProd()
 	c.DBMaxConns = 2
@@ -317,9 +278,7 @@ func TestValidateRelayURLsNotRequiredWithoutSecret(t *testing.T) {
 func TestValidateRejectsFleetBackendWhileFeatureOff(t *testing.T) {
 	c := baseProd()
 	c.FeatureFleetEnabled = false
-	c.FleetBackend = "docker"
-	c.DockerRequireDigest = true
-	c.GameServerPublicIP = "203.0.113.5"
+	c.FleetBackend = "agones"
 	err := c.Validate()
 	assert.ErrorContains(t, err, "FEATURE_FLEET_ENABLED")
 }

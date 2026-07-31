@@ -10,17 +10,6 @@ import (
 	"time"
 )
 
-func isLoopbackOrLinkLocal(s string) bool {
-	if s == "" {
-		return false
-	}
-	ip := net.ParseIP(s)
-	if ip == nil {
-		return false
-	}
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
-}
-
 // IsProduction reports whether the deployment environment is production, accepting
 // both "production" and the "prod" shorthand, case-insensitively.
 func (c *Config) IsProduction() bool {
@@ -294,25 +283,7 @@ func (c *Config) checkProductionPosture() error {
 	if !c.MetricsAuthDisabled && c.MetricsAuthToken == "" {
 		return fmt.Errorf("METRICS_AUTH_TOKEN (or _FILE) must be set in production; set METRICS_AUTH_DISABLED=true to explicitly serve /metrics unauthenticated")
 	}
-	if c.FleetBackend == "docker" && !c.DockerRequireDigest {
-		return fmt.Errorf("DOCKER_REQUIRE_DIGEST must be true in production when FLEET_BACKEND=docker")
-	}
-	if c.FleetBackend == "docker" && !hasNonBlankValue(c.DockerRegistryAllowlist) {
-		return fmt.Errorf("DOCKER_REGISTRY_ALLOWLIST must be set in production when FLEET_BACKEND=docker")
-	}
-	if c.FleetBackend == "docker" && isLoopbackOrLinkLocal(c.GameServerPublicIP) {
-		return fmt.Errorf("GAME_SERVER_PUBLIC_IP %q must be a routable address in production", c.GameServerPublicIP)
-	}
 	return nil
-}
-
-func hasNonBlankValue(values []string) bool {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return true
-		}
-	}
-	return false
 }
 
 // checkAgonesAuth validates the Agones/k3s credential combination. The three
@@ -406,16 +377,10 @@ func (c *Config) checkFields() error {
 		{"REALTIME_MAX_PER_TENANT", c.RealtimeMaxPerTenant},
 		{"REALTIME_MAX_PER_PLAYER", c.RealtimeMaxPerPlayer},
 		{"DB_MIN_CONNS", int64(c.DBMinConns)},
-		{"DOCKER_DEFAULT_MEMORY", c.DockerDefaultMemory},
-		{"DOCKER_DEFAULT_PIDS", c.DockerDefaultPids},
 	} {
 		if n.val < 0 {
 			return fmt.Errorf("%s %d: must be a non-negative integer", n.name, n.val)
 		}
-	}
-
-	if c.DockerDefaultCPUs < 0 {
-		return fmt.Errorf("DOCKER_DEFAULT_CPUS %v: must be a non-negative number", c.DockerDefaultCPUs)
 	}
 
 	if err := checkPort("RELAY_UDP_PORT", c.RelayUDPPort); err != nil {

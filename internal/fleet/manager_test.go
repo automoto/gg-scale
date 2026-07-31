@@ -14,7 +14,7 @@ import (
 )
 
 // fakeBackend lets each test script backend behaviour without standing up a
-// Docker daemon. allocateImpl is invoked on each Allocate call so tests can
+// real backend. allocateImpl is invoked on each Allocate call so tests can
 // assert retry semantics; watchImpl supplies the StatusUpdate stream.
 type fakeBackend struct {
 	mu             sync.Mutex
@@ -515,7 +515,7 @@ func TestManager_List_skips_terminal_when_excluded(t *testing.T) {
 
 func TestManager_BackendsForTenant_returns_distinct_backends(t *testing.T) {
 	store := newFakeStore()
-	backend := &fakeBackend{name: "docker", allocateImpl: func(_ int) (*fleet.Allocation, error) {
+	backend := &fakeBackend{name: "agones", allocateImpl: func(_ int) (*fleet.Allocation, error) {
 		return &fleet.Allocation{}, nil
 	}}
 	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
@@ -524,7 +524,7 @@ func TestManager_BackendsForTenant_returns_distinct_backends(t *testing.T) {
 	stats, err := mgr.BackendsForTenant(context.Background())
 	require.NoError(t, err)
 	require.Len(t, stats, 1)
-	assert.Equal(t, "docker", stats[0].Name)
+	assert.Equal(t, "agones", stats[0].Name)
 	assert.Equal(t, int64(2), stats[0].AllocationCount)
 }
 

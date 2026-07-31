@@ -919,20 +919,14 @@ func approximateTotalLabel(total int64, hasNext bool) string {
 	return stringFromInt(total)
 }
 
-// fleetBackendKind buckets a fleet.backend value ("docker"|"agones"|"plugin:<n>")
-// into one of three groups so the create-form switch stays exhaustive without
-// duplicating the prefix check at every call site.
+// fleetBackendKind buckets a fleet.backend value ("agones"|"plugin:<n>") into
+// one of two groups so the create-form switch stays exhaustive without
+// duplicating the prefix check at every call site. Agones is the default.
 func fleetBackendKind(backend string) string {
-	switch backend {
-	case "docker":
-		return "docker"
-	case "agones":
-		return "agones"
-	}
 	if strings.HasPrefix(backend, "plugin") {
 		return "plugin"
 	}
-	return "docker"
+	return "agones"
 }
 
 // editToNewFleetView projects an EditFleetView onto the NewFleetView shape

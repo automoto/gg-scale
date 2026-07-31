@@ -45,7 +45,7 @@ func TestFleetPage_renders_polling_section_when_enabled(t *testing.T) {
 	html := renderToString(t, FleetPage(FleetView{
 		TenantID:    1,
 		ProjectID:   2,
-		BackendName: "docker",
+		BackendName: "agones",
 		Enabled:     true,
 		Allocations: []AllocationView{
 			{ID: 5, Status: "ready", Region: "us-east-1", BackendRef: "ref-abc", Address: "1.2.3.4:7777"},
@@ -68,7 +68,7 @@ func TestFleetPage_skips_manual_allocate_button_when_disabled(t *testing.T) {
 func TestFleetDetailPage_shows_deallocate_for_live_status(t *testing.T) {
 	html := renderToString(t, FleetDetailPage(FleetDetailView{
 		TenantID: 1, ProjectID: 2,
-		Allocation: AllocationView{ID: 10, Status: "ready", Backend: "docker"},
+		Allocation: AllocationView{ID: 10, Status: "ready", Backend: "agones"},
 	}))
 	assert.Contains(t, html, "Deallocate")
 }
@@ -76,7 +76,7 @@ func TestFleetDetailPage_shows_deallocate_for_live_status(t *testing.T) {
 func TestFleetDetailPage_hides_deallocate_for_terminal_status(t *testing.T) {
 	html := renderToString(t, FleetDetailPage(FleetDetailView{
 		TenantID: 1, ProjectID: 2,
-		Allocation: AllocationView{ID: 10, Status: "shutdown", Backend: "docker"},
+		Allocation: AllocationView{ID: 10, Status: "shutdown", Backend: "agones"},
 	}))
 	assert.NotContains(t, html, "Deallocate</a>")
 }
@@ -97,7 +97,7 @@ func TestFleetDetailFragment_renders_events_table(t *testing.T) {
 func TestDeallocateConfirmPage_renders_required_typed_id(t *testing.T) {
 	html := renderToString(t, DeallocateConfirmPage(DeallocateConfirmView{
 		TenantID: 1, ProjectID: 2,
-		Allocation: AllocationView{ID: 99, Backend: "docker"},
+		Allocation: AllocationView{ID: 99, Backend: "agones"},
 	}))
 	assert.Contains(t, html, `name="confirm_id"`)
 	assert.Contains(t, html, "99")
@@ -116,7 +116,7 @@ func TestMatchmakerTableFragment_renders_buckets(t *testing.T) {
 
 func TestFleetBackendsPage_surfaces_unreachable_backend(t *testing.T) {
 	html := renderToString(t, FleetBackendsPage(FleetBackendsView{
-		ConfiguredName: "docker",
+		ConfiguredName: "agones",
 		Enabled:        true,
 		HealthErr:      "dial tcp 127.0.0.1:9999: connect: connection refused",
 	}))
@@ -127,7 +127,7 @@ func TestFleetBackendsPage_surfaces_unreachable_backend(t *testing.T) {
 
 func TestFleetBackendsPage_shows_healthy_when_no_err(t *testing.T) {
 	html := renderToString(t, FleetBackendsPage(FleetBackendsView{
-		ConfiguredName: "docker", Enabled: true,
+		ConfiguredName: "agones", Enabled: true,
 	}))
 	assert.Contains(t, html, "Backend healthy")
 }

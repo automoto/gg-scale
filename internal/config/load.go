@@ -162,7 +162,6 @@ func (c *Config) normalize() {
 	c.MetricsAuthToken = strings.TrimSpace(c.MetricsAuthToken)
 	c.ControlPanelEnabled = !c.ControlPanelDisabled
 	c.CORSAllowedOrigins = normalizeCSV(c.CORSAllowedOrigins)
-	c.DockerRegistryAllowlist = normalizeCSV(c.DockerRegistryAllowlist)
 	c.TrustedProxyCIDRs = normalizeCSV(c.TrustedProxyCIDRs)
 	c.RelayURLs = normalizeCSV(c.RelayURLs)
 	c.RelaySTUNURLs = normalizeCSV(c.RelaySTUNURLs)

@@ -108,7 +108,6 @@ type Feature string
 const (
 	FeatureP2PRelay           Feature = "p2p_relay"
 	FeatureDedicatedServers   Feature = "dedicated_servers"
-	FeatureFleetDockerBackend Feature = "fleet_docker_backend"
 	FeatureFleetAgonesBackend Feature = "fleet_agones_backend"
 	FeatureFleetPluginBackend Feature = "fleet_plugin_backend"
 	FeatureMatchmaker         Feature = "matchmaker"
@@ -597,8 +596,6 @@ func PlayerRole(role string) bool {
 // BackendFeature maps fleet backend names to feature gates.
 func BackendFeature(backend string) (Feature, bool) {
 	switch {
-	case backend == "docker":
-		return FeatureFleetDockerBackend, true
 	case backend == "agones":
 		return FeatureFleetAgonesBackend, true
 	case strings.HasPrefix(backend, "plugin"):

@@ -238,33 +238,6 @@ func TestLoad_rejects_malformed_two_factor_key(t *testing.T) {
 	}
 }
 
-func TestLoad_docker_require_digest_is_strict_bool(t *testing.T) {
-	t.Run("rejects_yes_no", func(t *testing.T) {
-		for _, v := range []string{"yes", "no"} {
-			clearEnv(t)
-			t.Setenv("DATABASE_URL", "postgres://localhost/test")
-			t.Setenv("DOCKER_REQUIRE_DIGEST", v)
-
-			_, err := config.Load()
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "DOCKER_REQUIRE_DIGEST")
-		}
-	})
-	t.Run("accepts_1_and_true", func(t *testing.T) {
-		for _, v := range []string{"1", "true"} {
-			clearEnv(t)
-			t.Setenv("DATABASE_URL", "postgres://localhost/test")
-			t.Setenv("DOCKER_REQUIRE_DIGEST", v)
-
-			cfg, err := config.Load()
-
-			require.NoError(t, err)
-			assert.True(t, cfg.DockerRequireDigest)
-		}
-	})
-}
-
 func TestLoad_defaults_db_max_conn_idle_time_to_10m(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")

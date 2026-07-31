@@ -1603,7 +1603,7 @@ templ FleetPage(vm FleetView) {
 			<section class="card">
 				<div class="empty-state">
 					<p>No fleet backend configured.</p>
-					<p class="card-subtitle">Set <code>FLEET_BACKEND</code> (e.g. <code>docker</code>, <code>agones</code>, <code>plugin:ovh</code>) and restart.</p>
+					<p class="card-subtitle">Set <code>FLEET_BACKEND</code> (e.g. <code>agones</code>, <code>plugin:ovh</code>) and restart.</p>
 				</div>
 			</section>
 		} else {
@@ -2267,8 +2267,7 @@ templ NewFleetPage(vm NewFleetView) {
 						hx-target="#fleet-backend-fields"
 						hx-include="this"
 						hx-swap="innerHTML">
-						<option value="docker" selected?={ vm.Backend == "docker" || vm.Backend == "" }>docker</option>
-						<option value="agones" selected?={ vm.Backend == "agones" }>agones</option>
+						<option value="agones" selected?={ vm.Backend == "agones" || vm.Backend == "" }>agones</option>
 						<option value="plugin" selected?={ vm.Backend == "plugin" }>plugin</option>
 					</select>
 					@fieldError(vm.FieldErrors, "backend")
@@ -2289,43 +2288,11 @@ templ NewFleetPage(vm NewFleetView) {
 // create form. Bound to the backend dropdown via hx-get.
 templ FleetBackendFieldsFragment(vm NewFleetView) {
 	switch fleetBackendKind(vm.Backend) {
-		case "agones":
-			@agonesFleetFields(vm)
 		case "plugin":
 			@pluginFleetFields(vm)
 		default:
-			@dockerFleetFields(vm)
+			@agonesFleetFields(vm)
 	}
-}
-
-templ dockerFleetFields(vm NewFleetView) {
-	<label>
-		Image
-		<input name="image" value={ vm.Config["image"] } required placeholder="ghcr.io/example/server:1.0"/>
-		@fieldError(vm.FieldErrors, "image")
-	</label>
-	<label>
-		Container port
-		<input name="port" type="number" min="1" max="65535" value={ vm.Config["port"] } required placeholder="7777"/>
-		@fieldError(vm.FieldErrors, "port")
-	</label>
-	<label>
-		Readiness probe
-		<select name="probe_type">
-			<option value="" selected?={ vm.Config["probe_type"] == "" }>none</option>
-			<option value="tcp" selected?={ vm.Config["probe_type"] == "tcp" }>tcp</option>
-			<option value="http" selected?={ vm.Config["probe_type"] == "http" }>http</option>
-		</select>
-	</label>
-	<label>
-		Probe path
-		<input name="probe_path" value={ vm.Config["probe_path"] } placeholder="/healthz"/>
-		<small class="muted">Only used when probe is http.</small>
-	</label>
-	<label>
-		<input type="checkbox" name="pull_image" value="true" checked?={ vm.Config["pull_image"] == "true" }/>
-		Pull image on first allocate
-	</label>
 }
 
 templ agonesFleetFields(vm NewFleetView) {

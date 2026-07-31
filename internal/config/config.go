@@ -34,10 +34,6 @@ type Config struct {
 	// MetricsAuthDisabled explicitly serves /metrics unauthenticated in
 	// production; without it, an empty MetricsAuthToken refuses to boot.
 	MetricsAuthDisabled bool `env:"METRICS_AUTH_DISABLED" envDefault:"false"`
-	// GameServerPublicIP is the public IP or hostname returned to game clients
-	// so they can connect directly to a game server container. Required when
-	// FLEET_BACKEND=docker. Empty is fine for local dev.
-	GameServerPublicIP string `env:"GAME_SERVER_PUBLIC_IP"`
 
 	// FeatureFleetEnabled is the startup kill switch for dedicated game-server
 	// fleets. Defaults false: no fleet manager is built and every fleet entry
@@ -49,9 +45,9 @@ type Config struct {
 	// points refuse regardless of RelaySharedSecret.
 	FeatureP2PRelayEnabled bool `env:"FEATURE_P2P_RELAY_ENABLED" envDefault:"false"`
 
-	// FleetBackend selects the fleet allocator: docker | agones | openstack |
-	// plugin:<name>. Empty by default so fleets stay off until an operator
-	// opts in; only consulted when FeatureFleetEnabled is true.
+	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
+	// by default so fleets stay off until an operator opts in; only consulted
+	// when FeatureFleetEnabled is true.
 	FleetBackend string `env:"FLEET_BACKEND"`
 	// FleetRegion is the region label persisted on every allocation and used
 	// by Agones GameServerSelector / region-aware backends. Default "local".
@@ -60,10 +56,6 @@ type Config struct {
 	// binaries. Default "/etc/ggscale/plugins". Only consulted when
 	// FleetBackend starts with "plugin:".
 	FleetPluginDir string `env:"FLEET_PLUGIN_DIR" envDefault:"/etc/ggscale/plugins"`
-
-	// Docker fleet-backend host-wide tunables. Per-template values (image,
-	// port, probe) live on the fleet template, not in env vars.
-	DockerHost string `env:"DOCKER_HOST"`
 
 	// Agones fleet-backend host-wide tunables. Per-template values (fleet
 	// name, selector labels) live on the fleet template, not in env vars.
@@ -270,22 +262,6 @@ type Config struct {
 	// (default; hard-fails if the server doesn't advertise it), or
 	// "implicit" (TLS from connect, typically port 465).
 	SMTPTLS string `env:"SMTP_TLS" envDefault:"starttls"`
-
-	// DockerBindIP is the host interface the docker fleet backend binds
-	// container ports to. Default "127.0.0.1"; set to a public IP for
-	// production multi-host setups.
-	DockerBindIP string `env:"DOCKER_BIND_IP" envDefault:"127.0.0.1"`
-	// DockerDefaultMemory / CPUs / Pids are the per-container resource
-	// caps applied when a fleet template doesn't specify its own.
-	DockerDefaultMemory int64   `env:"DOCKER_DEFAULT_MEMORY" envDefault:"536870912"`
-	DockerDefaultCPUs   float64 `env:"DOCKER_DEFAULT_CPUS" envDefault:"1.0"`
-	DockerDefaultPids   int64   `env:"DOCKER_DEFAULT_PIDS" envDefault:"256"`
-	// DockerRegistryAllowlist restricts which image registries may run.
-	// Empty disables the check.
-	DockerRegistryAllowlist []string `env:"DOCKER_REGISTRY_ALLOWLIST"`
-	// DockerRequireDigest forces every image to carry an @sha256:… pin.
-	// Required in production when FleetBackend=docker.
-	DockerRequireDigest bool `env:"DOCKER_REQUIRE_DIGEST" envDefault:"false"`
 
 	// TrustedProxyHeader names a request header (e.g. "CF-Connecting-IP")
 	// to honor when RemoteAddr is in a trusted-proxy network. Empty

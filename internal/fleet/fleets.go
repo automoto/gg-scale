@@ -14,14 +14,13 @@ import (
 )
 
 // Fleet is an operator-defined template that allocations are drawn from. It
-// captures the backend-specific recipe (Docker image+port+probe, Agones
-// fleet name+selector labels, or opaque plugin config) under a project-
-// scoped name. Allocations reference a Fleet by id; the matchmaker API and
-// SDK identify a Fleet by its project-scoped Name.
+// captures the backend-specific recipe (Agones fleet name+selector labels or
+// opaque plugin config) under a project-scoped name. Allocations reference a
+// Fleet by id; the matchmaker API and SDK identify a Fleet by its
+// project-scoped Name.
 //
-// Config is the per-backend payload, flattened to a string map. For docker
-// the keys are "image", "port", "probe_type", "probe_path", "pull_image".
-// For agones: "namespace" (optional override), "fleet_name", and any
+// Config is the per-backend payload, flattened to a string map. For agones
+// the keys are "namespace" (optional override), "fleet_name", and any
 // selector labels passed under "selector.<key>" entries. Plugin templates
 // are free-form and pass through verbatim to the plugin RPC.
 type Fleet struct {

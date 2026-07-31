@@ -1,7 +1,7 @@
 // Package fleet allocates and tracks game-server instances on behalf of the
-// matchmaker. Backend is the contract every implementation (docker, agones,
-// openstack, plugin) implements; Manager owns persistence, retry, and the
-// single point of entry callers use.
+// matchmaker. Backend is the contract every implementation (agones, plugin)
+// implements; Manager owns persistence, retry, and the single point of entry
+// callers use.
 package fleet
 
 import (
@@ -89,8 +89,8 @@ type AllocationID int64
 // row.
 //
 // Trust boundary: Region, GameMode, and Labels are flow-through fields that
-// land in backend-specific places (Kubernetes label selectors, Docker
-// labels, plugin gRPC). They are treated here as already-validated inputs.
+// land in backend-specific places (Kubernetes label selectors, plugin
+// gRPC). They are treated here as already-validated inputs.
 // The validation boundary lives at the matchmaker HTTP handler (M6), which
 // is the surface receiving player SDK input — validating again here
 // would put the check on the wrong side of the boundary.
@@ -108,8 +108,8 @@ type AllocationRequest struct {
 	Backend string
 	// Config is the per-backend recipe flattened to strings. Manager copies
 	// fleet.Config into this field; backends read keys they care about
-	// (docker: image/port/probe_*; agones: namespace/fleet_name/selector.*;
-	// plugin: whatever the plugin defines).
+	// (agones: namespace/fleet_name/selector.*; plugin: whatever the plugin
+	// defines).
 	Config   map[string]string
 	Region   string
 	GameMode string
@@ -118,8 +118,8 @@ type AllocationRequest struct {
 }
 
 // Allocation is the manager's view of one game-server slot. BackendRef is
-// the backend-specific identifier (Docker container ID, Agones GameServer
-// name, OpenStack instance UUID, plugin-supplied opaque string).
+// the backend-specific identifier (Agones GameServer name, plugin-supplied
+// opaque string).
 type Allocation struct {
 	ID         AllocationID
 	TenantID   int64
@@ -151,8 +151,8 @@ type StatusUpdate struct {
 }
 
 // Backend allocates and tears down game-server slots. Each implementation
-// (docker, agones, openstack, plugin) satisfies this contract and is
-// otherwise opaque to the manager.
+// (agones, plugin) satisfies this contract and is otherwise opaque to the
+// manager.
 //
 // Backends must be safe for concurrent use by the manager. Watch returns a
 // channel the backend closes when it has no further updates to send or when

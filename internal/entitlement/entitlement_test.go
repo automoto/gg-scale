@@ -73,7 +73,7 @@ func TestValidateState(t *testing.T) {
 		{"negative tier", State{Tier: -1}, true},
 		{"tier above ladder", State{Tier: 4}, true},
 		{"unknown feature", State{Tier: 1, Features: []string{"time_travel"}}, true},
-		{"fleet backend features are not billing-managed", State{Tier: 1, Features: []string{"fleet_docker_backend"}}, true},
+		{"fleet backend features are not billing-managed", State{Tier: 1, Features: []string{"fleet_agones_backend"}}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestDiffStates(t *testing.T) {
 		},
 		{
 			name:        "unmanaged current grants are left alone",
-			currentTier: 1, current: []string{"fleet_docker_backend"},
+			currentTier: 1, current: []string{"fleet_agones_backend"},
 			desired: State{Tier: 1},
 		},
 		{
