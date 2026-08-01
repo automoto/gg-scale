@@ -18,7 +18,10 @@ import (
 
 // leaderboardTopTTL bounds how stale a memoised top-N reply may be. Short
 // enough that a fresh score appears within a frame budget; long enough that
-// hot leaderboards don't replay the same query on every request.
+// hot leaderboards don't replay the same query on every request. It is also
+// the only bound on display_name staleness: a profile rename does not
+// invalidate these entries (it would have to enumerate every board the player
+// is on), it just waits out the TTL.
 const leaderboardTopTTL = 10 * time.Second
 
 // leaderboardTopCachedLimit is the only limit value that gets memoised.
@@ -116,7 +119,6 @@ func registerLeaderboardSubmit(api huma.API, d Deps) {
 
 func leaderboardSubmit(d Deps) func(context.Context, *leaderboardSubmitInput) (*struct{}, error) {
 	return func(ctx context.Context, in *leaderboardSubmitInput) (*struct{}, error) {
-		tenantID, _ := db.TenantFromContext(ctx)
 		userID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
@@ -126,34 +128,60 @@ func leaderboardSubmit(d Deps) func(context.Context, *leaderboardSubmitInput) (*
 			return nil, huma.Error401Unauthorized("no player project")
 		}
 
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			q := sqlcgen.New(tx)
-			// Project-scoped: a leaderboard in a sibling project resolves to no
-			// rows, so the score can never land on another project's board.
-			if _, err := q.GetLeaderboard(ctx, sqlcgen.GetLeaderboardParams{ID: in.ID, ProjectID: projectID}); err != nil {
-				return err
-			}
-			_, err := q.SubmitScore(ctx, sqlcgen.SubmitScoreParams{
-				LeaderboardID: in.ID, PlayerID: userID, Score: in.Body.Score,
-			})
-			return err
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
+		err := submitScoreToBoard(ctx, d, in.ID, projectID, userID, in.Body.Score, nil)
+		if errors.Is(err, errLeaderboardNotFound) {
 			return nil, huma.Error404NotFound("leaderboard not found")
 		}
 		if err != nil {
 			return nil, serverError(ctx, "leaderboard submit: tx", err)
 		}
-
-		// Invalidate the memoised top-N so the next reader pays the
-		// fresh-query cost rather than serving a stale snapshot.
-		// Best-effort: on Delete failure the TTL still bounds staleness.
-		if d.Cache != nil {
-			_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, in.ID, leaderboardTopCachedLimit))
-		}
-
 		return nil, nil
 	}
+}
+
+// errLeaderboardNotFound marks a submit against a board that does not exist in
+// the caller's project. Kept distinct from pgx.ErrNoRows so a gate's
+// player-miss can never be mislabeled as a board-miss.
+var errLeaderboardNotFound = errors.New("leaderboard: not found")
+
+// submitScoreToBoard writes one score in a transaction and invalidates the
+// memoised top-N. Shared by the player-session and server-tier submit routes,
+// so the board gate and the invalidation policy cannot drift apart. gate, when
+// non-nil, runs first inside the same transaction — the server tier uses it
+// for its player moderation check.
+func submitScoreToBoard(ctx context.Context, d Deps, boardID, projectID, playerID, score int64, gate func(q *sqlcgen.Queries) error) error {
+	tenantID, _ := db.TenantFromContext(ctx)
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		if gate != nil {
+			if gerr := gate(q); gerr != nil {
+				return gerr
+			}
+		}
+		// Project-scoped: a leaderboard in a sibling project resolves to no
+		// rows, so the score can never land on another project's board.
+		if _, err := q.GetLeaderboard(ctx, sqlcgen.GetLeaderboardParams{ID: boardID, ProjectID: projectID}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errLeaderboardNotFound
+			}
+			return err
+		}
+		_, err := q.SubmitScore(ctx, sqlcgen.SubmitScoreParams{
+			LeaderboardID: boardID, PlayerID: playerID, Score: score,
+		})
+		return err
+	})
+	if err != nil {
+		return err
+	}
+
+	// Invalidate the memoised top-N so the next reader pays the
+	// fresh-query cost rather than serving a stale snapshot.
+	// Best-effort: on Delete failure the TTL still bounds staleness.
+	if d.Cache != nil {
+		_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, boardID, leaderboardTopCachedLimit))
+	}
+	return nil
 }
 
 func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leaderboardTopOutput, error) {

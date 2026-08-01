@@ -383,6 +383,10 @@ type Querier interface {
 	// Tenant-scoped: the global account a player is linked to (NULL if the
 	// player is anonymous / unlinked).
 	GetPlayerLinkedAccountID(ctx context.Context, id int64) (pgtype.UUID, error)
+	// Server-tier gate: does the named player exist in the caller's project, and
+	// may a game server act for them? The tenants/projects JOINs mirror
+	// GetPlayerForVerify so a wound-down project can't keep taking writes.
+	GetPlayerModerationState(ctx context.Context, arg GetPlayerModerationStateParams) (GetPlayerModerationStateRow, error)
 	// Reset-request/confirm state read, keyed like login. Filters mirror
 	// GetPlayerByEmail: disabled/unlinked players read as unknown.
 	GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error)

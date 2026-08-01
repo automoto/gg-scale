@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getPlayerModerationState = `-- name: GetPlayerModerationState :one
+SELECT p.id, p.disabled_at
+FROM project_players p
+JOIN tenants  t ON t.id = p.tenant_id  AND t.deleted_at IS NULL
+JOIN projects j ON j.id = p.project_id AND j.deleted_at IS NULL
+WHERE p.id = $1
+  AND p.project_id = $2
+  AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND p.deleted_at IS NULL
+`
+
+type GetPlayerModerationStateParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+type GetPlayerModerationStateRow struct {
+	ID         int64
+	DisabledAt pgtype.Timestamptz
+}
+
+// Server-tier gate: does the named player exist in the caller's project, and
+// may a game server act for them? The tenants/projects JOINs mirror
+// GetPlayerForVerify so a wound-down project can't keep taking writes.
+func (q *Queries) GetPlayerModerationState(ctx context.Context, arg GetPlayerModerationStateParams) (GetPlayerModerationStateRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerModerationState, arg.ID, arg.ProjectID)
+	var i GetPlayerModerationStateRow
+	err := row.Scan(&i.ID, &i.DisabledAt)
+	return i, err
+}
+
 const getPublicPlayer = `-- name: GetPublicPlayer :one
 
 SELECT p.id, a.display_name, p.created_at

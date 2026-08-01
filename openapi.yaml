@@ -1274,6 +1274,23 @@ components:
         - level
         - version
       type: object
+    ServerSubmitScoreRequest:
+      additionalProperties: false
+      properties:
+        player_id:
+          examples:
+            - 42
+          format: int64
+          minimum: 1
+          type: integer
+        score:
+          examples:
+            - 1500
+          format: int64
+          type: integer
+      required:
+        - player_id
+      type: object
     SessionResponse:
       additionalProperties: false
       properties:
@@ -3059,6 +3076,39 @@ paths:
       summary: Issue short-lived TURN-REST relay credentials
       tags:
         - P2P & TURN Relay
+  /v1/server/leaderboards/{id}/scores:
+    post:
+      operationId: serverSubmitScore
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 1
+            format: int64
+            minimum: 1
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServerSubmitScoreRequest"
+        required: true
+      responses:
+        "201":
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: "Server-tier: submit a score for a player"
+      tags:
+        - Leaderboards
   /v1/server/player-sessions/verify:
     post:
       operationId: verifyPlayerSession
@@ -3118,6 +3168,148 @@ paths:
       summary: "Server-tier: read a player's remote addresses"
       tags:
         - Remote Addresses
+  /v1/server/players/{player_id}/storage/objects:
+    get:
+      operationId: serverListStorageObjects
+      parameters:
+        - in: path
+          name: player_id
+          required: true
+          schema:
+            examples:
+              - 42
+            format: int64
+            minimum: 1
+            type: integer
+        - explode: false
+          in: query
+          name: key_prefix
+          schema:
+            examples:
+              - save-
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            examples:
+              - "50"
+            type: string
+        - explode: false
+          in: query
+          name: cursor
+          schema:
+            examples:
+              - "104"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageListResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: "Server-tier: list a player's storage objects"
+      tags:
+        - Cloud Saves
+  /v1/server/players/{player_id}/storage/objects/{key}:
+    get:
+      operationId: serverGetStorageObject
+      parameters:
+        - in: path
+          name: player_id
+          required: true
+          schema:
+            examples:
+              - 42
+            format: int64
+            minimum: 1
+            type: integer
+        - in: path
+          name: key
+          required: true
+          schema:
+            examples:
+              - save-slot-1
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageObjectResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: "Server-tier: get a player's storage object"
+      tags:
+        - Cloud Saves
+    put:
+      operationId: serverPutStorageObject
+      parameters:
+        - in: path
+          name: player_id
+          required: true
+          schema:
+            examples:
+              - 42
+            format: int64
+            minimum: 1
+            type: integer
+        - in: path
+          name: key
+          required: true
+          schema:
+            examples:
+              - save-slot-1
+            type: string
+        - in: header
+          name: If-Match
+          schema:
+            examples:
+              - "7"
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              description: "Any JSON value to store: object, array, string, number, boolean, or null."
+              examples:
+                - hp: 100
+                  level: 3
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StorageObjectResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: "Server-tier: create or replace a player's storage object"
+      tags:
+        - Cloud Saves
   /v1/storage/objects:
     get:
       operationId: listStorageObjects

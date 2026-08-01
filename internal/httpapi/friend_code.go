@@ -72,51 +72,66 @@ func normalizeFriendCode(raw string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(raw))
 }
 
-// ensureFriendCode lazily initializes the caller's code on first profile
-// read: every player has a code with no setup step, and no backfill was
-// needed. Retries a (vanishingly rare) code collision; a concurrent
-// initializer winning the race is read back, not an error.
-func ensureFriendCode(ctx context.Context, d Deps, me int64) (string, error) {
+// setFreshFriendCode mints codes until one lands without a unique collision
+// and applies it with set, which owns the write semantics (initialize-if-absent
+// vs unconditional overwrite). The collision-retry policy lives only here.
+// rows is the set query's row count; interpreting 0 is the caller's job.
+func setFreshFriendCode(ctx context.Context, d Deps, set func(q *sqlcgen.Queries, code string) (int64, error)) (string, int64, error) {
 	for attempt := 0; ; attempt++ {
 		code, err := newFriendCode()
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
 		var rows int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			var qerr error
-			rows, qerr = sqlcgen.New(tx).SetPlayerFriendCodeIfAbsent(ctx, sqlcgen.SetPlayerFriendCodeIfAbsentParams{
-				FriendCode: &code, ID: me,
-			})
+			rows, qerr = set(sqlcgen.New(tx), code)
 			return qerr
 		})
-		switch {
-		case webutil.IsUniqueViolation(err) && attempt < friendCodeMaxAttempts:
+		if webutil.IsUniqueViolation(err) && attempt < friendCodeMaxAttempts {
 			continue
-		case err != nil:
-			return "", err
-		case rows > 0:
-			return code, nil
 		}
-		// Read the concurrent initializer's code back from the primary — a
-		// lagging replica may not see it yet.
-		var existing *string
-		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			row, qerr := sqlcgen.New(tx).GetProfile(ctx, me)
-			if qerr != nil {
-				return qerr
-			}
-			existing = row.FriendCode
-			return nil
-		})
 		if err != nil {
-			return "", err
+			return "", 0, err
 		}
-		if existing == nil {
-			return "", errors.New("friend code: unset after initialization")
-		}
-		return *existing, nil
+		return code, rows, nil
 	}
+}
+
+// ensureFriendCode lazily initializes the caller's code on first profile
+// read: every player has a code with no setup step, and no backfill was
+// needed. A concurrent initializer winning the race is read back, not an
+// error.
+func ensureFriendCode(ctx context.Context, d Deps, me int64) (string, error) {
+	code, rows, err := setFreshFriendCode(ctx, d, func(q *sqlcgen.Queries, code string) (int64, error) {
+		return q.SetPlayerFriendCodeIfAbsent(ctx, sqlcgen.SetPlayerFriendCodeIfAbsentParams{
+			FriendCode: &code, ID: me,
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+	if rows > 0 {
+		return code, nil
+	}
+	// Read the concurrent initializer's code back from the primary — a
+	// lagging replica may not see it yet.
+	var existing *string
+	err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		row, qerr := sqlcgen.New(tx).GetProfile(ctx, me)
+		if qerr != nil {
+			return qerr
+		}
+		existing = row.FriendCode
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if existing == nil {
+		return "", errors.New("friend code: unset after initialization")
+	}
+	return *existing, nil
 }
 
 func friendCodeRegenerate(d Deps) func(context.Context, *struct{}) (*friendCodeOutput, error) {
@@ -125,29 +140,18 @@ func friendCodeRegenerate(d Deps) func(context.Context, *struct{}) (*friendCodeO
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
-		for attempt := 0; ; attempt++ {
-			code, err := newFriendCode()
-			if err != nil {
-				return nil, serverError(ctx, "friend code: rand", err)
-			}
-			var rows int64
-			err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
-				var qerr error
-				rows, qerr = sqlcgen.New(tx).SetPlayerFriendCode(ctx, sqlcgen.SetPlayerFriendCodeParams{
-					FriendCode: &code, ID: me,
-				})
-				return qerr
+		code, rows, err := setFreshFriendCode(ctx, d, func(q *sqlcgen.Queries, code string) (int64, error) {
+			return q.SetPlayerFriendCode(ctx, sqlcgen.SetPlayerFriendCodeParams{
+				FriendCode: &code, ID: me,
 			})
-			switch {
-			case webutil.IsUniqueViolation(err) && attempt < friendCodeMaxAttempts:
-				continue
-			case err != nil:
-				return nil, serverError(ctx, "friend code: regenerate", err)
-			case rows == 0:
-				return nil, huma.Error404NotFound("not found")
-			}
-			return &friendCodeOutput{Body: friendCodeResult{FriendCode: code}}, nil
+		})
+		switch {
+		case err != nil:
+			return nil, serverError(ctx, "friend code: regenerate", err)
+		case rows == 0:
+			return nil, huma.Error404NotFound("not found")
 		}
+		return &friendCodeOutput{Body: friendCodeResult{FriendCode: code}}, nil
 	}
 }
 

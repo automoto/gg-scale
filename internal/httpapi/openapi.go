@@ -29,6 +29,8 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerRemoteConfig(api, d)
 	registerPlayerSessionVerify(api, d)
 	registerServerRemoteAddr(api, d)
+	registerServerLeaderboardSubmit(api, d)
+	registerServerStorageRoutes(api, d)
 	registerFleetHeartbeat(api, d)
 	registerFleetServersList(api, d)
 	registerRelay(api, d)

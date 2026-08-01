@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,8 +62,11 @@ var expectedV1Paths = []string{
 	"/v1/profile",
 	"/v1/profile/friend-code",
 	"/v1/relay/credentials",
+	"/v1/server/leaderboards/{id}/scores",
 	"/v1/server/player-sessions/verify",
 	"/v1/server/players/{player_id}/remote-addrs",
+	"/v1/server/players/{player_id}/storage/objects",
+	"/v1/server/players/{player_id}/storage/objects/{key}",
 	"/v1/storage/objects",
 	"/v1/storage/objects/{key}",
 	"/v1/ws",
@@ -184,6 +188,34 @@ func TestOpenAPIDoc_storage_put_body_documents_example(t *testing.T) {
 	require.NotNil(t, mt.Schema)
 	assert.NotEmpty(t, mt.Schema.Description)
 	assert.NotEmpty(t, mt.Schema.Examples, "storage put body must not render as a null sample")
+}
+
+// TestOpenAPIDoc_server_tier_ops_are_api_key_only guards the trust boundary of
+// the /v1/server/ subtree: every operation authenticates with the API key alone
+// (the caller is a game-server workload, not a player) and must never document
+// a player-session requirement.
+func TestOpenAPIDoc_server_tier_ops_are_api_key_only(t *testing.T) {
+	doc := OpenAPIDoc("1.0.0")
+
+	paths := []string{
+		"/v1/server/leaderboards/{id}/scores",
+		"/v1/server/players/{player_id}/storage/objects",
+		"/v1/server/players/{player_id}/storage/objects/{key}",
+	}
+	for _, p := range paths {
+		item := doc.Paths[p]
+		require.NotNil(t, item, p)
+		for method, op := range map[string]*huma.Operation{"get": item.Get, "put": item.Put, "post": item.Post} {
+			if op == nil {
+				continue
+			}
+			require.Len(t, op.Security, 1, "%s %s", method, p)
+			_, hasAPIKey := op.Security[0]["ApiKeyAuth"]
+			_, hasPlayer := op.Security[0]["PlayerSession"]
+			assert.True(t, hasAPIKey, "%s %s must require the API key", method, p)
+			assert.False(t, hasPlayer, "%s %s must not require a player session", method, p)
+		}
+	}
 }
 
 func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {

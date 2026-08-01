@@ -387,6 +387,17 @@ func NewRouter(d Deps) http.Handler {
 					// linked player's opaque endpoint for that project. Secret
 					// keys only — publishable keys never reach this group.
 					registerServerRemoteAddr(groupAPI(r, humaCfg), d)
+					// Server-tier player actions: score submission and storage
+					// for a player named by id. RBAC on top of the key-type
+					// gate, mirroring the player-session submit route.
+					r.Group(func(r chi.Router) {
+						r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
+						registerServerLeaderboardSubmit(groupAPI(r, humaCfg), d)
+					})
+					r.Group(func(r chi.Router) {
+						r.Use(requireAPIKeyPermission(d, rbac.ObjectStorage, rbac.ActionManage))
+						registerServerStorageRoutes(groupAPI(r, humaCfg), d)
+					})
 					if d.ServerList != nil {
 						r.Group(func(r chi.Router) {
 							r.Use(tenant.RequireKeyScope(tenant.ScopeFleet))

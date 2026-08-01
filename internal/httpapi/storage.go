@@ -138,12 +138,6 @@ func registerStorageRoutes(api huma.API, d Deps) {
 
 func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectOutput, error) {
 	return func(ctx context.Context, in *storagePutInput) (*storageObjectOutput, error) {
-		if in.Key == "" {
-			return nil, huma.Error400BadRequest("key required")
-		}
-		if !json.Valid(in.Body) {
-			return nil, huma.Error400BadRequest("value must be valid JSON")
-		}
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
 			return nil, huma.Error400BadRequest("no project")
@@ -152,34 +146,48 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
-
-		limit, err := resolveStorageLimit(ctx, d, projectID)
-		if err != nil {
-			return nil, serverError(ctx, "storage put: resolve limit", err)
-		}
-		if int64(len(in.Body)) > limit {
-			return nil, huma.Error413RequestEntityTooLarge("value exceeds maximum size")
-		}
-
-		version, updatedAt, err := putStorageObject(ctx, d, projectID, ownerID, in)
-		var qe *quota.ErrQuotaExceeded
-		switch {
-		case errors.Is(err, errIfMatchInvalid):
-			return nil, huma.Error400BadRequest("If-Match must be an integer version")
-		case errors.Is(err, pgx.ErrNoRows):
-			return nil, huma.Error412PreconditionFailed("version mismatch")
-		case errors.As(err, &qe):
-			d.Metrics.QuotaRejection(qe.Axis)
-			return nil, huma.Error403Forbidden(fmt.Sprintf("storage quota exceeded: tenant storage limit is %d bytes", qe.Limit))
-		case err != nil:
-			return nil, serverError(ctx, "storage put: tx", err)
-		}
-
-		return &storageObjectOutput{Body: storageObjectResponse{
-			Key: in.Key, Value: in.Body, Version: version,
-			UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
-		}}, nil
+		return putStorageForOwner(ctx, d, projectID, ownerID, in)
 	}
+}
+
+// putStorageForOwner validates and writes one storage object for an explicit
+// (project, owner) pair, mapping every failure to its wire error. Shared by the
+// player-session PUT and the server-tier PUT, which resolve the owner
+// differently but must behave identically from here on.
+func putStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, in *storagePutInput) (*storageObjectOutput, error) {
+	if in.Key == "" {
+		return nil, huma.Error400BadRequest("key required")
+	}
+	if !json.Valid(in.Body) {
+		return nil, huma.Error400BadRequest("value must be valid JSON")
+	}
+
+	limit, err := resolveStorageLimit(ctx, d, projectID)
+	if err != nil {
+		return nil, serverError(ctx, "storage put: resolve limit", err)
+	}
+	if int64(len(in.Body)) > limit {
+		return nil, huma.Error413RequestEntityTooLarge("value exceeds maximum size")
+	}
+
+	version, updatedAt, err := putStorageObject(ctx, d, projectID, ownerID, in)
+	var qe *quota.ErrQuotaExceeded
+	switch {
+	case errors.Is(err, errIfMatchInvalid):
+		return nil, huma.Error400BadRequest("If-Match must be an integer version")
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, huma.Error412PreconditionFailed("version mismatch")
+	case errors.As(err, &qe):
+		d.Metrics.QuotaRejection(qe.Axis)
+		return nil, huma.Error403Forbidden(fmt.Sprintf("storage quota exceeded: tenant storage limit is %d bytes", qe.Limit))
+	case err != nil:
+		return nil, serverError(ctx, "storage put: tx", err)
+	}
+
+	return &storageObjectOutput{Body: storageObjectResponse{
+		Key: in.Key, Value: in.Body, Version: version,
+		UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
+	}}, nil
 }
 
 // resolveStorageLimit returns the effective value-size cap: the platform
@@ -281,29 +289,34 @@ func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectO
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
-
-		var resp storageObjectResponse
-		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
-			row, qerr := sqlcgen.New(tx).GetStorageObject(ctx, sqlcgen.GetStorageObjectParams{
-				ProjectID: projectID, OwnerUserID: ownerID, Key: in.Key,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			resp = storageObjectResponse{
-				Key: in.Key, Value: row.Value, Version: row.Version,
-				UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
-			}
-			return nil
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, huma.Error404NotFound("not found")
-		}
-		if err != nil {
-			return nil, serverError(ctx, "storage get: tx", err)
-		}
-		return &storageObjectOutput{Body: resp}, nil
+		return getStorageForOwner(ctx, d, projectID, ownerID, in.Key)
 	}
+}
+
+// getStorageForOwner reads one storage object for an explicit (project, owner)
+// pair. Shared by the player-session GET and the server-tier GET.
+func getStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, key string) (*storageObjectOutput, error) {
+	var resp storageObjectResponse
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+		row, qerr := sqlcgen.New(tx).GetStorageObject(ctx, sqlcgen.GetStorageObjectParams{
+			ProjectID: projectID, OwnerUserID: ownerID, Key: key,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		resp = storageObjectResponse{
+			Key: key, Value: row.Value, Version: row.Version,
+			UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		}
+		return nil
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, huma.Error404NotFound("not found")
+	}
+	if err != nil {
+		return nil, serverError(ctx, "storage get: tx", err)
+	}
+	return &storageObjectOutput{Body: resp}, nil
 }
 
 func storageDelete(d Deps) func(context.Context, *storageKeyInput) (*struct{}, error) {
@@ -352,38 +365,44 @@ func storageList(d Deps) func(context.Context, *storageListInput) (*storageListO
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
-
-		limit := parseLimit(in.Limit, 50, storageListMaxLimit)
-		cursor := parseCursor(in.Cursor)
-
-		var items []storageObjectListItemResponse
-		var lastID int64
-		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
-			rows, qerr := sqlcgen.New(tx).ListStorageObjects(ctx, sqlcgen.ListStorageObjectsParams{
-				ProjectID: projectID, OwnerUserID: ownerID,
-				KeyPrefix: escapeStorageKeyPrefix(in.KeyPrefix), CursorID: cursor, RowLimit: limit,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			for _, row := range rows {
-				items = append(items, storageObjectListItemResponse{
-					Key: row.Key, Version: row.Version, SizeBytes: row.SizeBytes,
-					UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
-				})
-				lastID = row.ID
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, serverError(ctx, "storage list: tx", err)
-		}
-		var next string
-		if len(items) == int(limit) {
-			next = strconv.FormatInt(lastID, 10)
-		}
-		return &storageListOutput{Body: storageListResult{Items: items, NextCursor: next}}, nil
+		return listStorageForOwner(ctx, d, projectID, ownerID, in)
 	}
+}
+
+// listStorageForOwner pages one owner's storage objects for an explicit
+// (project, owner) pair. Shared by the player-session list and the server-tier
+// list.
+func listStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, in *storageListInput) (*storageListOutput, error) {
+	limit := parseLimit(in.Limit, 50, storageListMaxLimit)
+	cursor := parseCursor(in.Cursor)
+
+	var items []storageObjectListItemResponse
+	var lastID int64
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+		rows, qerr := sqlcgen.New(tx).ListStorageObjects(ctx, sqlcgen.ListStorageObjectsParams{
+			ProjectID: projectID, OwnerUserID: ownerID,
+			KeyPrefix: escapeStorageKeyPrefix(in.KeyPrefix), CursorID: cursor, RowLimit: limit,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		for _, row := range rows {
+			items = append(items, storageObjectListItemResponse{
+				Key: row.Key, Version: row.Version, SizeBytes: row.SizeBytes,
+				UpdatedAt: row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+			})
+			lastID = row.ID
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, serverError(ctx, "storage list: tx", err)
+	}
+	var next string
+	if len(items) == int(limit) {
+		next = strconv.FormatInt(lastID, 10)
+	}
+	return &storageListOutput{Body: storageListResult{Items: items, NextCursor: next}}, nil
 }
 
 var storageKeyPrefixEscaper = strings.NewReplacer(
