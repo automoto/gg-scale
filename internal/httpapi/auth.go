@@ -144,6 +144,7 @@ type customTokenInput struct {
 // operations (signup, login); the router mounts them behind the fixed
 // per-IP limiter.
 func registerAuthPasswordRoutes(api huma.API, d Deps) {
+	registerAuthResetRoutes(api, d)
 	huma.Register(api, huma.Operation{
 		OperationID:   "authSignup",
 		Method:        http.MethodPost,
@@ -402,6 +403,56 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 // be checked, and a distinguishable 200 would confirm "this email is a verified
 // account here" (and leak its player_id) to any publishable-key holder —
 // undoing the anti-enumeration cost signup and login already pay.
+// challengeState is the column-family-agnostic view of an emailed-code
+// challenge (email verification, password reset).
+type challengeState struct {
+	ID          int64
+	CodeHash    []byte
+	Salt        []byte
+	ExpiresAt   pgtype.Timestamptz
+	LockedUntil pgtype.Timestamptz
+}
+
+// checkCodeChallenge runs the guard sequence both challenge families share:
+// lockout, missing/expired challenge, atomic attempt reservation, the
+// lifetime-cap lockout trip, and the constant-time compare. Contract: when
+// locked or badCode is true the surrounding transaction must COMMIT so the
+// attempt bump / lock survives (see authVerify for why); a non-nil err is an
+// errVerify* sentinel or a query error and rolls back. reserve returns the
+// lifetime attempt count (pgx.ErrNoRows at the per-code cap).
+func checkCodeChallenge(ctx context.Context, s challengeState, code string, now time.Time,
+	reserve func(context.Context, int64, int32) (int32, error),
+	lock func(context.Context, int64, pgtype.Timestamptz) error,
+) (locked, badCode bool, err error) {
+	if s.LockedUntil.Valid && verifycode.AccountLocked(s.LockedUntil.Time, now) {
+		return false, false, errVerifyAccountLocked
+	}
+	if len(s.Salt) == 0 || len(s.CodeHash) == 0 {
+		return false, false, errVerifyExpired
+	}
+	if verifycode.Expired(s.ExpiresAt.Time, now) {
+		return false, false, errVerifyExpired
+	}
+	lifetime, err := reserve(ctx, s.ID, int32(verifycode.MaxAttempts))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, errVerifyExhausted
+		}
+		return false, false, err
+	}
+	if verifycode.LifetimeExhausted(int(lifetime)) {
+		until := pgtype.Timestamptz{Time: now.Add(verifycode.LockoutDuration), Valid: true}
+		if lerr := lock(ctx, s.ID, until); lerr != nil {
+			return false, false, lerr
+		}
+		return true, false, nil
+	}
+	if subtle.ConstantTimeCompare(verifycode.Hash(s.Salt, code), s.CodeHash) != 1 {
+		return false, true, nil
+	}
+	return false, false, nil
+}
+
 func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, error) {
 	return func(ctx context.Context, in *verifyInput) (*verifyOutput, error) {
 		projectID, _, err := pinnedProject(ctx)
@@ -428,50 +479,36 @@ func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, erro
 			if row.EmailVerifiedAt.Valid {
 				return errVerifyBadCode
 			}
-			if row.EmailVerificationLockedUntil.Valid && verifycode.AccountLocked(row.EmailVerificationLockedUntil.Time, now) {
-				return errVerifyAccountLocked
-			}
-			if verifycode.Expired(row.EmailVerificationExpiresAt.Time, now) {
-				return errVerifyExpired
-			}
-			if len(row.EmailVerificationSalt) == 0 || len(row.EmailVerificationCodeHash) == 0 {
-				return errVerifyExpired
-			}
-			// Atomic check-and-bump replaces the prior fetch-then-increment
-			// pattern that could undercount concurrent wrong codes.
-			reserved, err := q.ReservePlayerVerifyAttempt(ctx, sqlcgen.ReservePlayerVerifyAttemptParams{
+			// A wrong code / lockout trip must COMMIT, not error out: an
+			// error would roll the attempt bump back with the rest of the
+			// tx, handing an attacker unlimited guesses at the 10^6 code
+			// space. The 400/429 is raised from the flags after commit.
+			var cerr error
+			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, challengeState{
 				ID:          row.ID,
-				MaxAttempts: int32(verifycode.MaxAttempts),
-			})
-			if err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return errVerifyExhausted
-				}
-				return err
+				CodeHash:    row.EmailVerificationCodeHash,
+				Salt:        row.EmailVerificationSalt,
+				ExpiresAt:   row.EmailVerificationExpiresAt,
+				LockedUntil: row.EmailVerificationLockedUntil,
+			}, in.Body.Code, now,
+				func(ctx context.Context, id int64, max int32) (int32, error) {
+					r, rerr := q.ReservePlayerVerifyAttempt(ctx, sqlcgen.ReservePlayerVerifyAttemptParams{
+						ID: id, MaxAttempts: max,
+					})
+					if rerr != nil {
+						return 0, rerr
+					}
+					return r.EmailVerificationLifetimeAttempts, nil
+				},
+				func(ctx context.Context, id int64, until pgtype.Timestamptz) error {
+					return q.LockPlayerVerification(ctx, sqlcgen.LockPlayerVerificationParams{
+						ID: id, LockedUntil: until,
+					})
+				})
+			if cerr != nil {
+				return cerr
 			}
-			// Lifetime cap survives /resend; trip the long lockout. The
-			// Lock write happens in the same tx as the Reserve increment
-			// so the bump that crossed the cap and the lock both commit
-			// together; we return nil here and surface the lock via the
-			// dedicated guard at the head of the closure on the next call.
-			if verifycode.LifetimeExhausted(int(reserved.EmailVerificationLifetimeAttempts)) {
-				lockedUntil := pgtype.Timestamptz{Time: now.Add(verifycode.LockoutDuration), Valid: true}
-				if lerr := q.LockPlayerVerification(ctx, sqlcgen.LockPlayerVerificationParams{
-					ID: row.ID, LockedUntil: lockedUntil,
-				}); lerr != nil {
-					return lerr
-				}
-				lockedAfterAttempt = true
-				return nil
-			}
-			expected := verifycode.Hash(row.EmailVerificationSalt, in.Body.Code)
-			if subtle.ConstantTimeCompare(expected, row.EmailVerificationCodeHash) != 1 {
-				// A wrong code must COMMIT, not error out: an error would
-				// roll the ReservePlayerVerifyAttempt bump back with the
-				// rest of the tx, resetting both counters and handing an
-				// attacker unlimited guesses at the 10^6 code space. The
-				// 400 is raised from the flag once the tx has committed.
-				badCode = true
+			if lockedAfterAttempt || badCode {
 				return nil
 			}
 			if err := q.MarkPlayerVerified(ctx, row.ID); err != nil {

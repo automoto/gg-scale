@@ -221,3 +221,85 @@ ON CONFLICT (tenant_id, project_id, external_id)
     WHERE deleted_at IS NULL
 DO UPDATE SET external_id = EXCLUDED.external_id
 RETURNING id;
+
+-- name: GetPlayerPasswordResetState :one
+-- Reset-request/confirm state read, keyed like login. Filters mirror
+-- GetPlayerByEmail: disabled/unlinked players read as unknown.
+SELECT id, password_hash, password_reset_code_hash, password_reset_salt,
+       password_reset_expires_at, password_reset_attempts,
+       password_reset_lifetime_attempts, password_reset_locked_until,
+       password_reset_last_sent_at
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND email = sqlc.arg(email)
+  AND deleted_at IS NULL AND disabled_at IS NULL AND unlinked_at IS NULL;
+
+-- name: SetPlayerPasswordResetChallenge :exec
+-- Mints a fresh reset code: per-code attempts restart, lifetime attempts and
+-- the lockout survive so re-requesting codes never grants extra guesses.
+UPDATE project_players
+SET password_reset_code_hash    = sqlc.arg(code_hash),
+    password_reset_salt         = sqlc.arg(salt),
+    password_reset_expires_at   = sqlc.arg(expires_at),
+    password_reset_attempts     = 0,
+    password_reset_last_sent_at = now()
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: ReservePlayerPasswordResetAttempt :one
+-- Atomic check-and-bump, the ReservePlayerVerifyAttempt twin for resets.
+UPDATE project_players
+SET password_reset_attempts          = password_reset_attempts + 1,
+    password_reset_lifetime_attempts = password_reset_lifetime_attempts + 1
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND password_reset_attempts < sqlc.arg(max_attempts)
+RETURNING password_reset_attempts, password_reset_lifetime_attempts;
+
+-- name: LockPlayerPasswordReset :exec
+UPDATE project_players
+SET password_reset_locked_until = sqlc.arg(locked_until)
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint;
+
+-- name: CompletePlayerPasswordReset :exec
+-- Sets the new password, clears the challenge, and bumps the session epoch so
+-- every outstanding access token (possibly an attacker's) dies immediately.
+UPDATE project_players
+SET password_hash                    = sqlc.arg(password_hash),
+    password_reset_code_hash         = NULL,
+    password_reset_salt              = NULL,
+    password_reset_expires_at        = NULL,
+    password_reset_attempts          = 0,
+    session_epoch                    = session_epoch + 1
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: GetPlayerAuthCredentials :one
+-- Change-password / self-disable state read for the authenticated caller.
+SELECT id, password_hash, email, disabled_at
+FROM project_players
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: UpdatePlayerPassword :exec
+UPDATE project_players
+SET password_hash = sqlc.arg(password_hash)
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
+-- name: SetPlayerDisabledSelf :execrows
+-- Self-service disable: the epoch bump revokes live access tokens through the
+-- middleware gate. 0 rows = already disabled or gone.
+UPDATE project_players
+SET disabled_at   = now(),
+    session_epoch = session_epoch + 1
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND disabled_at IS NULL;

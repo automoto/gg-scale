@@ -31,6 +31,18 @@ components:
         - external_id
         - expires_at
       type: object
+    ChangePasswordInputBody:
+      additionalProperties: false
+      properties:
+        current_password:
+          examples:
+            - correct-horse-battery-staple
+          type: string
+        new_password:
+          examples:
+            - battery-staple-correct-horse
+          type: string
+      type: object
     Credentials:
       additionalProperties: false
       properties:
@@ -83,6 +95,14 @@ components:
           type: string
       required:
         - token
+      type: object
+    DisableInputBody:
+      additionalProperties: false
+      properties:
+        password:
+          examples:
+            - correct-horse-battery-staple
+          type: string
       type: object
     ErrorDetail:
       additionalProperties: false
@@ -1144,6 +1164,38 @@ components:
       required:
         - addresses
       type: object
+    ResendVerifyInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          examples:
+            - player@example.com
+          type: string
+      type: object
+    ResetConfirmInputBody:
+      additionalProperties: false
+      properties:
+        code:
+          examples:
+            - "483920"
+          type: string
+        email:
+          examples:
+            - player@example.com
+          type: string
+        new_password:
+          examples:
+            - correct-horse-battery-staple
+          type: string
+      type: object
+    ResetRequestInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          examples:
+            - player@example.com
+          type: string
+      type: object
     RosterEntry:
       additionalProperties: false
       properties:
@@ -1502,6 +1554,31 @@ paths:
       summary: Exchange a tenant-signed token for a session
       tags:
         - Authentication
+  /v1/auth/disable:
+    post:
+      description: "Self-service deactivation: revokes every session immediately and blocks sign-in. Players with credentials must re-authenticate with their password; anonymous players disable on the session alone. A project admin can re-enable the player with all data intact. Permanent deletion is requested through the account pages."
+      operationId: disablePlayer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisableInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Disable the calling player
+      tags:
+        - Authentication
   /v1/auth/link:
     post:
       description: "The in-client upgrade path for anonymous players: the player id and every save, score, and friend stay untouched. A verification code is emailed; after POST /v1/auth/verify the credentials work on any device, and verification also links the global gg-scale account (unlocking display names and friends). An email another player in the project uses is a 409."
@@ -1600,6 +1677,79 @@ paths:
       security:
         - ApiKeyAuth: []
       summary: Revoke a refresh token
+      tags:
+        - Authentication
+  /v1/auth/password:
+    post:
+      description: Requires the current password. Revokes every refresh token so other devices must sign in again; the caller's live access token keeps working until it expires.
+      operationId: changePassword
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Change the calling player's password
+      tags:
+        - Authentication
+  /v1/auth/password-reset:
+    post:
+      description: Emails a reset code when the address belongs to a player of the project. Always answers 202 — the response never reveals whether an account exists. Repeat requests inside a one-minute cooldown send nothing. Finish with POST /v1/auth/password-reset/confirm.
+      operationId: requestPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetRequestInputBody"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: Request an in-client password reset code
+      tags:
+        - Authentication
+  /v1/auth/password-reset/confirm:
+    post:
+      description: Sets the new password and revokes every existing session and refresh token for the player. Wrong codes are capped per code and per lifetime; a rejected new password does not consume the code.
+      operationId: confirmPasswordReset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetConfirmInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: Confirm a password reset with the emailed code
       tags:
         - Authentication
   /v1/auth/refresh:
@@ -1705,6 +1855,30 @@ paths:
       security:
         - ApiKeyAuth: []
       summary: Verify an email address with a code
+      tags:
+        - Authentication
+  /v1/auth/verify/resend:
+    post:
+      description: Mints a fresh code (replacing the old one) when the address belongs to an unverified player, subject to a one-minute cooldown. Always answers 202. Signing up again with an existing email also answers 202 and sends a sign-in notice instead of a duplicate account.
+      operationId: resendVerification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResendVerifyInputBody"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: Resend the email verification code
       tags:
         - Authentication
   /v1/config:

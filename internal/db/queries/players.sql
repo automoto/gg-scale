@@ -31,8 +31,9 @@ WHERE id = sqlc.arg(id)
   AND deleted_at IS NULL
   AND friend_code IS NULL;
 
--- name: SetPlayerFriendCode :exec
+-- name: SetPlayerFriendCode :execrows
 -- Regenerate: overwrites unconditionally, invalidating the old code.
+-- 0 rows = soft-deleted or missing caller.
 UPDATE project_players
 SET friend_code = sqlc.arg(friend_code)
 WHERE id = sqlc.arg(id)

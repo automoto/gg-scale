@@ -303,6 +303,38 @@ func TestPlayers_batch_bad_ids_param_is_validation_error(t *testing.T) {
 	}
 }
 
+// TestProfile_anonymous_clear_display_name_is_noop: an unlinked player
+// clearing a name they cannot have must get a quiet 204, not a 403.
+func TestProfile_anonymous_clear_display_name_is_noop(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 2, "dn")
+	srv := newServerForCluster(t, c)
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "dn")
+	resp, body := patchDisplayName(t, srv.URL, "dn", tok, "")
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+}
+
+// TestProfile_email_conflict_is_labeled_email: a duplicate email must not be
+// reported as a xuid conflict.
+func TestProfile_email_conflict_is_labeled_email(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 2, "dn")
+	srv := newServerForCluster(t, c)
+
+	tokA, _ := anonymousLoginWithID(t, srv.URL, "dn")
+	resp, body := authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "dn", tokA,
+		map[string]string{"email": "claimed@example.com"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(body))
+
+	tokB, _ := anonymousLoginWithID(t, srv.URL, "dn")
+	resp, body = authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "dn", tokB,
+		map[string]string{"email": "claimed@example.com"})
+	assert.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), "email already in use")
+	assert.NotContains(t, string(body), "xuid")
+}
+
 // ── patch atomicity ─────────────────────────────────────────────────────────
 
 // TestProfile_patch_is_atomic_when_one_field_invalid: a PATCH that fails

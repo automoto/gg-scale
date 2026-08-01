@@ -227,15 +227,20 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 				if qerr != nil && !errors.Is(qerr, pgx.ErrNoRows) {
 					return qerr
 				}
-				if !acc.Valid {
+				switch {
+				case !acc.Valid && namePtr == nil:
+					// An unlinked player clearing a name it cannot have is a
+					// quiet no-op, not a 403.
+				case !acc.Valid:
 					return errNoLinkedAccount
-				}
-				// player_accounts is global (plain grants, no RLS), so the
-				// write joins this tenant-scoped transaction directly.
-				if qerr := q.SetPlayerAccountDisplayName(ctx, sqlcgen.SetPlayerAccountDisplayNameParams{
-					ID: acc, DisplayName: namePtr,
-				}); qerr != nil {
-					return qerr
+				default:
+					// player_accounts is global (plain grants, no RLS), so
+					// the write joins this tenant-scoped transaction directly.
+					if qerr := q.SetPlayerAccountDisplayName(ctx, sqlcgen.SetPlayerAccountDisplayNameParams{
+						ID: acc, DisplayName: namePtr,
+					}); qerr != nil {
+						return qerr
+					}
 				}
 			}
 			if req.XUID != nil {
@@ -257,6 +262,8 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 		switch {
 		case errors.Is(err, errNoLinkedAccount):
 			return nil, huma.Error403Forbidden("link a gg-scale account to set a display name")
+		case webutil.UniqueViolationConstraint(err) == "project_players_email_uniq":
+			return nil, huma.Error409Conflict("email already in use")
 		case webutil.IsUniqueViolation(err):
 			return nil, huma.Error409Conflict("xuid already in use")
 		case err != nil:

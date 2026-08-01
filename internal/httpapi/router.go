@@ -427,6 +427,7 @@ func NewRouter(d Deps) http.Handler {
 					// ahead of every handler.
 					papi := groupAPI(r, humaCfg)
 					registerAuthLinkRoutes(papi, d)
+					registerAuthAccountRoutes(papi, d)
 					registerPresence(papi, d)
 					registerGameInvites(papi, d)
 					registerProfileRoutes(papi, d)

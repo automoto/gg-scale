@@ -115,7 +115,7 @@ func (q *Queries) ListPublicPlayers(ctx context.Context, arg ListPublicPlayersPa
 	return items, nil
 }
 
-const setPlayerFriendCode = `-- name: SetPlayerFriendCode :exec
+const setPlayerFriendCode = `-- name: SetPlayerFriendCode :execrows
 UPDATE project_players
 SET friend_code = $1
 WHERE id = $2
@@ -129,9 +129,13 @@ type SetPlayerFriendCodeParams struct {
 }
 
 // Regenerate: overwrites unconditionally, invalidating the old code.
-func (q *Queries) SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) error {
-	_, err := q.db.Exec(ctx, setPlayerFriendCode, arg.FriendCode, arg.ID)
-	return err
+// 0 rows = soft-deleted or missing caller.
+func (q *Queries) SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPlayerFriendCode, arg.FriendCode, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setPlayerFriendCodeIfAbsent = `-- name: SetPlayerFriendCodeIfAbsent :execrows

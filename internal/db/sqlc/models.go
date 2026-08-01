@@ -599,6 +599,13 @@ type ProjectPlayer struct {
 	SessionEpoch                      int32
 	UnlinkedAt                        pgtype.Timestamptz
 	FriendCode                        *string
+	PasswordResetCodeHash             []byte
+	PasswordResetSalt                 []byte
+	PasswordResetExpiresAt            pgtype.Timestamptz
+	PasswordResetAttempts             int32
+	PasswordResetLifetimeAttempts     int32
+	PasswordResetLockedUntil          pgtype.Timestamptz
+	PasswordResetLastSentAt           pgtype.Timestamptz
 }
 
 type RateLimitOverride struct {

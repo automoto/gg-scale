@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -103,6 +104,31 @@ func IsUniqueViolation(err error) bool {
 		return pgErr.Code == "23505"
 	}
 	return strings.Contains(err.Error(), "23505")
+}
+
+// UniqueViolationConstraint returns the violated unique constraint's name, or
+// "" when err is not a unique violation. Lets a handler that writes several
+// uniquely-indexed columns in one transaction report the right conflict.
+func UniqueViolationConstraint(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return pgErr.ConstraintName
+	}
+	return ""
+}
+
+// RandomCode returns n uniformly random characters from alphabet, for short
+// human-shareable codes (join codes, friend codes).
+func RandomCode(alphabet string, n int) (string, error) {
+	b := make([]byte, n)
+	for i := range b {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = alphabet[idx.Int64()]
+	}
+	return string(b), nil
 }
 
 // RandomHex returns prefix + hex(nbytes random bytes), suitable for

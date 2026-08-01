@@ -133,6 +133,11 @@ func (c *Client) Verify(ctx context.Context, appID, webAPIKey, ticketHex string)
 	if params == nil || params.SteamID == "" {
 		return Result{}, fmt.Errorf("%w: unexpected body", ErrUnavailable)
 	}
+	// A params object with a non-OK verdict is still a rejection: only an
+	// explicit OK may sign a player in.
+	if params.Result != "OK" {
+		return Result{}, fmt.Errorf("%w: verdict %q", ErrInvalidTicket, params.Result)
+	}
 	return Result{
 		SteamID:         params.SteamID,
 		OwnerSteamID:    params.OwnerSteamID,

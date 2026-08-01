@@ -64,6 +64,9 @@ type Querier interface {
 	// swept) won't match the WHERE and are excluded — the caller compares
 	// rows-affected and deallocates the orphan server when 0.
 	CommitMatchmakerTickets(ctx context.Context, arg CommitMatchmakerTicketsParams) (int64, error)
+	// Sets the new password, clears the challenge, and bumps the session epoch so
+	// every outstanding access token (possibly an attacker's) dies immediately.
+	CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) error
 	// last_used_step records the enrollment code's timestep so the same code
 	// cannot be replayed at the first login challenge.
 	ConfirmControlPanelTOTP(ctx context.Context, arg ConfirmControlPanelTOTPParams) (int64, error)
@@ -345,6 +348,8 @@ type Querier interface {
 	GetPlayerAccountTOTP(ctx context.Context, playerAccountID pgtype.UUID) (GetPlayerAccountTOTPRow, error)
 	GetPlayerAccountTrustedDevice(ctx context.Context, arg GetPlayerAccountTrustedDeviceParams) (int64, error)
 	GetPlayerAccountVerificationState(ctx context.Context, id pgtype.UUID) (GetPlayerAccountVerificationStateRow, error)
+	// Change-password / self-disable state read for the authenticated caller.
+	GetPlayerAuthCredentials(ctx context.Context, id int64) (GetPlayerAuthCredentialsRow, error)
 	// Disabled accounts (disabled_at IS NOT NULL) are filtered out here so
 	// /v1/auth/login behaves identically to an unknown email — same dummy
 	// bcrypt + invalid_credentials response. Same for players who unlinked
@@ -378,6 +383,9 @@ type Querier interface {
 	// Tenant-scoped: the global account a player is linked to (NULL if the
 	// player is anonymous / unlinked).
 	GetPlayerLinkedAccountID(ctx context.Context, id int64) (pgtype.UUID, error)
+	// Reset-request/confirm state read, keyed like login. Filters mirror
+	// GetPlayerByEmail: disabled/unlinked players read as unknown.
+	GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error)
 	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
 	// PK lookup used at token issuance to snapshot the current epoch into the JWT.
 	GetPlayerSessionEpoch(ctx context.Context, id int64) (int32, error)
@@ -611,6 +619,7 @@ type Querier interface {
 	// admin rows before counting them in the surrounding transaction.
 	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
 	LockPlayerAccountVerification(ctx context.Context, arg LockPlayerAccountVerificationParams) error
+	LockPlayerPasswordReset(ctx context.Context, arg LockPlayerPasswordResetParams) error
 	LockPlayerVerification(ctx context.Context, arg LockPlayerVerificationParams) error
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
@@ -705,6 +714,8 @@ type Querier interface {
 	ReservePlayerAccountTOTPAttempt(ctx context.Context, arg ReservePlayerAccountTOTPAttemptParams) (ReservePlayerAccountTOTPAttemptRow, error)
 	// Atomic check-and-bump; returns 0 rows when already at the per-code cap.
 	ReservePlayerAccountVerifyAttempt(ctx context.Context, arg ReservePlayerAccountVerifyAttemptParams) (ReservePlayerAccountVerifyAttemptRow, error)
+	// Atomic check-and-bump, the ReservePlayerVerifyAttempt twin for resets.
+	ReservePlayerPasswordResetAttempt(ctx context.Context, arg ReservePlayerPasswordResetAttemptParams) (ReservePlayerPasswordResetAttemptRow, error)
 	// Atomic check-and-bump (see ReserveControlPanelVerifyAttempt for the
 	// TOCTOU explanation). Returns 0 rows when already at cap.
 	ReservePlayerVerifyAttempt(ctx context.Context, arg ReservePlayerVerifyAttemptParams) (ReservePlayerVerifyAttemptRow, error)
@@ -798,11 +809,18 @@ type Querier interface {
 	// tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
 	// server-verify immediately.
 	SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error
+	// Self-service disable: the epoch bump revokes live access tokens through the
+	// middleware gate. 0 rows = already disabled or gone.
+	SetPlayerDisabledSelf(ctx context.Context, id int64) (int64, error)
 	// Regenerate: overwrites unconditionally, invalidating the old code.
-	SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) error
+	// 0 rows = soft-deleted or missing caller.
+	SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) (int64, error)
 	// Lazy first-read initialization: 0 rows means a concurrent reader won the
 	// race (re-read) or the caller already has a code.
 	SetPlayerFriendCodeIfAbsent(ctx context.Context, arg SetPlayerFriendCodeIfAbsentParams) (int64, error)
+	// Mints a fresh reset code: per-code attempts restart, lifetime attempts and
+	// the lockout survive so re-requesting codes never grants extra guesses.
+	SetPlayerPasswordResetChallenge(ctx context.Context, arg SetPlayerPasswordResetChallengeParams) error
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
 	SetPlayerVerificationCodeByID(ctx context.Context, arg SetPlayerVerificationCodeByIDParams) error
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error
@@ -869,6 +887,7 @@ type Querier interface {
 	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error
 	UpdateGameSessionState(ctx context.Context, arg UpdateGameSessionStateParams) error
 	UpdateLeaderboard(ctx context.Context, arg UpdateLeaderboardParams) (int64, error)
+	UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPasswordParams) error
 	// Profile updates are deliberately narrow — only fields explicitly
 	// enumerated server-side may change. PATCHing email re-triggers the
 	// verify flow (handler clears email_verified_at).

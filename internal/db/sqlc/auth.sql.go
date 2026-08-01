@@ -26,6 +26,31 @@ func (q *Queries) ClearPlayerVerificationCode(ctx context.Context, id int64) err
 	return err
 }
 
+const completePlayerPasswordReset = `-- name: CompletePlayerPasswordReset :exec
+UPDATE project_players
+SET password_hash                    = $1,
+    password_reset_code_hash         = NULL,
+    password_reset_salt              = NULL,
+    password_reset_expires_at        = NULL,
+    password_reset_attempts          = 0,
+    session_epoch                    = session_epoch + 1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type CompletePlayerPasswordResetParams struct {
+	PasswordHash []byte
+	ID           int64
+}
+
+// Sets the new password, clears the challenge, and bumps the session epoch so
+// every outstanding access token (possibly an attacker's) dies immediately.
+func (q *Queries) CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) error {
+	_, err := q.db.Exec(ctx, completePlayerPasswordReset, arg.PasswordHash, arg.ID)
+	return err
+}
+
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
 INSERT INTO project_players (tenant_id, project_id, external_id)
 VALUES (
@@ -125,6 +150,34 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (C
 	return i, err
 }
 
+const getPlayerAuthCredentials = `-- name: GetPlayerAuthCredentials :one
+SELECT id, password_hash, email, disabled_at
+FROM project_players
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type GetPlayerAuthCredentialsRow struct {
+	ID           int64
+	PasswordHash []byte
+	Email        *string
+	DisabledAt   pgtype.Timestamptz
+}
+
+// Change-password / self-disable state read for the authenticated caller.
+func (q *Queries) GetPlayerAuthCredentials(ctx context.Context, id int64) (GetPlayerAuthCredentialsRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerAuthCredentials, id)
+	var i GetPlayerAuthCredentialsRow
+	err := row.Scan(
+		&i.ID,
+		&i.PasswordHash,
+		&i.Email,
+		&i.DisabledAt,
+	)
+	return i, err
+}
+
 const getPlayerByEmail = `-- name: GetPlayerByEmail :one
 SELECT id, project_id, password_hash, email_verified_at
 FROM project_players
@@ -188,6 +241,54 @@ func (q *Queries) GetPlayerByExternalID(ctx context.Context, arg GetPlayerByExte
 	row := q.db.QueryRow(ctx, getPlayerByExternalID, arg.ProjectID, arg.ExternalID)
 	var i GetPlayerByExternalIDRow
 	err := row.Scan(&i.ID, &i.ProjectID, &i.EmailVerifiedAt)
+	return i, err
+}
+
+const getPlayerPasswordResetState = `-- name: GetPlayerPasswordResetState :one
+SELECT id, password_hash, password_reset_code_hash, password_reset_salt,
+       password_reset_expires_at, password_reset_attempts,
+       password_reset_lifetime_attempts, password_reset_locked_until,
+       password_reset_last_sent_at
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND email = $2
+  AND deleted_at IS NULL AND disabled_at IS NULL AND unlinked_at IS NULL
+`
+
+type GetPlayerPasswordResetStateParams struct {
+	ProjectID int64
+	Email     *string
+}
+
+type GetPlayerPasswordResetStateRow struct {
+	ID                            int64
+	PasswordHash                  []byte
+	PasswordResetCodeHash         []byte
+	PasswordResetSalt             []byte
+	PasswordResetExpiresAt        pgtype.Timestamptz
+	PasswordResetAttempts         int32
+	PasswordResetLifetimeAttempts int32
+	PasswordResetLockedUntil      pgtype.Timestamptz
+	PasswordResetLastSentAt       pgtype.Timestamptz
+}
+
+// Reset-request/confirm state read, keyed like login. Filters mirror
+// GetPlayerByEmail: disabled/unlinked players read as unknown.
+func (q *Queries) GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerPasswordResetState, arg.ProjectID, arg.Email)
+	var i GetPlayerPasswordResetStateRow
+	err := row.Scan(
+		&i.ID,
+		&i.PasswordHash,
+		&i.PasswordResetCodeHash,
+		&i.PasswordResetSalt,
+		&i.PasswordResetExpiresAt,
+		&i.PasswordResetAttempts,
+		&i.PasswordResetLifetimeAttempts,
+		&i.PasswordResetLockedUntil,
+		&i.PasswordResetLastSentAt,
+	)
 	return i, err
 }
 
@@ -392,6 +493,23 @@ func (q *Queries) ListPlayerSessionEpochs(ctx context.Context, ids []int64) ([]L
 	return items, nil
 }
 
+const lockPlayerPasswordReset = `-- name: LockPlayerPasswordReset :exec
+UPDATE project_players
+SET password_reset_locked_until = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+type LockPlayerPasswordResetParams struct {
+	LockedUntil pgtype.Timestamptz
+	ID          int64
+}
+
+func (q *Queries) LockPlayerPasswordReset(ctx context.Context, arg LockPlayerPasswordResetParams) error {
+	_, err := q.db.Exec(ctx, lockPlayerPasswordReset, arg.LockedUntil, arg.ID)
+	return err
+}
+
 const lockPlayerVerification = `-- name: LockPlayerVerification :exec
 UPDATE project_players
 SET email_verification_locked_until = $1::timestamptz
@@ -450,6 +568,34 @@ func (q *Queries) ReplacePlayerExternalID(ctx context.Context, arg ReplacePlayer
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const reservePlayerPasswordResetAttempt = `-- name: ReservePlayerPasswordResetAttempt :one
+UPDATE project_players
+SET password_reset_attempts          = password_reset_attempts + 1,
+    password_reset_lifetime_attempts = password_reset_lifetime_attempts + 1
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND password_reset_attempts < $2
+RETURNING password_reset_attempts, password_reset_lifetime_attempts
+`
+
+type ReservePlayerPasswordResetAttemptParams struct {
+	ID          int64
+	MaxAttempts int32
+}
+
+type ReservePlayerPasswordResetAttemptRow struct {
+	PasswordResetAttempts         int32
+	PasswordResetLifetimeAttempts int32
+}
+
+// Atomic check-and-bump, the ReservePlayerVerifyAttempt twin for resets.
+func (q *Queries) ReservePlayerPasswordResetAttempt(ctx context.Context, arg ReservePlayerPasswordResetAttemptParams) (ReservePlayerPasswordResetAttemptRow, error) {
+	row := q.db.QueryRow(ctx, reservePlayerPasswordResetAttempt, arg.ID, arg.MaxAttempts)
+	var i ReservePlayerPasswordResetAttemptRow
+	err := row.Scan(&i.PasswordResetAttempts, &i.PasswordResetLifetimeAttempts)
+	return i, err
 }
 
 const reservePlayerVerifyAttempt = `-- name: ReservePlayerVerifyAttempt :one
@@ -542,6 +688,57 @@ func (q *Queries) RevokeSessionByRefreshHash(ctx context.Context, refreshHash []
 	return player_id, err
 }
 
+const setPlayerDisabledSelf = `-- name: SetPlayerDisabledSelf :execrows
+UPDATE project_players
+SET disabled_at   = now(),
+    session_epoch = session_epoch + 1
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND disabled_at IS NULL
+`
+
+// Self-service disable: the epoch bump revokes live access tokens through the
+// middleware gate. 0 rows = already disabled or gone.
+func (q *Queries) SetPlayerDisabledSelf(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, setPlayerDisabledSelf, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setPlayerPasswordResetChallenge = `-- name: SetPlayerPasswordResetChallenge :exec
+UPDATE project_players
+SET password_reset_code_hash    = $1,
+    password_reset_salt         = $2,
+    password_reset_expires_at   = $3,
+    password_reset_attempts     = 0,
+    password_reset_last_sent_at = now()
+WHERE id = $4
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type SetPlayerPasswordResetChallengeParams struct {
+	CodeHash  []byte
+	Salt      []byte
+	ExpiresAt pgtype.Timestamptz
+	ID        int64
+}
+
+// Mints a fresh reset code: per-code attempts restart, lifetime attempts and
+// the lockout survive so re-requesting codes never grants extra guesses.
+func (q *Queries) SetPlayerPasswordResetChallenge(ctx context.Context, arg SetPlayerPasswordResetChallengeParams) error {
+	_, err := q.db.Exec(ctx, setPlayerPasswordResetChallenge,
+		arg.CodeHash,
+		arg.Salt,
+		arg.ExpiresAt,
+		arg.ID,
+	)
+	return err
+}
+
 const setPlayerVerificationCode = `-- name: SetPlayerVerificationCode :exec
 UPDATE project_players
 SET email_verification_code_hash    = $3,
@@ -570,6 +767,24 @@ func (q *Queries) SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVe
 		arg.EmailVerificationSalt,
 		arg.EmailVerificationExpiresAt,
 	)
+	return err
+}
+
+const updatePlayerPassword = `-- name: UpdatePlayerPassword :exec
+UPDATE project_players
+SET password_hash = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type UpdatePlayerPasswordParams struct {
+	PasswordHash []byte
+	ID           int64
+}
+
+func (q *Queries) UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPasswordParams) error {
+	_, err := q.db.Exec(ctx, updatePlayerPassword, arg.PasswordHash, arg.ID)
 	return err
 }
 

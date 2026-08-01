@@ -81,6 +81,18 @@ func TestVerify_parses_ban_flags(t *testing.T) {
 	}
 }
 
+func TestVerify_non_ok_verdict_is_rejected(t *testing.T) {
+	// A 200 with a params object but a non-OK verdict must never sign in,
+	// even when a steamid is present.
+	body := `{"response":{"params":{"result":"Denied","steamid":"76561197960265728",` +
+		`"ownersteamid":"76561197960265728","vacbanned":false,"publisherbanned":false}}}`
+	c, _ := fakeValve(t, http.StatusOK, body)
+
+	_, err := c.Verify(context.Background(), testAppID, testKey, testTicket)
+
+	assert.ErrorIs(t, err, ErrInvalidTicket)
+}
+
 func TestVerify_error_body_is_invalid_ticket(t *testing.T) {
 	c, _ := fakeValve(t, http.StatusOK,
 		`{"response":{"error":{"errorcode":101,"errordesc":"Invalid ticket"}}}`)

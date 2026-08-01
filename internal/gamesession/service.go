@@ -5,11 +5,9 @@ package gamesession
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -241,13 +239,5 @@ func IsMatchmade(props []byte) bool {
 }
 
 func newJoinCode() (string, error) {
-	b := make([]byte, joinCodeLen)
-	for i := range b {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(joinCodeAlphabet))))
-		if err != nil {
-			return "", err
-		}
-		b[i] = joinCodeAlphabet[n.Int64()]
-	}
-	return string(b), nil
+	return webutil.RandomCode(joinCodeAlphabet, joinCodeLen)
 }
