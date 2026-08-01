@@ -310,6 +310,13 @@ SET remote_addr_ip_lan    = sqlc.narg(remote_addr_ip_lan),
     updated_at            = now()
 WHERE id = sqlc.arg(id);
 
+-- name: SetPlayerAccountDisplayName :exec
+-- Player-set display name (PATCH /v1/profile). NULL clears it.
+UPDATE player_accounts
+SET display_name = sqlc.narg(display_name),
+    updated_at   = now()
+WHERE id = sqlc.arg(id);
+
 -- name: GetPlayerAccountForProjectRead :one
 -- Tenant-scoped: resolve a player (in a project the caller's secret key is
 -- pinned to) to its linked account id, for the server-side remote-address

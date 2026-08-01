@@ -217,6 +217,7 @@ func New(d Deps) http.Handler {
 			r.Post("/settings/disable", h.disableTenantHandler)
 			r.Post("/settings/enable", h.enableTenantHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
+			r.Post("/projects/{projectID}/config", h.updateRemoteConfigHandler)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
 			// switch hides these routes entirely (404) when off, so operators

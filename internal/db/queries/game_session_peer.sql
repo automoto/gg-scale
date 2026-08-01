@@ -28,16 +28,19 @@ WHERE session_id  = sqlc.arg('session_id')
 
 -- name: ListGameSessionPeers :many
 -- Returns active peers (last_seen within 30 s) with each peer's optional
--- xuid. RLS on game_session_peer scopes rows to the current tenant.
+-- xuid and display name (from the linked global account, when present).
+-- RLS on game_session_peer scopes rows to the current tenant.
 SELECT
     p.player_id,
     p.ip,
     p.port,
     p.qos,
     p.last_seen,
-    u.xuid
+    u.xuid,
+    a.display_name
 FROM game_session_peer p
 LEFT JOIN project_players u ON u.id = p.player_id
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
 WHERE p.session_id = sqlc.arg('session_id')
   AND p.last_seen  > now() - interval '30 seconds'
 ORDER BY p.last_seen ASC;

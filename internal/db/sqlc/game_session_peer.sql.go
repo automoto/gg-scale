@@ -86,25 +86,29 @@ SELECT
     p.port,
     p.qos,
     p.last_seen,
-    u.xuid
+    u.xuid,
+    a.display_name
 FROM game_session_peer p
 LEFT JOIN project_players u ON u.id = p.player_id
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
 WHERE p.session_id = $1
   AND p.last_seen  > now() - interval '30 seconds'
 ORDER BY p.last_seen ASC
 `
 
 type ListGameSessionPeersRow struct {
-	PlayerID int64
-	Ip       *string
-	Port     *int32
-	Qos      []byte
-	LastSeen pgtype.Timestamptz
-	Xuid     *string
+	PlayerID    int64
+	Ip          *string
+	Port        *int32
+	Qos         []byte
+	LastSeen    pgtype.Timestamptz
+	Xuid        *string
+	DisplayName *string
 }
 
 // Returns active peers (last_seen within 30 s) with each peer's optional
-// xuid. RLS on game_session_peer scopes rows to the current tenant.
+// xuid and display name (from the linked global account, when present).
+// RLS on game_session_peer scopes rows to the current tenant.
 func (q *Queries) ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error) {
 	rows, err := q.db.Query(ctx, listGameSessionPeers, sessionID)
 	if err != nil {
@@ -121,6 +125,7 @@ func (q *Queries) ListGameSessionPeers(ctx context.Context, sessionID string) ([
 			&i.Qos,
 			&i.LastSeen,
 			&i.Xuid,
+			&i.DisplayName,
 		); err != nil {
 			return nil, err
 		}

@@ -110,24 +110,27 @@ func (q *Queries) GetLeaderboardForControlPanel(ctx context.Context, arg GetLead
 
 const leaderboardRangeByRank = `-- name: LeaderboardRangeByRank :many
 WITH ranked AS (
-    SELECT player_id,
+    SELECT le.player_id,
            CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
+           a.display_name,
            RANK() OVER (
              ORDER BY
                CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
                CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               player_id ASC
+               le.player_id ASC
            ) AS r
     FROM leaderboard_entries le
     JOIN leaderboards l ON l.id = le.leaderboard_id
+    LEFT JOIN project_players pp ON pp.id = le.player_id AND pp.deleted_at IS NULL
+    LEFT JOIN player_accounts a ON a.id = pp.player_account_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
       AND le.leaderboard_id = $3
       AND l.tenant_id = le.tenant_id
       AND l.project_id = $4
       AND l.deleted_at IS NULL
-    GROUP BY player_id
+    GROUP BY le.player_id, a.display_name
 )
-SELECT player_id, best_score, r::bigint AS rank
+SELECT player_id, best_score, display_name, r::bigint AS rank
 FROM ranked
 WHERE r BETWEEN $1::bigint AND $2::bigint
 ORDER BY r
@@ -141,9 +144,10 @@ type LeaderboardRangeByRankParams struct {
 }
 
 type LeaderboardRangeByRankRow struct {
-	PlayerID  int64
-	BestScore int64
-	Rank      int64
+	PlayerID    int64
+	BestScore   int64
+	DisplayName *string
+	Rank        int64
 }
 
 func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error) {
@@ -160,7 +164,12 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 	var items []LeaderboardRangeByRankRow
 	for rows.Next() {
 		var i LeaderboardRangeByRankRow
-		if err := rows.Scan(&i.PlayerID, &i.BestScore, &i.Rank); err != nil {
+		if err := rows.Scan(
+			&i.PlayerID,
+			&i.BestScore,
+			&i.DisplayName,
+			&i.Rank,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -302,15 +311,18 @@ func (q *Queries) SubmitScore(ctx context.Context, arg SubmitScoreParams) (Submi
 const topN = `-- name: TopN :many
 SELECT le.player_id,
        CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
-       MIN(le.recorded_at)::timestamptz AS first_seen
+       MIN(le.recorded_at)::timestamptz AS first_seen,
+       a.display_name
 FROM leaderboard_entries le
 JOIN leaderboards l ON l.id = le.leaderboard_id
+LEFT JOIN project_players pp ON pp.id = le.player_id AND pp.deleted_at IS NULL
+LEFT JOIN player_accounts a ON a.id = pp.player_account_id
 WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND le.leaderboard_id = $1
   AND l.tenant_id = le.tenant_id
   AND l.project_id = $2
   AND l.deleted_at IS NULL
-GROUP BY le.player_id
+GROUP BY le.player_id, a.display_name
 ORDER BY
   CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
   CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
@@ -325,11 +337,14 @@ type TopNParams struct {
 }
 
 type TopNRow struct {
-	PlayerID  int64
-	BestScore int64
-	FirstSeen pgtype.Timestamptz
+	PlayerID    int64
+	BestScore   int64
+	FirstSeen   pgtype.Timestamptz
+	DisplayName *string
 }
 
+// display_name rides along from the entry's linked global account (NULL for
+// anonymous players); joining pp/a cannot fan out because pp.id is unique.
 func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 	rows, err := q.db.Query(ctx, topN, arg.LeaderboardID, arg.ProjectID, arg.RowLimit)
 	if err != nil {
@@ -339,7 +354,12 @@ func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 	var items []TopNRow
 	for rows.Next() {
 		var i TopNRow
-		if err := rows.Scan(&i.PlayerID, &i.BestScore, &i.FirstSeen); err != nil {
+		if err := rows.Scan(
+			&i.PlayerID,
+			&i.BestScore,
+			&i.FirstSeen,
+			&i.DisplayName,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -82,6 +82,16 @@ func TestDefaultPolicy_allows_tenant_admin_and_owner_to_manage_leaderboards(t *t
 	}
 }
 
+func TestDefaultPolicy_allows_tenant_admin_to_update_project_config(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
+
+	allowed, err := a.CanControlPanel(42, 7, rbac.ProjectConfigObject(99), rbac.ActionUpdate)
+
+	require.NoError(t, err)
+	assert.True(t, allowed)
+}
+
 func TestDefaultPolicy_allows_tenant_admin_to_manage_api_keys(t *testing.T) {
 	for _, obj := range []string{rbac.ObjectAPIKeyPublic, rbac.ObjectAPIKeySecret} {
 		t.Run(obj, func(t *testing.T) {

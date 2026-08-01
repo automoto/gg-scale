@@ -21,6 +21,7 @@ var expectedV1Paths = []string{
 	"/v1/auth/refresh",
 	"/v1/auth/signup",
 	"/v1/auth/verify",
+	"/v1/config",
 	"/v1/fleets/heartbeat",
 	"/v1/fleets/{fleet}/servers",
 	"/v1/friends",
@@ -44,6 +45,8 @@ var expectedV1Paths = []string{
 	"/v1/leaderboards/{id}/top",
 	"/v1/matchmaker/tickets",
 	"/v1/matchmaker/tickets/{id}",
+	"/v1/players",
+	"/v1/players/{id}",
 	"/v1/presence",
 	"/v1/profile",
 	"/v1/relay/credentials",
@@ -120,6 +123,7 @@ func TestOpenAPIDoc_schemas_carry_examples(t *testing.T) {
 		{"RemoteAddrEntry", "address"},
 		{"Server", "address"},
 		{"ProfileResponse", "external_id"},
+		{"PublicPlayerResponse", "display_name"},
 		{"PlayerVerifyResponse", "external_id"},
 		{"HealthzResult", "version"},
 	}
@@ -130,6 +134,27 @@ func TestOpenAPIDoc_schemas_carry_examples(t *testing.T) {
 		require.NotNil(t, p, "%s.%s", tc.schema, tc.property)
 		assert.NotEmpty(t, p.Examples, "%s.%s must document an example", tc.schema, tc.property)
 	}
+}
+
+func TestOpenAPIDoc_remote_config_documents_example_and_revalidation(t *testing.T) {
+	doc := OpenAPIDoc("1.0.0")
+	item := doc.Paths["/v1/config"]
+	require.NotNil(t, item)
+	require.NotNil(t, item.Get)
+
+	require.Len(t, item.Get.Security, 1)
+	_, hasAPIKey := item.Get.Security[0]["ApiKeyAuth"]
+	_, hasPlayer := item.Get.Security[0]["PlayerSession"]
+	assert.True(t, hasAPIKey)
+	assert.False(t, hasPlayer, "remote config must work before player login")
+
+	ok := item.Get.Responses["200"]
+	require.NotNil(t, ok)
+	media := ok.Content["application/json"]
+	require.NotNil(t, media)
+	require.NotNil(t, media.Schema)
+	assert.NotEmpty(t, media.Schema.Examples)
+	assert.Contains(t, item.Get.Responses, "304")
 }
 
 // TestOpenAPIDoc_storage_put_body_documents_example guards the storage PUT

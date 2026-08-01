@@ -40,6 +40,7 @@ p, role:tenant_owner, *, audit, read
 p, role:tenant_admin, *, project, manage
 p, role:tenant_admin, *, project:*:players, manage
 p, role:tenant_admin, *, project:*:leaderboard, manage
+p, role:tenant_admin, *, project:*:config, update
 p, role:tenant_admin, *, api_key:publishable, manage
 p, role:tenant_admin, *, api_key:secret, manage
 p, role:tenant_admin, *, audit, read

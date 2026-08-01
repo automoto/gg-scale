@@ -2747,6 +2747,18 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 		</div>
 		@flashSuccess(vm.Message)
 		<section class="card">
+			<h2>Remote config</h2>
+			<p class="card-subtitle">JSON values fetched by game clients from <code>GET /v1/config</code>. Changes take effect on the next fetch without a server restart.</p>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/config") } class="settings-form">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="remote-config">Config JSON</label>
+				<textarea id="remote-config" name="config" rows="14" spellcheck="false" aria-describedby="config-help config-error">{ vm.RemoteConfig }</textarea>
+				<small id="config-help">A top-level JSON object, up to 64 KiB. Both publishable and secret project keys can read it.</small>
+				@fieldError(vm.FieldErrors, "config")
+				<button type="submit" class="btn-inline">Save remote config</button>
+			</form>
+		</section>
+		<section class="card">
 			<h2>Invite quotas</h2>
 			<p class="card-subtitle">
 				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour, { rlNum(vm.DefaultDomainDay) }/project/day).

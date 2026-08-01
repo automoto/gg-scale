@@ -76,6 +76,7 @@ func newHumaConfig(version string) huma.Config {
 	// The order here is the order a reader sees them.
 	cfg.Tags = []*huma.Tag{
 		{Name: "Authentication", Description: "Player sign-in and session tokens: email/password, anonymous, and custom-token."},
+		{Name: "Remote Config", Description: "Project-defined live tuning values available before player login."},
 		{Name: "Player Profiles", Description: "Per-project player identity: email and external console id."},
 		{Name: "Cloud Saves", Description: "Per-player JSON object storage with optimistic concurrency."},
 		{Name: "Leaderboards", Description: "Ranked scoreboards with server-authoritative score submission."},
@@ -101,8 +102,17 @@ type groupAdapter struct {
 	router chi.Router
 }
 
+// chiPathMetadata lets an operation override the chi routing pattern (e.g. to
+// constrain a path param with a regex) while op.Path stays the spec-facing
+// path. Needed where an API path shares a prefix with a mounted page surface.
+const chiPathMetadata = "chiPath"
+
 func (a groupAdapter) Handle(op *huma.Operation, handler func(huma.Context)) {
-	routePath := strings.TrimPrefix(op.Path, v1Prefix)
+	chiPath := op.Path
+	if p, ok := op.Metadata[chiPathMetadata].(string); ok {
+		chiPath = p
+	}
+	routePath := strings.TrimPrefix(chiPath, v1Prefix)
 	h := func(w http.ResponseWriter, r *http.Request) {
 		handler(humachi.NewContext(op, r, w))
 	}

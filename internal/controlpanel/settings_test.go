@@ -133,12 +133,33 @@ func TestProjectSettingsPage_shows_invite_quota_forms(t *testing.T) {
 	html := renderToString(t, ProjectSettingsPage(ProjectSettingsView{
 		TenantID: 3, ProjectID: 8, ProjectName: "arcade",
 		DefaultInviterHour: 5, DefaultDomainDay: 50,
+		RemoteConfig: `{
+  "maintenance_mode": false
+}`,
 	}))
 	// Players are linked by project admins, never self-join: no public-joining control.
 	assert.NotContains(t, html, "public-joining")
 	assert.NotContains(t, html, "Public joining")
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/rate-limits/projects/8/invites")
 	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/projects/8/settings"`)
+	assert.Contains(t, html, "/v1/control-panel/tenants/3/projects/8/config")
+	assert.Contains(t, html, `name="config"`)
+	assert.Contains(t, html, `&#34;maintenance_mode&#34;: false`)
+}
+
+func TestNormalizeRemoteConfig_acceptsJSONObjects(t *testing.T) {
+	got, err := normalizeRemoteConfig(`{"minimum_client_version":"1.4.0","maintenance_mode":false}`)
+
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"maintenance_mode":false,"minimum_client_version":"1.4.0"}`, string(got))
+}
+
+func TestNormalizeRemoteConfig_rejectsNonObjectsAndInvalidJSON(t *testing.T) {
+	for _, input := range []string{"", "null", "[]", `{"unfinished":`} {
+		_, err := normalizeRemoteConfig(input)
+
+		assert.Error(t, err, "input=%q", input)
+	}
 }
 
 func TestServerSettingsPage_is_read_only(t *testing.T) {

@@ -34,9 +34,10 @@ type submitScoreRequest struct {
 }
 
 type leaderboardEntry struct {
-	PlayerID int64 `json:"player_id" example:"42"`
-	Score    int64 `json:"score" example:"1500"`
-	Rank     int64 `json:"rank" example:"3"`
+	PlayerID    int64  `json:"player_id" example:"42"`
+	Score       int64  `json:"score" example:"1500"`
+	Rank        int64  `json:"rank" example:"3"`
+	DisplayName string `json:"display_name,omitempty" example:"Nova Fox"`
 }
 
 type leaderboardSubmitInput struct {
@@ -246,9 +247,11 @@ func topFromPostgres(ctx context.Context, d Deps, leaderboardID, projectID int64
 			return qerr
 		}
 		for i, row := range rows {
-			out = append(out, leaderboardEntry{
-				PlayerID: row.PlayerID, Score: row.BestScore, Rank: int64(i),
-			})
+			e := leaderboardEntry{PlayerID: row.PlayerID, Score: row.BestScore, Rank: int64(i)}
+			if row.DisplayName != nil {
+				e.DisplayName = *row.DisplayName
+			}
+			out = append(out, e)
 		}
 		return nil
 	})
@@ -286,13 +289,17 @@ func aroundMeFromPostgres(ctx context.Context, d Deps, leaderboardID, projectID,
 			return qerr
 		}
 		for _, row := range rows {
-			entries = append(entries, leaderboardEntry{
+			e := leaderboardEntry{
 				PlayerID: row.PlayerID,
 				Score:    row.BestScore,
 				// Internal rank is 1-based per RANK(); convert to the
 				// 0-based rank the SDK has historically seen from ZREVRANK.
 				Rank: row.Rank - 1,
-			})
+			}
+			if row.DisplayName != nil {
+				e.DisplayName = *row.DisplayName
+			}
+			entries = append(entries, e)
 		}
 		return nil
 	})

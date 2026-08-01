@@ -53,9 +53,10 @@ type gameSessionHeartbeatRequest struct {
 }
 
 type peerEntry struct {
-	PlayerID int64           `json:"player_id" example:"87"`
-	XUID     string          `json:"xuid,omitempty" example:"2533274790395904"`
-	Addr     gameSessionAddr `json:"addr"`
+	PlayerID    int64           `json:"player_id" example:"87"`
+	XUID        string          `json:"xuid,omitempty" example:"2533274790395904"`
+	DisplayName string          `json:"display_name,omitempty" example:"Nova Fox"`
+	Addr        gameSessionAddr `json:"addr"`
 }
 
 type gameSessionResponse struct {
@@ -72,6 +73,9 @@ func buildPeerEntries(rows []sqlcgen.ListGameSessionPeersRow) []peerEntry {
 		p := peerEntry{PlayerID: r.PlayerID}
 		if r.Xuid != nil {
 			p.XUID = *r.Xuid
+		}
+		if r.DisplayName != nil {
+			p.DisplayName = *r.DisplayName
 		}
 		if r.Ip != nil {
 			p.Addr.IP = *r.Ip

@@ -258,8 +258,8 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Session-Token", "X-Request-Id", "If-Match"},
-		ExposedHeaders:   []string{"X-Request-Id", "X-API-Version", "Retry-After"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Session-Token", "X-Request-Id", "If-Match", "If-None-Match"},
+		ExposedHeaders:   []string{"X-Request-Id", "X-API-Version", "Retry-After", "ETag"},
 		AllowCredentials: false,
 		MaxAge:           300,
 	}))
@@ -338,6 +338,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.New(d.Lookup))
 				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
+				registerRemoteConfig(groupAPI(r, humaCfg), d)
 
 				// /v1/auth/* — tenant-scoped, player-anonymous (api_key
 				// suffices). signup/login keep the fixed per-IP cap:
@@ -415,6 +416,7 @@ func NewRouter(d Deps) http.Handler {
 					registerPresence(papi, d)
 					registerGameInvites(papi, d)
 					registerProfileRoutes(papi, d)
+					registerPlayerLookupRoutes(papi, d)
 					registerStorageRoutes(papi, d)
 					registerLeaderboardReadRoutes(papi, d)
 					registerFriendRoutes(papi, d)

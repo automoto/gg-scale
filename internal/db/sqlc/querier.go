@@ -383,16 +383,24 @@ type Querier interface {
 	GetPlayerVerificationState(ctx context.Context, arg GetPlayerVerificationStateParams) (GetPlayerVerificationStateRow, error)
 	GetPlayerVerificationStateByID(ctx context.Context, id int64) (GetPlayerVerificationStateByIDRow, error)
 	GetPresence(ctx context.Context, playerID int64) (GetPresenceRow, error)
+	// display_name lives on the linked global account; NULL for anonymous /
+	// unlinked players.
 	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
 	// Project → tenant lookup (privileged; used by the player UI which knows
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
+	// Public player lookup. Project-scoped: an id from a sibling project resolves
+	// to no rows (the handler 404s). Only public fields are selected — never the
+	// account email.
+	GetPublicPlayer(ctx context.Context, arg GetPublicPlayerParams) (GetPublicPlayerRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
 	// The player's current queued ticket in the project, if any. Used to surface
 	// the active ticket id in the 409 when a second create hits the one-active
 	// unique index.
 	GetQueuedTicketForPlayer(ctx context.Context, arg GetQueuedTicketForPlayerParams) (int64, error)
 	GetRelaySessionUsage(ctx context.Context, month pgtype.Date) (int64, error)
+	GetRemoteConfig(ctx context.Context, projectID int64) ([]byte, error)
+	GetRemoteConfigForControlPanel(ctx context.Context, arg GetRemoteConfigForControlPanelParams) ([]byte, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid. revoked_reason lets the
@@ -514,7 +522,8 @@ type Querier interface {
 	// learn who blocked them).
 	ListFriendsByStatusForAccount(ctx context.Context, arg ListFriendsByStatusForAccountParams) ([]FriendEdge, error)
 	// Returns active peers (last_seen within 30 s) with each peer's optional
-	// xuid. RLS on game_session_peer scopes rows to the current tenant.
+	// xuid and display name (from the linked global account, when present).
+	// RLS on game_session_peer scopes rows to the current tenant.
 	ListGameSessionPeers(ctx context.Context, sessionID string) ([]ListGameSessionPeersRow, error)
 	// Recipient-scoped, cursor-ordered, unexpired signals. The to_player_id filter
 	// plus RLS ensure a player only ever reads signals addressed to them, and the
@@ -549,6 +558,8 @@ type Querier interface {
 	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
 	ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
+	// Unknown and out-of-project ids drop out of the result set silently.
+	ListPublicPlayers(ctx context.Context, arg ListPublicPlayersParams) ([]ListPublicPlayersRow, error)
 	// Per-axis overrides for one tenant, for the control-panel views and the
 	// platform-admin editor. Hot paths never call this — they get the same rows
 	// aggregated into the quota-context snapshot above.
@@ -745,6 +756,8 @@ type Querier interface {
 	SetFriendEdgeStatusByAccount(ctx context.Context, arg SetFriendEdgeStatusByAccountParams) error
 	// Platform-level disable. Bumps session_epoch to kill live sessions.
 	SetPlayerAccountDisabled(ctx context.Context, id pgtype.UUID) error
+	// Player-set display name (PATCH /v1/profile). NULL clears it.
+	SetPlayerAccountDisplayName(ctx context.Context, arg SetPlayerAccountDisplayNameParams) error
 	SetPlayerAccountEnabled(ctx context.Context, id pgtype.UUID) error
 	// Password change bumps session_epoch so every outstanding account session is
 	// invalidated on its next request.
@@ -804,6 +817,8 @@ type Querier interface {
 	// signup request claims it. exclude_request_id lets the approve re-check ignore
 	// the request being approved; pass 0 at submit time.
 	TenantNameTaken(ctx context.Context, arg TenantNameTakenParams) (bool, error)
+	// display_name rides along from the entry's linked global account (NULL for
+	// anonymous players); joining pp/a cannot fan out because pp.id is unique.
 	TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error)
 	TouchControlPanelSession(ctx context.Context, arg TouchControlPanelSessionParams) error
 	// Returns rows affected (0 when the caller isn't a member of the session)
@@ -828,6 +843,7 @@ type Querier interface {
 	// Self-set secondary identifier. NULL clears it. The unique partial index
 	// on (project_id, xuid) rejects collisions with a constraint violation.
 	UpdateProfileXuid(ctx context.Context, arg UpdateProfileXuidParams) error
+	UpdateRemoteConfig(ctx context.Context, arg UpdateRemoteConfigParams) (int64, error)
 	// Starts (or restarts) enrollment. The WHERE guard makes this a no-op for a
 	// confirmed credential — zero rows means "already enabled", so a stray setup
 	// POST can never silently replace a live secret.

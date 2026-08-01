@@ -744,6 +744,24 @@ func (q *Queries) SetPlayerAccountDisabled(ctx context.Context, id pgtype.UUID) 
 	return err
 }
 
+const setPlayerAccountDisplayName = `-- name: SetPlayerAccountDisplayName :exec
+UPDATE player_accounts
+SET display_name = $1,
+    updated_at   = now()
+WHERE id = $2
+`
+
+type SetPlayerAccountDisplayNameParams struct {
+	DisplayName *string
+	ID          pgtype.UUID
+}
+
+// Player-set display name (PATCH /v1/profile). NULL clears it.
+func (q *Queries) SetPlayerAccountDisplayName(ctx context.Context, arg SetPlayerAccountDisplayNameParams) error {
+	_, err := q.db.Exec(ctx, setPlayerAccountDisplayName, arg.DisplayName, arg.ID)
+	return err
+}
+
 const setPlayerAccountEnabled = `-- name: SetPlayerAccountEnabled :exec
 UPDATE player_accounts
 SET disabled_at = NULL,

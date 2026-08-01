@@ -24,7 +24,7 @@ func TestValidateXUID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.valid, validateXUID(tt.in))
+			assert.Equal(t, tt.valid, validPrintableName(tt.in, xuidMaxChars))
 		})
 	}
 }

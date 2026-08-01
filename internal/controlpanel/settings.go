@@ -378,6 +378,14 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 	if err != nil {
 		return ProjectSettingsView{}, err
 	}
+	config, err := h.getRemoteConfigForControlPanel(ctx, tenantID, projectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ProjectSettingsView{}, errProjectNotInTenant
+	}
+	if err != nil {
+		return ProjectSettingsView{}, err
+	}
+	view.RemoteConfig = formatRemoteConfig(config)
 	return view, nil
 }
 

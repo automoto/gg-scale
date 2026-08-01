@@ -506,6 +506,8 @@ type ProjectSettingsView struct {
 	DomainPerDay       float64
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
+	RemoteConfig       string
+	FieldErrors        map[string]string
 }
 
 // ServerSettingsView renders the read-only server settings page.

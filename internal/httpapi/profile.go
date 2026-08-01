@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -20,12 +21,15 @@ import (
 	"github.com/ggscale/ggscale/internal/webutil"
 )
 
-const xuidMaxChars = 64
+const (
+	xuidMaxChars        = 64
+	displayNameMaxChars = 64
+)
 
-// validateXUID accepts a 1–64 char printable secondary identifier. Control
-// characters are rejected so the value is safe to surface in rosters/logs.
-func validateXUID(s string) bool {
-	if n := utf8.RuneCountInString(s); n == 0 || n > xuidMaxChars {
+// validPrintableName accepts 1–max printable characters. Control characters
+// are rejected so the value is safe to surface in rosters/logs.
+func validPrintableName(s string, max int) bool {
+	if n := utf8.RuneCountInString(s); n == 0 || n > max {
 		return false
 	}
 	for _, r := range s {
@@ -42,13 +46,15 @@ type profileResponse struct {
 	ExternalID      string `json:"external_id" example:"user_1b4e28ba2fa14f0e8bf1a09b4d7e5f60"`
 	Email           string `json:"email,omitempty" example:"player@example.com"`
 	XUID            string `json:"xuid,omitempty" example:"2533274790395904"`
+	DisplayName     string `json:"display_name,omitempty" example:"Nova Fox"`
 	EmailVerifiedAt string `json:"email_verified_at,omitempty" example:"2026-01-02T15:04:05Z"`
 	CreatedAt       string `json:"created_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type profilePatchRequest struct {
-	Email *string `json:"email,omitempty" example:"player@example.com"`
-	XUID  *string `json:"xuid,omitempty" example:"2533274790395904"`
+	Email       *string `json:"email,omitempty" example:"player@example.com"`
+	XUID        *string `json:"xuid,omitempty" example:"2533274790395904"`
+	DisplayName *string `json:"display_name,omitempty" example:"Nova Fox"`
 }
 
 type profileGetOutput struct {
@@ -76,10 +82,12 @@ func registerProfileRoutes(api huma.API, d Deps) {
 	}, profileGet(d))
 
 	huma.Register(api, huma.Operation{
-		OperationID:   "patchProfile",
-		Method:        http.MethodPatch,
-		Path:          "/v1/profile",
-		Summary:       "Update the caller's email or xuid",
+		OperationID: "patchProfile",
+		Method:      http.MethodPatch,
+		Path:        "/v1/profile",
+		Summary:     "Update the caller's email, xuid, or display name",
+		Description: "Setting display_name requires a linked gg-scale account; " +
+			"an empty string clears it.",
 		Tags:          []string{"Player Profiles"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusAccepted,
@@ -109,6 +117,9 @@ func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, err
 			if row.Xuid != nil {
 				resp.XUID = *row.Xuid
 			}
+			if row.DisplayName != nil {
+				resp.DisplayName = *row.DisplayName
+			}
 			if row.EmailVerifiedAt.Valid {
 				resp.EmailVerifiedAt = row.EmailVerifiedAt.Time.UTC().Format(time.RFC3339)
 			}
@@ -124,13 +135,13 @@ func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, err
 	}
 }
 
-// profilePatch edits email and/or xuid. A new email triggers a verification
-// round-trip (clears email_verified_at, mints a new verification token, sends
-// mail) and returns 202; an xuid-only change returns 204.
+// profilePatch edits email, xuid, and/or display_name. A new email triggers a
+// verification round-trip (clears email_verified_at, mints a new verification
+// token, sends mail) and returns 202; changes without an email return 204.
 func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePatchOutput, error) {
 	return func(ctx context.Context, in *profilePatchInput) (*profilePatchOutput, error) {
 		req := in.Body
-		if req.Email == nil && req.XUID == nil {
+		if req.Email == nil && req.XUID == nil && req.DisplayName == nil {
 			return nil, huma.Error400BadRequest("no editable fields supplied")
 		}
 
@@ -139,13 +150,18 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 			return nil, huma.Error401Unauthorized("no player")
 		}
 
+		if req.DisplayName != nil {
+			if err := updateDisplayName(ctx, d, me, *req.DisplayName); err != nil {
+				return nil, err
+			}
+		}
 		if req.XUID != nil {
 			if err := updateXUID(ctx, d, me, *req.XUID); err != nil {
 				return nil, err
 			}
-			if req.Email == nil {
-				return &profilePatchOutput{Status: http.StatusNoContent}, nil
-			}
+		}
+		if req.Email == nil {
+			return &profilePatchOutput{Status: http.StatusNoContent}, nil
 		}
 
 		newEmail := *req.Email
@@ -192,7 +208,7 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 func updateXUID(ctx context.Context, d Deps, me int64, raw string) error {
 	var xuid *string
 	if raw != "" {
-		if !validateXUID(raw) {
+		if !validPrintableName(raw, xuidMaxChars) {
 			return huma.Error400BadRequest("xuid invalid (1–64 printable chars)")
 		}
 		xuid = &raw
@@ -205,6 +221,42 @@ func updateXUID(ctx context.Context, d Deps, me int64, raw string) error {
 		return huma.Error409Conflict("xuid already in use")
 	case err != nil:
 		return serverError(ctx, "profile patch: xuid", err)
+	}
+	return nil
+}
+
+// updateDisplayName sets (or, for an empty string, clears) the display name on
+// the caller's linked global account. Anonymous / unlinked players have no
+// account to carry a name, so they get a 403 until they link one.
+func updateDisplayName(ctx context.Context, d Deps, me int64, raw string) error {
+	name := strings.TrimSpace(raw)
+	var namePtr *string
+	if name != "" {
+		if !validPrintableName(name, displayNameMaxChars) {
+			return huma.Error400BadRequest("display_name invalid (1–64 printable chars)")
+		}
+		namePtr = &name
+	}
+
+	var acc pgtype.UUID
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		var e error
+		acc, e = sqlcgen.New(tx).GetPlayerLinkedAccountID(ctx, me)
+		return e
+	})
+	if err != nil || !acc.Valid {
+		return huma.Error403Forbidden("link a gg-scale account to set a display name")
+	}
+
+	// player_accounts is a global table: writes go through BootstrapQ, the
+	// same as the account remote-addr writes.
+	err = d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).SetPlayerAccountDisplayName(ctx, sqlcgen.SetPlayerAccountDisplayNameParams{
+			ID: acc, DisplayName: namePtr,
+		})
+	})
+	if err != nil {
+		return serverError(ctx, "profile patch: display name", err)
 	}
 	return nil
 }

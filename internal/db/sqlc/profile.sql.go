@@ -12,11 +12,13 @@ import (
 )
 
 const getProfile = `-- name: GetProfile :one
-SELECT id, project_id, external_id, email, xuid, email_verified_at, created_at
-FROM project_players
-WHERE id = $1
-  AND tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND deleted_at IS NULL
+SELECT p.id, p.project_id, p.external_id, p.email, p.xuid, p.email_verified_at, p.created_at,
+       a.display_name
+FROM project_players p
+LEFT JOIN player_accounts a ON a.id = p.player_account_id
+WHERE p.id = $1
+  AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND p.deleted_at IS NULL
 `
 
 type GetProfileRow struct {
@@ -27,8 +29,11 @@ type GetProfileRow struct {
 	Xuid            *string
 	EmailVerifiedAt pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
+	DisplayName     *string
 }
 
+// display_name lives on the linked global account; NULL for anonymous /
+// unlinked players.
 func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, error) {
 	row := q.db.QueryRow(ctx, getProfile, id)
 	var i GetProfileRow
@@ -40,6 +45,7 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 		&i.Xuid,
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
+		&i.DisplayName,
 	)
 	return i, err
 }

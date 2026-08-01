@@ -571,6 +571,7 @@ type Project struct {
 	CreatedAt            pgtype.Timestamptz
 	DeletedAt            pgtype.Timestamptz
 	PublicJoiningEnabled bool
+	RemoteConfig         []byte
 }
 
 type ProjectPlayer struct {

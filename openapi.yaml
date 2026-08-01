@@ -598,6 +598,10 @@ components:
     LeaderboardEntry:
       additionalProperties: false
       properties:
+        display_name:
+          examples:
+            - Nova Fox
+          type: string
         player_id:
           examples:
             - 42
@@ -858,6 +862,10 @@ components:
       properties:
         addr:
           $ref: "#/components/schemas/GameSessionAddr"
+        display_name:
+          examples:
+            - Nova Fox
+          type: string
         player_id:
           examples:
             - 87
@@ -901,6 +909,18 @@ components:
         - player_id
         - external_id
       type: object
+    PlayersResolveResult:
+      additionalProperties: false
+      properties:
+        players:
+          items:
+            $ref: "#/components/schemas/PublicPlayerResponse"
+          type:
+            - array
+            - "null"
+      required:
+        - players
+      type: object
     PresenceUpdateRequest:
       additionalProperties: false
       properties:
@@ -920,6 +940,10 @@ components:
     ProfilePatchRequest:
       additionalProperties: false
       properties:
+        display_name:
+          examples:
+            - Nova Fox
+          type: string
         email:
           examples:
             - player@example.com
@@ -935,6 +959,10 @@ components:
         created_at:
           examples:
             - "2026-01-02T15:04:05Z"
+          type: string
+        display_name:
+          examples:
+            - Nova Fox
           type: string
         email:
           examples:
@@ -966,6 +994,26 @@ components:
         - id
         - project_id
         - external_id
+        - created_at
+      type: object
+    PublicPlayerResponse:
+      additionalProperties: false
+      properties:
+        created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
+          type: string
+        display_name:
+          examples:
+            - Nova Fox
+          type: string
+        id:
+          examples:
+            - 42
+          format: int64
+          type: integer
+      required:
+        - id
         - created_at
       type: object
     RefreshRequest:
@@ -1478,6 +1526,47 @@ paths:
       summary: Verify an email address with a code
       tags:
         - Authentication
+  /v1/config:
+    get:
+      description: Returns the project-defined JSON object using only a project-pinned tenant API key. Send If-None-Match with a previous ETag to receive 304 when unchanged.
+      operationId: getRemoteConfig
+      parameters:
+        - description: ETag from a previous config response.
+          in: header
+          name: If-None-Match
+          schema:
+            description: ETag from a previous config response.
+            examples:
+              - "\"remote-config-5f36b2ea290645ee34d943220a14b54ee5ea5be5b2ac97498f75ee173db9e9df\""
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                description: Arbitrary project-defined JSON key-value map.
+                examples:
+                  - daily_reward_multiplier: 1.5
+                    maintenance_mode: false
+                    minimum_client_version: 1.4.0
+                type: object
+          description: Current remote config
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+            ETag:
+              schema:
+                description: Validator for the current project config.
+                type: string
+        "304":
+          description: Config has not changed; response has no body
+      security:
+        - ApiKeyAuth: []
+      summary: Get the project's remote config
+      tags:
+        - Remote Config
   /v1/fleets/heartbeat:
     post:
       operationId: fleetHeartbeat
@@ -2346,6 +2435,70 @@ paths:
       summary: Get a matchmaking ticket
       tags:
         - Matchmaking
+  /v1/players:
+    get:
+      description: Batch lookup of up to 100 comma-separated ids. Unknown ids and ids from other projects are omitted from the result.
+      operationId: resolvePlayers
+      parameters:
+        - explode: false
+          in: query
+          name: ids
+          schema:
+            examples:
+              - 42,87,101
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlayersResolveResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Resolve player ids to public profiles
+      tags:
+        - Player Profiles
+  /v1/players/{id}:
+    get:
+      description: "Public fields only — never the account email. Project-scoped: an id from another project returns 404."
+      operationId: getPlayer
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 42
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicPlayerResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Get a player's public profile
+      tags:
+        - Player Profiles
   /v1/presence:
     put:
       operationId: updatePresence
@@ -2397,6 +2550,7 @@ paths:
       tags:
         - Player Profiles
     patch:
+      description: Setting display_name requires a linked gg-scale account; an empty string clears it.
       operationId: patchProfile
       requestBody:
         content:
@@ -2416,7 +2570,7 @@ paths:
       security:
         - ApiKeyAuth: []
           PlayerSession: []
-      summary: Update the caller's email or xuid
+      summary: Update the caller's email, xuid, or display name
       tags:
         - Player Profiles
   /v1/relay/credentials:
@@ -2675,6 +2829,8 @@ servers:
 tags:
   - description: "Player sign-in and session tokens: email/password, anonymous, and custom-token."
     name: Authentication
+  - description: Project-defined live tuning values available before player login.
+    name: Remote Config
   - description: "Per-project player identity: email and external console id."
     name: Player Profiles
   - description: Per-player JSON object storage with optimistic concurrency.

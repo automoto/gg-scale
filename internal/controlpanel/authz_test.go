@@ -111,3 +111,15 @@ func TestUpdateTenantTierHandler_non_platform_admin_denied(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, rr.Code, "direct tenant tier changes are platform-admin only")
 }
+
+func TestUpdateRemoteConfigHandler_member_denied(t *testing.T) {
+	auth, req := roleHandlerRequest(t, "member", url.Values{"config": {`{"maintenance_mode":true}`}})
+	rctx := chi.RouteContext(req.Context())
+	rctx.URLParams.Add("projectID", "8")
+	h := &Handler{rbac: auth}
+
+	rr := httptest.NewRecorder()
+	h.updateRemoteConfigHandler(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code, "remote config requires project config permission")
+}
