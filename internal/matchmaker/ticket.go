@@ -161,14 +161,14 @@ type Bucket struct {
 // RosterEntry is one matched player in a match roster, including the
 // criteria they matched with so peers can reason about the group.
 type RosterEntry struct {
-	PlayerID          int64              `json:"player_id"`
-	Region            string             `json:"region,omitempty"`
-	StringProperties  map[string]string  `json:"string_properties,omitempty"`
-	NumericProperties map[string]float64 `json:"numeric_properties,omitempty"`
+	PlayerID          int64              `json:"player_id" example:"42"`
+	Region            string             `json:"region,omitempty" example:"us-east-1"`
+	StringProperties  map[string]string  `json:"string_properties,omitempty" example:"{\"map\":\"arena-2\"}"`
+	NumericProperties map[string]float64 `json:"numeric_properties,omitempty" example:"{\"skill\":1420.5}"`
 	// Attributes is the player's opaque ticket attributes, passed through to
 	// matched peers so match_only P2P can exchange lobby codes or endpoints
 	// with no extra infrastructure. Visible to every peer in the match.
-	Attributes json.RawMessage `json:"attributes,omitempty"`
+	Attributes json.RawMessage `json:"attributes,omitempty" example:"{\"lobby_code\":\"XKCD42\"}"`
 }
 
 // Match is a committed match result. Ticket rows reference it via MatchID;

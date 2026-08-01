@@ -44,10 +44,10 @@ func storageBodyReadLimit(d Deps) int64 {
 }
 
 type storageObjectResponse struct {
-	Key       string          `json:"key"`
-	Value     json.RawMessage `json:"value"`
-	Version   int64           `json:"version"`
-	UpdatedAt string          `json:"updated_at"`
+	Key       string          `json:"key" example:"save-slot-1"`
+	Value     json.RawMessage `json:"value" example:"{\"level\":3,\"hp\":100}"`
+	Version   int64           `json:"version" example:"7"`
+	UpdatedAt string          `json:"updated_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type storageObjectOutput struct {
@@ -55,31 +55,31 @@ type storageObjectOutput struct {
 }
 
 type storageObjectListItemResponse struct {
-	Key       string `json:"key"`
-	Version   int64  `json:"version"`
-	UpdatedAt string `json:"updated_at"`
-	SizeBytes int64  `json:"size_bytes"`
+	Key       string `json:"key" example:"save-slot-1"`
+	Version   int64  `json:"version" example:"7"`
+	UpdatedAt string `json:"updated_at" example:"2026-01-02T15:04:05Z"`
+	SizeBytes int64  `json:"size_bytes" example:"512"`
 }
 
 type storagePutInput struct {
-	Key     string `path:"key"`
-	IfMatch string `header:"If-Match"`
+	Key     string `path:"key" example:"save-slot-1"`
+	IfMatch string `header:"If-Match" example:"7"`
 	Body    json.RawMessage
 }
 
 type storageKeyInput struct {
-	Key string `path:"key"`
+	Key string `path:"key" example:"save-slot-1"`
 }
 
 type storageListInput struct {
-	KeyPrefix string `query:"key_prefix"`
-	Limit     string `query:"limit"`
-	Cursor    string `query:"cursor"`
+	KeyPrefix string `query:"key_prefix" example:"save-"`
+	Limit     string `query:"limit" example:"50"`
+	Cursor    string `query:"cursor" example:"104"`
 }
 
 type storageListResult struct {
 	Items      []storageObjectListItemResponse `json:"items"`
-	NextCursor string                          `json:"next_cursor"`
+	NextCursor string                          `json:"next_cursor" example:"104"`
 }
 
 type storageListOutput struct {
@@ -104,6 +104,16 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Tags:         []string{"Cloud Saves"},
 		Security:     playerSecurity,
 		MaxBodyBytes: storageBodyReadLimit(d),
+		// The body is an arbitrary JSON value, so huma would emit an empty
+		// schema and the docs would render a null request sample. Set the
+		// schema by hand; huma keeps a preset request-body schema as is.
+		RequestBody: &huma.RequestBody{
+			Required: true,
+			Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{
+				Description: "Any JSON value to store: object, array, string, number, boolean, or null.",
+				Examples:    []any{map[string]any{"level": 3, "hp": 100}},
+			}}},
+		},
 	}, storagePut(d))
 
 	huma.Register(api, huma.Operation{

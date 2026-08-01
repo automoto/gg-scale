@@ -32,7 +32,7 @@ const (
 // relay credentials. Unqualified requests stay valid for non-matchmade P2P
 // (server browser, direct invites).
 type relayCredentialsInput struct {
-	MatchID string `query:"match_id"`
+	MatchID string `query:"match_id" example:"mm_5f3a9c1d2e4b6a70"`
 }
 
 // relayCredentialsOutput carries the TURN-REST credentials. The password field

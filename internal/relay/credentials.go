@@ -35,12 +35,12 @@ var ErrCredentialsInvalid = errors.New("relay: credentials invalid")
 // Credentials are the values returned to a client. URLs is the operator-
 // provided list of TURN URI strings the client should dial.
 type Credentials struct {
-	Username   string   `json:"username"`
-	Password   string   `json:"password"`
-	TTLSeconds int64    `json:"ttl"`
-	Realm      string   `json:"realm"`
-	URLs       []string `json:"urls,omitempty"`
-	STUNURLs   []string `json:"stun_urls,omitempty"`
+	Username   string   `json:"username" example:"1767225600:3:42:k1"`
+	Password   string   `json:"password" example:"dGVzdC1obWFjLXNhbXBsZS12YWx1ZQ=="`
+	TTLSeconds int64    `json:"ttl" example:"600"`
+	Realm      string   `json:"realm" example:"ggscale"`
+	URLs       []string `json:"urls,omitempty" example:"turn:relay.example.com:3478?transport=udp"`
+	STUNURLs   []string `json:"stun_urls,omitempty" example:"stun:stun.example.com:3478"`
 }
 
 // secretEntry is one accepted shared secret plus its stable key id.

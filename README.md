@@ -1,6 +1,16 @@
 # ggscale
 
-Open-source, self-hostable backend for multiplayer games. One Go binary and a Postgres database give you player accounts, saves, leaderboards, social features, matchmaking, and a game-server fleet. Run it on a single VPS, keep your data, and keep the game online as long as you want.
+The open platform for multiplayer games. A simple web service and a Postgres database give you everything you need to build and run an online game with players.
+
+## Documentation
+
+Full documentation, including Architecture, Features, API Route descriptions, and Onboarding guides, has been moved to our GitHub Wiki:
+
+**[ggscale GitHub Wiki Placeholder](https://github.com/automoto/gg-scale/wiki)**
+
+DeekWiki documentation is available here as well for more technical details:
+
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/automoto/gg-scale)
 
 ## Local Development & Quickstart
 
@@ -42,13 +52,4 @@ and this checkout, and covers the GA feature set — auth and players, game
 sessions and signaling, matchmaking, P2P relay, saves/storage, leaderboards,
 friends and invites, and the control panel.
 
-The game-server **fleet** feature is beta and not part of GA. It ships only
-via the Agones and plugin backends that spin up game servers on separate
-instances; the k3s + Agones stack and cluster e2e tests live in the bw-ops
-repo (`dev/fleet-agones/`).
-
-## Documentation
-
-Full documentation, including Architecture, Features, API Route descriptions, and Onboarding guides, has been moved to our GitHub Wiki:
-
-**[ggscale GitHub Wiki Placeholder](https://github.com/automoto/gg-scale/wiki)**
+The game-server **fleet** feature is beta and not yet ready for production.

@@ -24,9 +24,9 @@ const maxRemoteAddrs = 4
 // parseRemoteAddrSet owns the (indexed, per-entry) 400 validation rather than
 // a generic schema 422.
 type remoteAddrEntry struct {
-	Type    string `json:"type,omitempty"`
-	Scope   string `json:"scope,omitempty"`
-	Address string `json:"address,omitempty"`
+	Type    string `json:"type,omitempty" example:"ip"`
+	Scope   string `json:"scope,omitempty" example:"public"`
+	Address string `json:"address,omitempty" example:"203.0.113.10:7777"`
 }
 
 type remoteAddrsPayload struct {

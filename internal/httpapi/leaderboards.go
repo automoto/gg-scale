@@ -30,23 +30,23 @@ const leaderboardTopCachedLimit int32 = 10
 type submitScoreRequest struct {
 	// Optional so an omitted score defaults to 0 (matches the pre-migration
 	// wire); a present score of any int64 is accepted.
-	Score int64 `json:"score,omitempty"`
+	Score int64 `json:"score,omitempty" example:"1500"`
 }
 
 type leaderboardEntry struct {
-	PlayerID int64 `json:"player_id"`
-	Score    int64 `json:"score"`
-	Rank     int64 `json:"rank"`
+	PlayerID int64 `json:"player_id" example:"42"`
+	Score    int64 `json:"score" example:"1500"`
+	Rank     int64 `json:"rank" example:"3"`
 }
 
 type leaderboardSubmitInput struct {
-	ID   int64 `path:"id" minimum:"1"`
+	ID   int64 `path:"id" minimum:"1" example:"1"`
 	Body submitScoreRequest
 }
 
 type leaderboardTopInput struct {
-	ID    int64  `path:"id" minimum:"1"`
-	Limit string `query:"limit"`
+	ID    int64  `path:"id" minimum:"1" example:"1"`
+	Limit string `query:"limit" example:"10"`
 }
 
 type leaderboardTopResult struct {
@@ -58,13 +58,13 @@ type leaderboardTopOutput struct {
 }
 
 type leaderboardAroundMeInput struct {
-	ID     int64  `path:"id" minimum:"1"`
-	Radius string `query:"radius"`
+	ID     int64  `path:"id" minimum:"1" example:"1"`
+	Radius string `query:"radius" example:"5"`
 }
 
 type leaderboardAroundMeResult struct {
 	Entries  []leaderboardEntry `json:"entries"`
-	SelfRank int64              `json:"self_rank"`
+	SelfRank int64              `json:"self_rank" example:"12"`
 }
 
 type leaderboardAroundMeOutput struct {

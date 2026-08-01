@@ -14,16 +14,16 @@ import (
 // heartbeatRequest fields are schema-optional so the handler owns the
 // (cross-field) validation → 400, matching the pre-migration wire.
 type heartbeatRequest struct {
-	AgonesName     string `json:"agones_name,omitempty"`
-	Fleet          string `json:"fleet,omitempty"`
-	Address        string `json:"address,omitempty"`
-	Region         string `json:"region,omitempty"`
-	Name           string `json:"name,omitempty"`
-	CurrentPlayers int    `json:"current_players,omitempty"`
-	MaxPlayers     int    `json:"max_players,omitempty"`
-	GameMode       string `json:"game_mode,omitempty"`
-	Level          string `json:"level,omitempty"`
-	Version        string `json:"version,omitempty"`
+	AgonesName     string `json:"agones_name,omitempty" example:"gameserver-abc12"`
+	Fleet          string `json:"fleet,omitempty" example:"default"`
+	Address        string `json:"address,omitempty" example:"203.0.113.10:7777"`
+	Region         string `json:"region,omitempty" example:"us-east-1"`
+	Name           string `json:"name,omitempty" example:"us-east-1-a1"`
+	CurrentPlayers int    `json:"current_players,omitempty" example:"12"`
+	MaxPlayers     int    `json:"max_players,omitempty" example:"16"`
+	GameMode       string `json:"game_mode,omitempty" example:"ctf"`
+	Level          string `json:"level,omitempty" example:"arena-2"`
+	Version        string `json:"version,omitempty" example:"1.4.2"`
 }
 
 type listServersResponse struct {
@@ -35,7 +35,7 @@ type heartbeatInput struct {
 }
 
 type fleetServersInput struct {
-	Fleet string `path:"fleet"`
+	Fleet string `path:"fleet" example:"default"`
 }
 
 type fleetServersOutput struct {

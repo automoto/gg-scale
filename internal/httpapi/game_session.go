@@ -26,8 +26,8 @@ var (
 )
 
 type gameSessionAddr struct {
-	IP   string `json:"ip"`
-	Port int    `json:"port"`
+	IP   string `json:"ip" example:"203.0.113.10"`
+	Port int    `json:"port" example:"7777"`
 }
 
 func (a gameSessionAddr) valid() bool {
@@ -37,11 +37,11 @@ func (a gameSessionAddr) valid() bool {
 // Request fields are schema-optional so the handlers keep ownership of their
 // (cross-field) validation → 400, matching the pre-migration wire.
 type gameSessionCreateRequest struct {
-	TitleID    string          `json:"title_id,omitempty"`
+	TitleID    string          `json:"title_id,omitempty" example:"my-game"`
 	PublicAddr gameSessionAddr `json:"public_addr,omitempty"`
-	Props      json.RawMessage `json:"props,omitempty"`
-	MaxPlayers int             `json:"max_players,omitempty"`
-	Private    bool            `json:"private,omitempty"`
+	Props      json.RawMessage `json:"props,omitempty" example:"{\"map\":\"arena-2\"}"`
+	MaxPlayers int             `json:"max_players,omitempty" example:"8"`
+	Private    bool            `json:"private,omitempty" example:"false"`
 }
 
 type gameSessionJoinRequest struct {
@@ -49,20 +49,20 @@ type gameSessionJoinRequest struct {
 }
 
 type gameSessionHeartbeatRequest struct {
-	QoS *json.RawMessage `json:"qos,omitempty"`
+	QoS *json.RawMessage `json:"qos,omitempty" example:"{\"rtt_ms\":48}"`
 }
 
 type peerEntry struct {
-	PlayerID int64           `json:"player_id"`
-	XUID     string          `json:"xuid,omitempty"`
+	PlayerID int64           `json:"player_id" example:"87"`
+	XUID     string          `json:"xuid,omitempty" example:"2533274790395904"`
 	Addr     gameSessionAddr `json:"addr"`
 }
 
 type gameSessionResponse struct {
-	SessionID string      `json:"session_id"`
-	JoinCode  string      `json:"join_code"`
-	State     string      `json:"state"`
-	ExpiresAt time.Time   `json:"expires_at"`
+	SessionID string      `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+	JoinCode  string      `json:"join_code" example:"XKCD42"`
+	State     string      `json:"state" example:"open"`
+	ExpiresAt time.Time   `json:"expires_at" example:"2026-01-02T15:04:05Z"`
 	Peers     []peerEntry `json:"peers"`
 }
 
@@ -93,25 +93,25 @@ type gameSessionCreateInput struct {
 }
 
 type gameSessionIDInput struct {
-	ID string `path:"id"`
+	ID string `path:"id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
 
 type gameSessionJoinInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 	Body gameSessionJoinRequest
 }
 
 type gameSessionHeartbeatInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 	Body gameSessionHeartbeatRequest
 }
 
 type gameSessionResolveInput struct {
-	JoinCode string `query:"joinCode"`
+	JoinCode string `query:"joinCode" example:"XKCD42"`
 }
 
 type gameSessionResolveResult struct {
-	SessionID string `json:"session_id"`
+	SessionID string `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
 
 type gameSessionResolveOutput struct {

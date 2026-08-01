@@ -4,15 +4,25 @@ components:
       additionalProperties: false
       properties:
         access_token:
+          examples:
+            - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
           type: string
         expires_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         external_id:
+          examples:
+            - anon_9f86d081884c7d659a2feaa0c55ad015
           type: string
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         refresh_token:
+          examples:
+            - 3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
           type: string
       required:
         - access_token
@@ -25,25 +35,37 @@ components:
       additionalProperties: false
       properties:
         password:
+          examples:
+            - dGVzdC1obWFjLXNhbXBsZS12YWx1ZQ==
           type: string
         realm:
+          examples:
+            - ggscale
           type: string
         stun_urls:
+          examples:
+            - - stun:stun.example.com:3478
           items:
             type: string
           type:
             - array
             - "null"
         ttl:
+          examples:
+            - 600
           format: int64
           type: integer
         urls:
+          examples:
+            - - turn:relay.example.com:3478?transport=udp
           items:
             type: string
           type:
             - array
             - "null"
         username:
+          examples:
+            - 1767225600:3:42:k1
           type: string
       required:
         - username
@@ -55,6 +77,8 @@ components:
       additionalProperties: false
       properties:
         token:
+          examples:
+            - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6InN0ZWFtOjc2NTYxMTk4MDAwMDAwMDAifQ.k7HfXWY0mYbXvJqPz3sB4c9Q2rN8dEwTuVxYzA1bC2d
           minLength: 1
           type: string
       required:
@@ -116,24 +140,40 @@ components:
       additionalProperties: false
       properties:
         account_id:
+          examples:
+            - 6f9619ff-8b86-4d01-b42d-00cf4fc964ff
           type: string
         created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         display_name:
+          examples:
+            - PlayerTwo
           type: string
         email:
+          examples:
+            - friend@example.com
           type: string
         id:
+          examples:
+            - 12
           format: int64
           type: integer
         player_id:
+          examples:
+            - 87
           format: int64
           type: integer
         presence:
           $ref: "#/components/schemas/FriendPresence"
         status:
+          examples:
+            - accepted
           type: string
         updated_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
       required:
         - id
@@ -146,10 +186,14 @@ components:
       additionalProperties: false
       properties:
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type:
             - string
             - "null"
         status:
+          examples:
+            - online
           type: string
       required:
         - status
@@ -159,6 +203,8 @@ components:
       additionalProperties: false
       properties:
         status:
+          examples:
+            - requested
           type: string
       required:
         - status
@@ -173,6 +219,8 @@ components:
             - array
             - "null"
         next_cursor:
+          examples:
+            - "104"
           type: string
       required:
         - items
@@ -182,6 +230,8 @@ components:
       additionalProperties: false
       properties:
         invite_id:
+          examples:
+            - 314
           format: int64
           type: integer
       required:
@@ -191,9 +241,13 @@ components:
       additionalProperties: false
       properties:
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           minLength: 1
           type: string
         to_email:
+          examples:
+            - friend@example.com
           minLength: 1
           type: string
       required:
@@ -204,17 +258,29 @@ components:
       additionalProperties: false
       properties:
         expires_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         from_email:
+          examples:
+            - player@example.com
           type: string
         from_xuid:
+          examples:
+            - "2533274790395904"
           type: string
         invite_id:
+          examples:
+            - 314
           format: int64
           type: integer
         join_code:
+          examples:
+            - XKCD42
           type: string
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type: string
       required:
         - invite_id
@@ -238,8 +304,12 @@ components:
       additionalProperties: false
       properties:
         ip:
+          examples:
+            - 203.0.113.10
           type: string
         port:
+          examples:
+            - 7777
           format: int64
           type: integer
       required:
@@ -250,20 +320,30 @@ components:
       additionalProperties: false
       properties:
         max_players:
+          examples:
+            - 8
           format: int64
           type: integer
         private:
+          examples:
+            - false
           type: boolean
-        props: {}
+        props:
+          examples:
+            - map: arena-2
         public_addr:
           $ref: "#/components/schemas/GameSessionAddr"
         title_id:
+          examples:
+            - my-game
           type: string
       type: object
     GameSessionHeartbeatRequest:
       additionalProperties: false
       properties:
-        qos: {}
+        qos:
+          examples:
+            - rtt_ms: 48
       type: object
     GameSessionHeartbeatResult:
       additionalProperties: false
@@ -290,6 +370,8 @@ components:
       additionalProperties: false
       properties:
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type: string
       required:
         - session_id
@@ -298,9 +380,13 @@ components:
       additionalProperties: false
       properties:
         expires_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           format: date-time
           type: string
         join_code:
+          examples:
+            - XKCD42
           type: string
         peers:
           items:
@@ -309,8 +395,12 @@ components:
             - array
             - "null"
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type: string
         state:
+          examples:
+            - open
           type: string
       required:
         - session_id
@@ -323,21 +413,35 @@ components:
       additionalProperties: false
       properties:
         created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           format: date-time
           type: string
         from_player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         id:
+          examples:
+            - 513
           format: int64
           type: integer
         kind:
+          examples:
+            - answer
           type: string
         negotiation_id:
+          examples:
+            - neg-42-87-1
           type: string
         payload:
+          examples:
+            - eyJ0eXBlIjoiYW5zd2VyIiwic2RwIjoidj0wLi4uIn0=
           type: string
         to_player_id:
+          examples:
+            - 87
           format: int64
           type: integer
       required:
@@ -370,15 +474,23 @@ components:
             - answer
             - restart_offer
             - restart_answer
+          examples:
+            - offer
           type: string
         negotiation_id:
+          examples:
+            - neg-42-87-1
           maxLength: 128
           minLength: 1
           type: string
         payload:
+          examples:
+            - eyJ0eXBlIjoib2ZmZXIiLCJzZHAiOiJ2PTAuLi4ifQ==
           minLength: 1
           type: string
         to_player_id:
+          examples:
+            - 87
           format: int64
           minimum: 1
           type: integer
@@ -392,6 +504,8 @@ components:
       additionalProperties: false
       properties:
         id:
+          examples:
+            - 512
           format: int64
           type: integer
       required:
@@ -401,10 +515,16 @@ components:
       additionalProperties: false
       properties:
         commit:
+          examples:
+            - abc1234
           type: string
         status:
+          examples:
+            - ok
           type: string
         version:
+          examples:
+            - 1.0.0
           type: string
       required:
         - status
@@ -415,26 +535,46 @@ components:
       additionalProperties: false
       properties:
         address:
+          examples:
+            - 203.0.113.10:7777
           type: string
         agones_name:
+          examples:
+            - gameserver-abc12
           type: string
         current_players:
+          examples:
+            - 12
           format: int64
           type: integer
         fleet:
+          examples:
+            - default
           type: string
         game_mode:
+          examples:
+            - ctf
           type: string
         level:
+          examples:
+            - arena-2
           type: string
         max_players:
+          examples:
+            - 16
           format: int64
           type: integer
         name:
+          examples:
+            - us-east-1-a1
           type: string
         region:
+          examples:
+            - us-east-1
           type: string
         version:
+          examples:
+            - 1.4.2
           type: string
       type: object
     LeaderboardAroundMeResult:
@@ -447,6 +587,8 @@ components:
             - array
             - "null"
         self_rank:
+          examples:
+            - 12
           format: int64
           type: integer
       required:
@@ -457,12 +599,18 @@ components:
       additionalProperties: false
       properties:
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         rank:
+          examples:
+            - 3
           format: int64
           type: integer
         score:
+          examples:
+            - 1500
           format: int64
           type: integer
       required:
@@ -498,14 +646,20 @@ components:
       additionalProperties: false
       properties:
         email:
+          examples:
+            - player@example.com
           type: string
         password:
+          examples:
+            - correct-horse-battery-staple
           type: string
       type: object
     LogoutRequest:
       additionalProperties: false
       properties:
         refresh_token:
+          examples:
+            - 3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
           minLength: 1
           type: string
       required:
@@ -515,94 +669,160 @@ components:
       additionalProperties: false
       properties:
         allow_cross_region:
+          examples:
+            - true
           type: boolean
-        attributes: {}
+        attributes:
+          examples:
+            - lobby_code: XKCD42
         count_multiple:
+          examples:
+            - 2
           format: int64
           type: integer
         fleet:
+          examples:
+            - default
           type: string
         game_mode:
+          examples:
+            - ctf
           type: string
         max_count:
+          examples:
+            - 4
           format: int64
           type: integer
         min_count:
+          examples:
+            - 2
           format: int64
           type: integer
         mode:
+          examples:
+            - game_session
           type: string
         numeric_properties:
           additionalProperties:
             format: double
             type: number
+          examples:
+            - skill: 1420.5
           type: object
         query:
           type: string
         region:
+          examples:
+            - us-east-1
           type: string
         string_properties:
           additionalProperties:
             type: string
+          examples:
+            - map: arena-2
           type: object
       type: object
     MatchmakerTicketResponse:
       additionalProperties: false
       properties:
         allow_cross_region:
+          examples:
+            - true
           type: boolean
-        attributes: {}
+        attributes:
+          examples:
+            - lobby_code: XKCD42
         count_multiple:
+          examples:
+            - 2
           format: int64
           type: integer
         created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         expires_at:
+          examples:
+            - "2026-01-02T15:09:05Z"
           type: string
         failure_reason:
+          examples:
+            - expired
           type: string
         game_mode:
+          examples:
+            - ctf
           type: string
         host_player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         id:
+          examples:
+            - 9001
           format: int64
           type: integer
         join_code:
+          examples:
+            - XKCD42
           type: string
         match_address:
+          examples:
+            - 203.0.113.10:7777
           type: string
         match_id:
+          examples:
+            - mm_5f3a9c1d2e4b6a70
           type: string
         matched_at:
+          examples:
+            - "2026-01-02T15:04:35Z"
           type: string
         max_count:
+          examples:
+            - 4
           format: int64
           type: integer
         min_count:
+          examples:
+            - 2
           format: int64
           type: integer
         mode:
+          examples:
+            - game_session
           type: string
         numeric_properties:
           additionalProperties:
             format: double
             type: number
+          examples:
+            - skill: 1420.5
           type: object
         protocol_hint:
+          examples:
+            - udp
           type: string
         query:
           type: string
         region:
+          examples:
+            - us-east-1
           type: string
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type: string
         status:
+          examples:
+            - matched
           type: string
         string_properties:
           additionalProperties:
             type: string
+          examples:
+            - map: arena-2
           type: object
         users:
           items:
@@ -627,6 +847,8 @@ components:
       additionalProperties: false
       properties:
         ok:
+          examples:
+            - true
           type: boolean
       required:
         - ok
@@ -637,9 +859,13 @@ components:
         addr:
           $ref: "#/components/schemas/GameSessionAddr"
         player_id:
+          examples:
+            - 87
           format: int64
           type: integer
         xuid:
+          examples:
+            - "2533274790395904"
           type: string
       required:
         - player_id
@@ -649,6 +875,8 @@ components:
       additionalProperties: false
       properties:
         session_token:
+          examples:
+            - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
           type: string
       required:
         - session_token
@@ -657,10 +885,16 @@ components:
       additionalProperties: false
       properties:
         email:
+          examples:
+            - player@example.com
           type: string
         external_id:
+          examples:
+            - anon_9f86d081884c7d659a2feaa0c55ad015
           type: string
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
       required:
@@ -671,8 +905,12 @@ components:
       additionalProperties: false
       properties:
         session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
           type: string
         status:
+          examples:
+            - online
           maxLength: 32
           minLength: 1
           type: string
@@ -683,28 +921,46 @@ components:
       additionalProperties: false
       properties:
         email:
+          examples:
+            - player@example.com
           type: string
         xuid:
+          examples:
+            - "2533274790395904"
           type: string
       type: object
     ProfileResponse:
       additionalProperties: false
       properties:
         created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         email:
+          examples:
+            - player@example.com
           type: string
         email_verified_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         external_id:
+          examples:
+            - user_1b4e28ba2fa14f0e8bf1a09b4d7e5f60
           type: string
         id:
+          examples:
+            - 42
           format: int64
           type: integer
         project_id:
+          examples:
+            - 7
           format: int64
           type: integer
         xuid:
+          examples:
+            - "2533274790395904"
           type: string
       required:
         - id
@@ -716,6 +972,8 @@ components:
       additionalProperties: false
       properties:
         refresh_token:
+          examples:
+            - 3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
           minLength: 1
           type: string
       required:
@@ -725,10 +983,16 @@ components:
       additionalProperties: false
       properties:
         address:
+          examples:
+            - 203.0.113.10:7777
           type: string
         scope:
+          examples:
+            - public
           type: string
         type:
+          examples:
+            - ip
           type: string
       type: object
     RemoteAddrsPayload:
@@ -746,20 +1010,30 @@ components:
     RosterEntry:
       additionalProperties: false
       properties:
-        attributes: {}
+        attributes:
+          examples:
+            - lobby_code: XKCD42
         numeric_properties:
           additionalProperties:
             format: double
             type: number
+          examples:
+            - skill: 1420.5
           type: object
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         region:
+          examples:
+            - us-east-1
           type: string
         string_properties:
           additionalProperties:
             type: string
+          examples:
+            - map: arena-2
           type: object
       required:
         - player_id
@@ -768,22 +1042,38 @@ components:
       additionalProperties: false
       properties:
         address:
+          examples:
+            - 203.0.113.10:7777
           type: string
         current_players:
+          examples:
+            - 12
           format: int64
           type: integer
         game_mode:
+          examples:
+            - ctf
           type: string
         level:
+          examples:
+            - arena-2
           type: string
         max_players:
+          examples:
+            - 16
           format: int64
           type: integer
         name:
+          examples:
+            - us-east-1-a1
           type: string
         region:
+          examples:
+            - us-east-1
           type: string
         version:
+          examples:
+            - 1.4.2
           type: string
       required:
         - name
@@ -799,13 +1089,21 @@ components:
       additionalProperties: false
       properties:
         access_token:
+          examples:
+            - eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
           type: string
         expires_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         refresh_token:
+          examples:
+            - 3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
           type: string
       required:
         - access_token
@@ -817,8 +1115,12 @@ components:
       additionalProperties: false
       properties:
         email:
+          examples:
+            - player@example.com
           type: string
         password:
+          examples:
+            - correct-horse-battery-staple
           type: string
       type: object
     StorageListResult:
@@ -831,6 +1133,8 @@ components:
             - array
             - "null"
         next_cursor:
+          examples:
+            - "104"
           type: string
       required:
         - items
@@ -840,13 +1144,21 @@ components:
       additionalProperties: false
       properties:
         key:
+          examples:
+            - save-slot-1
           type: string
         size_bytes:
+          examples:
+            - 512
           format: int64
           type: integer
         updated_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
         version:
+          examples:
+            - 7
           format: int64
           type: integer
       required:
@@ -859,11 +1171,20 @@ components:
       additionalProperties: false
       properties:
         key:
+          examples:
+            - save-slot-1
           type: string
         updated_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
           type: string
-        value: {}
+        value:
+          examples:
+            - hp: 100
+              level: 3
         version:
+          examples:
+            - 7
           format: int64
           type: integer
       required:
@@ -876,6 +1197,8 @@ components:
       additionalProperties: false
       properties:
         score:
+          examples:
+            - 1500
           format: int64
           type: integer
       type: object
@@ -883,9 +1206,13 @@ components:
       additionalProperties: false
       properties:
         code:
+          examples:
+            - "482913"
           minLength: 1
           type: string
         email:
+          examples:
+            - player@example.com
           minLength: 1
           type: string
       required:
@@ -896,9 +1223,13 @@ components:
       additionalProperties: false
       properties:
         player_id:
+          examples:
+            - 42
           format: int64
           type: integer
         verified:
+          examples:
+            - true
           type: boolean
       required:
         - player_id
@@ -1178,6 +1509,8 @@ paths:
           name: fleet
           required: true
           schema:
+            examples:
+              - default
             type: string
       responses:
         "200":
@@ -1206,16 +1539,22 @@ paths:
           in: query
           name: status
           schema:
+            examples:
+              - accepted
             type: string
         - explode: false
           in: query
           name: limit
           schema:
+            examples:
+              - "50"
             type: string
         - explode: false
           in: query
           name: cursor
           schema:
+            examples:
+              - "104"
             type: string
       responses:
         "200":
@@ -1244,6 +1583,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1270,6 +1611,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1300,6 +1643,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1330,6 +1675,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1390,6 +1737,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1420,6 +1769,8 @@ paths:
           name: player_id
           required: true
           schema:
+            examples:
+              - 87
             format: int64
             minimum: 1
             type: integer
@@ -1450,6 +1801,8 @@ paths:
           in: query
           name: joinCode
           schema:
+            examples:
+              - XKCD42
             type: string
       responses:
         "200":
@@ -1507,6 +1860,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
       responses:
         "204":
@@ -1530,6 +1885,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
       responses:
         "200":
@@ -1559,6 +1916,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
       requestBody:
         content:
@@ -1593,6 +1952,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
       requestBody:
         content:
@@ -1627,11 +1988,15 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
         - explode: false
           in: query
           name: after_id
           schema:
+            examples:
+              - 512
             format: int64
             minimum: 0
             type: integer
@@ -1661,6 +2026,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
             type: string
       requestBody:
         content:
@@ -1763,6 +2130,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 314
             format: int64
             type: integer
       responses:
@@ -1788,6 +2157,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 1
             format: int64
             minimum: 1
             type: integer
@@ -1795,6 +2166,8 @@ paths:
           in: query
           name: radius
           schema:
+            examples:
+              - "5"
             type: string
       responses:
         "200":
@@ -1823,6 +2196,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 1
             format: int64
             minimum: 1
             type: integer
@@ -1855,6 +2230,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 1
             format: int64
             minimum: 1
             type: integer
@@ -1862,6 +2239,8 @@ paths:
           in: query
           name: limit
           schema:
+            examples:
+              - "10"
             type: string
       responses:
         "200":
@@ -1918,6 +2297,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 9001
             format: int64
             type: integer
       responses:
@@ -1942,6 +2323,8 @@ paths:
           name: id
           required: true
           schema:
+            examples:
+              - 9001
             format: int64
             type: integer
       responses:
@@ -2044,6 +2427,8 @@ paths:
           in: query
           name: match_id
           schema:
+            examples:
+              - mm_5f3a9c1d2e4b6a70
             type: string
       responses:
         "200":
@@ -2131,16 +2516,22 @@ paths:
           in: query
           name: key_prefix
           schema:
+            examples:
+              - save-
             type: string
         - explode: false
           in: query
           name: limit
           schema:
+            examples:
+              - "50"
             type: string
         - explode: false
           in: query
           name: cursor
           schema:
+            examples:
+              - "104"
             type: string
       responses:
         "200":
@@ -2169,6 +2560,8 @@ paths:
           name: key
           required: true
           schema:
+            examples:
+              - save-slot-1
             type: string
       responses:
         "204":
@@ -2192,6 +2585,8 @@ paths:
           name: key
           required: true
           schema:
+            examples:
+              - save-slot-1
             type: string
       responses:
         "200":
@@ -2219,15 +2614,23 @@ paths:
           name: key
           required: true
           schema:
+            examples:
+              - save-slot-1
             type: string
         - in: header
           name: If-Match
           schema:
+            examples:
+              - "7"
             type: string
       requestBody:
         content:
           application/json:
-            schema: {}
+            schema:
+              description: "Any JSON value to store: object, array, string, number, boolean, or null."
+              examples:
+                - hp: 100
+                  level: 3
         required: true
       responses:
         "200":

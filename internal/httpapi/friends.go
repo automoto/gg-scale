@@ -34,20 +34,20 @@ var (
 const linkAccountMsg = "link a gg-scale account to use friends"
 
 type friendPresence struct {
-	Status    string  `json:"status"`
-	SessionID *string `json:"session_id"`
+	Status    string  `json:"status" example:"online"`
+	SessionID *string `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
 
 type friendEntry struct {
-	ID          int64           `json:"id"`
-	AccountID   string          `json:"account_id"`
-	PlayerID    *int64          `json:"player_id,omitempty"`
-	Status      string          `json:"status"`
-	Email       *string         `json:"email,omitempty"`
-	DisplayName *string         `json:"display_name,omitempty"`
+	ID          int64           `json:"id" example:"12"`
+	AccountID   string          `json:"account_id" example:"6f9619ff-8b86-4d01-b42d-00cf4fc964ff"`
+	PlayerID    *int64          `json:"player_id,omitempty" example:"87"`
+	Status      string          `json:"status" example:"accepted"`
+	Email       *string         `json:"email,omitempty" example:"friend@example.com"`
+	DisplayName *string         `json:"display_name,omitempty" example:"PlayerTwo"`
 	Presence    *friendPresence `json:"presence,omitempty"`
-	CreatedAt   string          `json:"created_at"`
-	UpdatedAt   string          `json:"updated_at"`
+	CreatedAt   string          `json:"created_at" example:"2026-01-02T15:04:05Z"`
+	UpdatedAt   string          `json:"updated_at" example:"2026-01-02T15:04:05Z"`
 }
 
 // callerAccount resolves the linked account UUID for the current player.
@@ -64,11 +64,11 @@ func callerAccount(ctx context.Context, tx pgx.Tx, playerID int64) (pgtype.UUID,
 }
 
 type friendTargetInput struct {
-	PlayerID int64 `path:"player_id" minimum:"1"`
+	PlayerID int64 `path:"player_id" minimum:"1" example:"87"`
 }
 
 type friendStatusResult struct {
-	Status string `json:"status"`
+	Status string `json:"status" example:"requested"`
 }
 
 type friendStatusOutput struct {
@@ -76,14 +76,14 @@ type friendStatusOutput struct {
 }
 
 type friendsListInput struct {
-	Status string `query:"status"`
-	Limit  string `query:"limit"`
-	Cursor string `query:"cursor"`
+	Status string `query:"status" example:"accepted"`
+	Limit  string `query:"limit" example:"50"`
+	Cursor string `query:"cursor" example:"104"`
 }
 
 type friendsListResult struct {
 	Items      []friendEntry `json:"items"`
-	NextCursor string        `json:"next_cursor"`
+	NextCursor string        `json:"next_cursor" example:"104"`
 }
 
 type friendsListOutput struct {

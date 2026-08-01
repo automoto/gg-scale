@@ -20,8 +20,8 @@ import (
 // CHECK char_length 1..32) → a missing/empty/oversize status is a 422.
 // session_id is optional.
 type presenceUpdateRequest struct {
-	Status    string  `json:"status" minLength:"1" maxLength:"32"`
-	SessionID *string `json:"session_id,omitempty"`
+	Status    string  `json:"status" minLength:"1" maxLength:"32" example:"online"`
+	SessionID *string `json:"session_id,omitempty" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
 
 type presenceUpdateInput struct {
@@ -35,7 +35,7 @@ type presenceUpdateOutput struct {
 // okResult is the {"ok": true} acknowledgement body shared by fire-and-forget
 // player endpoints.
 type okResult struct {
-	OK bool `json:"ok"`
+	OK bool `json:"ok" example:"true"`
 }
 
 // registerPresence registers PUT /v1/presence.

@@ -8,9 +8,9 @@ import (
 )
 
 type healthzResult struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
-	Commit  string `json:"commit"`
+	Status  string `json:"status" example:"ok"`
+	Version string `json:"version" example:"1.0.0"`
+	Commit  string `json:"commit" example:"abc1234"`
 }
 
 type healthzOutput struct {

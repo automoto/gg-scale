@@ -30,36 +30,36 @@ var errSignalRateLimited = errors.New("game session signal rate limited")
 // express (maxLength counts runes), so it is enforced separately against the
 // octet_length CHECK — see validateSignalPayloadSize.
 type gameSessionSignalRequest struct {
-	ToPlayerID    int64  `json:"to_player_id" minimum:"1"`
-	NegotiationID string `json:"negotiation_id" minLength:"1" maxLength:"128"`
-	Kind          string `json:"kind" enum:"offer,answer,restart_offer,restart_answer"`
-	Payload       string `json:"payload" minLength:"1"`
+	ToPlayerID    int64  `json:"to_player_id" minimum:"1" example:"87"`
+	NegotiationID string `json:"negotiation_id" minLength:"1" maxLength:"128" example:"neg-42-87-1"`
+	Kind          string `json:"kind" enum:"offer,answer,restart_offer,restart_answer" example:"offer"`
+	Payload       string `json:"payload" minLength:"1" example:"eyJ0eXBlIjoib2ZmZXIiLCJzZHAiOiJ2PTAuLi4ifQ=="`
 }
 
 type gameSessionSignalSendInput struct {
-	ID   string `path:"id"`
+	ID   string `path:"id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 	Body gameSessionSignalRequest
 }
 
 type gameSessionSignalSendResult struct {
-	ID int64 `json:"id"`
+	ID int64 `json:"id" example:"512"`
 }
 
 type gameSessionSignalSendOutput struct{ Body gameSessionSignalSendResult }
 
 type gameSessionSignalPollInput struct {
-	ID      string `path:"id"`
-	AfterID int64  `query:"after_id" minimum:"0"`
+	ID      string `path:"id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+	AfterID int64  `query:"after_id" minimum:"0" example:"512"`
 }
 
 type gameSessionSignalEntry struct {
-	ID            int64     `json:"id"`
-	FromPlayerID  int64     `json:"from_player_id"`
-	ToPlayerID    int64     `json:"to_player_id"`
-	NegotiationID string    `json:"negotiation_id"`
-	Kind          string    `json:"kind"`
-	Payload       string    `json:"payload"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            int64     `json:"id" example:"513"`
+	FromPlayerID  int64     `json:"from_player_id" example:"42"`
+	ToPlayerID    int64     `json:"to_player_id" example:"87"`
+	NegotiationID string    `json:"negotiation_id" example:"neg-42-87-1"`
+	Kind          string    `json:"kind" example:"answer"`
+	Payload       string    `json:"payload" example:"eyJ0eXBlIjoiYW5zd2VyIiwic2RwIjoidj0wLi4uIn0="`
+	CreatedAt     time.Time `json:"created_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type gameSessionSignalPollResult struct {

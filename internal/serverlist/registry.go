@@ -37,14 +37,14 @@ type Heartbeat struct {
 // Server is the public projection returned by List. Mirrors the JSON
 // the SDK and clients consume.
 type Server struct {
-	Name           string `json:"name"`
-	Address        string `json:"address"`
-	Region         string `json:"region"`
-	CurrentPlayers int    `json:"current_players"`
-	MaxPlayers     int    `json:"max_players"`
-	GameMode       string `json:"game_mode"`
-	Level          string `json:"level"`
-	Version        string `json:"version"`
+	Name           string `json:"name" example:"us-east-1-a1"`
+	Address        string `json:"address" example:"203.0.113.10:7777"`
+	Region         string `json:"region" example:"us-east-1"`
+	CurrentPlayers int    `json:"current_players" example:"12"`
+	MaxPlayers     int    `json:"max_players" example:"16"`
+	GameMode       string `json:"game_mode" example:"ctf"`
+	Level          string `json:"level" example:"arena-2"`
+	Version        string `json:"version" example:"1.4.2"`
 }
 
 type entry struct {

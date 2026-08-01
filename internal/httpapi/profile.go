@@ -37,18 +37,18 @@ func validateXUID(s string) bool {
 }
 
 type profileResponse struct {
-	ID              int64  `json:"id"`
-	ProjectID       int64  `json:"project_id"`
-	ExternalID      string `json:"external_id"`
-	Email           string `json:"email,omitempty"`
-	XUID            string `json:"xuid,omitempty"`
-	EmailVerifiedAt string `json:"email_verified_at,omitempty"`
-	CreatedAt       string `json:"created_at"`
+	ID              int64  `json:"id" example:"42"`
+	ProjectID       int64  `json:"project_id" example:"7"`
+	ExternalID      string `json:"external_id" example:"user_1b4e28ba2fa14f0e8bf1a09b4d7e5f60"`
+	Email           string `json:"email,omitempty" example:"player@example.com"`
+	XUID            string `json:"xuid,omitempty" example:"2533274790395904"`
+	EmailVerifiedAt string `json:"email_verified_at,omitempty" example:"2026-01-02T15:04:05Z"`
+	CreatedAt       string `json:"created_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type profilePatchRequest struct {
-	Email *string `json:"email,omitempty"`
-	XUID  *string `json:"xuid,omitempty"`
+	Email *string `json:"email,omitempty" example:"player@example.com"`
+	XUID  *string `json:"xuid,omitempty" example:"2533274790395904"`
 }
 
 type profileGetOutput struct {

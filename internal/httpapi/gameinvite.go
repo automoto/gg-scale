@@ -30,17 +30,17 @@ var (
 // blank field is a 422. Recipient resolution (unknown email → 404) and
 // session state remain handler/DB concerns.
 type gameInviteCreateRequest struct {
-	ToEmail   string `json:"to_email" minLength:"1"`
-	SessionID string `json:"session_id" minLength:"1"`
+	ToEmail   string `json:"to_email" minLength:"1" example:"friend@example.com"`
+	SessionID string `json:"session_id" minLength:"1" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
 
 type gameInviteEntry struct {
-	InviteID  int64  `json:"invite_id"`
-	FromEmail string `json:"from_email,omitempty"`
-	FromXUID  string `json:"from_xuid,omitempty"`
-	SessionID string `json:"session_id"`
-	JoinCode  string `json:"join_code"`
-	ExpiresAt string `json:"expires_at"`
+	InviteID  int64  `json:"invite_id" example:"314"`
+	FromEmail string `json:"from_email,omitempty" example:"player@example.com"`
+	FromXUID  string `json:"from_xuid,omitempty" example:"2533274790395904"`
+	SessionID string `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+	JoinCode  string `json:"join_code" example:"XKCD42"`
+	ExpiresAt string `json:"expires_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type gameInviteCreateInput struct {
@@ -49,7 +49,7 @@ type gameInviteCreateInput struct {
 
 type gameInviteCreateOutput struct {
 	Body struct {
-		InviteID int64 `json:"invite_id"`
+		InviteID int64 `json:"invite_id" example:"314"`
 	}
 }
 
@@ -60,7 +60,7 @@ type gameInviteListOutput struct {
 }
 
 type gameInviteDeleteInput struct {
-	ID int64 `path:"id"`
+	ID int64 `path:"id" example:"314"`
 }
 
 // registerGameInvites registers POST/GET/DELETE /v1/invite.

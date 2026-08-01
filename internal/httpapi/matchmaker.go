@@ -35,59 +35,59 @@ type matchmakerTicketRequest struct {
 	// game_session (created session), or fleet_allocation (dedicated
 	// server). Omitted mode is inferred: fleet present → fleet_allocation,
 	// absent → match_only.
-	Mode              string             `json:"mode,omitempty"`
-	Fleet             string             `json:"fleet,omitempty"`
-	Region            string             `json:"region,omitempty"`
-	AllowCrossRegion  *bool              `json:"allow_cross_region,omitempty"`
-	GameMode          string             `json:"game_mode,omitempty"`
-	MinCount          int                `json:"min_count,omitempty"`
-	MaxCount          int                `json:"max_count,omitempty"`
-	CountMultiple     int                `json:"count_multiple,omitempty"`
+	Mode              string             `json:"mode,omitempty" example:"game_session"`
+	Fleet             string             `json:"fleet,omitempty" example:"default"`
+	Region            string             `json:"region,omitempty" example:"us-east-1"`
+	AllowCrossRegion  *bool              `json:"allow_cross_region,omitempty" example:"true"`
+	GameMode          string             `json:"game_mode,omitempty" example:"ctf"`
+	MinCount          int                `json:"min_count,omitempty" example:"2"`
+	MaxCount          int                `json:"max_count,omitempty" example:"4"`
+	CountMultiple     int                `json:"count_multiple,omitempty" example:"2"`
 	Query             string             `json:"query,omitempty"`
-	StringProperties  map[string]string  `json:"string_properties,omitempty"`
-	NumericProperties map[string]float64 `json:"numeric_properties,omitempty"`
-	Attributes        json.RawMessage    `json:"attributes,omitempty"`
+	StringProperties  map[string]string  `json:"string_properties,omitempty" example:"{\"map\":\"arena-2\"}"`
+	NumericProperties map[string]float64 `json:"numeric_properties,omitempty" example:"{\"skill\":1420.5}"`
+	Attributes        json.RawMessage    `json:"attributes,omitempty" example:"{\"lobby_code\":\"XKCD42\"}"`
 }
 
 type matchmakerTicketResponse struct {
-	ID                int64              `json:"id"`
-	Status            string             `json:"status"`
-	Mode              string             `json:"mode"`
-	Region            string             `json:"region"`
-	AllowCrossRegion  bool               `json:"allow_cross_region"`
-	GameMode          string             `json:"game_mode"`
-	MinCount          int                `json:"min_count"`
-	MaxCount          int                `json:"max_count"`
-	CountMultiple     int                `json:"count_multiple"`
+	ID                int64              `json:"id" example:"9001"`
+	Status            string             `json:"status" example:"matched"`
+	Mode              string             `json:"mode" example:"game_session"`
+	Region            string             `json:"region" example:"us-east-1"`
+	AllowCrossRegion  bool               `json:"allow_cross_region" example:"true"`
+	GameMode          string             `json:"game_mode" example:"ctf"`
+	MinCount          int                `json:"min_count" example:"2"`
+	MaxCount          int                `json:"max_count" example:"4"`
+	CountMultiple     int                `json:"count_multiple" example:"2"`
 	Query             string             `json:"query,omitempty"`
-	StringProperties  map[string]string  `json:"string_properties,omitempty"`
-	NumericProperties map[string]float64 `json:"numeric_properties,omitempty"`
-	Attributes        json.RawMessage    `json:"attributes,omitempty"`
-	MatchID           string             `json:"match_id,omitempty"`
-	MatchAddress      string             `json:"match_address"`
+	StringProperties  map[string]string  `json:"string_properties,omitempty" example:"{\"map\":\"arena-2\"}"`
+	NumericProperties map[string]float64 `json:"numeric_properties,omitempty" example:"{\"skill\":1420.5}"`
+	Attributes        json.RawMessage    `json:"attributes,omitempty" example:"{\"lobby_code\":\"XKCD42\"}"`
+	MatchID           string             `json:"match_id,omitempty" example:"mm_5f3a9c1d2e4b6a70"`
+	MatchAddress      string             `json:"match_address" example:"203.0.113.10:7777"`
 	// ProtocolHint is the wire protocol the matched game-server listens
 	// on (lower-cased: "tcp", "udp", "tcpudp"). Empty when the backend
 	// can't determine it (older allocations, plugin backends that don't
 	// surface it). Game-specific SDKs already know what to dial; this
 	// field is for cross-game launchers, control panels, and defense-in-depth.
-	ProtocolHint string `json:"protocol_hint,omitempty"`
+	ProtocolHint string `json:"protocol_hint,omitempty" example:"udp"`
 	// SessionID / JoinCode are set for matched game_session tickets.
-	SessionID string `json:"session_id,omitempty"`
-	JoinCode  string `json:"join_code,omitempty"`
+	SessionID string `json:"session_id,omitempty" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+	JoinCode  string `json:"join_code,omitempty" example:"XKCD42"`
 	// HostPlayerID is the player peers connect to for matched match_only and
 	// game_session tickets (the group's oldest ticket). Absent for
 	// fleet_allocation, which resolves to a dedicated server address.
-	HostPlayerID int64 `json:"host_player_id,omitempty"`
+	HostPlayerID int64 `json:"host_player_id,omitempty" example:"42"`
 	// Users is the match roster, populated once the ticket is matched (and
 	// while the match record is within its retention window).
 	Users []matchmaker.RosterEntry `json:"users,omitempty"`
 	// FailureReason is a machine-readable reason a failed ticket ended that
 	// way. Present only for failed tickets. Known values: "expired",
 	// "attempts_exhausted"; treat as an open enum — more may be added.
-	FailureReason string `json:"failure_reason,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	MatchedAt     string `json:"matched_at,omitempty"`
-	ExpiresAt     string `json:"expires_at,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty" example:"expired"`
+	CreatedAt     string `json:"created_at" example:"2026-01-02T15:04:05Z"`
+	MatchedAt     string `json:"matched_at,omitempty" example:"2026-01-02T15:04:35Z"`
+	ExpiresAt     string `json:"expires_at,omitempty" example:"2026-01-02T15:09:05Z"`
 }
 
 // resolveTicketMode applies the omitted-mode inference rule and validates
@@ -210,7 +210,7 @@ type matchmakerTicketOutput struct {
 }
 
 type matchmakerTicketIDInput struct {
-	ID int64 `path:"id"`
+	ID int64 `path:"id" example:"9001"`
 }
 
 func registerMatchmakerRoutes(api huma.API, d Deps) {

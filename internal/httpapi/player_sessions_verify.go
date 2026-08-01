@@ -22,7 +22,7 @@ import (
 const maxVerifyBodyBytes = 8 << 10
 
 type playerVerifyRequest struct {
-	SessionToken string `json:"session_token"`
+	SessionToken string `json:"session_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`
 }
 
 // errStaleSession marks a token rejected by the epoch/ban gate. Collapses to
@@ -34,9 +34,9 @@ var errStaleSession = errors.New("project_players verify: stale session")
 // UUID, etc.) — the same column that auth/anonymous returns. Email is
 // omitempty because it's optional on the account.
 type playerVerifyResponse struct {
-	PlayerID   int64  `json:"player_id"`
-	ExternalID string `json:"external_id"`
-	Email      string `json:"email,omitempty"`
+	PlayerID   int64  `json:"player_id" example:"42"`
+	ExternalID string `json:"external_id" example:"anon_9f86d081884c7d659a2feaa0c55ad015"`
+	Email      string `json:"email,omitempty" example:"player@example.com"`
 }
 
 // playerSessionVerifyHandler validates a player session token on behalf

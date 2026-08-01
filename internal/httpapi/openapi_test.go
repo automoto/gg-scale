@@ -98,6 +98,57 @@ func TestOpenAPIDoc_committed_spec_is_current(t *testing.T) {
 		"committed openapi.yaml is stale; run `make openapi` and commit the result")
 }
 
+// TestOpenAPIDoc_schemas_carry_examples spot-checks that the wire structs
+// document example values. Redoc composes response samples from these
+// per-property examples; without them the docs render empty or null samples.
+func TestOpenAPIDoc_schemas_carry_examples(t *testing.T) {
+	doc := OpenAPIDoc("1.0.0")
+	schemas := doc.Components.Schemas.Map()
+
+	cases := []struct{ schema, property string }{
+		{"AnonymousResponse", "access_token"},
+		{"SessionResponse", "refresh_token"},
+		{"StorageObjectResponse", "value"},
+		{"StorageObjectListItemResponse", "key"},
+		{"GameSessionResponse", "join_code"},
+		{"GameSessionSignalEntry", "kind"},
+		{"GameInviteEntry", "join_code"},
+		{"LeaderboardEntry", "score"},
+		{"FriendEntry", "status"},
+		{"MatchmakerTicketResponse", "status"},
+		{"Credentials", "urls"},
+		{"RemoteAddrEntry", "address"},
+		{"Server", "address"},
+		{"ProfileResponse", "external_id"},
+		{"PlayerVerifyResponse", "external_id"},
+		{"HealthzResult", "version"},
+	}
+	for _, tc := range cases {
+		s := schemas[tc.schema]
+		require.NotNil(t, s, tc.schema)
+		p := s.Properties[tc.property]
+		require.NotNil(t, p, "%s.%s", tc.schema, tc.property)
+		assert.NotEmpty(t, p.Examples, "%s.%s must document an example", tc.schema, tc.property)
+	}
+}
+
+// TestOpenAPIDoc_storage_put_body_documents_example guards the storage PUT
+// request body, whose value is arbitrary JSON. Without a hand-set schema the
+// generator emits `schema: {}` and the docs show a null request sample.
+func TestOpenAPIDoc_storage_put_body_documents_example(t *testing.T) {
+	doc := OpenAPIDoc("1.0.0")
+	item := doc.Paths["/v1/storage/objects/{key}"]
+	require.NotNil(t, item)
+	require.NotNil(t, item.Put)
+	require.NotNil(t, item.Put.RequestBody)
+
+	mt := item.Put.RequestBody.Content["application/json"]
+	require.NotNil(t, mt)
+	require.NotNil(t, mt.Schema)
+	assert.NotEmpty(t, mt.Schema.Description)
+	assert.NotEmpty(t, mt.Schema.Examples, "storage put body must not render as a null sample")
+}
+
 func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {
 	doc := OpenAPIDoc("1.0.0")
 	item := doc.Paths["/v1/server/player-sessions/verify"]

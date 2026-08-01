@@ -49,18 +49,18 @@ func apiNow(d Deps) time.Time {
 const bcryptCost = webutil.BcryptCost
 
 type anonymousResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	PlayerID     int64  `json:"player_id"`
-	ExternalID   string `json:"external_id"`
-	ExpiresAt    string `json:"expires_at"`
+	AccessToken  string `json:"access_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`
+	RefreshToken string `json:"refresh_token" example:"3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"`
+	PlayerID     int64  `json:"player_id" example:"42"`
+	ExternalID   string `json:"external_id" example:"anon_9f86d081884c7d659a2feaa0c55ad015"`
+	ExpiresAt    string `json:"expires_at" example:"2026-01-02T15:04:05Z"`
 }
 
 type sessionResponse struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
-	PlayerID     int64  `json:"player_id"`
-	ExpiresAt    string `json:"expires_at"`
+	AccessToken  string `json:"access_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`
+	RefreshToken string `json:"refresh_token" example:"3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"`
+	PlayerID     int64  `json:"player_id" example:"42"`
+	ExpiresAt    string `json:"expires_at" example:"2026-01-02T15:04:05Z"`
 }
 
 // signup/login fields stay schema-optional: signup enforces password byte
@@ -69,30 +69,30 @@ type sessionResponse struct {
 // input to a uniform 401 so the request shape reveals nothing. Both own their
 // validation in the handler.
 type signupRequest struct {
-	Email    string `json:"email,omitempty"`
-	Password string `json:"password,omitempty"`
+	Email    string `json:"email,omitempty" example:"player@example.com"`
+	Password string `json:"password,omitempty" example:"correct-horse-battery-staple"`
 }
 
 type verifyRequest struct {
-	Email string `json:"email" minLength:"1"`
-	Code  string `json:"code" minLength:"1"`
+	Email string `json:"email" minLength:"1" example:"player@example.com"`
+	Code  string `json:"code" minLength:"1" example:"482913"`
 }
 
 type loginRequest struct {
-	Email    string `json:"email,omitempty"`
-	Password string `json:"password,omitempty"`
+	Email    string `json:"email,omitempty" example:"player@example.com"`
+	Password string `json:"password,omitempty" example:"correct-horse-battery-staple"`
 }
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token" minLength:"1"`
+	RefreshToken string `json:"refresh_token" minLength:"1" example:"3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"`
 }
 
 type logoutRequest struct {
-	RefreshToken string `json:"refresh_token" minLength:"1"`
+	RefreshToken string `json:"refresh_token" minLength:"1" example:"3f2c8a1d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"`
 }
 
 type customTokenRequest struct {
-	Token string `json:"token" minLength:"1"`
+	Token string `json:"token" minLength:"1" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRlcm5hbF9pZCI6InN0ZWFtOjc2NTYxMTk4MDAwMDAwMDAifQ.k7HfXWY0mYbXvJqPz3sB4c9Q2rN8dEwTuVxYzA1bC2d"`
 }
 
 type anonymousOutput struct {
@@ -108,8 +108,8 @@ type verifyInput struct {
 }
 
 type verifyResult struct {
-	PlayerID int64 `json:"player_id"`
-	Verified bool  `json:"verified"`
+	PlayerID int64 `json:"player_id" example:"42"`
+	Verified bool  `json:"verified" example:"true"`
 }
 
 type verifyOutput struct {
