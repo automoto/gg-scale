@@ -2598,6 +2598,22 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 			<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits") }>Invite quotas &amp; rate limits →</a></p>
 		</section>
 		<section class="card">
+			<h2>Custom token sign-in</h2>
+			<p class="card-subtitle">Your backend signs player tokens with its private key (Ed25519 or RSA); ggscale verifies them against this public key on <code>POST /v1/auth/custom-token</code>. The private key never leaves your backend.</p>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/custom-token") } class="settings-form">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="custom-token-public-key">Public key (PEM)</label>
+				if vm.CustomTokenPublicKey == "" {
+					<textarea id="custom-token-public-key" name="custom_token_public_key" rows="6" spellcheck="false" placeholder="not configured — paste a PEM public key to enable" aria-describedby="custom-token-key-help custom_token_public_key-error"></textarea>
+				} else {
+					<textarea id="custom-token-public-key" name="custom_token_public_key" rows="6" spellcheck="false" aria-describedby="custom-token-key-help custom_token_public_key-error">{ vm.CustomTokenPublicKey }</textarea>
+				}
+				<small id="custom-token-key-help">Generate a keypair with <code>openssl genpkey -algorithm ed25519 -out private.pem</code> then <code>openssl pkey -in private.pem -pubout</code>. Save an empty value to disable custom-token sign-in.</small>
+				@fieldError(vm.FieldErrors, "custom_token_public_key")
+				<button type="submit" class="btn-inline">Save signing key</button>
+			</form>
+		</section>
+		<section class="card">
 			<h2>Tenant status</h2>
 			if vm.Disabled {
 				<p role="alert">This tenant is disabled. API keys do not resolve and players cannot play.</p>
@@ -2756,6 +2772,27 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 				<small id="config-help">A top-level JSON object, up to 64 KiB. Both publishable and secret project keys can read it.</small>
 				@fieldError(vm.FieldErrors, "config")
 				<button type="submit" class="btn-inline">Save remote config</button>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Steam sign-in</h2>
+			<p class="card-subtitle">Lets game clients exchange a Steam session ticket for a session via <code>POST /v1/auth/steam</code>. Off until both fields are set.</p>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/steam-auth") } class="settings-form">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="steam-app-id">App ID</label>
+				<input id="steam-app-id" name="steam_app_id" type="text" inputmode="numeric" value={ vm.SteamAppID } aria-describedby="steam-app-id-help"/>
+				<small id="steam-app-id-help">The numeric Steam App ID of your game.</small>
+				@fieldError(vm.FieldErrors, "steam_app_id")
+				<label for="steam-web-api-key">Publisher Web API key</label>
+				if vm.SteamKeyConfigured {
+					<input id="steam-web-api-key" name="steam_web_api_key" type="password" autocomplete="off" placeholder="configured — leave blank to keep" aria-describedby="steam-key-help"/>
+				} else {
+					<input id="steam-web-api-key" name="steam_web_api_key" type="password" autocomplete="off" placeholder="not configured" aria-describedby="steam-key-help"/>
+				}
+				<small id="steam-key-help">From partner.steamgames.com. Stored encrypted, shown never; enter a value only to set or replace it.</small>
+				@fieldError(vm.FieldErrors, "steam_web_api_key")
+				<label class="checkbox-label"><input type="checkbox" name="steam_clear" value="1"/> Disable Steam sign-in and delete the stored key</label>
+				<button type="submit" class="btn-inline">Save Steam settings</button>
 			</form>
 		</section>
 		<section class="card">

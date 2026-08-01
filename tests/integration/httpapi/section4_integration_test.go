@@ -5,6 +5,8 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	cryptorand "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -305,22 +307,11 @@ func TestLogin_with_nonexistent_email_returns_401_with_bcrypt_timing(t *testing.
 func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
-	secret := []byte("tenant-custom-token-shared-secret")
-	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE tenants SET custom_token_secret = $1 WHERE id = $2`, secret, tenantID)
-	require.NoError(t, err)
+	priv := seedCustomTokenKey(t, c, tenantID)
 
 	srv, _ := newFullStackServer(t, c)
-	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"external_id": "steam_99",
-		"exp":         time.Now().Add(time.Hour).Unix(),
-		"aud":         "ggscale-custom-token",
-	})
-	signed, err := tok.SignedString(secret)
-	require.NoError(t, err)
-
 	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "k",
-		map[string]string{"token": signed})
+		map[string]string{"token": signCustomToken(t, priv, "steam_99")})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
 	var session struct {
@@ -334,6 +325,54 @@ func TestCustomToken_mints_session_for_external_user(t *testing.T) {
 		`SELECT external_id FROM project_players WHERE id = $1 AND project_id = $2`,
 		session.PlayerID, projectID).Scan(&got))
 	assert.Equal(t, "steam_99", got)
+}
+
+// TestCustomToken_hs256_tokens_are_rejected pins the breaking change: the
+// verifier accepts only the algorithm matching the stored public key, so a
+// legacy HS256 token (or any alg-confusion attempt) fails closed.
+func TestCustomToken_hs256_tokens_are_rejected(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	seedCustomTokenKey(t, c, tenantID)
+
+	srv, _ := newFullStackServer(t, c)
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"external_id": "steam_99",
+		"exp":         time.Now().Add(time.Hour).Unix(),
+		"aud":         "ggscale-custom-token",
+	})
+	signed, err := tok.SignedString([]byte("legacy-shared-secret"))
+	require.NoError(t, err)
+
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "k",
+		map[string]string{"token": signed})
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+}
+
+func TestCustomToken_wrong_key_is_rejected(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	seedCustomTokenKey(t, c, tenantID)
+	_, otherPriv, err := ed25519.GenerateKey(cryptorand.Reader)
+	require.NoError(t, err)
+
+	srv, _ := newFullStackServer(t, c)
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "k",
+		map[string]string{"token": signCustomToken(t, otherPriv, "steam_99")})
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(body))
+}
+
+func TestCustomToken_unconfigured_tenant_is_400(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	_, priv, err := ed25519.GenerateKey(cryptorand.Reader)
+	require.NoError(t, err)
+
+	srv, _ := newFullStackServer(t, c)
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "k",
+		map[string]string{"token": signCustomToken(t, priv, "steam_99")})
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+	assert.Contains(t, string(body), "not configured")
 }
 
 // -------- Storage --------

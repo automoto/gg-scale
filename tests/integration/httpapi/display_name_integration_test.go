@@ -253,6 +253,32 @@ func TestPlayers_batch_over_cap_is_validation_error(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
 }
 
+// TestPlayers_batch_tolerates_empty_segments covers programmatically built
+// lists: a trailing or doubled comma must not fail the whole batch.
+func TestPlayers_batch_tolerates_empty_segments(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 2, "pl")
+	srv := newServerForCluster(t, c)
+
+	_, named := linkedPlayerWithName(t, c, srv.URL, "pl", "Comma Fan")
+	tok, _ := anonymousLoginWithID(t, srv.URL, "pl")
+
+	for _, ids := range []string{
+		fmt.Sprintf("%d,", named),
+		fmt.Sprintf(",%d,,", named),
+	} {
+		resp, body := authedReq(t, http.MethodGet,
+			srv.URL+"/v1/players?ids="+ids, "pl", tok, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, "ids=%q: %s", ids, string(body))
+		var out struct {
+			Players []publicPlayerBody `json:"players"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		require.Len(t, out.Players, 1, "ids=%q", ids)
+		assert.Equal(t, named, out.Players[0].ID)
+	}
+}
+
 func TestPlayers_batch_bad_ids_param_is_validation_error(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, 2, "pl")
@@ -265,7 +291,7 @@ func TestPlayers_batch_bad_ids_param_is_validation_error(t *testing.T) {
 	}{
 		{"missing", ""},
 		{"not_a_number", "abc"},
-		{"empty_element", "1,,2"},
+		{"only_commas", ",,"},
 		{"negative", "-1"},
 	}
 	for _, tc := range cases {
@@ -275,6 +301,26 @@ func TestPlayers_batch_bad_ids_param_is_validation_error(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
 		})
 	}
+}
+
+// ── patch atomicity ─────────────────────────────────────────────────────────
+
+// TestProfile_patch_is_atomic_when_one_field_invalid: a PATCH that fails
+// validation on any field must change nothing, even when another field in the
+// same request was valid.
+func TestProfile_patch_is_atomic_when_one_field_invalid(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 2, "dn")
+	srv := newServerForCluster(t, c)
+
+	tok, _ := linkedPlayerWithName(t, c, srv.URL, "dn", "Before")
+
+	resp, body := authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "dn", tok,
+		map[string]string{"display_name": "After", "xuid": "bad\aname"})
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
+
+	assert.Equal(t, "Before", getProfile(t, srv.URL, "dn", tok).DisplayName,
+		"a rejected xuid must not leave the display name half-committed")
 }
 
 // ── enrichment: session peers and leaderboard entries ───────────────────────

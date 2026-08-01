@@ -18,6 +18,7 @@ p, role:platform_admin, *, project:*:relay, *
 p, role:platform_admin, *, project:*:matchmaking:dedicated, *
 p, role:platform_admin, *, project:*:leaderboard, manage
 p, role:platform_admin, *, api_key:*, manage
+p, role:platform_admin, *, custom_token, manage
 p, role:platform_admin, *, team, manage
 p, role:platform_admin, *, audit, read
 p, role:platform_support, *, tenant, read
@@ -34,6 +35,7 @@ p, role:tenant_owner, *, project:*:relay, *
 p, role:tenant_owner, *, project:*:matchmaking:dedicated, *
 p, role:tenant_owner, *, project:*:leaderboard, manage
 p, role:tenant_owner, *, api_key:*, manage
+p, role:tenant_owner, *, custom_token, manage
 p, role:tenant_owner, *, team, manage
 p, role:tenant_owner, *, audit, read
 
@@ -43,6 +45,7 @@ p, role:tenant_admin, *, project:*:leaderboard, manage
 p, role:tenant_admin, *, project:*:config, update
 p, role:tenant_admin, *, api_key:publishable, manage
 p, role:tenant_admin, *, api_key:secret, manage
+p, role:tenant_admin, *, custom_token, manage
 p, role:tenant_admin, *, audit, read
 
 p, role:security_admin, *, api_key:secret, manage

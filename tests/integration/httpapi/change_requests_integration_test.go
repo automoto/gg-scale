@@ -611,13 +611,12 @@ func TestBranchFollowup_platform_admin_downgrade_preserves_data_and_blocks_only_
 func TestBranchFollowup_audit_hygiene_and_final_database_invariants(t *testing.T) {
 	c := startCluster(t)
 	const (
-		apiKey      = "ops-secret-api-key"
-		password    = "ops-secret-password"
-		customToken = "ops-secret-custom-token-material"
+		apiKey   = "ops-secret-api-key"
+		password = "ops-secret-password"
 	)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, apiKey)
 	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE tenants SET enforce_quotas = true, custom_token_secret = $2 WHERE id = $1`, tenantID, []byte(customToken))
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
 	require.NoError(t, err)
 	ownerID := seedControlPanelUser(t, c, "ops-owner@example.test", password, false)
 	paID := seedControlPanelUser(t, c, "ops-pa@example.test", password, true)
@@ -682,7 +681,7 @@ func TestBranchFollowup_audit_hygiene_and_final_database_invariants(t *testing.T
 		strconv.FormatInt(deniedID, 10):   true,
 		strconv.FormatInt(tenantID, 10):   true,
 	}
-	secrets := []string{apiKey, password, customToken, ownerCSRF, paCSRF, ownerCookie.Value, paCookie.Value}
+	secrets := []string{apiKey, password, ownerCSRF, paCSRF, ownerCookie.Value, paCookie.Value}
 	for rows.Next() {
 		var actor int64
 		var action, target, payload string

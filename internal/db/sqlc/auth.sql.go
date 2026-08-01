@@ -286,17 +286,17 @@ func (q *Queries) GetSessionByRefreshHash(ctx context.Context, arg GetSessionByR
 	return i, err
 }
 
-const getTenantCustomTokenSecret = `-- name: GetTenantCustomTokenSecret :one
-SELECT custom_token_secret
+const getTenantCustomTokenPublicKey = `-- name: GetTenantCustomTokenPublicKey :one
+SELECT custom_token_public_key
 FROM tenants
 WHERE id = current_setting('app.tenant_id', true)::bigint
 `
 
-func (q *Queries) GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error) {
-	row := q.db.QueryRow(ctx, getTenantCustomTokenSecret)
-	var custom_token_secret []byte
-	err := row.Scan(&custom_token_secret)
-	return custom_token_secret, err
+func (q *Queries) GetTenantCustomTokenPublicKey(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, getTenantCustomTokenPublicKey)
+	var custom_token_public_key string
+	err := row.Scan(&custom_token_public_key)
+	return custom_token_public_key, err
 }
 
 const incrementPlayerVerificationAttempts = `-- name: IncrementPlayerVerificationAttempts :one

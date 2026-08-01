@@ -109,3 +109,13 @@ FROM control_panel_create_tenant(
     sqlc.arg(key_hash),
     sqlc.arg(key_label)
 ) AS r(tenant_id, project_id, api_key_id, membership_id);
+
+-- name: GetTenantCustomTokenPublicKeyForControlPanel :one
+SELECT custom_token_public_key
+FROM tenants
+WHERE id = sqlc.arg(tenant_id);
+
+-- name: UpdateTenantCustomTokenPublicKey :execrows
+UPDATE tenants
+SET custom_token_public_key = sqlc.arg(public_key)
+WHERE id = sqlc.arg(tenant_id);

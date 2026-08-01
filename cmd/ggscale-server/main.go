@@ -51,6 +51,7 @@ import (
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/relaymeter"
+	"github.com/ggscale/ggscale/internal/secretseal"
 	"github.com/ggscale/ggscale/internal/serverlist"
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
@@ -400,6 +401,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// Same zero-config pattern for the credential-sealing key (Steam and
+	// future provider keys are sealed at rest).
+	credCipher, err := secretseal.Load(ctx, appPool, cfg.CredentialEncKey)
+	if err != nil {
+		return err
+	}
 	emailVerifySigningKey, err := verifycode.LoadSigningKey(ctx, appPool, cfg.EmailVerifySigningKey)
 	if err != nil {
 		return err
@@ -577,6 +584,7 @@ func run() error {
 		MailFrom:              cfg.MailFrom,
 		EnqueuePasswordReset:  enqueuePasswordReset,
 		TwoFactor:             tfCipher,
+		CredentialCipher:      credCipher,
 		EmailVerifySigningKey: emailVerifySigningKey,
 		Cache:                 store,
 		Registry:              registry,

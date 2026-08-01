@@ -39,7 +39,9 @@ import (
 	"github.com/ggscale/ggscale/internal/realtime"
 	"github.com/ggscale/ggscale/internal/relay"
 	"github.com/ggscale/ggscale/internal/relaymeter"
+	"github.com/ggscale/ggscale/internal/secretseal"
 	"github.com/ggscale/ggscale/internal/serverlist"
+	"github.com/ggscale/ggscale/internal/steamauth"
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
@@ -92,6 +94,13 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs 2FA pending cookies for the
 	// control panel and player surfaces. nil = 2FA enrollment unavailable.
 	TwoFactor *twofactor.Cipher
+	// CredentialCipher seals stored provider credentials (e.g. the Steam Web
+	// API key) at rest and unseals them on read. nil reads values as stored
+	// (unit tests; legacy plaintext rows).
+	CredentialCipher *secretseal.Cipher
+	// SteamAuth verifies Steam session tickets for POST /v1/auth/steam. nil
+	// defaults to the production Valve client; tests inject a fake.
+	SteamAuth steamauth.Verifier
 	// EmailVerifySigningKey signs verification cookies for both web surfaces.
 	EmailVerifySigningKey []byte
 	Cache                 cache.Store
@@ -237,6 +246,9 @@ func NewRouter(d Deps) http.Handler {
 	if d.GameSessions == nil && d.Pool != nil {
 		d.GameSessions = gamesession.NewService(d.Pool)
 	}
+	if d.SteamAuth == nil {
+		d.SteamAuth = steamauth.New()
+	}
 	// No replica configured (or a test fixture): read-heavy handlers fall back
 	// to the primary, so behavior is identical to a single-pool deployment.
 	if d.ReadPool == nil {
@@ -299,6 +311,7 @@ func NewRouter(d Deps) http.Handler {
 				RBAC:                 d.RBAC,
 				PluginInfo:           d.ControlPanelPluginInfo,
 				TwoFactor:            d.TwoFactor,
+				CredentialCipher:     d.CredentialCipher,
 				VerifySigningKey:     d.EmailVerifySigningKey,
 				StorageLimits:        d.StorageLimits,
 				BillingHandoffKey:    d.BillingHandoffKey,

@@ -123,3 +123,27 @@ func TestUpdateRemoteConfigHandler_member_denied(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, rr.Code, "remote config requires project config permission")
 }
+
+func TestUpdateCustomTokenKeyHandler_member_denied(t *testing.T) {
+	auth, req := roleHandlerRequest(t, "member", url.Values{"custom_token_public_key": {"irrelevant"}})
+	h := &Handler{rbac: auth}
+
+	rr := httptest.NewRecorder()
+	h.updateCustomTokenKeyHandler(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code, "the signing key requires custom_token manage")
+}
+
+func TestUpdateSteamAuthHandler_member_denied(t *testing.T) {
+	auth, req := roleHandlerRequest(t, "member", url.Values{
+		"steam_app_id": {"480"}, "steam_web_api_key": {"0123456789ABCDEF0123456789ABCDEF"},
+	})
+	rctx := chi.RouteContext(req.Context())
+	rctx.URLParams.Add("projectID", "8")
+	h := &Handler{rbac: auth}
+
+	rr := httptest.NewRecorder()
+	h.updateSteamAuthHandler(rr, req)
+
+	assert.Equal(t, http.StatusForbidden, rr.Code, "steam auth settings require project config permission")
+}

@@ -28,3 +28,4 @@ sql:
         rename:
           api_key: APIKey
           api_keys: APIKeys
+          steam_web_api_key: SteamWebAPIKey

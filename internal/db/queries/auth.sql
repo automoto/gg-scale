@@ -175,8 +175,8 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = ANY(sqlc.arg(ids)::bigint[])
   AND deleted_at IS NULL;
 
--- name: GetTenantCustomTokenSecret :one
-SELECT custom_token_secret
+-- name: GetTenantCustomTokenPublicKey :one
+SELECT custom_token_public_key
 FROM tenants
 WHERE id = current_setting('app.tenant_id', true)::bigint;
 

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/playerauth"
 )
@@ -85,9 +86,14 @@ func publicPlayer(id int64, displayName *string, createdAt pgtype.Timestamptz) p
 
 func playerGet(d Deps) func(context.Context, *playerGetInput) (*playerGetOutput, error) {
 	return func(ctx context.Context, in *playerGetInput) (*playerGetOutput, error) {
-		projectID, ok := playerauth.ProjectIDFromContext(ctx)
+		if _, ok := playerauth.IDFromContext(ctx); !ok {
+			return nil, huma.Error401Unauthorized("no player")
+		}
+		// Project scope comes from the API-key pin, matching every sibling
+		// player endpoint (game sessions, storage, leaderboards).
+		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			return nil, huma.Error401Unauthorized("no player project")
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
 		var resp publicPlayerResponse
@@ -113,9 +119,12 @@ func playerGet(d Deps) func(context.Context, *playerGetInput) (*playerGetOutput,
 
 func playersResolve(d Deps) func(context.Context, *playersResolveInput) (*playersResolveOutput, error) {
 	return func(ctx context.Context, in *playersResolveInput) (*playersResolveOutput, error) {
-		projectID, ok := playerauth.ProjectIDFromContext(ctx)
+		if _, ok := playerauth.IDFromContext(ctx); !ok {
+			return nil, huma.Error401Unauthorized("no player")
+		}
+		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
-			return nil, huma.Error401Unauthorized("no player project")
+			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
 
 		ids, perr := parsePlayerIDs(in.IDs)
@@ -144,16 +153,23 @@ func playersResolve(d Deps) func(context.Context, *playersResolveInput) (*player
 }
 
 func parsePlayerIDs(raw string) ([]int64, error) {
-	if raw == "" {
+	// Empty segments (a trailing or doubled comma from a programmatically
+	// built list) are skipped, not errors.
+	parts := make([]string, 0)
+	for _, p := range strings.Split(raw, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) == 0 {
 		return nil, errors.New("ids required")
 	}
-	parts := strings.Split(raw, ",")
 	if len(parts) > playerResolveMaxIDs {
 		return nil, fmt.Errorf("too many ids (max %d)", playerResolveMaxIDs)
 	}
 	out := make([]int64, 0, len(parts))
 	for _, p := range parts {
-		id, err := strconv.ParseInt(strings.TrimSpace(p), 10, 64)
+		id, err := strconv.ParseInt(p, 10, 64)
 		if err != nil || id < 1 {
 			return nil, errors.New("ids must be positive integers")
 		}

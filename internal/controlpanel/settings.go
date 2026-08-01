@@ -57,6 +57,9 @@ func (h *Handler) tenantSettingsView(ctx context.Context, tenantID int64) (Tenan
 		if err != nil {
 			return err
 		}
+		if view.CustomTokenPublicKey, err = q.GetTenantCustomTokenPublicKeyForControlPanel(ctx, tenantID); err != nil {
+			return err
+		}
 		view.TenantName = facts.Name
 		view.Disabled = facts.DisabledAt.Valid
 		if facts.DisabledBy != nil {
@@ -378,14 +381,33 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 	if err != nil {
 		return ProjectSettingsView{}, err
 	}
-	config, err := h.getRemoteConfigForControlPanel(ctx, tenantID, projectID)
+	// One tenant-scoped transaction for both per-project config reads.
+	tctx := db.WithTenant(ctx, tenantID)
+	err = h.pool.Q(tctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		config, qerr := q.GetRemoteConfigForControlPanel(tctx, sqlcgen.GetRemoteConfigForControlPanelParams{
+			ProjectID: projectID, TenantID: tenantID,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		view.RemoteConfig = formatRemoteConfig(config)
+		steamCfg, qerr := q.GetProjectSteamAuthConfigForControlPanel(tctx, sqlcgen.GetProjectSteamAuthConfigForControlPanelParams{
+			ProjectID: projectID, TenantID: tenantID,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		view.SteamAppID = steamCfg.SteamAppID
+		view.SteamKeyConfigured = steamCfg.SteamKeyConfigured != nil && *steamCfg.SteamKeyConfigured
+		return nil
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ProjectSettingsView{}, errProjectNotInTenant
 	}
 	if err != nil {
 		return ProjectSettingsView{}, err
 	}
-	view.RemoteConfig = formatRemoteConfig(config)
 	return view, nil
 }
 

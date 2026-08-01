@@ -302,6 +302,25 @@ func TestSessionBrowser_title_filter(t *testing.T) {
 	assert.Equal(t, alpha.SessionID, out.Items[0].SessionID)
 }
 
+// TestSessionBrowser_exact_final_page_has_no_cursor: when the result count
+// equals the page size, next_cursor must stay empty — a client looping until
+// the cursor clears must not make a wasted extra request.
+func TestSessionBrowser_exact_final_page_has_no_cursor(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "sb")
+	srv := newServerForCluster(t, c)
+
+	for range 2 {
+		tok, _ := anonymousLoginWithID(t, srv.URL, "sb")
+		createSessionWith(t, srv.URL, "sb", tok, map[string]any{"max_players": 4})
+	}
+
+	tok, _ := anonymousLoginWithID(t, srv.URL, "sb")
+	out, _ := browseSessions(t, srv.URL, "sb", tok, "limit=2")
+	require.Len(t, out.Items, 2)
+	assert.Empty(t, out.NextCursor)
+}
+
 func TestSessionBrowser_pagination_walks_every_session_once(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "sb")

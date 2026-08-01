@@ -1234,6 +1234,19 @@ components:
             - correct-horse-battery-staple
           type: string
       type: object
+    SteamAuthRequest:
+      additionalProperties: false
+      properties:
+        ticket:
+          examples:
+            - 14000000048bcd42aabbccdd
+          maxLength: 8192
+          minLength: 20
+          pattern: ^[0-9a-fA-F]+$
+          type: string
+      required:
+        - ticket
+      type: object
     StorageListResult:
       additionalProperties: false
       properties:
@@ -1437,6 +1450,7 @@ paths:
         - Authentication
   /v1/auth/custom-token:
     post:
+      description: The developer's backend signs a short-lived JWT (EdDSA or RS256, aud "ggscale-custom-token", required exp, an external_id claim) with its private key; ggscale verifies it against the public key configured in the control panel and signs the player in, creating the player on first sign-in.
       operationId: authCustomToken
       requestBody:
         content:
@@ -1560,6 +1574,34 @@ paths:
       security:
         - ApiKeyAuth: []
       summary: Sign up with email and password
+      tags:
+        - Authentication
+  /v1/auth/steam:
+    post:
+      description: Verifies a Steamworks session ticket with Valve and signs the player in, creating the player on first sign-in. Obtain the ticket with ISteamUser::GetAuthTicketForWebApi("ggscale") and hex-encode it. Requires the project's Steam credentials to be configured in the control panel. 401 means Valve rejected the ticket (fetch a fresh one); 502 means Valve was unreachable (retry with backoff).
+      operationId: authSteam
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteamAuthRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: Exchange a Steam session ticket for a session
       tags:
         - Authentication
   /v1/auth/verify:

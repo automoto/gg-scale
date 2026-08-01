@@ -20,6 +20,7 @@ var expectedV1Paths = []string{
 	"/v1/auth/logout",
 	"/v1/auth/refresh",
 	"/v1/auth/signup",
+	"/v1/auth/steam",
 	"/v1/auth/verify",
 	"/v1/config",
 	"/v1/fleets/heartbeat",

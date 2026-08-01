@@ -450,16 +450,23 @@ func gameSessionList(d Deps) func(context.Context, *gameSessionListInput) (*game
 		}
 		limit := parseLimit(in.Limit, 50, gameSessionListMaxLimit)
 
+		// Fetch one extra row: only a real next page sets the cursor, so a
+		// client looping until next_cursor clears never makes a wasted
+		// empty-page request.
 		var rows []sqlcgen.ListPublicOpenGameSessionsRow
 		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			var qerr error
 			rows, qerr = sqlcgen.New(tx).ListPublicOpenGameSessions(ctx, sqlcgen.ListPublicOpenGameSessionsParams{
-				ProjectID: projectID, CursorID: in.Cursor, TitleID: in.TitleID, RowLimit: limit,
+				ProjectID: projectID, CursorID: in.Cursor, TitleID: in.TitleID, RowLimit: limit + 1,
 			})
 			return qerr
 		})
 		if err != nil {
 			return nil, serverError(ctx, "game session list: tx", err)
+		}
+		hasMore := len(rows) > int(limit)
+		if hasMore {
+			rows = rows[:limit]
 		}
 
 		items := make([]publicGameSessionEntry, 0, len(rows))
@@ -479,7 +486,7 @@ func gameSessionList(d Deps) func(context.Context, *gameSessionListInput) (*game
 			items = append(items, e)
 		}
 		var next string
-		if len(rows) == int(limit) {
+		if hasMore {
 			next = rows[len(rows)-1].ID
 		}
 		return &gameSessionListOutput{Body: gameSessionListResult{Items: items, NextCursor: next}}, nil

@@ -117,20 +117,6 @@ func formatRemoteConfig(config []byte) string {
 	return out.String()
 }
 
-func (h *Handler) getRemoteConfigForControlPanel(ctx context.Context, tenantID, projectID int64) ([]byte, error) {
-	ctx = db.WithTenant(ctx, tenantID)
-	var config []byte
-	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		var err error
-		config, err = sqlcgen.New(tx).GetRemoteConfigForControlPanel(ctx, sqlcgen.GetRemoteConfigForControlPanelParams{
-			ProjectID: projectID,
-			TenantID:  tenantID,
-		})
-		return err
-	})
-	return config, err
-}
-
 func (h *Handler) updateRemoteConfig(ctx context.Context, tenantID, projectID int64, config []byte) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	return h.pool.Q(ctx, func(tx pgx.Tx) error {

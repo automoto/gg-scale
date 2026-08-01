@@ -135,9 +135,45 @@ func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, err
 	}
 }
 
-// profilePatch edits email, xuid, and/or display_name. A new email triggers a
-// verification round-trip (clears email_verified_at, mints a new verification
-// token, sends mail) and returns 202; changes without an email return 204.
+// errNoLinkedAccount rejects a display-name change for an anonymous /
+// unlinked player: there is no global account to carry the name.
+var errNoLinkedAccount = errors.New("profile: no linked account")
+
+// normalizedDisplayName trims and validates a display_name patch value. Both
+// an absent field and an empty (post-trim) string return nil — the caller
+// distinguishes "skip" from "clear" by whether the field was present.
+func normalizedDisplayName(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	name := strings.TrimSpace(*raw)
+	if name == "" {
+		return nil, nil
+	}
+	if !validPrintableName(name, displayNameMaxChars) {
+		return nil, huma.Error400BadRequest("display_name invalid (1–64 printable chars)")
+	}
+	return &name, nil
+}
+
+// normalizedXUID validates a xuid patch value; an empty string means clear
+// and returns nil.
+func normalizedXUID(raw *string) (*string, error) {
+	if raw == nil || *raw == "" {
+		return nil, nil
+	}
+	if !validPrintableName(*raw, xuidMaxChars) {
+		return nil, huma.Error400BadRequest("xuid invalid (1–64 printable chars)")
+	}
+	return raw, nil
+}
+
+// profilePatch edits email, xuid, and/or display_name. Every field is
+// validated before anything is written, and all writes share one transaction,
+// so a rejected field never leaves another field committed. A new email
+// triggers a verification round-trip (clears email_verified_at, mints a new
+// verification token, sends mail) and returns 202; changes without an email
+// return 204.
 func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePatchOutput, error) {
 	return func(ctx context.Context, in *profilePatchInput) (*profilePatchOutput, error) {
 		req := in.Body
@@ -150,113 +186,82 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 			return nil, huma.Error401Unauthorized("no player")
 		}
 
-		if req.DisplayName != nil {
-			if err := updateDisplayName(ctx, d, me, *req.DisplayName); err != nil {
-				return nil, err
-			}
+		namePtr, err := normalizedDisplayName(req.DisplayName)
+		if err != nil {
+			return nil, err
 		}
-		if req.XUID != nil {
-			if err := updateXUID(ctx, d, me, *req.XUID); err != nil {
-				return nil, err
-			}
+		xuidPtr, err := normalizedXUID(req.XUID)
+		if err != nil {
+			return nil, err
 		}
-		if req.Email == nil {
-			return &profilePatchOutput{Status: http.StatusNoContent}, nil
-		}
-
-		newEmail := *req.Email
-		if !validateEmail(newEmail) {
+		if req.Email != nil && !validateEmail(*req.Email) {
 			return nil, huma.Error400BadRequest("email invalid")
 		}
-
-		code, err := verifycode.GenerateCode()
-		if err != nil {
-			return nil, serverError(ctx, "profile patch: code", err)
+		var code string
+		var codeHash, salt []byte
+		if req.Email != nil {
+			if code, err = verifycode.GenerateCode(); err != nil {
+				return nil, serverError(ctx, "profile patch: code", err)
+			}
+			if salt, err = verifycode.NewSalt(); err != nil {
+				return nil, serverError(ctx, "profile patch: salt", err)
+			}
+			codeHash = verifycode.Hash(salt, code)
 		}
-		salt, err := verifycode.NewSalt()
-		if err != nil {
-			return nil, serverError(ctx, "profile patch: salt", err)
-		}
-		codeHash := verifycode.Hash(salt, code)
 
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
-			return sqlcgen.New(tx).UpdateProfileEmail(ctx, sqlcgen.UpdateProfileEmailParams{
-				ID:                         me,
-				Email:                      &newEmail,
-				EmailVerificationCodeHash:  codeHash,
-				EmailVerificationSalt:      salt,
-				EmailVerificationExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true},
-			})
+			q := sqlcgen.New(tx)
+			if req.DisplayName != nil {
+				acc, qerr := q.GetPlayerLinkedAccountID(ctx, me)
+				if qerr != nil && !errors.Is(qerr, pgx.ErrNoRows) {
+					return qerr
+				}
+				if !acc.Valid {
+					return errNoLinkedAccount
+				}
+				// player_accounts is global (plain grants, no RLS), so the
+				// write joins this tenant-scoped transaction directly.
+				if qerr := q.SetPlayerAccountDisplayName(ctx, sqlcgen.SetPlayerAccountDisplayNameParams{
+					ID: acc, DisplayName: namePtr,
+				}); qerr != nil {
+					return qerr
+				}
+			}
+			if req.XUID != nil {
+				if qerr := q.UpdateProfileXuid(ctx, sqlcgen.UpdateProfileXuidParams{ID: me, Xuid: xuidPtr}); qerr != nil {
+					return qerr
+				}
+			}
+			if req.Email != nil {
+				return q.UpdateProfileEmail(ctx, sqlcgen.UpdateProfileEmailParams{
+					ID:                         me,
+					Email:                      req.Email,
+					EmailVerificationCodeHash:  codeHash,
+					EmailVerificationSalt:      salt,
+					EmailVerificationExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true},
+				})
+			}
+			return nil
 		})
-		if err != nil {
+		switch {
+		case errors.Is(err, errNoLinkedAccount):
+			return nil, huma.Error403Forbidden("link a gg-scale account to set a display name")
+		case webutil.IsUniqueViolation(err):
+			return nil, huma.Error409Conflict("xuid already in use")
+		case err != nil:
 			return nil, serverError(ctx, "profile patch: tx", err)
 		}
 
+		if req.Email == nil {
+			return &profilePatchOutput{Status: http.StatusNoContent}, nil
+		}
 		if d.Mailer != nil {
 			_ = d.Mailer.Send(ctx, mailer.Message{
-				From: d.MailFrom, To: []string{newEmail},
+				From: d.MailFrom, To: []string{*req.Email},
 				Subject: mailerVerifySubject,
 				Body:    fmt.Sprintf("Your ggscale verification code is %s (valid 15 minutes).", code),
 			})
 		}
 		return &profilePatchOutput{Status: http.StatusAccepted}, nil
 	}
-}
-
-// updateXUID sets (or, for an empty string, clears) the caller's xuid,
-// returning a huma error on a validation or uniqueness failure.
-func updateXUID(ctx context.Context, d Deps, me int64, raw string) error {
-	var xuid *string
-	if raw != "" {
-		if !validPrintableName(raw, xuidMaxChars) {
-			return huma.Error400BadRequest("xuid invalid (1–64 printable chars)")
-		}
-		xuid = &raw
-	}
-	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).UpdateProfileXuid(ctx, sqlcgen.UpdateProfileXuidParams{ID: me, Xuid: xuid})
-	})
-	switch {
-	case webutil.IsUniqueViolation(err):
-		return huma.Error409Conflict("xuid already in use")
-	case err != nil:
-		return serverError(ctx, "profile patch: xuid", err)
-	}
-	return nil
-}
-
-// updateDisplayName sets (or, for an empty string, clears) the display name on
-// the caller's linked global account. Anonymous / unlinked players have no
-// account to carry a name, so they get a 403 until they link one.
-func updateDisplayName(ctx context.Context, d Deps, me int64, raw string) error {
-	name := strings.TrimSpace(raw)
-	var namePtr *string
-	if name != "" {
-		if !validPrintableName(name, displayNameMaxChars) {
-			return huma.Error400BadRequest("display_name invalid (1–64 printable chars)")
-		}
-		namePtr = &name
-	}
-
-	var acc pgtype.UUID
-	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
-		var e error
-		acc, e = sqlcgen.New(tx).GetPlayerLinkedAccountID(ctx, me)
-		return e
-	})
-	if err != nil || !acc.Valid {
-		return huma.Error403Forbidden("link a gg-scale account to set a display name")
-	}
-
-	// player_accounts is a global table: writes go through BootstrapQ, the
-	// same as the account remote-addr writes.
-	err = d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerAccountDisplayName(ctx, sqlcgen.SetPlayerAccountDisplayNameParams{
-			ID: acc, DisplayName: namePtr,
-		})
-	})
-	if err != nil {
-		return serverError(ctx, "profile patch: display name", err)
-	}
-	return nil
 }

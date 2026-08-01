@@ -169,6 +169,13 @@ type Config struct {
 	// have enrolled locks those logins out (fail closed) until the prior key is
 	// restored as a decrypt fallback.
 	TwoFactorEncKey string `env:"TWO_FACTOR_ENC_KEY" envFile:"true"`
+	// CredentialEncKey is an optional 32-byte hex AES key that encrypts stored
+	// provider credentials (e.g. the Steam Web API key) at rest. When empty
+	// the server auto-generates and persists a key (zero-config self-host);
+	// set this to keep key material out of database backups. A removed key
+	// falls back to treating stored values as opaque, so restore the prior
+	// key as a decrypt fallback before rotating.
+	CredentialEncKey string `env:"CREDENTIAL_ENC_KEY" envFile:"true"`
 	// MigrationsDir is the directory ggscale-server reads SQL migrations
 	// from on startup. Default `/migrations` matches the Dockerfile COPY.
 	// In local dev (compose, go run) override with the repo-relative path.

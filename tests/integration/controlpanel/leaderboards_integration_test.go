@@ -21,6 +21,7 @@ import (
 	"github.com/ggscale/ggscale/internal/controlpanel"
 	"github.com/ggscale/ggscale/internal/mailer"
 	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/ggscale/ggscale/internal/secretseal"
 )
 
 func leaderboardsPath(tenantID, projectID int64) string {
@@ -83,9 +84,13 @@ func newLeaderboardServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Pool
 	noopMailer, err := mailer.New("noop", "", "", "", "noreply@test", "off")
 	require.NoError(t, err)
 
+	credCipher, err := secretseal.Load(ctx, pool, "")
+	require.NoError(t, err)
+
 	root := chi.NewRouter()
 	root.Mount(pathControlPanel, controlpanel.New(controlpanel.Deps{
 		Pool: pool, Config: controlpanel.Config{Mount: true}, Mailer: noopMailer, RBAC: authorizer,
+		CredentialCipher: credCipher,
 		VerifySigningKey: []byte(testEmailVerifySigningKey),
 	}))
 	srv = httptest.NewServer(root)

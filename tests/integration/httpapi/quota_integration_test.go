@@ -5,7 +5,11 @@ package httpapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	cryptorand "crypto/rand"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -305,14 +309,29 @@ func fillPlayersTo(t *testing.T, c *cluster, tenantID, projectID, target int64, 
 	require.NoError(t, err)
 }
 
-func signCustomToken(t *testing.T, secret []byte, externalID string) string {
+// seedCustomTokenKey stores a fresh Ed25519 verification key on the tenant
+// and returns the private key test tokens are signed with.
+func seedCustomTokenKey(t *testing.T, c *cluster, tenantID int64) ed25519.PrivateKey {
 	t.Helper()
-	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+	pub, priv, err := ed25519.GenerateKey(cryptorand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	require.NoError(t, err)
+	pemKey := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`UPDATE tenants SET custom_token_public_key = $1 WHERE id = $2`, string(pemKey), tenantID)
+	require.NoError(t, err)
+	return priv
+}
+
+func signCustomToken(t *testing.T, priv ed25519.PrivateKey, externalID string) string {
+	t.Helper()
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{
 		"external_id": externalID,
 		"exp":         time.Now().Add(time.Hour).Unix(),
 		"aud":         "ggscale-custom-token",
 	})
-	signed, err := tok.SignedString(secret)
+	signed, err := tok.SignedString(priv)
 	require.NoError(t, err)
 	return signed
 }
@@ -320,9 +339,9 @@ func signCustomToken(t *testing.T, secret []byte, externalID string) string {
 func TestBranchFollowup_player_quota_caps_all_growth_and_preserves_existing_paths(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "player-quota")
-	secret := []byte("branch-player-quota-custom-secret")
+	priv := seedCustomTokenKey(t, c, tenantID)
 	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE tenants SET enforce_quotas = true, custom_token_secret = $2 WHERE id = $1`, tenantID, secret)
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
 	require.NoError(t, err)
 	adminID := seedControlPanelUser(t, c, "player-quota-admin@example.test", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
@@ -340,7 +359,7 @@ func TestBranchFollowup_player_quota_caps_all_growth_and_preserves_existing_path
 		"player-quota-admin@example.test", "correct-horse-battery-staple")
 
 	// Create one custom-token player and capture a refresh token before filling.
-	existingToken := signCustomToken(t, secret, "custom-existing")
+	existingToken := signCustomToken(t, priv, "custom-existing")
 	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "player-quota",
 		map[string]string{"token": existingToken})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
@@ -371,7 +390,7 @@ func TestBranchFollowup_player_quota_caps_all_growth_and_preserves_existing_path
 		map[string]string{"email": "signup-at-cap@example.test", "password": "playerpass1"})
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
 	resp, body = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "player-quota",
-		map[string]string{"token": signCustomToken(t, secret, "custom-new-at-cap")})
+		map[string]string{"token": signCustomToken(t, priv, "custom-new-at-cap")})
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
 
 	// Existing identities and sessions remain available at the cap.
@@ -559,9 +578,9 @@ func TestBranchFollowup_player_quota_mixed_concurrency_is_tenant_wide(t *testing
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'player-race-b') RETURNING id`, tenantID).Scan(&projectB))
 	seedAPIKey(t, c.bootstrapPool, tenantID, &projectB, "player-race-b", "publishable")
-	secret := []byte("branch-player-race-custom-secret")
+	priv := seedCustomTokenKey(t, c, tenantID)
 	_, err := c.bootstrapPool.Exec(context.Background(),
-		`UPDATE tenants SET enforce_quotas = true, custom_token_secret = $2 WHERE id = $1`, tenantID, secret)
+		`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, tenantID)
 	require.NoError(t, err)
 	fillPlayersTo(t, c, tenantID, projectA, branchPlayerLimit/2, "bf-race-a")
 	fillPlayersTo(t, c, tenantID, projectB, branchPlayerLimit-1, "bf-race-b")
@@ -575,7 +594,7 @@ func TestBranchFollowup_player_quota_mixed_concurrency_is_tenant_wide(t *testing
 	const attempts = 20
 	customTokens := make([]string, attempts)
 	for i := 1; i < attempts; i += 2 {
-		customTokens[i] = signCustomToken(t, secret, fmt.Sprintf("race-custom-%02d", i))
+		customTokens[i] = signCustomToken(t, priv, fmt.Sprintf("race-custom-%02d", i))
 	}
 	results := make(chan result, attempts)
 	start := make(chan struct{})

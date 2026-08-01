@@ -58,6 +58,7 @@ type Querier interface {
 	ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	ClearControlPanelVerificationCode(ctx context.Context, id int64) error
 	ClearPlayerVerificationCode(ctx context.Context, id int64) error
+	ClearProjectSteamAuthConfig(ctx context.Context, projectID int64) (int64, error)
 	// Flip the given still-queued tickets holding this claim_id to 'matched'
 	// and stamp the match id, address + protocol. Rows that drifted (cancelled,
 	// swept) won't match the WHERE and are excluded — the caller compares
@@ -386,6 +387,10 @@ type Querier interface {
 	// display_name lives on the linked global account; NULL for anonymous /
 	// unlinked players.
 	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
+	// Runtime read for the Steam sign-in endpoint, tenant-scoped via RLS GUC.
+	GetProjectSteamAuthConfig(ctx context.Context, projectID int64) (GetProjectSteamAuthConfigRow, error)
+	// Control-panel read: reports whether a key is stored, never its value.
+	GetProjectSteamAuthConfigForControlPanel(ctx context.Context, arg GetProjectSteamAuthConfigForControlPanelParams) (GetProjectSteamAuthConfigForControlPanelRow, error)
 	// Project → tenant lookup (privileged; used by the player UI which knows
 	// the project from the URL but has no tenant context yet).
 	GetProjectTenant(ctx context.Context, id int64) (GetProjectTenantRow, error)
@@ -408,7 +413,8 @@ type Querier interface {
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
-	GetTenantCustomTokenSecret(ctx context.Context) ([]byte, error)
+	GetTenantCustomTokenPublicKey(ctx context.Context) (string, error)
+	GetTenantCustomTokenPublicKeyForControlPanel(ctx context.Context, tenantID int64) (string, error)
 	// Lean per-request probe used by the control panel's tenant-access gate:
 	// a platform-disabled tenant locks its tenant admins out.
 	GetTenantDisabledState(ctx context.Context, id int64) (GetTenantDisabledStateRow, error)
@@ -849,7 +855,11 @@ type Querier interface {
 	// Self-set secondary identifier. NULL clears it. The unique partial index
 	// on (project_id, xuid) rejects collisions with a constraint violation.
 	UpdateProfileXuid(ctx context.Context, arg UpdateProfileXuidParams) error
+	// A NULL key keeps the stored one, so the settings form can update the app id
+	// without re-entering the secret (replace-on-write).
+	UpdateProjectSteamAuthConfig(ctx context.Context, arg UpdateProjectSteamAuthConfigParams) (int64, error)
 	UpdateRemoteConfig(ctx context.Context, arg UpdateRemoteConfigParams) (int64, error)
+	UpdateTenantCustomTokenPublicKey(ctx context.Context, arg UpdateTenantCustomTokenPublicKeyParams) (int64, error)
 	// Starts (or restarts) enrollment. The WHERE guard makes this a no-op for a
 	// confirmed credential — zero rows means "already enabled", so a stray setup
 	// POST can never silently replace a live secret.

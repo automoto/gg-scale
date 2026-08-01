@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -19,6 +22,7 @@ import (
 
 	"github.com/ggscale/ggscale/internal/auditlog"
 	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/ggscale/ggscale/internal/customtoken"
 	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/mailer"
@@ -201,13 +205,20 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		DefaultStatus: http.StatusNoContent,
 	}, authLogout(d))
 
+	registerAuthSteam(api, d)
+
 	huma.Register(api, huma.Operation{
 		OperationID: "authCustomToken",
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/custom-token",
 		Summary:     "Exchange a tenant-signed token for a session",
-		Tags:        []string{"Authentication"},
-		Security:    apiKeySecurity,
+		Description: "The developer's backend signs a short-lived JWT (EdDSA or RS256, " +
+			"aud \"" + customTokenAudience + "\", required exp, an external_id claim) " +
+			"with its private key; ggscale verifies it against the public key " +
+			"configured in the control panel and signs the player in, creating " +
+			"the player on first sign-in.",
+		Tags:     []string{"Authentication"},
+		Security: apiKeySecurity,
 	}, authCustomToken(d))
 }
 
@@ -711,63 +722,25 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 		var playerID, sessionEpoch int64
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
-			secret, err := q.GetTenantCustomTokenSecret(ctx)
+			pemKey, err := q.GetTenantCustomTokenPublicKey(ctx)
 			if err != nil {
 				return err
 			}
-			if len(secret) == 0 {
+			if pemKey == "" {
 				return errCustomTokenNotConfigured
 			}
-			parsed, err := parseCustomToken(in.Body.Token, secret, now)
+			// The control panel validates keys on write, so a bad stored key
+			// is operator-corrupted state (raw SQL), not a client fault.
+			pub, err := customtoken.ParsePublicKey(pemKey)
+			if err != nil {
+				return fmt.Errorf("stored custom-token public key invalid: %w", err)
+			}
+			parsed, err := parseCustomToken(in.Body.Token, pub, now)
 			if err != nil {
 				return err
 			}
-			qc, err := playerQuotaContext(ctx, q)
-			if err != nil {
-				return err
-			}
-			existing, err := q.GetPlayerByExternalID(ctx, sqlcgen.GetPlayerByExternalIDParams{
-				ProjectID: projectID, ExternalID: parsed.External,
-			})
-			var id int64
-			created := false
-			switch {
-			case err == nil:
-				id = existing.ID
-			case errors.Is(err, pgx.ErrNoRows):
-				if err := checkPlayerQuotaSnapshot(qc); err != nil {
-					return err
-				}
-				id, err = q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
-					ProjectID: projectID, ExternalID: parsed.External,
-				})
-				if err != nil {
-					return fmt.Errorf("upsert player: %w", err)
-				}
-				// A lost upsert race (concurrent create of the same
-				// external_id) reserves a slot for a player that already
-				// counted; the rare over-count only under-admits later.
-				created = true
-			default:
-				return fmt.Errorf("find player: %w", err)
-			}
-			playerID = id
-			if err := playerBanCheck(ctx, q, id); err != nil {
-				return err
-			}
-			if sessionEpoch, err = playerEpoch(ctx, q, id); err != nil {
-				return err
-			}
-			if err := auditlog.Write(ctx, tx, id, "auth.custom_token", parsed.External, nil); err != nil {
-				return err
-			}
-			if err := insertSession(ctx, tx, projectID, id, refreshTok, now); err != nil {
-				return err
-			}
-			if created {
-				return reservePlayerSlot(ctx, q, qc)
-			}
-			return nil
+			playerID, sessionEpoch, err = signInExternalPlayer(ctx, tx, projectID, parsed.External, "auth.custom_token", refreshTok, now)
+			return err
 		})
 		switch {
 		case errors.Is(err, errCustomTokenNotConfigured):
@@ -791,23 +764,88 @@ func authCustomToken(d Deps) func(context.Context, *customTokenInput) (*sessionO
 	}
 }
 
-// parseCustomToken verifies a tenant-signed custom token against secret and
-// returns its claims. Every validation failure collapses to
+// signInExternalPlayer is the shared external-identity sign-in body used by
+// the custom-token and Steam handlers, inside the caller's auth transaction:
+// get-or-create the player by external id (respecting the tenant's player
+// quota), enforce bans, read the session epoch, audit, persist the refresh
+// session, and reserve a quota slot when the player is fresh.
+func signInExternalPlayer(ctx context.Context, tx pgx.Tx, projectID int64, externalID, auditAction, refreshTok string, now time.Time) (playerID, sessionEpoch int64, err error) {
+	q := sqlcgen.New(tx)
+	qc, err := playerQuotaContext(ctx, q)
+	if err != nil {
+		return 0, 0, err
+	}
+	existing, err := q.GetPlayerByExternalID(ctx, sqlcgen.GetPlayerByExternalIDParams{
+		ProjectID: projectID, ExternalID: externalID,
+	})
+	created := false
+	switch {
+	case err == nil:
+		playerID = existing.ID
+	case errors.Is(err, pgx.ErrNoRows):
+		if err := checkPlayerQuotaSnapshot(qc); err != nil {
+			return 0, 0, err
+		}
+		playerID, err = q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
+			ProjectID: projectID, ExternalID: externalID,
+		})
+		if err != nil {
+			return 0, 0, fmt.Errorf("upsert player: %w", err)
+		}
+		// A lost upsert race (concurrent create of the same external_id)
+		// reserves a slot for a player that already counted; the rare
+		// over-count only under-admits later.
+		created = true
+	default:
+		return 0, 0, fmt.Errorf("find player: %w", err)
+	}
+	if err := playerBanCheck(ctx, q, playerID); err != nil {
+		return 0, 0, err
+	}
+	if sessionEpoch, err = playerEpoch(ctx, q, playerID); err != nil {
+		return 0, 0, err
+	}
+	if err := auditlog.Write(ctx, tx, playerID, auditAction, externalID, nil); err != nil {
+		return 0, 0, err
+	}
+	if err := insertSession(ctx, tx, projectID, playerID, refreshTok, now); err != nil {
+		return 0, 0, err
+	}
+	if created {
+		if err := reservePlayerSlot(ctx, q, qc); err != nil {
+			return 0, 0, err
+		}
+	}
+	return playerID, sessionEpoch, nil
+}
+
+// parseCustomToken verifies a tenant-signed custom token against the tenant's
+// public key and returns its claims. Every validation failure collapses to
 // errCustomTokenInvalid so the wire can't distinguish a bad signature from an
-// expired or wrong-audience token. The parser pins HS256 (blocking alg=none
-// and RS→HS confusion), requires exp, checks aud, and allows a small clock
-// skew; the explicit future-iat guard rejects tokens minted further ahead
-// than that leeway (a clock fault or a forged token).
-func parseCustomToken(tokenStr string, secret []byte, now time.Time) (*customTokenClaims, error) {
+// expired or wrong-audience token. The accepted algorithm is pinned by the
+// stored key's type — EdDSA for Ed25519, RS256 for RSA — blocking alg=none
+// and algorithm-confusion attacks. The parser requires exp, checks aud, and
+// allows a small clock skew; the explicit future-iat guard rejects tokens
+// minted further ahead than that leeway (a clock fault or a forged token).
+func parseCustomToken(tokenStr string, pub crypto.PublicKey, now time.Time) (*customTokenClaims, error) {
+	var method string
+	switch pub.(type) {
+	case ed25519.PublicKey:
+		method = jwt.SigningMethodEdDSA.Alg()
+	case *rsa.PublicKey:
+		method = jwt.SigningMethodRS256.Alg()
+	default:
+		return nil, errCustomTokenInvalid
+	}
 	parsed := &customTokenClaims{}
 	parser := jwt.NewParser(
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithValidMethods([]string{method}),
 		jwt.WithExpirationRequired(),
 		jwt.WithAudience(customTokenAudience),
 		jwt.WithLeeway(30*time.Second),
 	)
 	if _, err := parser.ParseWithClaims(tokenStr, parsed, func(*jwt.Token) (any, error) {
-		return secret, nil
+		return pub, nil
 	}); err != nil {
 		return nil, errCustomTokenInvalid
 	}
@@ -835,7 +873,7 @@ var (
 	errSessionRevoked           = errors.New("auth: session revoked or expired")
 	errPlayerBanned             = errors.New("auth: player banned in tenant")
 	errEmailUnverified          = errors.New("auth: email not verified")
-	errCustomTokenNotConfigured = errors.New("auth: custom token secret not set")
+	errCustomTokenNotConfigured = errors.New("auth: custom token public key not set")
 	errCustomTokenInvalid       = errors.New("auth: custom token invalid")
 	errVerifyBadCode            = errors.New("auth: bad verification code")
 	errVerifyExpired            = errors.New("auth: verification code expired")

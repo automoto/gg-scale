@@ -154,6 +154,19 @@ func (q *Queries) EnableTenantByTenantAdmin(ctx context.Context, id int64) (int6
 	return result.RowsAffected(), nil
 }
 
+const getTenantCustomTokenPublicKeyForControlPanel = `-- name: GetTenantCustomTokenPublicKeyForControlPanel :one
+SELECT custom_token_public_key
+FROM tenants
+WHERE id = $1
+`
+
+func (q *Queries) GetTenantCustomTokenPublicKeyForControlPanel(ctx context.Context, tenantID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getTenantCustomTokenPublicKeyForControlPanel, tenantID)
+	var custom_token_public_key string
+	err := row.Scan(&custom_token_public_key)
+	return custom_token_public_key, err
+}
+
 const getTenantDisabledState = `-- name: GetTenantDisabledState :one
 SELECT disabled_at, disabled_by
 FROM tenants
@@ -310,4 +323,23 @@ func (q *Queries) SetTenantTierByID(ctx context.Context, arg SetTenantTierByIDPa
 	var i SetTenantTierByIDRow
 	err := row.Scan(&i.OldTier, &i.NewTier)
 	return i, err
+}
+
+const updateTenantCustomTokenPublicKey = `-- name: UpdateTenantCustomTokenPublicKey :execrows
+UPDATE tenants
+SET custom_token_public_key = $1
+WHERE id = $2
+`
+
+type UpdateTenantCustomTokenPublicKeyParams struct {
+	PublicKey string
+	TenantID  int64
+}
+
+func (q *Queries) UpdateTenantCustomTokenPublicKey(ctx context.Context, arg UpdateTenantCustomTokenPublicKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateTenantCustomTokenPublicKey, arg.PublicKey, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

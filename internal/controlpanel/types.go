@@ -440,6 +440,10 @@ type TenantSettingsView struct {
 	// directly (mirroring the direct tier change). Rendered only when
 	// IsPlatformAdmin is set.
 	AdminFeatureGrants []AdminFeatureGrantView
+	// CustomTokenPublicKey is the tenant's custom-token verification key
+	// (PEM). Public material — displayed in full for easy comparison.
+	CustomTokenPublicKey string
+	FieldErrors          map[string]string
 }
 
 // AdminFeatureGrantView is one directly-grantable feature shown to a platform
@@ -507,6 +511,10 @@ type ProjectSettingsView struct {
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
 	RemoteConfig       string
+	// Steam sign-in credentials. The Web API key is write-only: the view
+	// carries only whether one is stored, never its value.
+	SteamAppID         string
+	SteamKeyConfigured bool
 	FieldErrors        map[string]string
 }
 

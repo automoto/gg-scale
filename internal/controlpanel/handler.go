@@ -24,6 +24,7 @@ import (
 	"github.com/ggscale/ggscale/internal/quota"
 	"github.com/ggscale/ggscale/internal/ratelimit"
 	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/ggscale/ggscale/internal/secretseal"
 	"github.com/ggscale/ggscale/internal/storagelimit"
 	"github.com/ggscale/ggscale/internal/tenant"
 	"github.com/ggscale/ggscale/internal/twofactor"
@@ -68,6 +69,9 @@ type Deps struct {
 	// TwoFactor encrypts TOTP secrets and signs the 2FA pending cookie.
 	// nil = 2FA enrollment unavailable; already-enrolled logins fail closed.
 	TwoFactor *twofactor.Cipher
+	// CredentialCipher seals stored tenant/project credentials (e.g. the Steam
+	// Web API key) at rest. nil = values are stored unsealed (unit tests).
+	CredentialCipher *secretseal.Cipher
 	// VerifySigningKey signs short-lived email-verification cookies. Startup
 	// supplies the same key to the control panel and player site.
 	VerifySigningKey []byte
@@ -115,6 +119,7 @@ type Handler struct {
 	// across processes and the player site.
 	verifySigningKey     []byte
 	twoFactor            *twofactor.Cipher
+	credentialCipher     *secretseal.Cipher
 	storageLimits        storagelimit.LimitStore
 	billingHandoffKey    []byte
 	enqueuePasswordReset func(ctx context.Context, email string) error
@@ -215,9 +220,11 @@ func New(d Deps) http.Handler {
 			r.Post("/settings/features", h.updateTenantFeatureHandler)
 			r.Post("/settings/change-requests", h.submitChangeRequestHandler)
 			r.Post("/settings/disable", h.disableTenantHandler)
+			r.Post("/settings/custom-token", h.updateCustomTokenKeyHandler)
 			r.Post("/settings/enable", h.enableTenantHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			r.Post("/projects/{projectID}/config", h.updateRemoteConfigHandler)
+			r.Post("/projects/{projectID}/steam-auth", h.updateSteamAuthHandler)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
 			// switch hides these routes entirely (404) when off, so operators
@@ -345,6 +352,7 @@ func newHandler(d Deps) *Handler {
 		metrics:              d.Metrics,
 		verifySigningKey:     append([]byte(nil), d.VerifySigningKey...),
 		twoFactor:            d.TwoFactor,
+		credentialCipher:     d.CredentialCipher,
 		storageLimits:        d.StorageLimits,
 		billingHandoffKey:    append([]byte(nil), d.BillingHandoffKey...),
 		enqueuePasswordReset: d.EnqueuePasswordReset,

@@ -572,6 +572,8 @@ type Project struct {
 	DeletedAt            pgtype.Timestamptz
 	PublicJoiningEnabled bool
 	RemoteConfig         []byte
+	SteamAppID           string
+	SteamWebAPIKey       []byte
 }
 
 type ProjectPlayer struct {
@@ -738,13 +740,13 @@ type Tenant struct {
 	Name                 string
 	CreatedAt            pgtype.Timestamptz
 	DeletedAt            pgtype.Timestamptz
-	CustomTokenSecret    []byte
 	PublicJoiningEnabled bool
 	Tier                 int16
 	EnforceQuotas        bool
 	PlayerCount          int64
 	DisabledAt           pgtype.Timestamptz
 	DisabledBy           *string
+	CustomTokenPublicKey string
 }
 
 type TenantChangeRequest struct {
