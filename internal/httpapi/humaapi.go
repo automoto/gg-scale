@@ -72,6 +72,23 @@ func newHumaConfig(version string) huma.Config {
 			Description: "Player session JWT issued by the /v1/auth endpoints.",
 		},
 	}
+	// Tags group the operations into feature sections in the rendered docs.
+	// The order here is the order a reader sees them.
+	cfg.Tags = []*huma.Tag{
+		{Name: "Authentication", Description: "Player sign-in and session tokens: email/password, anonymous, and custom-token."},
+		{Name: "Player Profiles", Description: "Per-project player identity: email and external console id."},
+		{Name: "Cloud Saves", Description: "Per-player JSON object storage with optimistic concurrency."},
+		{Name: "Leaderboards", Description: "Ranked scoreboards with server-authoritative score submission."},
+		{Name: "Friends & Presence", Description: "Friend requests, blocks, and online presence."},
+		{Name: "Game Sessions & Invites", Description: "Pre-game rooms with join codes, plus short-lived invites."},
+		{Name: "Matchmaking", Description: "Tickets that return a roster, a game session, or a fleet allocation."},
+		{Name: "Realtime", Description: "The WebSocket channel for presence, invites, and match events."},
+		{Name: "P2P & TURN Relay", Description: "Short-lived TURN credentials for NAT traversal."},
+		{Name: "Remote Addresses", Description: "A player's opaque connect handles, such as a Steam id."},
+		{Name: "Game Server Fleet", Description: "Dedicated-server heartbeat and fleet listing. Beta."},
+		{Name: "Session Verification", Description: "Server-tier check of a player session token."},
+		{Name: "Health", Description: "Liveness probe."},
+	}
 	return cfg
 }
 

@@ -219,7 +219,7 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/matchmaker/tickets",
 		Summary:       "Create a matchmaking ticket",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Matchmaking"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
 		MaxBodyBytes:  64 << 10,
@@ -230,7 +230,7 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/matchmaker/tickets/{id}",
 		Summary:     "Get a matchmaking ticket",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Matchmaking"},
 		Security:    playerSecurity,
 	}, matchmakerGetTicket(d))
 
@@ -239,7 +239,7 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 		Method:        http.MethodDelete,
 		Path:          "/v1/matchmaker/tickets/{id}",
 		Summary:       "Cancel a matchmaking ticket",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Matchmaking"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, matchmakerCancelTicket(d))

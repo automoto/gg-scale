@@ -48,7 +48,7 @@ func registerRelay(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/relay/credentials",
 		Summary:     "Issue short-lived TURN-REST relay credentials",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"P2P & TURN Relay"},
 		Security:    playerSecurity,
 	}, relayCredentials(d))
 }

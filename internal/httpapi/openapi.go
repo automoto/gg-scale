@@ -85,7 +85,7 @@ func addWebSocketStub(doc *huma.OpenAPI) {
 			Summary:     "Realtime WebSocket channel",
 			Description: "Upgrades to a WebSocket for realtime player events; not a JSON endpoint. " +
 				"Authenticate with the tenant API key and the player session token.",
-			Tags:     []string{"/v1"},
+			Tags:     []string{"Realtime"},
 			Security: playerSecurity,
 			Responses: map[string]*huma.Response{
 				"101": {Description: "Switching Protocols (WebSocket upgrade)"},

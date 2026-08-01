@@ -72,12 +72,12 @@ func registerGameSessionSignalRoutes(api huma.API, d Deps) {
 	huma.Register(api, huma.Operation{
 		OperationID: "sendGameSessionSignal", Method: http.MethodPost,
 		Path: "/v1/game-session/{id}/signals", Summary: "Send a game-session negotiation signal",
-		Tags: []string{"/v1"}, Security: playerSecurity, DefaultStatus: http.StatusCreated,
+		Tags: []string{"Game Sessions & Invites"}, Security: playerSecurity, DefaultStatus: http.StatusCreated,
 	}, gameSessionSignalSend(d))
 	huma.Register(api, huma.Operation{
 		OperationID: "pollGameSessionSignals", Method: http.MethodGet,
 		Path: "/v1/game-session/{id}/signals", Summary: "Poll game-session negotiation signals",
-		Tags: []string{"/v1"}, Security: playerSecurity,
+		Tags: []string{"Game Sessions & Invites"}, Security: playerSecurity,
 	}, gameSessionSignalPoll(d))
 }
 

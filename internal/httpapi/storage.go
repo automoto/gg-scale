@@ -92,7 +92,7 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/storage/objects",
 		Summary:     "List the caller's storage objects",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Cloud Saves"},
 		Security:    playerSecurity,
 	}, storageList(d))
 
@@ -101,7 +101,7 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Method:       http.MethodPut,
 		Path:         "/v1/storage/objects/{key}",
 		Summary:      "Create or replace a storage object",
-		Tags:         []string{"/v1"},
+		Tags:         []string{"Cloud Saves"},
 		Security:     playerSecurity,
 		MaxBodyBytes: storageBodyReadLimit(d),
 	}, storagePut(d))
@@ -111,7 +111,7 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/storage/objects/{key}",
 		Summary:     "Get a storage object",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Cloud Saves"},
 		Security:    playerSecurity,
 	}, storageGet(d))
 
@@ -120,7 +120,7 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Method:        http.MethodDelete,
 		Path:          "/v1/storage/objects/{key}",
 		Summary:       "Delete a storage object",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Cloud Saves"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, storageDelete(d))

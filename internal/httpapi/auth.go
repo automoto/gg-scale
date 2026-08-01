@@ -145,7 +145,7 @@ func registerAuthPasswordRoutes(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/auth/signup",
 		Summary:       "Sign up with email and password",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Authentication"},
 		Security:      apiKeySecurity,
 		DefaultStatus: http.StatusAccepted,
 	}, authSignup(d))
@@ -155,7 +155,7 @@ func registerAuthPasswordRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/login",
 		Summary:     "Log in with email and password",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authLogin(d))
 }
@@ -169,7 +169,7 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/anonymous",
 		Summary:     "Create an anonymous player session",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authAnonymous(d))
 
@@ -178,7 +178,7 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/verify",
 		Summary:     "Verify an email address with a code",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authVerify(d))
 
@@ -187,7 +187,7 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/refresh",
 		Summary:     "Rotate a refresh token",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authRefresh(d))
 
@@ -196,7 +196,7 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/auth/logout",
 		Summary:       "Revoke a refresh token",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Authentication"},
 		Security:      apiKeySecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, authLogout(d))
@@ -206,7 +206,7 @@ func registerAuthTokenRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/auth/custom-token",
 		Summary:     "Exchange a tenant-signed token for a session",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authCustomToken(d))
 }

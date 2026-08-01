@@ -96,7 +96,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/friends",
 		Summary:     "List the caller's friends by status",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendsList(d))
 
@@ -105,7 +105,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/friends/{player_id}/request",
 		Summary:     "Send a friend request",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendRequest(d))
 
@@ -114,7 +114,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/friends/{player_id}/accept",
 		Summary:     "Accept a friend request",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendAccept(d))
 
@@ -123,7 +123,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/friends/{player_id}/reject",
 		Summary:     "Reject a friend request",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendReject(d))
 
@@ -132,7 +132,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/friends/{player_id}/block",
 		Summary:     "Block a player",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendBlock(d))
 
@@ -141,7 +141,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/friends/{player_id}/unblock",
 		Summary:     "Unblock a player",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, friendUnblock(d))
 
@@ -150,7 +150,7 @@ func registerFriendRoutes(api huma.API, d Deps) {
 		Method:        http.MethodDelete,
 		Path:          "/v1/friends/{player_id}",
 		Summary:       "Remove a friend",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Friends & Presence"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, friendDelete(d))

@@ -70,7 +70,7 @@ func registerGameInvites(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/invite",
 		Summary:       "Invite a friend to a game session",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Game Sessions & Invites"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
 	}, gameInviteCreate(d))
@@ -80,7 +80,7 @@ func registerGameInvites(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/invite",
 		Summary:     "List the caller's pending game invites",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Game Sessions & Invites"},
 		Security:    playerSecurity,
 	}, gameInviteList(d))
 
@@ -89,7 +89,7 @@ func registerGameInvites(api huma.API, d Deps) {
 		Method:        http.MethodDelete,
 		Path:          "/v1/invite/{id}",
 		Summary:       "Cancel or dismiss a game invite",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Game Sessions & Invites"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, gameInviteDelete(d))

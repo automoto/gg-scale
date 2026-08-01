@@ -24,7 +24,7 @@ func registerHealthz(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/healthz",
 		Summary:     "Liveness probe",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Health"},
 	}, func(_ context.Context, _ *struct{}) (*healthzOutput, error) {
 		return &healthzOutput{Body: healthzResult{
 			Status: "ok", Version: d.Version, Commit: d.Commit,

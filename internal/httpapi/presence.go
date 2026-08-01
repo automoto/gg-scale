@@ -45,7 +45,7 @@ func registerPresence(api huma.API, d Deps) {
 		Method:      http.MethodPut,
 		Path:        "/v1/presence",
 		Summary:     "Update the caller's presence",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Friends & Presence"},
 		Security:    playerSecurity,
 	}, func(ctx context.Context, in *presenceUpdateInput) (*presenceUpdateOutput, error) {
 		callerID, ok := playerauth.IDFromContext(ctx)

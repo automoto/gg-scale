@@ -72,7 +72,7 @@ func registerRemoteAddrRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/account/remote-addrs",
 		Summary:     "Get the caller's remote addresses",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Remote Addresses"},
 		Security:    playerSecurity,
 	}, ownerRemoteAddrGet(d))
 
@@ -81,7 +81,7 @@ func registerRemoteAddrRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPut,
 		Path:        "/v1/account/remote-addrs",
 		Summary:     "Replace the caller's remote addresses",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Remote Addresses"},
 		Security:    playerSecurity,
 	}, ownerRemoteAddrPut(d))
 
@@ -90,7 +90,7 @@ func registerRemoteAddrRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/friends/{player_id}/remote-addrs",
 		Summary:     "Get an accepted friend's remote addresses",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Remote Addresses"},
 		Security:    playerSecurity,
 	}, friendRemoteAddrGet(d))
 }
@@ -227,7 +227,7 @@ func registerServerRemoteAddr(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/server/players/{player_id}/remote-addrs",
 		Summary:     "Server-tier: read a player's remote addresses",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Remote Addresses"},
 		Security:    apiKeySecurity,
 	}, serverRemoteAddrGet(d))
 }

@@ -84,7 +84,7 @@ func registerLeaderboardReadRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/leaderboards/{id}/top",
 		Summary:     "Top scores for a leaderboard",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Leaderboards"},
 		Security:    playerSecurity,
 	}, leaderboardTop(d))
 
@@ -93,7 +93,7 @@ func registerLeaderboardReadRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/leaderboards/{id}/around-me",
 		Summary:     "Scores around the caller's rank",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Leaderboards"},
 		Security:    playerSecurity,
 	}, leaderboardAroundMe(d))
 }
@@ -107,7 +107,7 @@ func registerLeaderboardSubmit(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/leaderboards/{id}/scores",
 		Summary:       "Submit a score to a leaderboard",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Leaderboards"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
 	}, leaderboardSubmit(d))

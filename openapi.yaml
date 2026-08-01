@@ -944,7 +944,7 @@ paths:
           PlayerSession: []
       summary: Get the caller's remote addresses
       tags:
-        - /v1
+        - Remote Addresses
     put:
       operationId: putAccountRemoteAddrs
       requestBody:
@@ -971,7 +971,7 @@ paths:
           PlayerSession: []
       summary: Replace the caller's remote addresses
       tags:
-        - /v1
+        - Remote Addresses
   /v1/auth/anonymous:
     post:
       operationId: authAnonymous
@@ -992,7 +992,7 @@ paths:
         - ApiKeyAuth: []
       summary: Create an anonymous player session
       tags:
-        - /v1
+        - Authentication
   /v1/auth/custom-token:
     post:
       operationId: authCustomToken
@@ -1019,7 +1019,7 @@ paths:
         - ApiKeyAuth: []
       summary: Exchange a tenant-signed token for a session
       tags:
-        - /v1
+        - Authentication
   /v1/auth/login:
     post:
       operationId: authLogin
@@ -1046,7 +1046,7 @@ paths:
         - ApiKeyAuth: []
       summary: Log in with email and password
       tags:
-        - /v1
+        - Authentication
   /v1/auth/logout:
     post:
       operationId: authLogout
@@ -1069,7 +1069,7 @@ paths:
         - ApiKeyAuth: []
       summary: Revoke a refresh token
       tags:
-        - /v1
+        - Authentication
   /v1/auth/refresh:
     post:
       operationId: authRefresh
@@ -1096,7 +1096,7 @@ paths:
         - ApiKeyAuth: []
       summary: Rotate a refresh token
       tags:
-        - /v1
+        - Authentication
   /v1/auth/signup:
     post:
       operationId: authSignup
@@ -1119,7 +1119,7 @@ paths:
         - ApiKeyAuth: []
       summary: Sign up with email and password
       tags:
-        - /v1
+        - Authentication
   /v1/auth/verify:
     post:
       operationId: authVerify
@@ -1146,7 +1146,7 @@ paths:
         - ApiKeyAuth: []
       summary: Verify an email address with a code
       tags:
-        - /v1
+        - Authentication
   /v1/fleets/heartbeat:
     post:
       operationId: fleetHeartbeat
@@ -1169,7 +1169,7 @@ paths:
         - ApiKeyAuth: []
       summary: Game-server liveness heartbeat
       tags:
-        - /v1
+        - Game Server Fleet
   /v1/fleets/{fleet}/servers:
     get:
       operationId: fleetServersList
@@ -1197,7 +1197,7 @@ paths:
           PlayerSession: []
       summary: List live servers in a fleet
       tags:
-        - /v1
+        - Game Server Fleet
   /v1/friends:
     get:
       operationId: listFriends
@@ -1235,7 +1235,7 @@ paths:
           PlayerSession: []
       summary: List the caller's friends by status
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}:
     delete:
       operationId: deleteFriend
@@ -1261,7 +1261,7 @@ paths:
           PlayerSession: []
       summary: Remove a friend
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}/accept:
     post:
       operationId: acceptFriend
@@ -1291,7 +1291,7 @@ paths:
           PlayerSession: []
       summary: Accept a friend request
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}/block:
     post:
       operationId: blockFriend
@@ -1321,7 +1321,7 @@ paths:
           PlayerSession: []
       summary: Block a player
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}/reject:
     post:
       operationId: rejectFriend
@@ -1351,7 +1351,7 @@ paths:
           PlayerSession: []
       summary: Reject a friend request
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}/remote-addrs:
     get:
       operationId: getFriendRemoteAddrs
@@ -1381,7 +1381,7 @@ paths:
           PlayerSession: []
       summary: Get an accepted friend's remote addresses
       tags:
-        - /v1
+        - Remote Addresses
   /v1/friends/{player_id}/request:
     post:
       operationId: requestFriend
@@ -1411,7 +1411,7 @@ paths:
           PlayerSession: []
       summary: Send a friend request
       tags:
-        - /v1
+        - Friends & Presence
   /v1/friends/{player_id}/unblock:
     post:
       operationId: unblockFriend
@@ -1441,7 +1441,7 @@ paths:
           PlayerSession: []
       summary: Unblock a player
       tags:
-        - /v1
+        - Friends & Presence
   /v1/game-session:
     get:
       operationId: resolveGameSession
@@ -1469,7 +1469,7 @@ paths:
           PlayerSession: []
       summary: Resolve a game session by join code
       tags:
-        - /v1
+        - Game Sessions & Invites
     post:
       description: Creates a session with a one-hour lifetime window. Member heartbeats slide the window forward, so an active session stays alive for the length of the match while an idle one expires within the hour. When the match ends, the host should DELETE the session — that frees the project's open-session slot immediately instead of waiting for expiry.
       operationId: createGameSession
@@ -1497,7 +1497,7 @@ paths:
           PlayerSession: []
       summary: Create a game session
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/game-session/{id}:
     delete:
       description: A joiner is removed from the roster; the host ends the session for everyone. Call this from the host when the match ends — an ended session stops counting against the project's open-session limit immediately.
@@ -1522,7 +1522,7 @@ paths:
           PlayerSession: []
       summary: Leave (or, for the host, end) a game session
       tags:
-        - /v1
+        - Game Sessions & Invites
     get:
       operationId: getGameSession
       parameters:
@@ -1549,7 +1549,7 @@ paths:
           PlayerSession: []
       summary: Get a game session
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/game-session/{id}/heartbeat:
     post:
       description: Marks the caller's peer as alive and returns the current roster. A member heartbeat also extends the session's expiry when under 30 minutes remain, keeping active matches alive past the one-hour default window.
@@ -1584,7 +1584,7 @@ paths:
           PlayerSession: []
       summary: Heartbeat a game session peer
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/game-session/{id}/join:
     post:
       operationId: joinGameSession
@@ -1618,7 +1618,7 @@ paths:
           PlayerSession: []
       summary: Join a game session
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/game-session/{id}/signals:
     get:
       operationId: pollGameSessionSignals
@@ -1653,7 +1653,7 @@ paths:
           PlayerSession: []
       summary: Poll game-session negotiation signals
       tags:
-        - /v1
+        - Game Sessions & Invites
     post:
       operationId: sendGameSessionSignal
       parameters:
@@ -1686,7 +1686,7 @@ paths:
           PlayerSession: []
       summary: Send a game-session negotiation signal
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/healthz:
     get:
       operationId: healthz
@@ -1705,7 +1705,7 @@ paths:
           description: Error
       summary: Liveness probe
       tags:
-        - /v1
+        - Health
   /v1/invite:
     get:
       operationId: listGameInvites
@@ -1727,7 +1727,7 @@ paths:
           PlayerSession: []
       summary: List the caller's pending game invites
       tags:
-        - /v1
+        - Game Sessions & Invites
     post:
       operationId: createGameInvite
       requestBody:
@@ -1754,7 +1754,7 @@ paths:
           PlayerSession: []
       summary: Invite a friend to a game session
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/invite/{id}:
     delete:
       operationId: deleteGameInvite
@@ -1779,7 +1779,7 @@ paths:
           PlayerSession: []
       summary: Cancel or dismiss a game invite
       tags:
-        - /v1
+        - Game Sessions & Invites
   /v1/leaderboards/{id}/around-me:
     get:
       operationId: leaderboardAroundMe
@@ -1814,7 +1814,7 @@ paths:
           PlayerSession: []
       summary: Scores around the caller's rank
       tags:
-        - /v1
+        - Leaderboards
   /v1/leaderboards/{id}/scores:
     post:
       operationId: submitScore
@@ -1846,7 +1846,7 @@ paths:
           PlayerSession: []
       summary: Submit a score to a leaderboard
       tags:
-        - /v1
+        - Leaderboards
   /v1/leaderboards/{id}/top:
     get:
       operationId: leaderboardTop
@@ -1881,7 +1881,7 @@ paths:
           PlayerSession: []
       summary: Top scores for a leaderboard
       tags:
-        - /v1
+        - Leaderboards
   /v1/matchmaker/tickets:
     post:
       operationId: createMatchmakerTicket
@@ -1909,7 +1909,7 @@ paths:
           PlayerSession: []
       summary: Create a matchmaking ticket
       tags:
-        - /v1
+        - Matchmaking
   /v1/matchmaker/tickets/{id}:
     delete:
       operationId: cancelMatchmakerTicket
@@ -1934,7 +1934,7 @@ paths:
           PlayerSession: []
       summary: Cancel a matchmaking ticket
       tags:
-        - /v1
+        - Matchmaking
     get:
       operationId: getMatchmakerTicket
       parameters:
@@ -1962,7 +1962,7 @@ paths:
           PlayerSession: []
       summary: Get a matchmaking ticket
       tags:
-        - /v1
+        - Matchmaking
   /v1/presence:
     put:
       operationId: updatePresence
@@ -1990,7 +1990,7 @@ paths:
           PlayerSession: []
       summary: Update the caller's presence
       tags:
-        - /v1
+        - Friends & Presence
   /v1/profile:
     get:
       operationId: getProfile
@@ -2012,7 +2012,7 @@ paths:
           PlayerSession: []
       summary: Get the caller's profile
       tags:
-        - /v1
+        - Player Profiles
     patch:
       operationId: patchProfile
       requestBody:
@@ -2035,7 +2035,7 @@ paths:
           PlayerSession: []
       summary: Update the caller's email or xuid
       tags:
-        - /v1
+        - Player Profiles
   /v1/relay/credentials:
     post:
       operationId: issueRelayCredentials
@@ -2063,7 +2063,7 @@ paths:
           PlayerSession: []
       summary: Issue short-lived TURN-REST relay credentials
       tags:
-        - /v1
+        - P2P & TURN Relay
   /v1/server/player-sessions/verify:
     post:
       operationId: verifyPlayerSession
@@ -2093,7 +2093,7 @@ paths:
         - ApiKeyAuth: []
       summary: "Server-tier: verify a player session token"
       tags:
-        - /v1
+        - Session Verification
   /v1/server/players/{player_id}/remote-addrs:
     get:
       operationId: serverGetPlayerRemoteAddrs
@@ -2122,7 +2122,7 @@ paths:
         - ApiKeyAuth: []
       summary: "Server-tier: read a player's remote addresses"
       tags:
-        - /v1
+        - Remote Addresses
   /v1/storage/objects:
     get:
       operationId: listStorageObjects
@@ -2160,7 +2160,7 @@ paths:
           PlayerSession: []
       summary: List the caller's storage objects
       tags:
-        - /v1
+        - Cloud Saves
   /v1/storage/objects/{key}:
     delete:
       operationId: deleteStorageObject
@@ -2184,7 +2184,7 @@ paths:
           PlayerSession: []
       summary: Delete a storage object
       tags:
-        - /v1
+        - Cloud Saves
     get:
       operationId: getStorageObject
       parameters:
@@ -2211,7 +2211,7 @@ paths:
           PlayerSession: []
       summary: Get a storage object
       tags:
-        - /v1
+        - Cloud Saves
     put:
       operationId: putStorageObject
       parameters:
@@ -2247,7 +2247,7 @@ paths:
           PlayerSession: []
       summary: Create or replace a storage object
       tags:
-        - /v1
+        - Cloud Saves
   /v1/ws:
     get:
       description: Upgrades to a WebSocket for realtime player events; not a JSON endpoint. Authenticate with the tenant API key and the player session token.
@@ -2260,7 +2260,7 @@ paths:
           PlayerSession: []
       summary: Realtime WebSocket channel
       tags:
-        - /v1
+        - Realtime
 servers:
   - description: Local development server (default HTTP_ADDR)
     url: http://localhost:8080
@@ -2269,3 +2269,30 @@ servers:
     variables:
       host:
         default: ggscale.example.com
+tags:
+  - description: "Player sign-in and session tokens: email/password, anonymous, and custom-token."
+    name: Authentication
+  - description: "Per-project player identity: email and external console id."
+    name: Player Profiles
+  - description: Per-player JSON object storage with optimistic concurrency.
+    name: Cloud Saves
+  - description: Ranked scoreboards with server-authoritative score submission.
+    name: Leaderboards
+  - description: Friend requests, blocks, and online presence.
+    name: Friends & Presence
+  - description: Pre-game rooms with join codes, plus short-lived invites.
+    name: Game Sessions & Invites
+  - description: Tickets that return a roster, a game session, or a fleet allocation.
+    name: Matchmaking
+  - description: The WebSocket channel for presence, invites, and match events.
+    name: Realtime
+  - description: Short-lived TURN credentials for NAT traversal.
+    name: P2P & TURN Relay
+  - description: A player's opaque connect handles, such as a Steam id.
+    name: Remote Addresses
+  - description: Dedicated-server heartbeat and fleet listing. Beta.
+    name: Game Server Fleet
+  - description: Server-tier check of a player session token.
+    name: Session Verification
+  - description: Liveness probe.
+    name: Health

@@ -140,7 +140,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 			"the hour. When the match ends, the host should DELETE the session " +
 			"— that frees the project's open-session slot immediately instead " +
 			"of waiting for expiry.",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Game Sessions & Invites"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
 	}, gameSessionCreate(d))
@@ -150,7 +150,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/game-session",
 		Summary:     "Resolve a game session by join code",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Game Sessions & Invites"},
 		Security:    playerSecurity,
 	}, gameSessionResolve(d))
 
@@ -159,7 +159,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/game-session/{id}",
 		Summary:     "Get a game session",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Game Sessions & Invites"},
 		Security:    playerSecurity,
 	}, gameSessionGet(d))
 
@@ -168,7 +168,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/game-session/{id}/join",
 		Summary:     "Join a game session",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Game Sessions & Invites"},
 		Security:    playerSecurity,
 	}, gameSessionJoin(d))
 
@@ -181,7 +181,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 			"roster. A member heartbeat also extends the session's expiry when " +
 			"under 30 minutes remain, keeping active matches alive past the " +
 			"one-hour default window.",
-		Tags:     []string{"/v1"},
+		Tags:     []string{"Game Sessions & Invites"},
 		Security: playerSecurity,
 	}, gameSessionHeartbeat(d))
 
@@ -194,7 +194,7 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 			"session for everyone. Call this from the host when the match ends " +
 			"— an ended session stops counting against the project's " +
 			"open-session limit immediately.",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Game Sessions & Invites"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusNoContent,
 	}, gameSessionLeave(d))

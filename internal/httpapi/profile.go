@@ -71,7 +71,7 @@ func registerProfileRoutes(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/profile",
 		Summary:     "Get the caller's profile",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Player Profiles"},
 		Security:    playerSecurity,
 	}, profileGet(d))
 
@@ -80,7 +80,7 @@ func registerProfileRoutes(api huma.API, d Deps) {
 		Method:        http.MethodPatch,
 		Path:          "/v1/profile",
 		Summary:       "Update the caller's email or xuid",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Player Profiles"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusAccepted,
 	}, profilePatch(d))

@@ -50,7 +50,7 @@ func registerFleetHeartbeat(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/fleets/heartbeat",
 		Summary:       "Game-server liveness heartbeat",
-		Tags:          []string{"/v1"},
+		Tags:          []string{"Game Server Fleet"},
 		Security:      apiKeySecurity,
 		DefaultStatus: http.StatusNoContent,
 		MaxBodyBytes:  8 << 10,
@@ -63,7 +63,7 @@ func registerFleetServersList(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/fleets/{fleet}/servers",
 		Summary:     "List live servers in a fleet",
-		Tags:        []string{"/v1"},
+		Tags:        []string{"Game Server Fleet"},
 		Security:    playerSecurity,
 	}, fleetServersList(d))
 }
