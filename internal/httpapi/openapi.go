@@ -24,6 +24,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerHealthz(api, d)
 	registerAuthPasswordRoutes(api, d)
 	registerAuthTokenRoutes(api, d)
+	registerAuthLinkRoutes(api, d)
 	registerRemoteConfig(api, d)
 	registerPlayerSessionVerify(api, d)
 	registerServerRemoteAddr(api, d)

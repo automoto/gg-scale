@@ -651,6 +651,18 @@ components:
       required:
         - entries
       type: object
+    LinkEmailRequest:
+      additionalProperties: false
+      properties:
+        email:
+          examples:
+            - player@example.com
+          type: string
+        password:
+          examples:
+            - correct-horse-battery-staple
+          type: string
+      type: object
     ListServersResponse:
       additionalProperties: false
       properties:
@@ -1474,6 +1486,56 @@ paths:
       security:
         - ApiKeyAuth: []
       summary: Exchange a tenant-signed token for a session
+      tags:
+        - Authentication
+  /v1/auth/link:
+    post:
+      description: "The in-client upgrade path for anonymous players: the player id and every save, score, and friend stay untouched. A verification code is emailed; after POST /v1/auth/verify the credentials work on any device, and verification also links the global gg-scale account (unlocking display names and friends). An email another player in the project uses is a 409."
+      operationId: linkEmail
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkEmailRequest"
+        required: true
+      responses:
+        "202":
+          description: Accepted
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Attach email + password sign-in to the calling player
+      tags:
+        - Authentication
+  /v1/auth/link/steam:
+    post:
+      description: Verifies a Steamworks session ticket (see POST /v1/auth/steam) and replaces the caller's generated identity with the Steam identity, so later native Steam sign-ins resolve to this player with all data intact. Only anonymous or email-signup identities can link; a Steam identity another player holds, or a developer-keyed custom-token identity, is a 409.
+      operationId: linkSteam
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteamAuthRequest"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Attach a Steam identity to the calling player
       tags:
         - Authentication
   /v1/auth/login:

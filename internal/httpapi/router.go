@@ -426,6 +426,7 @@ func NewRouter(d Deps) http.Handler {
 					// tenant/session/rate-limit middleware still runs
 					// ahead of every handler.
 					papi := groupAPI(r, humaCfg)
+					registerAuthLinkRoutes(papi, d)
 					registerPresence(papi, d)
 					registerGameInvites(papi, d)
 					registerProfileRoutes(papi, d)

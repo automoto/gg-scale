@@ -477,6 +477,12 @@ func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, erro
 			if err := q.MarkPlayerVerified(ctx, row.ID); err != nil {
 				return err
 			}
+			// A proven email also links the global account layer (display
+			// names, friends) — the in-client counterpart of the hosted
+			// invite-accept flow.
+			if err := attachVerifiedAccount(ctx, q, projectID, row.ID, email); err != nil {
+				return err
+			}
 			playerID = row.ID
 			return auditlog.Write(ctx, tx, row.ID, "auth.verify", "", nil)
 		})

@@ -477,6 +477,25 @@ func (q *Queries) GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForA
 	return i, err
 }
 
+const insertVerifiedPlayerAccountIfAbsent = `-- name: InsertVerifiedPlayerAccountIfAbsent :exec
+INSERT INTO player_accounts (email, password_hash, email_verified_at)
+VALUES ($1, $2, now())
+ON CONFLICT (email) DO NOTHING
+`
+
+type InsertVerifiedPlayerAccountIfAbsentParams struct {
+	Email        string
+	PasswordHash []byte
+}
+
+// Race-safe half of find-or-create for a proven email (the caller re-reads
+// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
+// NOTHING never aborts the surrounding transaction.
+func (q *Queries) InsertVerifiedPlayerAccountIfAbsent(ctx context.Context, arg InsertVerifiedPlayerAccountIfAbsentParams) error {
+	_, err := q.db.Exec(ctx, insertVerifiedPlayerAccountIfAbsent, arg.Email, arg.PasswordHash)
+	return err
+}
+
 const invalidatePlayerAccountPasswordResets = `-- name: InvalidatePlayerAccountPasswordResets :exec
 UPDATE player_account_password_resets
 SET used_at = now()

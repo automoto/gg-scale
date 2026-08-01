@@ -314,6 +314,48 @@ func (q *Queries) IncrementPlayerVerificationAttempts(ctx context.Context, id in
 	return email_verification_attempts, err
 }
 
+const linkPlayerEmailCredentials = `-- name: LinkPlayerEmailCredentials :execrows
+UPDATE project_players
+SET email = $1,
+    password_hash = $2,
+    email_verification_code_hash = $3,
+    email_verification_salt = $4,
+    email_verification_expires_at = $5,
+    email_verification_last_sent_at = now()
+WHERE id = $6
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND email IS NULL
+`
+
+type LinkPlayerEmailCredentialsParams struct {
+	Email                      *string
+	PasswordHash               []byte
+	EmailVerificationCodeHash  []byte
+	EmailVerificationSalt      []byte
+	EmailVerificationExpiresAt pgtype.Timestamptz
+	ID                         int64
+}
+
+// POST /v1/auth/link: attach email + password sign-in to a player that has
+// none, minting the verification challenge in the same write. The email IS
+// NULL guard makes 0 rows mean "already has credentials"; the per-project
+// email unique index rejects an address another player uses.
+func (q *Queries) LinkPlayerEmailCredentials(ctx context.Context, arg LinkPlayerEmailCredentialsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkPlayerEmailCredentials,
+		arg.Email,
+		arg.PasswordHash,
+		arg.EmailVerificationCodeHash,
+		arg.EmailVerificationSalt,
+		arg.EmailVerificationExpiresAt,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listPlayerSessionEpochs = `-- name: ListPlayerSessionEpochs :many
 SELECT id, session_epoch
 FROM project_players
@@ -381,6 +423,33 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 func (q *Queries) MarkPlayerVerified(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markPlayerVerified, id)
 	return err
+}
+
+const replacePlayerExternalID = `-- name: ReplacePlayerExternalID :execrows
+UPDATE project_players
+SET external_id = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND external_id = $3
+`
+
+type ReplacePlayerExternalIDParams struct {
+	NewExternalID string
+	ID            int64
+	OldExternalID string
+}
+
+// Steam linking: swap a generated identity for the platform identity.
+// Compare-and-swap on the old value so a concurrent change loses cleanly;
+// the per-project external_id unique index rejects an identity another
+// player already holds.
+func (q *Queries) ReplacePlayerExternalID(ctx context.Context, arg ReplacePlayerExternalIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, replacePlayerExternalID, arg.NewExternalID, arg.ID, arg.OldExternalID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const reservePlayerVerifyAttempt = `-- name: ReservePlayerVerifyAttempt :one

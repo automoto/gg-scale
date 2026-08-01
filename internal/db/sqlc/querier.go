@@ -461,6 +461,10 @@ type Querier interface {
 	// ON CONFLICT DO NOTHING makes first-boot generation race-safe: concurrent
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
+	// Race-safe half of find-or-create for a proven email (the caller re-reads
+	// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
+	// NOTHING never aborts the surrounding transaction.
+	InsertVerifiedPlayerAccountIfAbsent(ctx context.Context, arg InsertVerifiedPlayerAccountIfAbsentParams) error
 	// Burns every outstanding reset link for the user. Run in the same
 	// transaction as any password change so an older emailed link cannot reset
 	// the password again afterwards.
@@ -481,6 +485,11 @@ type Querier interface {
 	IsPlayerBannedByTenant(ctx context.Context, playerID int64) (int64, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
+	// POST /v1/auth/link: attach email + password sign-in to a player that has
+	// none, minting the verification challenge in the same write. The email IS
+	// NULL guard makes 0 rows mean "already has credentials"; the per-project
+	// email unique index rejects an address another player uses.
+	LinkPlayerEmailCredentials(ctx context.Context, arg LinkPlayerEmailCredentialsParams) (int64, error)
 	// ListPlayerAccountLinkedProjects is intentionally NOT a sqlc query: it reads
 	// the SECURITY DEFINER player_account_linked_projects(uuid) table-function,
 	// which sqlc's analyzer can't resolve column types for. It is called via raw
@@ -669,6 +678,11 @@ type Querier interface {
 	// flipped to 'failed' this call so the caller can meter the
 	// attempts_exhausted failure counter without re-reading the rows.
 	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
+	// Steam linking: swap a generated identity for the platform identity.
+	// Compare-and-swap on the old value so a concurrent change loses cleanly;
+	// the per-project external_id unique index rejects an identity another
+	// player already holds.
+	ReplacePlayerExternalID(ctx context.Context, arg ReplacePlayerExternalIDParams) (int64, error)
 	// Friend edges between GLOBAL player_accounts. friend_edges has no tenant_id
 	// and no RLS, so these run in either a tenant Pool.Q or a BootstrapQ
 	// transaction. Account ids are UUIDs.

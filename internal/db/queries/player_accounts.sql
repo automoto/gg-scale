@@ -16,6 +16,14 @@ VALUES (
 )
 RETURNING id, email::text AS email, created_at;
 
+-- name: InsertVerifiedPlayerAccountIfAbsent :exec
+-- Race-safe half of find-or-create for a proven email (the caller re-reads
+-- after this, so a concurrent creator's row is picked up): ON CONFLICT DO
+-- NOTHING never aborts the surrounding transaction.
+INSERT INTO player_accounts (email, password_hash, email_verified_at)
+VALUES (sqlc.arg(email), sqlc.arg(password_hash), now())
+ON CONFLICT (email) DO NOTHING;
+
 -- name: CreateVerifiedPlayerAccount :one
 -- Creates an already-verified account (used by invite acceptance, where the
 -- magic link delivered to the invited inbox proves email ownership).

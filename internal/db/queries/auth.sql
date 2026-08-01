@@ -175,6 +175,35 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = ANY(sqlc.arg(ids)::bigint[])
   AND deleted_at IS NULL;
 
+-- name: LinkPlayerEmailCredentials :execrows
+-- POST /v1/auth/link: attach email + password sign-in to a player that has
+-- none, minting the verification challenge in the same write. The email IS
+-- NULL guard makes 0 rows mean "already has credentials"; the per-project
+-- email unique index rejects an address another player uses.
+UPDATE project_players
+SET email = sqlc.arg(email),
+    password_hash = sqlc.arg(password_hash),
+    email_verification_code_hash = sqlc.arg(email_verification_code_hash),
+    email_verification_salt = sqlc.arg(email_verification_salt),
+    email_verification_expires_at = sqlc.arg(email_verification_expires_at),
+    email_verification_last_sent_at = now()
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND email IS NULL;
+
+-- name: ReplacePlayerExternalID :execrows
+-- Steam linking: swap a generated identity for the platform identity.
+-- Compare-and-swap on the old value so a concurrent change loses cleanly;
+-- the per-project external_id unique index rejects an identity another
+-- player already holds.
+UPDATE project_players
+SET external_id = sqlc.arg(new_external_id)
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND external_id = sqlc.arg(old_external_id);
+
 -- name: GetTenantCustomTokenPublicKey :one
 SELECT custom_token_public_key
 FROM tenants

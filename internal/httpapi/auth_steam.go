@@ -44,6 +44,53 @@ func registerAuthSteam(api huma.API, d Deps) {
 	}, authSteam(d))
 }
 
+// verifySteamTicketForProject loads the project's Steam credentials and
+// verifies the ticket with Valve, mapping every failure to its wire error:
+// 400 unconfigured, 401 invalid ticket, 403 VAC/publisher banned, 502
+// Valve unavailable. No DB transaction is open during the Valve round-trip.
+// Shared by native Steam sign-in and Steam identity linking.
+func verifySteamTicketForProject(ctx context.Context, d Deps, projectID int64, ticket string) (steamauth.Result, error) {
+	var appID string
+	var webAPIKey []byte
+	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+		cfg, qerr := sqlcgen.New(tx).GetProjectSteamAuthConfig(ctx, projectID)
+		if qerr != nil {
+			return qerr
+		}
+		if cfg.SteamAppID == "" || len(cfg.SteamWebAPIKey) == 0 {
+			return errSteamNotConfigured
+		}
+		appID = cfg.SteamAppID
+		webAPIKey = d.CredentialCipher.DecryptOrPlain(cfg.SteamWebAPIKey)
+		return nil
+	})
+	switch {
+	case errors.Is(err, errSteamNotConfigured), errors.Is(err, pgx.ErrNoRows):
+		return steamauth.Result{}, huma.Error400BadRequest("steam sign-in not configured for this project")
+	case err != nil:
+		return steamauth.Result{}, serverError(ctx, "steam auth: config", err)
+	}
+
+	res, err := d.SteamAuth.Verify(ctx, appID, string(webAPIKey), ticket)
+	switch {
+	case errors.Is(err, steamauth.ErrInvalidTicket):
+		return steamauth.Result{}, huma.Error401Unauthorized("invalid steam session ticket")
+	case err != nil:
+		slog.ErrorContext(ctx, "steam auth: verify", "error", err)
+		return steamauth.Result{}, huma.Error502BadGateway("steam verification is temporarily unavailable")
+	}
+	if res.VACBanned || res.PublisherBanned {
+		return steamauth.Result{}, huma.Error403Forbidden("steam account banned")
+	}
+	// Identity keys on the playing account, never ownersteamid: under
+	// Family Sharing the borrower is a distinct player from the owner.
+	if !validSteamID(res.SteamID) {
+		slog.ErrorContext(ctx, "steam auth: unexpected steamid", "steamid", res.SteamID)
+		return steamauth.Result{}, huma.Error502BadGateway("steam verification is temporarily unavailable")
+	}
+	return res, nil
+}
+
 func authSteam(d Deps) func(context.Context, *steamAuthInput) (*sessionOutput, error) {
 	return func(ctx context.Context, in *steamAuthInput) (*sessionOutput, error) {
 		projectID, tenantID, err := pinnedProject(ctx)
@@ -56,45 +103,9 @@ func authSteam(d Deps) func(context.Context, *steamAuthInput) (*sessionOutput, e
 		}
 		now := apiNow(d)
 
-		// Config read in its own short transaction: the Valve round-trip
-		// below must never run while a DB transaction is open.
-		var appID string
-		var webAPIKey []byte
-		err = d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
-			cfg, qerr := sqlcgen.New(tx).GetProjectSteamAuthConfig(ctx, projectID)
-			if qerr != nil {
-				return qerr
-			}
-			if cfg.SteamAppID == "" || len(cfg.SteamWebAPIKey) == 0 {
-				return errSteamNotConfigured
-			}
-			appID = cfg.SteamAppID
-			webAPIKey = d.CredentialCipher.DecryptOrPlain(cfg.SteamWebAPIKey)
-			return nil
-		})
-		switch {
-		case errors.Is(err, errSteamNotConfigured), errors.Is(err, pgx.ErrNoRows):
-			return nil, huma.Error400BadRequest("steam sign-in not configured for this project")
-		case err != nil:
-			return nil, serverError(ctx, "steam auth: config", err)
-		}
-
-		res, err := d.SteamAuth.Verify(ctx, appID, string(webAPIKey), in.Body.Ticket)
-		switch {
-		case errors.Is(err, steamauth.ErrInvalidTicket):
-			return nil, huma.Error401Unauthorized("invalid steam session ticket")
-		case err != nil:
-			slog.ErrorContext(ctx, "steam auth: verify", "error", err)
-			return nil, huma.Error502BadGateway("steam verification is temporarily unavailable")
-		}
-		if res.VACBanned || res.PublisherBanned {
-			return nil, huma.Error403Forbidden("steam account banned")
-		}
-		// Identity keys on the playing account, never ownersteamid: under
-		// Family Sharing the borrower is a distinct player from the owner.
-		if !validSteamID(res.SteamID) {
-			slog.ErrorContext(ctx, "steam auth: unexpected steamid", "steamid", res.SteamID)
-			return nil, huma.Error502BadGateway("steam verification is temporarily unavailable")
+		res, err := verifySteamTicketForProject(ctx, d, projectID, in.Body.Ticket)
+		if err != nil {
+			return nil, err
 		}
 		externalID := "steam:" + res.SteamID
 
