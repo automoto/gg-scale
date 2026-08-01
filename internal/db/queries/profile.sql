@@ -2,7 +2,7 @@
 -- display_name lives on the linked global account; NULL for anonymous /
 -- unlinked players.
 SELECT p.id, p.project_id, p.external_id, p.email, p.xuid, p.email_verified_at, p.created_at,
-       a.display_name
+       p.friend_code, a.display_name
 FROM project_players p
 LEFT JOIN player_accounts a ON a.id = p.player_account_id
 WHERE p.id = $1

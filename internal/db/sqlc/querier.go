@@ -398,6 +398,8 @@ type Querier interface {
 	// to no rows (the handler 404s). Only public fields are selected — never the
 	// account email.
 	GetPublicPlayer(ctx context.Context, arg GetPublicPlayerParams) (GetPublicPlayerRow, error)
+	// Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+	GetPublicPlayerByFriendCode(ctx context.Context, arg GetPublicPlayerByFriendCodeParams) (GetPublicPlayerByFriendCodeRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
 	// The player's current queued ticket in the project, if any. Used to surface
 	// the active ticket id in the 409 when a second create hits the one-active
@@ -796,6 +798,11 @@ type Querier interface {
 	// tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
 	// server-verify immediately.
 	SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error
+	// Regenerate: overwrites unconditionally, invalidating the old code.
+	SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) error
+	// Lazy first-read initialization: 0 rows means a concurrent reader won the
+	// race (re-read) or the caller already has a code.
+	SetPlayerFriendCodeIfAbsent(ctx context.Context, arg SetPlayerFriendCodeIfAbsentParams) (int64, error)
 	SetPlayerVerificationCode(ctx context.Context, arg SetPlayerVerificationCodeParams) error
 	SetPlayerVerificationCodeByID(ctx context.Context, arg SetPlayerVerificationCodeByIDParams) error
 	SetProjectPublicJoining(ctx context.Context, arg SetProjectPublicJoiningParams) error

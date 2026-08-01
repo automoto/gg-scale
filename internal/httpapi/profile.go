@@ -47,6 +47,7 @@ type profileResponse struct {
 	Email           string `json:"email,omitempty" example:"player@example.com"`
 	XUID            string `json:"xuid,omitempty" example:"2533274790395904"`
 	DisplayName     string `json:"display_name,omitempty" example:"Nova Fox"`
+	FriendCode      string `json:"friend_code,omitempty" example:"XKCD4242"`
 	EmailVerifiedAt string `json:"email_verified_at,omitempty" example:"2026-01-02T15:04:05Z"`
 	CreatedAt       string `json:"created_at" example:"2026-01-02T15:04:05Z"`
 }
@@ -120,6 +121,9 @@ func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, err
 			if row.DisplayName != nil {
 				resp.DisplayName = *row.DisplayName
 			}
+			if row.FriendCode != nil {
+				resp.FriendCode = *row.FriendCode
+			}
 			if row.EmailVerifiedAt.Valid {
 				resp.EmailVerifiedAt = row.EmailVerifiedAt.Time.UTC().Format(time.RFC3339)
 			}
@@ -130,6 +134,13 @@ func profileGet(d Deps) func(context.Context, *struct{}) (*profileGetOutput, err
 		}
 		if err != nil {
 			return nil, serverError(ctx, "profile get: tx", err)
+		}
+		if resp.FriendCode == "" {
+			code, cerr := ensureFriendCode(ctx, d, me)
+			if cerr != nil {
+				return nil, serverError(ctx, "profile get: friend code", cerr)
+			}
+			resp.FriendCode = code
 		}
 		return &profileGetOutput{Body: resp}, nil
 	}

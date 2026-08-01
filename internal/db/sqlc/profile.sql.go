@@ -13,7 +13,7 @@ import (
 
 const getProfile = `-- name: GetProfile :one
 SELECT p.id, p.project_id, p.external_id, p.email, p.xuid, p.email_verified_at, p.created_at,
-       a.display_name
+       p.friend_code, a.display_name
 FROM project_players p
 LEFT JOIN player_accounts a ON a.id = p.player_account_id
 WHERE p.id = $1
@@ -29,6 +29,7 @@ type GetProfileRow struct {
 	Xuid            *string
 	EmailVerifiedAt pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
+	FriendCode      *string
 	DisplayName     *string
 }
 
@@ -45,6 +46,7 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 		&i.Xuid,
 		&i.EmailVerifiedAt,
 		&i.CreatedAt,
+		&i.FriendCode,
 		&i.DisplayName,
 	)
 	return i, err

@@ -11,6 +11,34 @@ WHERE p.id = sqlc.arg(id)
   AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND p.deleted_at IS NULL;
 
+-- name: GetPublicPlayerByFriendCode :one
+-- Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+SELECT p.id, a.display_name, p.created_at
+FROM project_players p
+LEFT JOIN player_accounts a ON a.id = p.player_account_id
+WHERE p.friend_code = sqlc.arg(friend_code)
+  AND p.project_id = sqlc.arg(project_id)
+  AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND p.deleted_at IS NULL;
+
+-- name: SetPlayerFriendCodeIfAbsent :execrows
+-- Lazy first-read initialization: 0 rows means a concurrent reader won the
+-- race (re-read) or the caller already has a code.
+UPDATE project_players
+SET friend_code = sqlc.arg(friend_code)
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND friend_code IS NULL;
+
+-- name: SetPlayerFriendCode :exec
+-- Regenerate: overwrites unconditionally, invalidating the old code.
+UPDATE project_players
+SET friend_code = sqlc.arg(friend_code)
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
 -- name: ListPublicPlayers :many
 -- Unknown and out-of-project ids drop out of the result set silently.
 SELECT p.id, a.display_name, p.created_at

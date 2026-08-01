@@ -136,6 +136,16 @@ components:
           format: uri
           type: string
       type: object
+    FriendCodeResult:
+      additionalProperties: false
+      properties:
+        friend_code:
+          examples:
+            - XKCD4242
+          type: string
+      required:
+        - friend_code
+      type: object
     FriendEntry:
       additionalProperties: false
       properties:
@@ -1004,6 +1014,10 @@ components:
         external_id:
           examples:
             - user_1b4e28ba2fa14f0e8bf1a09b4d7e5f60
+          type: string
+        friend_code:
+          examples:
+            - XKCD4242
           type: string
         id:
           examples:
@@ -2678,6 +2692,39 @@ paths:
       summary: Resolve player ids to public profiles
       tags:
         - Player Profiles
+  /v1/players/by-code/{code}:
+    get:
+      description: Case-insensitive; dashes and spaces are ignored. Returns public fields only — use the resolved id with POST /v1/friends/{player_id}/request. Codes are 8 characters from a 32-letter alphabet and the endpoint sits behind the per-player rate limit, so code scanning is impractical. Unknown and cross-project codes are 404.
+      operationId: resolveFriendCode
+      parameters:
+        - in: path
+          name: code
+          required: true
+          schema:
+            examples:
+              - XKCD4242
+            maxLength: 32
+            minLength: 1
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicPlayerResponse"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Resolve a friend code to a public player
+      tags:
+        - Friends & Presence
   /v1/players/{id}:
     get:
       description: "Public fields only — never the account email. Project-scoped: an id from another project returns 404."
@@ -2785,6 +2832,29 @@ paths:
       summary: Update the caller's email, xuid, or display name
       tags:
         - Player Profiles
+  /v1/profile/friend-code:
+    post:
+      description: Mints a new code and invalidates the old one immediately. The current code is on GET /v1/profile.
+      operationId: regenerateFriendCode
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FriendCodeResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Regenerate the caller's friend code
+      tags:
+        - Friends & Presence
   /v1/relay/credentials:
     post:
       operationId: issueRelayCredentials

@@ -598,6 +598,7 @@ type ProjectPlayer struct {
 	PlayerAccountID                   pgtype.UUID
 	SessionEpoch                      int32
 	UnlinkedAt                        pgtype.Timestamptz
+	FriendCode                        *string
 }
 
 type RateLimitOverride struct {

@@ -43,6 +43,35 @@ func (q *Queries) GetPublicPlayer(ctx context.Context, arg GetPublicPlayerParams
 	return i, err
 }
 
+const getPublicPlayerByFriendCode = `-- name: GetPublicPlayerByFriendCode :one
+SELECT p.id, a.display_name, p.created_at
+FROM project_players p
+LEFT JOIN player_accounts a ON a.id = p.player_account_id
+WHERE p.friend_code = $1
+  AND p.project_id = $2
+  AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND p.deleted_at IS NULL
+`
+
+type GetPublicPlayerByFriendCodeParams struct {
+	FriendCode *string
+	ProjectID  int64
+}
+
+type GetPublicPlayerByFriendCodeRow struct {
+	ID          int64
+	DisplayName *string
+	CreatedAt   pgtype.Timestamptz
+}
+
+// Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+func (q *Queries) GetPublicPlayerByFriendCode(ctx context.Context, arg GetPublicPlayerByFriendCodeParams) (GetPublicPlayerByFriendCodeRow, error) {
+	row := q.db.QueryRow(ctx, getPublicPlayerByFriendCode, arg.FriendCode, arg.ProjectID)
+	var i GetPublicPlayerByFriendCodeRow
+	err := row.Scan(&i.ID, &i.DisplayName, &i.CreatedAt)
+	return i, err
+}
+
 const listPublicPlayers = `-- name: ListPublicPlayers :many
 SELECT p.id, a.display_name, p.created_at
 FROM project_players p
@@ -84,4 +113,47 @@ func (q *Queries) ListPublicPlayers(ctx context.Context, arg ListPublicPlayersPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const setPlayerFriendCode = `-- name: SetPlayerFriendCode :exec
+UPDATE project_players
+SET friend_code = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type SetPlayerFriendCodeParams struct {
+	FriendCode *string
+	ID         int64
+}
+
+// Regenerate: overwrites unconditionally, invalidating the old code.
+func (q *Queries) SetPlayerFriendCode(ctx context.Context, arg SetPlayerFriendCodeParams) error {
+	_, err := q.db.Exec(ctx, setPlayerFriendCode, arg.FriendCode, arg.ID)
+	return err
+}
+
+const setPlayerFriendCodeIfAbsent = `-- name: SetPlayerFriendCodeIfAbsent :execrows
+UPDATE project_players
+SET friend_code = $1
+WHERE id = $2
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND friend_code IS NULL
+`
+
+type SetPlayerFriendCodeIfAbsentParams struct {
+	FriendCode *string
+	ID         int64
+}
+
+// Lazy first-read initialization: 0 rows means a concurrent reader won the
+// race (re-read) or the caller already has a code.
+func (q *Queries) SetPlayerFriendCodeIfAbsent(ctx context.Context, arg SetPlayerFriendCodeIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPlayerFriendCodeIfAbsent, arg.FriendCode, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

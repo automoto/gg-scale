@@ -431,6 +431,7 @@ func NewRouter(d Deps) http.Handler {
 					registerGameInvites(papi, d)
 					registerProfileRoutes(papi, d)
 					registerPlayerLookupRoutes(papi, d)
+					registerFriendCodeRoutes(papi, d)
 					registerStorageRoutes(papi, d)
 					registerLeaderboardReadRoutes(papi, d)
 					registerFriendRoutes(papi, d)

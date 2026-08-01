@@ -35,6 +35,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerGameInvites(api, d)
 	registerProfileRoutes(api, d)
 	registerPlayerLookupRoutes(api, d)
+	registerFriendCodeRoutes(api, d)
 	registerStorageRoutes(api, d)
 	registerLeaderboardReadRoutes(api, d)
 	registerLeaderboardSubmit(api, d)
