@@ -98,6 +98,39 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND expires_at > now()
   AND expires_at < sqlc.arg('threshold');
 
+-- name: ListPublicOpenGameSessions :many
+-- The public session browser: open, public, unexpired sessions in the
+-- caller's project that still have room. Player counts come from the peer
+-- heartbeat window (last_seen within 30 s, matching ListGameSessionPeers), and
+-- a session with no live peer is a ghost lobby nobody can play in, so it is
+-- excluded too. Keyset-paginated on the session id.
+SELECT
+    s.id,
+    s.title_id,
+    s.props,
+    s.max_players,
+    s.host_player_id,
+    s.created_at,
+    a.display_name AS host_display_name,
+    count(p.player_id) AS player_count
+FROM game_session s
+LEFT JOIN game_session_peer p
+    ON p.session_id = s.id AND p.last_seen > now() - interval '30 seconds'
+LEFT JOIN project_players pp ON pp.id = s.host_player_id AND pp.deleted_at IS NULL
+LEFT JOIN player_accounts a ON a.id = pp.player_account_id
+WHERE s.tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND s.project_id = sqlc.arg('project_id')
+  AND s.private    = false
+  AND s.state      = 'open'
+  AND s.expires_at > now()
+  AND s.id > sqlc.arg('cursor_id')
+  AND (sqlc.arg('title_id')::text = '' OR s.title_id = sqlc.arg('title_id'))
+GROUP BY s.id, a.display_name
+HAVING count(p.player_id) > 0
+   AND count(p.player_id) < s.max_players
+ORDER BY s.id
+LIMIT sqlc.arg('row_limit');
+
 -- name: DeleteExpiredGameSessionsForTenant :execrows
 -- Removes sessions past their expiry for the current tenant. Called once
 -- per tenant by the GC goroutine.

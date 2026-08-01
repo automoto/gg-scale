@@ -366,6 +366,23 @@ components:
         public_addr:
           $ref: "#/components/schemas/GameSessionAddr"
       type: object
+    GameSessionListResult:
+      additionalProperties: false
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/PublicGameSessionEntry"
+          type:
+            - array
+            - "null"
+        next_cursor:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
+          type: string
+      required:
+        - items
+        - next_cursor
+      type: object
     GameSessionResolveResult:
       additionalProperties: false
       properties:
@@ -994,6 +1011,52 @@ components:
         - id
         - project_id
         - external_id
+        - created_at
+      type: object
+    PublicGameSessionEntry:
+      additionalProperties: false
+      properties:
+        created_at:
+          examples:
+            - "2026-01-02T15:04:05Z"
+          format: date-time
+          type: string
+        host_display_name:
+          examples:
+            - Nova Fox
+          type: string
+        host_player_id:
+          examples:
+            - 87
+          format: int64
+          type: integer
+        max_players:
+          examples:
+            - 8
+          format: int64
+          type: integer
+        player_count:
+          examples:
+            - 3
+          format: int64
+          type: integer
+        props:
+          examples:
+            - map: arena-2
+        session_id:
+          examples:
+            - gs_9f86d081884c7d659a2feaa0c55ad015
+          type: string
+        title_id:
+          examples:
+            - my-game
+          type: string
+      required:
+        - session_id
+        - props
+        - player_count
+        - max_players
+        - host_player_id
         - created_at
       type: object
     PublicPlayerResponse:
@@ -2141,6 +2204,51 @@ paths:
         - ApiKeyAuth: []
           PlayerSession: []
       summary: Send a game-session negotiation signal
+      tags:
+        - Game Sessions & Invites
+  /v1/game-sessions:
+    get:
+      description: "The server browser: lists open, public, non-full sessions in the caller's project. Player counts and liveness come from member heartbeats — a session with no heartbeat in the last 30 seconds is not listed. Filter by title_id; page with limit and cursor (next_cursor from the previous page). Join a listed session with POST /v1/game-session/{id}/join. Complements the matchmaker and join codes; private sessions are never listed."
+      operationId: listGameSessions
+      parameters:
+        - explode: false
+          in: query
+          name: title_id
+          schema:
+            examples:
+              - my-game
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            examples:
+              - "50"
+            type: string
+        - explode: false
+          in: query
+          name: cursor
+          schema:
+            examples:
+              - gs_9f86d081884c7d659a2feaa0c55ad015
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameSessionListResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Browse public game sessions
       tags:
         - Game Sessions & Invites
   /v1/healthz:

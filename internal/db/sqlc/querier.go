@@ -558,6 +558,12 @@ type Querier interface {
 	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
 	ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
+	// The public session browser: open, public, unexpired sessions in the
+	// caller's project that still have room. Player counts come from the peer
+	// heartbeat window (last_seen within 30 s, matching ListGameSessionPeers), and
+	// a session with no live peer is a ghost lobby nobody can play in, so it is
+	// excluded too. Keyset-paginated on the session id.
+	ListPublicOpenGameSessions(ctx context.Context, arg ListPublicOpenGameSessionsParams) ([]ListPublicOpenGameSessionsRow, error)
 	// Unknown and out-of-project ids drop out of the result set silently.
 	ListPublicPlayers(ctx context.Context, arg ListPublicPlayersParams) ([]ListPublicPlayersRow, error)
 	// Per-axis overrides for one tenant, for the control-panel views and the

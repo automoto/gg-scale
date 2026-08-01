@@ -303,6 +303,92 @@ func (q *Queries) GetGameSessionForUpdate(ctx context.Context, arg GetGameSessio
 	return i, err
 }
 
+const listPublicOpenGameSessions = `-- name: ListPublicOpenGameSessions :many
+SELECT
+    s.id,
+    s.title_id,
+    s.props,
+    s.max_players,
+    s.host_player_id,
+    s.created_at,
+    a.display_name AS host_display_name,
+    count(p.player_id) AS player_count
+FROM game_session s
+LEFT JOIN game_session_peer p
+    ON p.session_id = s.id AND p.last_seen > now() - interval '30 seconds'
+LEFT JOIN project_players pp ON pp.id = s.host_player_id AND pp.deleted_at IS NULL
+LEFT JOIN player_accounts a ON a.id = pp.player_account_id
+WHERE s.tenant_id  = current_setting('app.tenant_id', true)::bigint
+  AND s.project_id = $1
+  AND s.private    = false
+  AND s.state      = 'open'
+  AND s.expires_at > now()
+  AND s.id > $2
+  AND ($3::text = '' OR s.title_id = $3)
+GROUP BY s.id, a.display_name
+HAVING count(p.player_id) > 0
+   AND count(p.player_id) < s.max_players
+ORDER BY s.id
+LIMIT $4
+`
+
+type ListPublicOpenGameSessionsParams struct {
+	ProjectID int64
+	CursorID  string
+	TitleID   string
+	RowLimit  int32
+}
+
+type ListPublicOpenGameSessionsRow struct {
+	ID              string
+	TitleID         string
+	Props           []byte
+	MaxPlayers      int32
+	HostPlayerID    int64
+	CreatedAt       pgtype.Timestamptz
+	HostDisplayName *string
+	PlayerCount     int64
+}
+
+// The public session browser: open, public, unexpired sessions in the
+// caller's project that still have room. Player counts come from the peer
+// heartbeat window (last_seen within 30 s, matching ListGameSessionPeers), and
+// a session with no live peer is a ghost lobby nobody can play in, so it is
+// excluded too. Keyset-paginated on the session id.
+func (q *Queries) ListPublicOpenGameSessions(ctx context.Context, arg ListPublicOpenGameSessionsParams) ([]ListPublicOpenGameSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listPublicOpenGameSessions,
+		arg.ProjectID,
+		arg.CursorID,
+		arg.TitleID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPublicOpenGameSessionsRow
+	for rows.Next() {
+		var i ListPublicOpenGameSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TitleID,
+			&i.Props,
+			&i.MaxPlayers,
+			&i.HostPlayerID,
+			&i.CreatedAt,
+			&i.HostDisplayName,
+			&i.PlayerCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockProjectForGameSessionCreate = `-- name: LockProjectForGameSessionCreate :exec
 SELECT pg_advisory_xact_lock(hashtextextended('game_session_cap', $1))
 `

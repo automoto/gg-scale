@@ -114,6 +114,38 @@ type gameSessionResolveInput struct {
 	JoinCode string `query:"joinCode" example:"XKCD42"`
 }
 
+// gameSessionListMaxLimit caps a session-browser page, matching the friends
+// and storage list endpoints.
+const gameSessionListMaxLimit = 100
+
+type gameSessionListInput struct {
+	TitleID string `query:"title_id" example:"my-game"`
+	Limit   string `query:"limit" example:"50"`
+	Cursor  string `query:"cursor" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+}
+
+// publicGameSessionEntry is a browsable session as any player in the project
+// may see it: public fields only — no join code and no peer addresses.
+type publicGameSessionEntry struct {
+	SessionID       string          `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+	TitleID         string          `json:"title_id,omitempty" example:"my-game"`
+	Props           json.RawMessage `json:"props" example:"{\"map\":\"arena-2\"}"`
+	PlayerCount     int             `json:"player_count" example:"3"`
+	MaxPlayers      int             `json:"max_players" example:"8"`
+	HostPlayerID    int64           `json:"host_player_id" example:"87"`
+	HostDisplayName string          `json:"host_display_name,omitempty" example:"Nova Fox"`
+	CreatedAt       time.Time       `json:"created_at" example:"2026-01-02T15:04:05Z"`
+}
+
+type gameSessionListResult struct {
+	Items      []publicGameSessionEntry `json:"items"`
+	NextCursor string                   `json:"next_cursor" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
+}
+
+type gameSessionListOutput struct {
+	Body gameSessionListResult
+}
+
 type gameSessionResolveResult struct {
 	SessionID string `json:"session_id" example:"gs_9f86d081884c7d659a2feaa0c55ad015"`
 }
@@ -157,6 +189,22 @@ func registerGameSessionRoutes(api huma.API, d Deps) {
 		Tags:        []string{"Game Sessions & Invites"},
 		Security:    playerSecurity,
 	}, gameSessionResolve(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "listGameSessions",
+		Method:      http.MethodGet,
+		Path:        "/v1/game-sessions",
+		Summary:     "Browse public game sessions",
+		Description: "The server browser: lists open, public, non-full sessions in the " +
+			"caller's project. Player counts and liveness come from member " +
+			"heartbeats — a session with no heartbeat in the last 30 seconds is " +
+			"not listed. Filter by title_id; page with limit and cursor " +
+			"(next_cursor from the previous page). Join a listed session with " +
+			"POST /v1/game-session/{id}/join. Complements the matchmaker and " +
+			"join codes; private sessions are never listed.",
+		Tags:     []string{"Game Sessions & Invites"},
+		Security: playerSecurity,
+	}, gameSessionList(d))
 
 	huma.Register(api, huma.Operation{
 		OperationID: "getGameSession",
@@ -388,6 +436,53 @@ func gameSessionResolve(d Deps) func(context.Context, *gameSessionResolveInput) 
 		}
 
 		return &gameSessionResolveOutput{Body: gameSessionResolveResult{SessionID: row.ID}}, nil
+	}
+}
+
+func gameSessionList(d Deps) func(context.Context, *gameSessionListInput) (*gameSessionListOutput, error) {
+	return func(ctx context.Context, in *gameSessionListInput) (*gameSessionListOutput, error) {
+		if _, ok := playerauth.IDFromContext(ctx); !ok {
+			return nil, huma.Error401Unauthorized("no player")
+		}
+		projectID, ok := db.ProjectFromContext(ctx)
+		if !ok {
+			return nil, huma.Error400BadRequest("api key has no project pin")
+		}
+		limit := parseLimit(in.Limit, 50, gameSessionListMaxLimit)
+
+		var rows []sqlcgen.ListPublicOpenGameSessionsRow
+		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+			var qerr error
+			rows, qerr = sqlcgen.New(tx).ListPublicOpenGameSessions(ctx, sqlcgen.ListPublicOpenGameSessionsParams{
+				ProjectID: projectID, CursorID: in.Cursor, TitleID: in.TitleID, RowLimit: limit,
+			})
+			return qerr
+		})
+		if err != nil {
+			return nil, serverError(ctx, "game session list: tx", err)
+		}
+
+		items := make([]publicGameSessionEntry, 0, len(rows))
+		for _, r := range rows {
+			e := publicGameSessionEntry{
+				SessionID:    r.ID,
+				TitleID:      r.TitleID,
+				Props:        json.RawMessage(r.Props),
+				PlayerCount:  int(r.PlayerCount),
+				MaxPlayers:   int(r.MaxPlayers),
+				HostPlayerID: r.HostPlayerID,
+				CreatedAt:    r.CreatedAt.Time,
+			}
+			if r.HostDisplayName != nil {
+				e.HostDisplayName = *r.HostDisplayName
+			}
+			items = append(items, e)
+		}
+		var next string
+		if len(rows) == int(limit) {
+			next = rows[len(rows)-1].ID
+		}
+		return &gameSessionListOutput{Body: gameSessionListResult{Items: items, NextCursor: next}}, nil
 	}
 }
 
