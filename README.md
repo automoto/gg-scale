@@ -1,4 +1,4 @@
-# ggscale
+# gg-scale
 
 The open platform for multiplayer games. A simple web service and a Postgres database give you everything you need to build and run an online game with players.
 
@@ -6,7 +6,7 @@ The open platform for multiplayer games. A simple web service and a Postgres dat
 
 Full documentation, including Architecture, Features, API Route descriptions, and Onboarding guides, has been moved to our GitHub Wiki:
 
-**[ggscale GitHub Wiki Placeholder](https://github.com/automoto/gg-scale/wiki)**
+**[gg-scale wiki](https://github.com/automoto/gg-scale/wiki)**
 
 DeekWiki documentation is available here as well for more technical details:
 
