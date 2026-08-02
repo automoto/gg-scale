@@ -649,6 +649,9 @@ components:
           examples:
             - Nova Fox
           type: string
+        metadata:
+          examples:
+            - ghost: r-42
         player_id:
           examples:
             - 42
@@ -668,6 +671,153 @@ components:
         - player_id
         - score
         - rank
+      type: object
+    LeaderboardInfo:
+      additionalProperties: false
+      properties:
+        attempt_cap:
+          examples:
+            - 3
+          format: int32
+          type: integer
+        client_submissions:
+          examples:
+            - false
+          type: boolean
+        current_period:
+          examples:
+            - 2
+          format: int32
+          type: integer
+        id:
+          examples:
+            - 1
+          format: int64
+          type: integer
+        metadata:
+          examples:
+            - icon: gold
+        name:
+          examples:
+            - weekly-high-score
+          type: string
+        next_reset_at:
+          format: date-time
+          type: string
+        period_started_at:
+          format: date-time
+          type: string
+        reset_schedule:
+          enum:
+            - none
+            - daily
+            - weekly
+            - monthly
+          examples:
+            - weekly
+          type: string
+        score_max:
+          examples:
+            - 1000000
+          format: int64
+          type: integer
+        score_min:
+          examples:
+            - 0
+          format: int64
+          type: integer
+        score_operator:
+          enum:
+            - best
+            - set
+            - incr
+          examples:
+            - best
+          type: string
+        sort_order:
+          enum:
+            - asc
+            - desc
+          examples:
+            - desc
+          type: string
+      required:
+        - id
+        - name
+        - sort_order
+        - score_operator
+        - client_submissions
+        - reset_schedule
+        - current_period
+      type: object
+    LeaderboardListResult:
+      additionalProperties: false
+      properties:
+        leaderboards:
+          items:
+            $ref: "#/components/schemas/LeaderboardInfo"
+          type:
+            - array
+            - "null"
+      required:
+        - leaderboards
+      type: object
+    LeaderboardPeriodSummary:
+      additionalProperties: false
+      properties:
+        ended_at:
+          format: date-time
+          type: string
+        period:
+          examples:
+            - 12
+          format: int32
+          type: integer
+        started_at:
+          format: date-time
+          type: string
+      required:
+        - period
+        - started_at
+        - ended_at
+      type: object
+    LeaderboardPeriodsResult:
+      additionalProperties: false
+      properties:
+        current_period:
+          examples:
+            - 13
+          format: int32
+          type: integer
+        next_cursor:
+          examples:
+            - "7"
+          type: string
+        next_reset_at:
+          format: date-time
+          type: string
+        period_started_at:
+          format: date-time
+          type: string
+        periods:
+          items:
+            $ref: "#/components/schemas/LeaderboardPeriodSummary"
+          type:
+            - array
+            - "null"
+        reset_schedule:
+          enum:
+            - none
+            - daily
+            - weekly
+            - monthly
+          examples:
+            - weekly
+          type: string
+      required:
+        - current_period
+        - reset_schedule
+        - periods
       type: object
     LeaderboardTopResult:
       additionalProperties: false
@@ -1277,6 +1427,9 @@ components:
     ServerSubmitScoreRequest:
       additionalProperties: false
       properties:
+        metadata:
+          examples:
+            - ghost: r-42
         player_id:
           examples:
             - 42
@@ -1290,6 +1443,7 @@ components:
           type: integer
       required:
         - player_id
+        - score
       type: object
     SessionResponse:
       additionalProperties: false
@@ -1415,11 +1569,16 @@ components:
     SubmitScoreRequest:
       additionalProperties: false
       properties:
+        metadata:
+          examples:
+            - ghost: r-42
         score:
           examples:
             - 1500
           format: int64
           type: integer
+      required:
+        - score
       type: object
     VerifyRequest:
       additionalProperties: false
@@ -2655,6 +2814,29 @@ paths:
       summary: Cancel or dismiss a game invite
       tags:
         - Game Sessions & Invites
+  /v1/leaderboards:
+    get:
+      description: "Runtime discovery: board ids, sort order, score operator, period state, submission policy, and the developer-defined metadata blob — no hardcoded ids needed in the client."
+      operationId: listLeaderboards
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardListResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: List the project's leaderboards
+      tags:
+        - Leaderboards
   /v1/leaderboards/{id}/around-me:
     get:
       operationId: leaderboardAroundMe
@@ -2694,8 +2876,138 @@ paths:
       summary: Scores around the caller's rank
       tags:
         - Leaderboards
+  /v1/leaderboards/{id}/friends:
+    get:
+      description: Current-period entries for the caller plus accepted friends who are players in this project, ranked within that group (0-based). The caller is always included when they have a score, even below a full page of higher-ranked friends. An unlinked caller sees only their own entry.
+      operationId: leaderboardFriends
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 1
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardTopResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Scores of the caller and their accepted friends
+      tags:
+        - Leaderboards
+  /v1/leaderboards/{id}/periods:
+    get:
+      description: The board's current period and its finished periods, newest first, keyset-paginated on the period number. Entries of a finished period stay readable via the period top route.
+      operationId: listLeaderboardPeriods
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 1
+            format: int64
+            minimum: 1
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            examples:
+              - "50"
+            type: string
+        - explode: false
+          in: query
+          name: cursor
+          schema:
+            examples:
+              - "12"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardPeriodsResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Reset history of a leaderboard
+      tags:
+        - Leaderboards
+  /v1/leaderboards/{id}/periods/{period}/top:
+    get:
+      description: Like the top route, for any period up to and including the current one. A period the board has not reached is 404.
+      operationId: leaderboardPeriodTop
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 1
+            format: int64
+            minimum: 1
+            type: integer
+        - in: path
+          name: period
+          required: true
+          schema:
+            examples:
+              - 12
+            format: int32
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            examples:
+              - "10"
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardTopResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Top scores of one leaderboard period
+      tags:
+        - Leaderboards
   /v1/leaderboards/{id}/scores:
     post:
+      description: Server-authoritative boards require a secret API key. Boards with client_submissions enabled also accept the player's publishable-key session, rate limited per player and validated against the board's score bounds.
       operationId: submitScore
       parameters:
         - in: path

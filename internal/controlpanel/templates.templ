@@ -2439,6 +2439,67 @@ templ LeaderboardsListPage(vm LeaderboardsListView) {
 	}
 }
 
+// leaderboardFeatureFields renders the shared feature inputs of the
+// create/edit forms. The score operator is only selectable on create; edits
+// show the stored value read-only because changing it mid-board would
+// reinterpret every standing score.
+templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
+	if edit {
+		<p class="muted">Score operator: <strong>{ vm.ScoreOperator }</strong> (fixed at creation)</p>
+	} else {
+		<label>
+			Score operator
+			<select name="score_operator" aria-describedby="score_operator-error">
+				<option value="best" selected?={ vm.ScoreOperator == "best" }>Best — keep each player's best score</option>
+				<option value="set" selected?={ vm.ScoreOperator == "set" }>Set — last submission replaces the score</option>
+				<option value="incr" selected?={ vm.ScoreOperator == "incr" }>Increment — submissions add to a running total</option>
+			</select>
+			@fieldError(vm.FieldErrors, "score_operator")
+		</label>
+	}
+	<label>
+		<input type="checkbox" name="client_submissions" checked?={ vm.ClientSubmissions }/>
+		Allow client submissions (player sessions may submit without a secret key; rate limited, bounded below)
+	</label>
+	<div class="grid">
+		<label>
+			Minimum valid score
+			<input name="score_min" value={ vm.ScoreMin } inputmode="numeric" placeholder="none" aria-describedby="score_min-error"/>
+			@fieldError(vm.FieldErrors, "score_min")
+		</label>
+		<label>
+			Maximum valid score
+			<input name="score_max" value={ vm.ScoreMax } inputmode="numeric" placeholder="none" aria-describedby="score_max-error"/>
+			@fieldError(vm.FieldErrors, "score_max")
+		</label>
+	</div>
+	<div class="grid">
+		<label>
+			Reset schedule
+			<select name="reset_schedule" aria-describedby="reset_schedule-error">
+				<option value="none" selected?={ vm.ResetSchedule == "none" }>None — scores never reset</option>
+				<option value="daily" selected?={ vm.ResetSchedule == "daily" }>Daily (midnight UTC)</option>
+				<option value="weekly" selected?={ vm.ResetSchedule == "weekly" }>Weekly (Monday 00:00 UTC)</option>
+				<option value="monthly" selected?={ vm.ResetSchedule == "monthly" }>Monthly (1st 00:00 UTC)</option>
+			</select>
+			@fieldError(vm.FieldErrors, "reset_schedule")
+		</label>
+		<label>
+			Attempt cap per period
+			<input name="attempt_cap" value={ vm.AttemptCap } inputmode="numeric" placeholder="unlimited" aria-describedby="attempt_cap-error"/>
+			@fieldError(vm.FieldErrors, "attempt_cap")
+		</label>
+	</div>
+	if edit && vm.ResetSchedule != "none" {
+		<p class="muted">Current period: { stringFromInt(int64(vm.CurrentPeriod)) }</p>
+	}
+	<label>
+		Display metadata (JSON object, optional)
+		<textarea name="metadata" rows="4" placeholder={ `{"icon": "gold", "title": "Weekly Cup"}` } aria-describedby="metadata-error">{ vm.Metadata }</textarea>
+		@fieldError(vm.FieldErrors, "metadata")
+	</label>
+}
+
 templ NewLeaderboardPage(vm LeaderboardFormView) {
 	@appLayout("New leaderboard — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navLeaderboards, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
@@ -2461,6 +2522,7 @@ templ NewLeaderboardPage(vm LeaderboardFormView) {
 					@fieldError(vm.FieldErrors, "name")
 				</label>
 				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				@leaderboardFeatureFields(vm, false)
 				<div class="form-actions">
 					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
 					<button type="submit" class="btn-inline">Create leaderboard</button>
@@ -2491,6 +2553,7 @@ templ EditLeaderboardPage(vm LeaderboardFormView) {
 					@fieldError(vm.FieldErrors, "name")
 				</label>
 				@leaderboardSortOrderField(vm.SortOrder, vm.FieldErrors)
+				@leaderboardFeatureFields(vm, true)
 				<div class="form-actions">
 					<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Cancel</a>
 					<button type="submit" class="btn-inline">Save changes</button>

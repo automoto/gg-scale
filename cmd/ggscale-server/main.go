@@ -749,6 +749,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))
 	river.AddWorker(workers, jobs.NewPasswordResetEmailWorker(resetDeps))
 	river.AddWorker(workers, jobs.NewPasswordResetGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewLeaderboardPeriodResetWorker(appPool))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,

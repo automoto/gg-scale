@@ -184,6 +184,36 @@ func (q *Queries) IsBlockedBetweenAccounts(ctx context.Context, arg IsBlockedBet
 	return id, err
 }
 
+const listAcceptedFriendAccountIDs = `-- name: ListAcceptedFriendAccountIDs :many
+SELECT CASE WHEN from_account_id = $1 THEN to_account_id
+            ELSE from_account_id END::uuid AS account_id
+FROM friend_edges
+WHERE (from_account_id = $1 OR to_account_id = $1)
+  AND status = 'accepted'
+`
+
+// Every account the caller has an accepted friendship with, either direction.
+// Used by views that need the full friend set at once (friends leaderboard).
+func (q *Queries) ListAcceptedFriendAccountIDs(ctx context.Context, me pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAcceptedFriendAccountIDs, me)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var account_id pgtype.UUID
+		if err := rows.Scan(&account_id); err != nil {
+			return nil, err
+		}
+		items = append(items, account_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccountIdentities = `-- name: ListAccountIdentities :many
 SELECT id, email::text AS email, display_name
 FROM player_accounts

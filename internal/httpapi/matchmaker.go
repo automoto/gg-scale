@@ -466,10 +466,16 @@ func matchmakerCancelTicket(d Deps) func(context.Context, *matchmakerTicketIDInp
 // allowMatchmakerAction enforces the per-action token bucket. On denial it
 // returns a 429 problem+json carrying the canonical Retry-After header.
 func allowMatchmakerAction(ctx context.Context, d Deps, tenantID, projectID, playerID int64, action string, rate, burst float64) error {
+	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, playerID)
+	return allowRateAction(ctx, d, key, rate, burst)
+}
+
+// allowRateAction debits one token from the bucket behind key. On denial it
+// returns a 429 problem+json carrying the canonical Retry-After header.
+func allowRateAction(ctx context.Context, d Deps, key string, rate, burst float64) error {
 	if d.Limiter == nil {
 		return huma.Error500InternalServerError("rate limiter unavailable")
 	}
-	key := fmt.Sprintf("ratelimit:matchmaker:%s:%d:%d:%d", action, tenantID, projectID, playerID)
 	decision, err := d.Limiter.Allow(ctx, key, rate, burst)
 	if err != nil {
 		return huma.Error500InternalServerError("internal error")

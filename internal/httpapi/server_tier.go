@@ -90,9 +90,10 @@ func serverProjectID(ctx context.Context) (int64, error) {
 
 type serverSubmitScoreRequest struct {
 	PlayerID int64 `json:"player_id" minimum:"1" example:"42"`
-	// Optional so an omitted score defaults to 0, matching the
+	Score    int64 `json:"score" example:"1500"`
+	// Optional JSON object stored with the score; same semantics as the
 	// player-session submit route.
-	Score int64 `json:"score,omitempty" example:"1500"`
+	Metadata json.RawMessage `json:"metadata,omitempty" example:"{\"ghost\":\"r-42\"}"`
 }
 
 type serverLeaderboardSubmitInput struct {
@@ -118,11 +119,16 @@ func serverLeaderboardSubmit(d Deps) func(context.Context, *serverLeaderboardSub
 		if err != nil {
 			return nil, err
 		}
-		err = submitScoreToBoard(ctx, d, in.ID, projectID, in.Body.PlayerID, in.Body.Score, func(q *sqlcgen.Queries) error {
+		if err := validateScoreMetadata(in.Body.Metadata); err != nil {
+			return nil, err
+		}
+		err = submitScoreToBoard(ctx, d, in.ID, projectID, scoreSubmission{
+			playerID: in.Body.PlayerID, score: in.Body.Score, metadata: in.Body.Metadata,
+		}, func(q *sqlcgen.Queries) error {
 			return requireServerTierPlayer(ctx, q, in.Body.PlayerID, projectID)
 		})
-		if errors.Is(err, errLeaderboardNotFound) {
-			return nil, huma.Error404NotFound("leaderboard not found")
+		if werr := leaderboardSubmitError(err); werr != nil {
+			return nil, werr
 		}
 		if werr := serverTierPlayerError(err); werr != nil {
 			return nil, werr

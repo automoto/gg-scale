@@ -41,6 +41,8 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerFriendCodeRoutes(api, d)
 	registerStorageRoutes(api, d)
 	registerLeaderboardReadRoutes(api, d)
+	registerLeaderboardDiscoveryRoutes(api, d)
+	registerLeaderboardPeriodRoutes(api, d)
 	registerLeaderboardSubmit(api, d)
 	registerFriendRoutes(api, d)
 	registerRemoteAddrRoutes(api, d)

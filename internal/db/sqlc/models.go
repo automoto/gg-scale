@@ -390,13 +390,23 @@ type GameSessionSignal struct {
 }
 
 type Leaderboard struct {
-	ID        int64
-	TenantID  int64
-	ProjectID int64
-	Name      string
-	SortOrder string
-	CreatedAt pgtype.Timestamptz
-	DeletedAt pgtype.Timestamptz
+	ID                int64
+	TenantID          int64
+	ProjectID         int64
+	Name              string
+	SortOrder         string
+	CreatedAt         pgtype.Timestamptz
+	DeletedAt         pgtype.Timestamptz
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
 }
 
 type LeaderboardEntry struct {
@@ -406,6 +416,19 @@ type LeaderboardEntry struct {
 	PlayerID      int64
 	Score         int64
 	RecordedAt    pgtype.Timestamptz
+	Period        int32
+	Attempts      int32
+	Metadata      []byte
+	UpdatedAt     pgtype.Timestamptz
+}
+
+type LeaderboardPeriod struct {
+	ID            int64
+	TenantID      int64
+	LeaderboardID int64
+	Period        int32
+	StartedAt     pgtype.Timestamptz
+	EndedAt       pgtype.Timestamptz
 }
 
 type MatchmakerMatch struct {

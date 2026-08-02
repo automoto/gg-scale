@@ -997,17 +997,27 @@ type LeaderboardRowView struct {
 }
 
 // LeaderboardFormView renders the create- and edit-leaderboard forms.
-// LeaderboardID is zero on create.
+// LeaderboardID is zero on create. The feature fields are raw form strings so
+// a rejected submission re-renders exactly what the user typed; ScoreOperator
+// is only selectable on create and displays read-only on edit.
 type LeaderboardFormView struct {
-	UserEmail     string
-	CSRFToken     string
-	TenantID      int64
-	ProjectID     int64
-	LeaderboardID int64
-	Name          string
-	SortOrder     string
-	Error         string
-	FieldErrors   map[string]string
+	UserEmail         string
+	CSRFToken         string
+	TenantID          int64
+	ProjectID         int64
+	LeaderboardID     int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	ClientSubmissions bool
+	ScoreMin          string
+	ScoreMax          string
+	ResetSchedule     string
+	AttemptCap        string
+	Metadata          string
+	CurrentPeriod     int32
+	Error             string
+	FieldErrors       map[string]string
 }
 
 // fleetQuery preserves the include-terminal toggle + current page across

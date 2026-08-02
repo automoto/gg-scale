@@ -27,5 +27,9 @@ func PeriodicRegistrations() []PeriodicRegistration {
 		{Args: MatchmakerGCArgs{}, Interval: time.Hour},
 		{Args: StorageWarnArgs{}, Interval: time.Hour},
 		{Args: PasswordResetGCArgs{}, Interval: 24 * time.Hour},
+		// Short interval: a period reset should land within minutes of its
+		// calendar boundary, and the sweep is one indexed query per tenant
+		// when nothing is due.
+		{Args: LeaderboardPeriodResetArgs{}, Interval: 5 * time.Minute},
 	}
 }

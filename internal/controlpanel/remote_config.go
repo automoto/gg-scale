@@ -93,18 +93,33 @@ func (h *Handler) renderRemoteConfigError(w http.ResponseWriter, r *http.Request
 }
 
 func normalizeRemoteConfig(raw string) ([]byte, error) {
+	encoded, err := normalizeJSONObjectBlob(raw, maxRemoteConfigBytes)
+	if err != nil {
+		return nil, errInvalidRemoteConfig
+	}
+	return encoded, nil
+}
+
+// normalizeJSONObjectBlob validates a single top-level JSON object (no
+// trailing data), re-encodes it canonically, and enforces the byte cap on the
+// canonical form. Shared by the remote-config editor and the leaderboard
+// metadata field.
+func normalizeJSONObjectBlob(raw string, maxBytes int) ([]byte, error) {
 	dec := json.NewDecoder(strings.NewReader(raw))
 	dec.UseNumber()
-	var config map[string]any
-	if err := dec.Decode(&config); err != nil || config == nil {
-		return nil, errInvalidRemoteConfig
+	var blob map[string]any
+	if err := dec.Decode(&blob); err != nil || blob == nil {
+		return nil, errors.New("control panel: not a JSON object")
 	}
 	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return nil, errInvalidRemoteConfig
+		return nil, errors.New("control panel: trailing data after JSON object")
 	}
-	encoded, err := json.Marshal(config)
-	if err != nil || len(encoded) > maxRemoteConfigBytes {
-		return nil, errInvalidRemoteConfig
+	encoded, err := json.Marshal(blob)
+	if err != nil {
+		return nil, err
+	}
+	if len(encoded) > maxBytes {
+		return nil, errors.New("control panel: JSON object too large")
 	}
 	return encoded, nil
 }

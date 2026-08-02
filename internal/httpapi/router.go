@@ -446,18 +446,19 @@ func NewRouter(d Deps) http.Handler {
 					registerFriendCodeRoutes(papi, d)
 					registerStorageRoutes(papi, d)
 					registerLeaderboardReadRoutes(papi, d)
+					registerLeaderboardDiscoveryRoutes(papi, d)
+					registerLeaderboardPeriodRoutes(papi, d)
 					registerFriendRoutes(papi, d)
 					registerRemoteAddrRoutes(papi, d)
 					registerGameSessionRoutes(papi, d)
 
-					// Score submission is server-authoritative: only
-					// callers with a secret key (game server / tenant
-					// backend) may submit. The player session in
+					// Score submission authorizes in the handler, not here:
+					// boards are server-authoritative (secret key) by
+					// default, but a board may opt in to publishable-key
+					// client submissions, and that flag is per-board data
+					// the router cannot see. The player session in
 					// X-Session-Token still identifies the subject.
-					r.Group(func(r chi.Router) {
-						r.Use(requireAPIKeyPermission(d, rbac.ObjectLeaderboard, rbac.ActionSubmit))
-						registerLeaderboardSubmit(groupAPI(r, humaCfg), d)
-					})
+					registerLeaderboardSubmit(papi, d)
 				})
 			})
 		}

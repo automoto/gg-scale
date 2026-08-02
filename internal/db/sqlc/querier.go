@@ -11,12 +11,14 @@ import (
 )
 
 type Querier interface {
+	AdvanceLeaderboardPeriod(ctx context.Context, arg AdvanceLeaderboardPeriodParams) (int64, error)
 	// Adjust the current tenant's storage counter by delta (bytes; negative on
 	// delete/shrink), clamped at zero. Called in the write tx after a successful
 	// object write so the counter stays in lockstep. Runs in tenant context.
 	ApplyTenantStorageDelta(ctx context.Context, delta int64) error
 	ApproveTenantChangeRequest(ctx context.Context, arg ApproveTenantChangeRequestParams) (int64, error)
 	ApproveTenantSignupRequest(ctx context.Context, arg ApproveTenantSignupRequestParams) (int64, error)
+	ArchiveLeaderboardPeriod(ctx context.Context, arg ArchiveLeaderboardPeriodParams) error
 	// Edge id if an accepted friendship exists in either direction.
 	AreAccountsFriendsAccepted(ctx context.Context, arg AreAccountsFriendsAcceptedParams) (int64, error)
 	// Tenant-scoped: admin "link player" accept binds a proven email + global
@@ -96,7 +98,6 @@ type Querier interface {
 	CountControlPanelUsers(ctx context.Context) (int64, error)
 	CountControlPanelUsersForPlatformAdmin(ctx context.Context, emailFilter *string) (int64, error)
 	CountEnabledPlatformAdmins(ctx context.Context) (int64, error)
-	CountEntries(ctx context.Context, leaderboardID int64) (int64, error)
 	// Control panel matchmaker page: matches formed per mode within the retention
 	// window (rows are GC'd after MatchTTL, so this reads as "recent matches").
 	CountMatchmakerMatchesByMode(ctx context.Context, projectID int64) ([]CountMatchmakerMatchesByModeRow, error)
@@ -331,6 +332,11 @@ type Querier interface {
 	// Most-specific-wins: a project-scoped row overrides a tenant-wide row for the
 	// same kind. Used by the invite throttle.
 	GetInviteRateLimitOverride(ctx context.Context, arg GetInviteRateLimitOverrideParams) (GetInviteRateLimitOverrideRow, error)
+	// Leaderboard entries hold ONE row per (leaderboard, player, period). The
+	// board's score operator is applied at write time by the SubmitScore upsert,
+	// so every read is a plain ORDER BY score. Scheduled boards bump
+	// leaderboards.current_period on reset; old entries stay in place under
+	// their period number.
 	GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) (GetLeaderboardRow, error)
 	GetLeaderboardForControlPanel(ctx context.Context, arg GetLeaderboardForControlPanelParams) (GetLeaderboardForControlPanelRow, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
@@ -497,6 +503,12 @@ type Querier interface {
 	// the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
 	// Returns pgx.ErrNoRows when not banned (or the player is unlinked).
 	IsPlayerBannedByTenant(ctx context.Context, playerID int64) (int64, error)
+	// Friends view: current-period entries for an explicit player set, in rank
+	// order. The caller re-ranks 0-based within the returned set.
+	LeaderboardEntriesForPlayers(ctx context.Context, arg LeaderboardEntriesForPlayersParams) ([]LeaderboardEntriesForPlayersRow, error)
+	// Any period counts: past-period entries are ranked under the board's
+	// current sort order too, so history alone locks it.
+	LeaderboardHasEntries(ctx context.Context, leaderboardID int64) (bool, error)
 	LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRangeByRankParams) ([]LeaderboardRangeByRankRow, error)
 	LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error)
 	// POST /v1/auth/link: attach email + password sign-in to a player that has
@@ -513,6 +525,9 @@ type Querier interface {
 	// Clears unlinked_at: a re-invite restores an unlinked player's access.
 	LinkPlayerToAccount(ctx context.Context, arg LinkPlayerToAccountParams) error
 	ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error)
+	// Every account the caller has an accepted friendship with, either direction.
+	// Used by views that need the full friend set at once (friends leaderboard).
+	ListAcceptedFriendAccountIDs(ctx context.Context, me pgtype.UUID) ([]pgtype.UUID, error)
 	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
 	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
@@ -536,6 +551,11 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
+	// Boards whose scheduled reset boundary has passed, locked for the reset
+	// transaction so two job runs can never double-archive a period. as_of is the
+	// job's clock — the same instant it computes the next boundary from, so the
+	// due filter and the new boundary can never disagree.
+	ListDueLeaderboardResets(ctx context.Context, asOf pgtype.Timestamptz) ([]ListDueLeaderboardResetsRow, error)
 	// Name, usage, class, quota overrides, and last-notified threshold for every
 	// quota-enforced tenant. Read cross-tenant by the storage-warn River job
 	// (bootstrap tx).
@@ -558,6 +578,8 @@ type Querier interface {
 	// plus RLS ensure a player only ever reads signals addressed to them, and the
 	// id > after_id cursor makes repeat polls return only new signals.
 	ListGameSessionSignalsForRecipient(ctx context.Context, arg ListGameSessionSignalsForRecipientParams) ([]ListGameSessionSignalsForRecipientRow, error)
+	// Finished periods, newest first, keyset-paginated on the period number.
+	ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
 	// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 	// bucket for the current tenant's project, plus oldest queued ticket and
@@ -859,7 +881,15 @@ type Querier interface {
 	// counter maintained by ApplyTenantStorageDelta. Runs in the write tx
 	// (app.tenant_id set), serialized per object by LockStorageObjectForWrite.
 	StorageUsageForWrite(ctx context.Context, arg StorageUsageForWriteParams) (StorageUsageForWriteRow, error)
-	SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error)
+	// Operator-aware upsert. 'best' keeps the better score by sort order, 'set'
+	// replaces, 'incr' adds. clamp_min/clamp_max bound the ACCUMULATED 'incr'
+	// total (the request-level bounds check only sees the delta, so without this
+	// a client could stack in-bounds deltas past score_max); callers pass NULL to
+	// leave the total unclamped. Metadata follows the standing score on 'best'
+	// (a worse run must not overwrite the record run's metadata) and the latest
+	// submission otherwise. Zero rows means the attempt cap blocked the write —
+	// the arbiter matched but the DO UPDATE WHERE refused it.
+	SubmitScore(ctx context.Context, arg SubmitScoreParams) (int64, error)
 	// Idempotent: repeated unsubscribes are a no-op.
 	SuppressEmail(ctx context.Context, email string) error
 	// Release every claim whose lease has expired. Same accounting as
@@ -890,6 +920,8 @@ type Querier interface {
 	UpdateControlPanelPassword(ctx context.Context, arg UpdateControlPanelPasswordParams) error
 	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error
 	UpdateGameSessionState(ctx context.Context, arg UpdateGameSessionStateParams) error
+	// score_operator and current_period are deliberately absent: the operator is
+	// fixed at creation and the period only moves via AdvanceLeaderboardPeriod.
 	UpdateLeaderboard(ctx context.Context, arg UpdateLeaderboardParams) (int64, error)
 	UpdatePlayerPassword(ctx context.Context, arg UpdatePlayerPasswordParams) error
 	// Profile updates are deliberately narrow — only fields explicitly

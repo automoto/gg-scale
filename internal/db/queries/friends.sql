@@ -64,6 +64,15 @@ WHERE ((sqlc.arg('status')::text != 'blocked'
 ORDER BY id ASC
 LIMIT sqlc.arg('row_limit');
 
+-- name: ListAcceptedFriendAccountIDs :many
+-- Every account the caller has an accepted friendship with, either direction.
+-- Used by views that need the full friend set at once (friends leaderboard).
+SELECT CASE WHEN from_account_id = sqlc.arg('me') THEN to_account_id
+            ELSE from_account_id END::uuid AS account_id
+FROM friend_edges
+WHERE (from_account_id = sqlc.arg('me') OR to_account_id = sqlc.arg('me'))
+  AND status = 'accepted';
+
 -- name: AreAccountsFriendsAccepted :one
 -- Edge id if an accepted friendship exists in either direction.
 SELECT id FROM friend_edges

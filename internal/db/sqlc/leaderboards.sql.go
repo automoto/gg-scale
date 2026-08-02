@@ -11,44 +11,113 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countEntries = `-- name: CountEntries :one
-SELECT COUNT(*)::bigint
-FROM leaderboard_entries
+const advanceLeaderboardPeriod = `-- name: AdvanceLeaderboardPeriod :execrows
+UPDATE leaderboards
+SET current_period = current_period + 1,
+    period_started_at = $1,
+    next_reset_at = $2
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND leaderboard_id = $1
+  AND id = $3
+  AND deleted_at IS NULL
 `
 
-func (q *Queries) CountEntries(ctx context.Context, leaderboardID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countEntries, leaderboardID)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+type AdvanceLeaderboardPeriodParams struct {
+	PeriodStartedAt pgtype.Timestamptz
+	NextResetAt     pgtype.Timestamptz
+	ID              int64
+}
+
+func (q *Queries) AdvanceLeaderboardPeriod(ctx context.Context, arg AdvanceLeaderboardPeriodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, advanceLeaderboardPeriod, arg.PeriodStartedAt, arg.NextResetAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const archiveLeaderboardPeriod = `-- name: ArchiveLeaderboardPeriod :exec
+INSERT INTO leaderboard_periods (tenant_id, leaderboard_id, period, started_at, ended_at)
+VALUES (
+    current_setting('app.tenant_id', true)::bigint,
+    $1, $2, $3, $4
+)
+ON CONFLICT (leaderboard_id, period) DO NOTHING
+`
+
+type ArchiveLeaderboardPeriodParams struct {
+	LeaderboardID int64
+	Period        int32
+	StartedAt     pgtype.Timestamptz
+	EndedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) ArchiveLeaderboardPeriod(ctx context.Context, arg ArchiveLeaderboardPeriodParams) error {
+	_, err := q.db.Exec(ctx, archiveLeaderboardPeriod,
+		arg.LeaderboardID,
+		arg.Period,
+		arg.StartedAt,
+		arg.EndedAt,
+	)
+	return err
 }
 
 const createLeaderboard = `-- name: CreateLeaderboard :one
-INSERT INTO leaderboards (tenant_id, project_id, name, sort_order)
+INSERT INTO leaderboards (
+    tenant_id, project_id, name, sort_order, score_operator, metadata,
+    client_submissions, score_min, score_max, reset_schedule, attempt_cap,
+    period_started_at, next_reset_at
+)
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3
+    $1, $2, $3,
+    $4, $5,
+    $6, $7, $8,
+    $9, $10,
+    $11, $12
 )
 RETURNING id
 `
 
 type CreateLeaderboardParams struct {
-	ProjectID int64
-	Name      string
-	SortOrder string
+	ProjectID         int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
 }
 
 func (q *Queries) CreateLeaderboard(ctx context.Context, arg CreateLeaderboardParams) (int64, error) {
-	row := q.db.QueryRow(ctx, createLeaderboard, arg.ProjectID, arg.Name, arg.SortOrder)
+	row := q.db.QueryRow(ctx, createLeaderboard,
+		arg.ProjectID,
+		arg.Name,
+		arg.SortOrder,
+		arg.ScoreOperator,
+		arg.Metadata,
+		arg.ClientSubmissions,
+		arg.ScoreMin,
+		arg.ScoreMax,
+		arg.ResetSchedule,
+		arg.AttemptCap,
+		arg.PeriodStartedAt,
+		arg.NextResetAt,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
 }
 
 const getLeaderboard = `-- name: GetLeaderboard :one
-SELECT id, sort_order
+
+SELECT id, sort_order, score_operator, client_submissions, score_min,
+       score_max, attempt_cap, reset_schedule, current_period,
+       period_started_at, next_reset_at
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
@@ -62,19 +131,47 @@ type GetLeaderboardParams struct {
 }
 
 type GetLeaderboardRow struct {
-	ID        int64
-	SortOrder string
+	ID                int64
+	SortOrder         string
+	ScoreOperator     string
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	AttemptCap        *int32
+	ResetSchedule     string
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
 }
 
+// Leaderboard entries hold ONE row per (leaderboard, player, period). The
+// board's score operator is applied at write time by the SubmitScore upsert,
+// so every read is a plain ORDER BY score. Scheduled boards bump
+// leaderboards.current_period on reset; old entries stay in place under
+// their period number.
 func (q *Queries) GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) (GetLeaderboardRow, error) {
 	row := q.db.QueryRow(ctx, getLeaderboard, arg.ID, arg.ProjectID)
 	var i GetLeaderboardRow
-	err := row.Scan(&i.ID, &i.SortOrder)
+	err := row.Scan(
+		&i.ID,
+		&i.SortOrder,
+		&i.ScoreOperator,
+		&i.ClientSubmissions,
+		&i.ScoreMin,
+		&i.ScoreMax,
+		&i.AttemptCap,
+		&i.ResetSchedule,
+		&i.CurrentPeriod,
+		&i.PeriodStartedAt,
+		&i.NextResetAt,
+	)
 	return i, err
 }
 
 const getLeaderboardForControlPanel = `-- name: GetLeaderboardForControlPanel :one
-SELECT id, project_id, name, sort_order, created_at
+SELECT id, project_id, name, sort_order, score_operator, metadata,
+       client_submissions, score_min, score_max, reset_schedule, attempt_cap,
+       current_period, period_started_at, next_reset_at, created_at
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
@@ -88,11 +185,21 @@ type GetLeaderboardForControlPanelParams struct {
 }
 
 type GetLeaderboardForControlPanelRow struct {
-	ID        int64
-	ProjectID int64
-	Name      string
-	SortOrder string
-	CreatedAt pgtype.Timestamptz
+	ID                int64
+	ProjectID         int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 func (q *Queries) GetLeaderboardForControlPanel(ctx context.Context, arg GetLeaderboardForControlPanelParams) (GetLeaderboardForControlPanelRow, error) {
@@ -103,34 +210,125 @@ func (q *Queries) GetLeaderboardForControlPanel(ctx context.Context, arg GetLead
 		&i.ProjectID,
 		&i.Name,
 		&i.SortOrder,
+		&i.ScoreOperator,
+		&i.Metadata,
+		&i.ClientSubmissions,
+		&i.ScoreMin,
+		&i.ScoreMax,
+		&i.ResetSchedule,
+		&i.AttemptCap,
+		&i.CurrentPeriod,
+		&i.PeriodStartedAt,
+		&i.NextResetAt,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
+const leaderboardEntriesForPlayers = `-- name: LeaderboardEntriesForPlayers :many
+SELECT le.player_id, le.score, le.metadata, a.display_name
+FROM leaderboard_entries le
+JOIN leaderboards l ON l.id = le.leaderboard_id AND l.deleted_at IS NULL
+LEFT JOIN project_players pp ON pp.id = le.player_id AND pp.deleted_at IS NULL
+LEFT JOIN player_accounts a ON a.id = pp.player_account_id
+WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND le.leaderboard_id = $1
+  AND le.period = $2
+  AND l.tenant_id = le.tenant_id
+  AND l.project_id = $3
+  AND le.player_id = ANY($4::bigint[])
+ORDER BY
+  CASE WHEN l.sort_order = 'asc' THEN le.score END ASC,
+  CASE WHEN l.sort_order <> 'asc' THEN le.score END DESC,
+  le.player_id ASC
+LIMIT $5
+`
+
+type LeaderboardEntriesForPlayersParams struct {
+	LeaderboardID int64
+	Period        int32
+	ProjectID     int64
+	PlayerIds     []int64
+	RowLimit      int32
+}
+
+type LeaderboardEntriesForPlayersRow struct {
+	PlayerID    int64
+	Score       int64
+	Metadata    []byte
+	DisplayName *string
+}
+
+// Friends view: current-period entries for an explicit player set, in rank
+// order. The caller re-ranks 0-based within the returned set.
+func (q *Queries) LeaderboardEntriesForPlayers(ctx context.Context, arg LeaderboardEntriesForPlayersParams) ([]LeaderboardEntriesForPlayersRow, error) {
+	rows, err := q.db.Query(ctx, leaderboardEntriesForPlayers,
+		arg.LeaderboardID,
+		arg.Period,
+		arg.ProjectID,
+		arg.PlayerIds,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaderboardEntriesForPlayersRow
+	for rows.Next() {
+		var i LeaderboardEntriesForPlayersRow
+		if err := rows.Scan(
+			&i.PlayerID,
+			&i.Score,
+			&i.Metadata,
+			&i.DisplayName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const leaderboardHasEntries = `-- name: LeaderboardHasEntries :one
+SELECT EXISTS (
+    SELECT 1 FROM leaderboard_entries
+    WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+      AND leaderboard_id = $1
+)::boolean AS has_entries
+`
+
+// Any period counts: past-period entries are ranked under the board's
+// current sort order too, so history alone locks it.
+func (q *Queries) LeaderboardHasEntries(ctx context.Context, leaderboardID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, leaderboardHasEntries, leaderboardID)
+	var has_entries bool
+	err := row.Scan(&has_entries)
+	return has_entries, err
+}
+
 const leaderboardRangeByRank = `-- name: LeaderboardRangeByRank :many
 WITH ranked AS (
-    SELECT le.player_id,
-           CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
-           a.display_name,
+    SELECT le.player_id, le.score, le.metadata, a.display_name,
            RANK() OVER (
              ORDER BY
-               CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
-               CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
+               CASE WHEN l.sort_order = 'asc' THEN le.score END ASC,
+               CASE WHEN l.sort_order <> 'asc' THEN le.score END DESC,
                le.player_id ASC
            ) AS r
     FROM leaderboard_entries le
-    JOIN leaderboards l ON l.id = le.leaderboard_id
+    JOIN leaderboards l ON l.id = le.leaderboard_id AND l.deleted_at IS NULL
     LEFT JOIN project_players pp ON pp.id = le.player_id AND pp.deleted_at IS NULL
     LEFT JOIN player_accounts a ON a.id = pp.player_account_id
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
       AND le.leaderboard_id = $3
+      AND le.period = $4
       AND l.tenant_id = le.tenant_id
-      AND l.project_id = $4
-      AND l.deleted_at IS NULL
-    GROUP BY le.player_id, a.display_name
+      AND l.project_id = $5
 )
-SELECT player_id, best_score, display_name, r::bigint AS rank
+SELECT player_id, score, metadata, display_name, r::bigint AS rank
 FROM ranked
 WHERE r BETWEEN $1::bigint AND $2::bigint
 ORDER BY r
@@ -140,12 +338,14 @@ type LeaderboardRangeByRankParams struct {
 	RankLow       int64
 	RankHigh      int64
 	LeaderboardID int64
+	Period        int32
 	ProjectID     int64
 }
 
 type LeaderboardRangeByRankRow struct {
 	PlayerID    int64
-	BestScore   int64
+	Score       int64
+	Metadata    []byte
 	DisplayName *string
 	Rank        int64
 }
@@ -155,6 +355,7 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 		arg.RankLow,
 		arg.RankHigh,
 		arg.LeaderboardID,
+		arg.Period,
 		arg.ProjectID,
 	)
 	if err != nil {
@@ -166,7 +367,8 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 		var i LeaderboardRangeByRankRow
 		if err := rows.Scan(
 			&i.PlayerID,
-			&i.BestScore,
+			&i.Score,
+			&i.Metadata,
 			&i.DisplayName,
 			&i.Rank,
 		); err != nil {
@@ -182,21 +384,20 @@ func (q *Queries) LeaderboardRangeByRank(ctx context.Context, arg LeaderboardRan
 
 const leaderboardUserRank = `-- name: LeaderboardUserRank :one
 WITH ranked AS (
-    SELECT player_id,
+    SELECT le.player_id,
            RANK() OVER (
              ORDER BY
-               CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
-               CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
-               player_id ASC
+               CASE WHEN l.sort_order = 'asc' THEN le.score END ASC,
+               CASE WHEN l.sort_order <> 'asc' THEN le.score END DESC,
+               le.player_id ASC
            ) AS r
     FROM leaderboard_entries le
-    JOIN leaderboards l ON l.id = le.leaderboard_id
+    JOIN leaderboards l ON l.id = le.leaderboard_id AND l.deleted_at IS NULL
     WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
       AND le.leaderboard_id = $2
+      AND le.period = $3
       AND l.tenant_id = le.tenant_id
-      AND l.project_id = $3
-      AND l.deleted_at IS NULL
-    GROUP BY player_id
+      AND l.project_id = $4
 )
 SELECT r::bigint AS rank
 FROM ranked
@@ -206,18 +407,129 @@ WHERE player_id = $1
 type LeaderboardUserRankParams struct {
 	PlayerID      int64
 	LeaderboardID int64
+	Period        int32
 	ProjectID     int64
 }
 
 func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRankParams) (int64, error) {
-	row := q.db.QueryRow(ctx, leaderboardUserRank, arg.PlayerID, arg.LeaderboardID, arg.ProjectID)
+	row := q.db.QueryRow(ctx, leaderboardUserRank,
+		arg.PlayerID,
+		arg.LeaderboardID,
+		arg.Period,
+		arg.ProjectID,
+	)
 	var rank int64
 	err := row.Scan(&rank)
 	return rank, err
 }
 
+const listDueLeaderboardResets = `-- name: ListDueLeaderboardResets :many
+SELECT id, current_period, period_started_at, next_reset_at, reset_schedule, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND reset_schedule <> 'none'
+  AND next_reset_at IS NOT NULL
+  AND next_reset_at <= $1::timestamptz
+FOR UPDATE
+`
+
+type ListDueLeaderboardResetsRow struct {
+	ID              int64
+	CurrentPeriod   int32
+	PeriodStartedAt pgtype.Timestamptz
+	NextResetAt     pgtype.Timestamptz
+	ResetSchedule   string
+	CreatedAt       pgtype.Timestamptz
+}
+
+// Boards whose scheduled reset boundary has passed, locked for the reset
+// transaction so two job runs can never double-archive a period. as_of is the
+// job's clock — the same instant it computes the next boundary from, so the
+// due filter and the new boundary can never disagree.
+func (q *Queries) ListDueLeaderboardResets(ctx context.Context, asOf pgtype.Timestamptz) ([]ListDueLeaderboardResetsRow, error) {
+	rows, err := q.db.Query(ctx, listDueLeaderboardResets, asOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueLeaderboardResetsRow
+	for rows.Next() {
+		var i ListDueLeaderboardResetsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CurrentPeriod,
+			&i.PeriodStartedAt,
+			&i.NextResetAt,
+			&i.ResetSchedule,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaderboardPeriods = `-- name: ListLeaderboardPeriods :many
+SELECT s.period, s.started_at, s.ended_at
+FROM leaderboard_periods s
+JOIN leaderboards l ON l.id = s.leaderboard_id AND l.deleted_at IS NULL
+WHERE s.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND s.leaderboard_id = $1
+  AND l.tenant_id = s.tenant_id
+  AND l.project_id = $2
+  AND s.period < $3::integer
+ORDER BY s.period DESC
+LIMIT $4
+`
+
+type ListLeaderboardPeriodsParams struct {
+	LeaderboardID int64
+	ProjectID     int64
+	BeforePeriod  int32
+	RowLimit      int32
+}
+
+type ListLeaderboardPeriodsRow struct {
+	Period    int32
+	StartedAt pgtype.Timestamptz
+	EndedAt   pgtype.Timestamptz
+}
+
+// Finished periods, newest first, keyset-paginated on the period number.
+func (q *Queries) ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error) {
+	rows, err := q.db.Query(ctx, listLeaderboardPeriods,
+		arg.LeaderboardID,
+		arg.ProjectID,
+		arg.BeforePeriod,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaderboardPeriodsRow
+	for rows.Next() {
+		var i ListLeaderboardPeriodsRow
+		if err := rows.Scan(&i.Period, &i.StartedAt, &i.EndedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLeaderboardsForProject = `-- name: ListLeaderboardsForProject :many
-SELECT id, name, sort_order, created_at
+SELECT id, name, sort_order, score_operator, metadata, client_submissions,
+       score_min, score_max, reset_schedule, attempt_cap, current_period,
+       period_started_at, next_reset_at, created_at
 FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
@@ -226,10 +538,20 @@ ORDER BY name
 `
 
 type ListLeaderboardsForProjectRow struct {
-	ID        int64
-	Name      string
-	SortOrder string
-	CreatedAt pgtype.Timestamptz
+	ID                int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 func (q *Queries) ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error) {
@@ -245,6 +567,16 @@ func (q *Queries) ListLeaderboardsForProject(ctx context.Context, projectID int6
 			&i.ID,
 			&i.Name,
 			&i.SortOrder,
+			&i.ScoreOperator,
+			&i.Metadata,
+			&i.ClientSubmissions,
+			&i.ScoreMin,
+			&i.ScoreMax,
+			&i.ResetSchedule,
+			&i.AttemptCap,
+			&i.CurrentPeriod,
+			&i.PeriodStartedAt,
+			&i.NextResetAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -279,74 +611,122 @@ func (q *Queries) SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeade
 	return result.RowsAffected(), nil
 }
 
-const submitScore = `-- name: SubmitScore :one
+const submitScore = `-- name: SubmitScore :execrows
 INSERT INTO leaderboard_entries (
-    tenant_id, leaderboard_id, player_id, score, recorded_at
+    tenant_id, leaderboard_id, player_id, period, score, attempts, metadata,
+    recorded_at, updated_at
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
-    $1, $2, $3, now()
+    $1, $2, $3,
+    $4, 1, $5, now(), now()
 )
-RETURNING id, recorded_at
+ON CONFLICT (leaderboard_id, player_id, period) DO UPDATE SET
+    score = CASE
+        WHEN $6::text = 'set' THEN EXCLUDED.score
+        WHEN $6::text = 'incr' THEN LEAST(
+            COALESCE($7::bigint, leaderboard_entries.score + EXCLUDED.score),
+            GREATEST(
+                COALESCE($8::bigint, leaderboard_entries.score + EXCLUDED.score),
+                leaderboard_entries.score + EXCLUDED.score
+            )
+        )
+        WHEN $9::text = 'asc' THEN LEAST(leaderboard_entries.score, EXCLUDED.score)
+        ELSE GREATEST(leaderboard_entries.score, EXCLUDED.score)
+    END,
+    metadata = CASE
+        WHEN $6::text <> 'best' THEN EXCLUDED.metadata
+        WHEN $9::text = 'asc' AND EXCLUDED.score < leaderboard_entries.score THEN EXCLUDED.metadata
+        WHEN $9::text <> 'asc' AND EXCLUDED.score > leaderboard_entries.score THEN EXCLUDED.metadata
+        ELSE leaderboard_entries.metadata
+    END,
+    attempts = leaderboard_entries.attempts + 1,
+    updated_at = now()
+WHERE $10::integer IS NULL
+   OR leaderboard_entries.attempts < $10::integer
 `
 
 type SubmitScoreParams struct {
 	LeaderboardID int64
 	PlayerID      int64
+	Period        int32
 	Score         int64
+	Metadata      []byte
+	ScoreOperator string
+	ClampMax      *int64
+	ClampMin      *int64
+	SortOrder     string
+	AttemptCap    *int32
 }
 
-type SubmitScoreRow struct {
-	ID         int64
-	RecordedAt pgtype.Timestamptz
-}
-
-func (q *Queries) SubmitScore(ctx context.Context, arg SubmitScoreParams) (SubmitScoreRow, error) {
-	row := q.db.QueryRow(ctx, submitScore, arg.LeaderboardID, arg.PlayerID, arg.Score)
-	var i SubmitScoreRow
-	err := row.Scan(&i.ID, &i.RecordedAt)
-	return i, err
+// Operator-aware upsert. 'best' keeps the better score by sort order, 'set'
+// replaces, 'incr' adds. clamp_min/clamp_max bound the ACCUMULATED 'incr'
+// total (the request-level bounds check only sees the delta, so without this
+// a client could stack in-bounds deltas past score_max); callers pass NULL to
+// leave the total unclamped. Metadata follows the standing score on 'best'
+// (a worse run must not overwrite the record run's metadata) and the latest
+// submission otherwise. Zero rows means the attempt cap blocked the write —
+// the arbiter matched but the DO UPDATE WHERE refused it.
+func (q *Queries) SubmitScore(ctx context.Context, arg SubmitScoreParams) (int64, error) {
+	result, err := q.db.Exec(ctx, submitScore,
+		arg.LeaderboardID,
+		arg.PlayerID,
+		arg.Period,
+		arg.Score,
+		arg.Metadata,
+		arg.ScoreOperator,
+		arg.ClampMax,
+		arg.ClampMin,
+		arg.SortOrder,
+		arg.AttemptCap,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const topN = `-- name: TopN :many
-SELECT le.player_id,
-       CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) ELSE MAX(le.score) END::bigint AS best_score,
-       MIN(le.recorded_at)::timestamptz AS first_seen,
-       a.display_name
+SELECT le.player_id, le.score, le.metadata, a.display_name
 FROM leaderboard_entries le
-JOIN leaderboards l ON l.id = le.leaderboard_id
+JOIN leaderboards l ON l.id = le.leaderboard_id AND l.deleted_at IS NULL
 LEFT JOIN project_players pp ON pp.id = le.player_id AND pp.deleted_at IS NULL
 LEFT JOIN player_accounts a ON a.id = pp.player_account_id
 WHERE le.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND le.leaderboard_id = $1
+  AND le.period = $2
   AND l.tenant_id = le.tenant_id
-  AND l.project_id = $2
-  AND l.deleted_at IS NULL
-GROUP BY le.player_id, a.display_name
+  AND l.project_id = $3
 ORDER BY
-  CASE WHEN max(l.sort_order) = 'asc' THEN MIN(le.score) END ASC,
-  CASE WHEN max(l.sort_order) <> 'asc' THEN MAX(le.score) END DESC,
+  CASE WHEN l.sort_order = 'asc' THEN le.score END ASC,
+  CASE WHEN l.sort_order <> 'asc' THEN le.score END DESC,
   le.player_id ASC
-LIMIT $3
+LIMIT $4
 `
 
 type TopNParams struct {
 	LeaderboardID int64
+	Period        int32
 	ProjectID     int64
 	RowLimit      int32
 }
 
 type TopNRow struct {
 	PlayerID    int64
-	BestScore   int64
-	FirstSeen   pgtype.Timestamptz
+	Score       int64
+	Metadata    []byte
 	DisplayName *string
 }
 
 // display_name rides along from the entry's linked global account (NULL for
 // anonymous players); joining pp/a cannot fan out because pp.id is unique.
 func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
-	rows, err := q.db.Query(ctx, topN, arg.LeaderboardID, arg.ProjectID, arg.RowLimit)
+	rows, err := q.db.Query(ctx, topN,
+		arg.LeaderboardID,
+		arg.Period,
+		arg.ProjectID,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -356,8 +736,8 @@ func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 		var i TopNRow
 		if err := rows.Scan(
 			&i.PlayerID,
-			&i.BestScore,
-			&i.FirstSeen,
+			&i.Score,
+			&i.Metadata,
 			&i.DisplayName,
 		); err != nil {
 			return nil, err
@@ -373,24 +753,50 @@ func (q *Queries) TopN(ctx context.Context, arg TopNParams) ([]TopNRow, error) {
 const updateLeaderboard = `-- name: UpdateLeaderboard :execrows
 UPDATE leaderboards
 SET name = $1,
-    sort_order = $2
+    sort_order = $2,
+    metadata = $3,
+    client_submissions = $4,
+    score_min = $5,
+    score_max = $6,
+    reset_schedule = $7,
+    attempt_cap = $8,
+    period_started_at = $9,
+    next_reset_at = $10
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND project_id = $3
-  AND id = $4
+  AND project_id = $11
+  AND id = $12
   AND deleted_at IS NULL
 `
 
 type UpdateLeaderboardParams struct {
-	Name      string
-	SortOrder string
-	ProjectID int64
-	ID        int64
+	Name              string
+	SortOrder         string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+	ProjectID         int64
+	ID                int64
 }
 
+// score_operator and current_period are deliberately absent: the operator is
+// fixed at creation and the period only moves via AdvanceLeaderboardPeriod.
 func (q *Queries) UpdateLeaderboard(ctx context.Context, arg UpdateLeaderboardParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateLeaderboard,
 		arg.Name,
 		arg.SortOrder,
+		arg.Metadata,
+		arg.ClientSubmissions,
+		arg.ScoreMin,
+		arg.ScoreMax,
+		arg.ResetSchedule,
+		arg.AttemptCap,
+		arg.PeriodStartedAt,
+		arg.NextResetAt,
 		arg.ProjectID,
 		arg.ID,
 	)

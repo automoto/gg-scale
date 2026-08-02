@@ -227,6 +227,126 @@ func TestLeaderboards_soft_delete_hides_and_frees_name(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, recreateResp.StatusCode)
 }
 
+func TestLeaderboards_feature_fields_roundtrip_and_operator_is_immutable(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	resp, _ := tfPostForm(t, admin, srv.URL+leaderboardsPath(tenantID, projectA), url.Values{
+		"_csrf":              {csrf},
+		"name":               {"arcade"},
+		"sort_order":         {"asc"},
+		"score_operator":     {"incr"},
+		"client_submissions": {"on"},
+		"score_min":          {"0"},
+		"score_max":          {"100000"},
+		"reset_schedule":     {"weekly"},
+		"attempt_cap":        {"3"},
+		"metadata":           {`{"icon": "gold"}`},
+	})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	id := boardID(t, raw, projectA, "arcade")
+
+	var (
+		operator, schedule    string
+		clientSubs            bool
+		scoreMin, scoreMax    int64
+		attemptCap            int32
+		metadata              string
+		periodStarted, nextAt *string
+	)
+	readRow := func() {
+		t.Helper()
+		require.NoError(t, raw.QueryRow(context.Background(),
+			`SELECT score_operator, reset_schedule, client_submissions, score_min, score_max,
+			        attempt_cap, metadata::text, period_started_at::text, next_reset_at::text
+			 FROM leaderboards WHERE id = $1`, id).Scan(
+			&operator, &schedule, &clientSubs, &scoreMin, &scoreMax,
+			&attemptCap, &metadata, &periodStarted, &nextAt))
+	}
+	readRow()
+	assert.Equal(t, "incr", operator)
+	assert.Equal(t, "weekly", schedule)
+	assert.True(t, clientSubs)
+	assert.Equal(t, int64(0), scoreMin)
+	assert.Equal(t, int64(100000), scoreMax)
+	assert.Equal(t, int32(3), attemptCap)
+	assert.JSONEq(t, `{"icon":"gold"}`, metadata)
+	assert.NotNil(t, periodStarted, "an active schedule needs a period start")
+	assert.NotNil(t, nextAt, "an active schedule needs a next reset boundary")
+
+	// The edit form cannot change the operator, and turning the schedule off
+	// clears the pending boundary while the period number persists.
+	resp, _ = tfPostForm(t, admin, srv.URL+leaderboardsPath(tenantID, projectA)+"/"+strconv.FormatInt(id, 10), url.Values{
+		"_csrf":              {csrf},
+		"name":               {"arcade"},
+		"sort_order":         {"asc"},
+		"score_operator":     {"set"},
+		"client_submissions": {"on"},
+		"score_min":          {"0"},
+		"score_max":          {"100000"},
+		"reset_schedule":     {"none"},
+		"attempt_cap":        {"3"},
+		"metadata":           {`{"icon": "gold"}`},
+	})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	readRow()
+	assert.Equal(t, "incr", operator, "operator is fixed at creation")
+	assert.Equal(t, "none", schedule)
+	assert.Nil(t, nextAt, "schedule off clears the boundary")
+	assert.NotNil(t, periodStarted, "the running period persists")
+}
+
+func TestLeaderboards_sort_order_locked_once_scores_exist(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	resp, _ := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	id := boardID(t, raw, projectA, "board")
+	boardPath := leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+
+	var playerID int64
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1, $2, 'anon_lock') RETURNING id`,
+		tenantID, projectA).Scan(&playerID))
+	_, err := raw.Exec(context.Background(),
+		`INSERT INTO leaderboard_entries (tenant_id, leaderboard_id, player_id, score) VALUES ($1, $2, $3, 100)`,
+		tenantID, id, playerID)
+	require.NoError(t, err)
+
+	// Collapsed bests are frozen under the order they were written with, so
+	// the flip must be refused once any entry exists.
+	flipResp, flipBody := tfPostForm(t, admin, srv.URL+boardPath,
+		url.Values{"_csrf": {csrf}, "name": {"board"}, "sort_order": {"asc"}})
+	assert.Equal(t, http.StatusUnprocessableEntity, flipResp.StatusCode)
+	assert.Contains(t, flipBody, "fixed once scores exist")
+	var sortOrder string
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`SELECT sort_order FROM leaderboards WHERE id = $1`, id).Scan(&sortOrder))
+	assert.Equal(t, "desc", sortOrder)
+
+	// An edit that keeps the direction still works.
+	renameResp, _ := tfPostForm(t, admin, srv.URL+boardPath,
+		url.Values{"_csrf": {csrf}, "name": {"renamed"}, "sort_order": {"desc"}})
+	assert.Equal(t, http.StatusSeeOther, renameResp.StatusCode)
+}
+
+func TestLeaderboards_invalid_metadata_is_rejected_and_persists_nothing(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	resp, body := tfPostForm(t, admin, srv.URL+leaderboardsPath(tenantID, projectA), url.Values{
+		"_csrf": {csrf}, "name": {"broken"}, "metadata": {`[1,2,3]`},
+	})
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Contains(t, body, "JSON object")
+
+	var count int
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM leaderboards WHERE project_id = $1`, projectA).Scan(&count))
+	assert.Zero(t, count)
+}
+
 func TestLeaderboards_duplicate_name_on_create_and_rename(t *testing.T) {
 	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
 	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
