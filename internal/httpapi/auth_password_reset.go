@@ -224,17 +224,26 @@ func resetConfirm(d Deps) func(context.Context, *resetConfirmInput) (*struct{}, 
 					return q.LockPlayerPasswordReset(ctx, sqlcgen.LockPlayerPasswordResetParams{
 						ID: id, LockedUntil: until,
 					})
-				})
+				},
+				q.ClearPlayerPasswordResetLock)
 			if cerr != nil {
 				return cerr
 			}
 			if lockedAfterAttempt || badCode {
 				return nil
 			}
-			if qerr := q.CompletePlayerPasswordReset(ctx, sqlcgen.CompletePlayerPasswordResetParams{
-				PasswordHash: hash, ID: row.ID,
-			}); qerr != nil {
+			rows, qerr := q.CompletePlayerPasswordReset(ctx, sqlcgen.CompletePlayerPasswordResetParams{
+				PasswordHash: hash, ID: row.ID, CodeHash: row.PasswordResetCodeHash,
+			})
+			if qerr != nil {
 				return qerr
+			}
+			if rows == 0 {
+				// A concurrent re-request replaced the challenge after the
+				// compare; the code the caller used is no longer the live one.
+				// Commit so the reserved attempt survives.
+				badCode = true
+				return nil
 			}
 			if _, qerr := q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
 				ProjectID: projectID, PlayerID: row.ID,

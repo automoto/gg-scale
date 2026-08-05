@@ -398,6 +398,10 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 				Value:    active.ActiveTicketID,
 			})
 		}
+		if errors.Is(err, matchmaker.ErrTooManyUnclaimedAllocations) {
+			return nil, huma.Error429TooManyRequests(
+				"too many unclaimed dedicated-server allocations; claim or let existing matches expire before requesting more")
+		}
 		if err != nil {
 			return nil, huma.Error500InternalServerError("internal error")
 		}

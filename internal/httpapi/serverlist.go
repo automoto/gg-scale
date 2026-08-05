@@ -7,7 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/serverlist"
 )
 
@@ -68,6 +68,23 @@ func registerFleetServersList(api huma.API, d Deps) {
 	}, fleetServersList(d))
 }
 
+// requireDedicatedServers gates fleet endpoints behind the dedicated_servers
+// entitlement, matching the matchmaker fleet path — an API-key fleet scope
+// alone must not keep a fleet running after the entitlement is revoked.
+func requireDedicatedServers(ctx context.Context, d Deps, tenantID, projectID int64) error {
+	if d.RBAC == nil {
+		return huma.Error500InternalServerError("authorization unavailable")
+	}
+	enabled, err := d.RBAC.FeatureEnabled(ctx, tenantID, projectID, rbac.FeatureDedicatedServers)
+	if err != nil {
+		return huma.Error500InternalServerError("feature check failed")
+	}
+	if !enabled {
+		return huma.Error403Forbidden("forbidden")
+	}
+	return nil
+}
+
 // fleetHeartbeat accepts a heartbeat from a game-server. The tenant is taken
 // from the authenticated context, not the request body, so a tenant can't
 // spoof another tenant's fleet.
@@ -76,9 +93,12 @@ func fleetHeartbeat(d Deps) func(context.Context, *heartbeatInput) (*struct{}, e
 		if d.ServerList == nil {
 			return nil, huma.Error503ServiceUnavailable("server list not configured")
 		}
-		tenantID, err := db.TenantFromContext(ctx)
+		projectID, tenantID, err := pinnedProject(ctx)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("internal error")
+			return nil, err
+		}
+		if ferr := requireDedicatedServers(ctx, d, tenantID, projectID); ferr != nil {
+			return nil, ferr
 		}
 		req := in.Body
 		if req.AgonesName == "" || req.Fleet == "" || req.Address == "" {
@@ -120,9 +140,12 @@ func fleetServersList(d Deps) func(context.Context, *fleetServersInput) (*fleetS
 		if d.ServerList == nil {
 			return nil, huma.Error503ServiceUnavailable("server list not configured")
 		}
-		tenantID, err := db.TenantFromContext(ctx)
+		projectID, tenantID, err := pinnedProject(ctx)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("internal error")
+			return nil, err
+		}
+		if ferr := requireDedicatedServers(ctx, d, tenantID, projectID); ferr != nil {
+			return nil, ferr
 		}
 		if in.Fleet == "" {
 			return nil, huma.Error400BadRequest("fleet is required")

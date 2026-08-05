@@ -208,6 +208,7 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 		if req.Email != nil && !validateEmail(*req.Email) {
 			return nil, huma.Error400BadRequest("email invalid")
 		}
+		now := apiNow(d)
 		var code string
 		var codeHash, salt []byte
 		if req.Email != nil {
@@ -220,6 +221,9 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 			codeHash = verifycode.Hash(salt, code)
 		}
 
+		// emailSent records whether the email branch actually re-issued a code,
+		// so the post-commit mail send happens only when it did.
+		emailSent := false
 		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			if req.DisplayName != nil {
@@ -249,13 +253,34 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 				}
 			}
 			if req.Email != nil {
-				return q.UpdateProfileEmail(ctx, sqlcgen.UpdateProfileEmailParams{
+				st, qerr := q.GetProfileEmailState(ctx, me)
+				if qerr != nil {
+					return qerr
+				}
+				unchanged := st.Email != nil && *st.Email == *req.Email
+				// Skip the write+send when the address is unchanged and already
+				// verified (pure no-op), or when the per-recipient resend
+				// cooldown has not elapsed. The cooldown bounds this path to one
+				// mail per player per window regardless of the target address,
+				// closing the verification-email bombing vector; the
+				// changed-address check avoids a pointless resend.
+				if unchanged && st.EmailVerifiedAt.Valid {
+					return nil
+				}
+				if st.EmailVerificationLastSentAt.Valid &&
+					!verifycode.CanResend(st.EmailVerificationLastSentAt.Time, now) {
+					return nil
+				}
+				if qerr := q.UpdateProfileEmail(ctx, sqlcgen.UpdateProfileEmailParams{
 					ID:                         me,
 					Email:                      req.Email,
 					EmailVerificationCodeHash:  codeHash,
 					EmailVerificationSalt:      salt,
-					EmailVerificationExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(verifycode.CodeTTL), Valid: true},
-				})
+					EmailVerificationExpiresAt: pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true},
+				}); qerr != nil {
+					return qerr
+				}
+				emailSent = true
 			}
 			return nil
 		})
@@ -270,7 +295,7 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 			return nil, serverError(ctx, "profile patch: tx", err)
 		}
 
-		if req.Email == nil {
+		if !emailSent {
 			return &profilePatchOutput{Status: http.StatusNoContent}, nil
 		}
 		if d.Mailer != nil {

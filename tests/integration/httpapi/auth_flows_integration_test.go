@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -135,6 +136,63 @@ func TestPasswordReset_bad_new_password_does_not_burn_the_code(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
 }
 
+func TestPasswordReset_success_clears_lifetime_state(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "budget@example.com", "oldpassword")
+
+	// Earlier recovery activity left lifetime state behind.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players SET password_reset_lifetime_attempts = 5 WHERE id = $1`, sess.PlayerID)
+	require.NoError(t, err)
+
+	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/password-reset", "pw",
+		map[string]string{"email": "budget@example.com"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	code := extractVerifyToken(t, rec.Sent[len(rec.Sent)-1].Body)
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/password-reset/confirm", "pw",
+		map[string]string{"email": "budget@example.com", "code": code, "new_password": "newpassword"})
+	require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+
+	var lifetime int
+	var locked *time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT password_reset_lifetime_attempts, password_reset_locked_until
+		 FROM project_players WHERE id = $1`, sess.PlayerID).Scan(&lifetime, &locked))
+	assert.Zero(t, lifetime, "a successful reset must restart the lifetime budget")
+	assert.Nil(t, locked)
+}
+
+func TestPasswordReset_recovery_possible_after_lockout_expires(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "unlock@example.com", "oldpassword")
+
+	// The lifetime cap tripped yesterday; the 24h lock has expired.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players
+		 SET password_reset_lifetime_attempts = 20,
+		     password_reset_locked_until = now() - interval '1 hour'
+		 WHERE id = $1`, sess.PlayerID)
+	require.NoError(t, err)
+
+	resp, _ := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/password-reset", "pw",
+		map[string]string{"email": "unlock@example.com"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode)
+	code := extractVerifyToken(t, rec.Sent[len(rec.Sent)-1].Body)
+
+	// The correct code must work — an expired lock must not re-arm itself
+	// before the compare.
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/password-reset/confirm", "pw",
+		map[string]string{"email": "unlock@example.com", "code": code, "new_password": "newpassword"})
+	require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+	assert.Equal(t, http.StatusOK, loginStatus(t, srv.URL, "pw", "unlock@example.com", "newpassword"))
+}
+
 func TestPasswordReset_request_cooldown_sends_one_mail(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
@@ -149,6 +207,53 @@ func TestPasswordReset_request_cooldown_sends_one_mail(t *testing.T) {
 	}
 	assert.Equal(t, mailsBefore+1, len(rec.Sent),
 		"a second request inside the cooldown must stay opaque and send nothing")
+}
+
+// ── profile email change (verification-mail throttle) ───────────────────────
+
+func TestProfileEmailChange_cooldown_bounds_verification_mail(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "changer@example.com", "password1")
+
+	// Clear the signup-era send timestamp so the first change is eligible.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players SET email_verification_last_sent_at = now() - interval '2 minutes' WHERE id = $1`,
+		sess.PlayerID)
+	require.NoError(t, err)
+	before := len(rec.Sent)
+
+	// Changing to a new address sends exactly one verification mail.
+	resp, body := authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "pw", sess.AccessToken,
+		map[string]string{"email": "victim@example.com"})
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(body))
+
+	// Rapid repeats to attacker-chosen addresses are throttled: the
+	// per-recipient cooldown sends nothing more within the window, so a player
+	// can't turn PATCH /v1/profile into a verification-mail cannon.
+	for _, target := range []string{"victim@example.com", "victim2@example.com", "victim3@example.com"} {
+		resp, _ = authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "pw", sess.AccessToken,
+			map[string]string{"email": target})
+		assert.Contains(t, []int{http.StatusAccepted, http.StatusNoContent}, resp.StatusCode)
+	}
+	assert.Equal(t, before+1, len(rec.Sent), "cooldown bounds profile-email verification to one send per window")
+}
+
+func TestProfileEmailChange_unchanged_verified_sends_nothing(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "steady@example.com", "password1")
+	before := len(rec.Sent)
+
+	// Re-submitting the already-verified address is a pure no-op: no mail.
+	resp, body := authedReq(t, http.MethodPatch, srv.URL+"/v1/profile", "pw", sess.AccessToken,
+		map[string]string{"email": "steady@example.com"})
+	require.Equal(t, http.StatusNoContent, resp.StatusCode, string(body))
+	assert.Equal(t, before, len(rec.Sent))
 }
 
 // ── resend verification ─────────────────────────────────────────────────────

@@ -94,6 +94,17 @@ func authLinkEmail(d Deps) func(context.Context, *linkEmailInput) (*struct{}, er
 			return nil, huma.Error400BadRequest("password must be 8–72 characters")
 		}
 
+		// Cheap conflict check before the expensive hash: a repeat call on an
+		// already-credentialed player must not burn bcrypt work. The UPDATE's
+		// email IS NULL guard below stays authoritative under concurrency.
+		creds, err := playerCredentials(ctx, d, me)
+		if err != nil {
+			return nil, serverError(ctx, "auth link: read", err)
+		}
+		if creds.Email != nil {
+			return nil, huma.Error409Conflict("player already has sign-in credentials")
+		}
+
 		hash, err := bcrypt.GenerateFromPassword([]byte(in.Body.Password), bcryptCost)
 		if err != nil {
 			return nil, serverError(ctx, "auth link: hash", err)
@@ -160,8 +171,10 @@ func authLinkSteam(d Deps) func(context.Context, *linkSteamInput) (*struct{}, er
 			return nil, err
 		}
 
+		// Primary read: the documented flow creates an anonymous player and
+		// links Steam right after — a lagging replica would not see the row.
 		var current string
-		err = d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			row, qerr := sqlcgen.New(tx).GetProfile(ctx, me)
 			if qerr != nil {
 				return qerr
@@ -169,6 +182,9 @@ func authLinkSteam(d Deps) func(context.Context, *linkSteamInput) (*struct{}, er
 			current = row.ExternalID
 			return nil
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, huma.Error404NotFound("player not found")
+		}
 		if err != nil {
 			return nil, serverError(ctx, "steam link: profile", err)
 		}

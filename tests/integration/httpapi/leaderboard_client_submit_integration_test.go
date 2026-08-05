@@ -105,6 +105,32 @@ func TestClientSubmit_incr_total_clamps_to_bounds_for_clients_only(t *testing.T)
 	assert.Equal(t, int64(1600), total)
 }
 
+func TestClientSubmit_incr_min_only_clamp_applies(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 2, "secret-k")
+	seedAPIKey(t, c.bootstrapPool, tenantID, &projectID, "pub-k", "publishable")
+	var boardID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO leaderboards (tenant_id, project_id, name, score_operator, client_submissions, score_min, score_max)
+		 VALUES ($1, $2, 'debt', 'incr', true, -100, NULL) RETURNING id`,
+		tenantID, projectID).Scan(&boardID))
+
+	srv, _ := newFullStackServer(t, c)
+	pubToken, playerID := anonymousLoginWithID(t, srv.URL, "pub-k")
+
+	// Each delta is inside the bounds, but the accumulated total saturates
+	// at score_min instead of stacking below it.
+	for range 2 {
+		resp, body := submitScore(t, srv.URL, "pub-k", pubToken, boardID, map[string]int64{"score": -100})
+		require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+	}
+	var total int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT score FROM leaderboard_entries WHERE leaderboard_id = $1 AND player_id = $2`,
+		boardID, playerID).Scan(&total))
+	assert.Equal(t, int64(-100), total, "client incr totals saturate at score_min")
+}
+
 func TestClientSubmit_per_player_rate_limit(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 2, "secret-k")

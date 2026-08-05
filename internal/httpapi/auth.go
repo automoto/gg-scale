@@ -419,13 +419,22 @@ type challengeState struct {
 // locked or badCode is true the surrounding transaction must COMMIT so the
 // attempt bump / lock survives (see authVerify for why); a non-nil err is an
 // errVerify* sentinel or a query error and rolls back. reserve returns the
-// lifetime attempt count (pgx.ErrNoRows at the per-code cap).
+// lifetime attempt count (pgx.ErrNoRows at the per-code cap). clearLock
+// restarts the lifetime budget once a lockout has expired — without it the
+// reserve below would re-trip the cap on the old count before the compare,
+// locking the account forever.
 func checkCodeChallenge(ctx context.Context, s challengeState, code string, now time.Time,
 	reserve func(context.Context, int64, int32) (int32, error),
 	lock func(context.Context, int64, pgtype.Timestamptz) error,
+	clearLock func(context.Context, int64) error,
 ) (locked, badCode bool, err error) {
-	if s.LockedUntil.Valid && verifycode.AccountLocked(s.LockedUntil.Time, now) {
-		return false, false, errVerifyAccountLocked
+	if s.LockedUntil.Valid {
+		if verifycode.AccountLocked(s.LockedUntil.Time, now) {
+			return false, false, errVerifyAccountLocked
+		}
+		if cerr := clearLock(ctx, s.ID); cerr != nil {
+			return false, false, cerr
+		}
 	}
 	if len(s.Salt) == 0 || len(s.CodeHash) == 0 {
 		return false, false, errVerifyExpired
@@ -504,7 +513,8 @@ func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, erro
 					return q.LockPlayerVerification(ctx, sqlcgen.LockPlayerVerificationParams{
 						ID: id, LockedUntil: until,
 					})
-				})
+				},
+				q.ClearPlayerVerificationLock)
 			if cerr != nil {
 				return cerr
 			}

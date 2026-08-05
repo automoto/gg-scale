@@ -30,14 +30,33 @@ const notifyDebounce = 100 * time.Millisecond
 // (Enqueue, Get, Cancel) run inside db.Pool.Q so RLS receives app.tenant_id;
 // privileged paths called by the worker run inside db.Pool.BootstrapQ.
 type PGQueue struct {
-	pool     *db.Pool
-	failures FailureRecorder
-	notify   *notifyLimiter
+	pool                    *db.Pool
+	failures                FailureRecorder
+	notify                  *notifyLimiter
+	maxUnclaimedFleetAllocs int
 }
+
+// defaultMaxUnclaimedFleetAllocs caps the concurrent unclaimed fleet
+// allocations one player may hold. Small by design: a legit player claims a
+// match promptly, so a handful of outstanding unclaimed allocations is already
+// generous, while the cap denies the abandon-loop hoarding vector.
+const defaultMaxUnclaimedFleetAllocs = 3
 
 // NewPGQueue returns a Queue backed by the given pool.
 func NewPGQueue(pool *db.Pool) *PGQueue {
-	return &PGQueue{pool: pool, notify: newNotifyLimiter(notifyDebounce)}
+	return &PGQueue{
+		pool:                    pool,
+		notify:                  newNotifyLimiter(notifyDebounce),
+		maxUnclaimedFleetAllocs: defaultMaxUnclaimedFleetAllocs,
+	}
+}
+
+// WithMaxUnclaimedFleetAllocations overrides the per-player cap on concurrent
+// unclaimed fleet allocations. A value <= 0 disables the cap. Returns the queue
+// for chaining.
+func (q *PGQueue) WithMaxUnclaimedFleetAllocations(n int) *PGQueue {
+	q.maxUnclaimedFleetAllocs = n
+	return q
 }
 
 // ticketNotifyPayload is the matchmaker_ticket NOTIFY body. Its shape mirrors
@@ -98,6 +117,20 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 	var expiredStale int64
 	err = q.pool.Q(ctx, func(tx pgx.Tx) error {
 		gen := sqlcgen.New(tx)
+		// Per-player concurrent-allocation cap: a fleet ticket that would push
+		// the player past the cap of outstanding unclaimed allocations is
+		// refused here. Counted in the same transaction as the insert so two
+		// races can't both slip past (the one-active-queued index already bars
+		// a second queued ticket, bounding overshoot to the in-flight ticket).
+		if req.Mode == ModeFleetAllocation && q.maxUnclaimedFleetAllocs > 0 {
+			live, cerr := gen.CountPlayerLiveFleetAllocations(ctx, req.PlayerID)
+			if cerr != nil {
+				return cerr
+			}
+			if live >= int64(q.maxUnclaimedFleetAllocs) {
+				return ErrTooManyUnclaimedAllocations
+			}
+		}
 		// TTL-expire this player's stale queued ticket first: the one-active
 		// unique index can't be time-aware, so an expired-but-unswept ticket
 		// would otherwise trip the violation below and block re-queuing.

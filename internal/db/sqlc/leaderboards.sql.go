@@ -225,6 +225,60 @@ func (q *Queries) GetLeaderboardForControlPanel(ctx context.Context, arg GetLead
 	return i, err
 }
 
+const getLeaderboardForSubmit = `-- name: GetLeaderboardForSubmit :one
+SELECT id, sort_order, score_operator, client_submissions, score_min,
+       score_max, attempt_cap, reset_schedule, current_period,
+       period_started_at, next_reset_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND project_id = $2
+  AND deleted_at IS NULL
+FOR KEY SHARE
+`
+
+type GetLeaderboardForSubmitParams struct {
+	ID        int64
+	ProjectID int64
+}
+
+type GetLeaderboardForSubmitRow struct {
+	ID                int64
+	SortOrder         string
+	ScoreOperator     string
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	AttemptCap        *int32
+	ResetSchedule     string
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+}
+
+// The submit-path twin of GetLeaderboard. FOR KEY SHARE conflicts with the
+// reset job's FOR UPDATE (ListDueLeaderboardResets), so a submission blocks
+// on an in-flight reset and re-reads the advanced period instead of writing
+// into the just-archived one. Concurrent submissions do not block each other.
+func (q *Queries) GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboardForSubmitParams) (GetLeaderboardForSubmitRow, error) {
+	row := q.db.QueryRow(ctx, getLeaderboardForSubmit, arg.ID, arg.ProjectID)
+	var i GetLeaderboardForSubmitRow
+	err := row.Scan(
+		&i.ID,
+		&i.SortOrder,
+		&i.ScoreOperator,
+		&i.ClientSubmissions,
+		&i.ScoreMin,
+		&i.ScoreMax,
+		&i.AttemptCap,
+		&i.ResetSchedule,
+		&i.CurrentPeriod,
+		&i.PeriodStartedAt,
+		&i.NextResetAt,
+	)
+	return i, err
+}
+
 const leaderboardEntriesForPlayers = `-- name: LeaderboardEntriesForPlayers :many
 SELECT le.player_id, le.score, le.metadata, a.display_name
 FROM leaderboard_entries le
@@ -624,10 +678,13 @@ VALUES (
 ON CONFLICT (leaderboard_id, player_id, period) DO UPDATE SET
     score = CASE
         WHEN $6::text = 'set' THEN EXCLUDED.score
-        WHEN $6::text = 'incr' THEN LEAST(
-            COALESCE($7::bigint, leaderboard_entries.score + EXCLUDED.score),
-            GREATEST(
-                COALESCE($8::bigint, leaderboard_entries.score + EXCLUDED.score),
+        -- LEAST/GREATEST ignore NULL args, so an absent bound simply drops
+        -- out; wrapping COALESCE around either bound would instead feed the
+        -- accumulated score back in and cancel the other bound.
+        WHEN $6::text = 'incr' THEN GREATEST(
+            $7::bigint,
+            LEAST(
+                $8::bigint,
                 leaderboard_entries.score + EXCLUDED.score
             )
         )
@@ -653,8 +710,8 @@ type SubmitScoreParams struct {
 	Score         int64
 	Metadata      []byte
 	ScoreOperator string
-	ClampMax      *int64
 	ClampMin      *int64
+	ClampMax      *int64
 	SortOrder     string
 	AttemptCap    *int32
 }
@@ -675,8 +732,8 @@ func (q *Queries) SubmitScore(ctx context.Context, arg SubmitScoreParams) (int64
 		arg.Score,
 		arg.Metadata,
 		arg.ScoreOperator,
-		arg.ClampMax,
 		arg.ClampMin,
+		arg.ClampMax,
 		arg.SortOrder,
 		arg.AttemptCap,
 	)

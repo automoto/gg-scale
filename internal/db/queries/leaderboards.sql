@@ -14,6 +14,21 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg(project_id)
   AND deleted_at IS NULL;
 
+-- name: GetLeaderboardForSubmit :one
+-- The submit-path twin of GetLeaderboard. FOR KEY SHARE conflicts with the
+-- reset job's FOR UPDATE (ListDueLeaderboardResets), so a submission blocks
+-- on an in-flight reset and re-reads the advanced period instead of writing
+-- into the just-archived one. Concurrent submissions do not block each other.
+SELECT id, sort_order, score_operator, client_submissions, score_min,
+       score_max, attempt_cap, reset_schedule, current_period,
+       period_started_at, next_reset_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = sqlc.arg(id)
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
+FOR KEY SHARE;
+
 -- name: CreateLeaderboard :one
 INSERT INTO leaderboards (
     tenant_id, project_id, name, sort_order, score_operator, metadata,
@@ -51,10 +66,13 @@ VALUES (
 ON CONFLICT (leaderboard_id, player_id, period) DO UPDATE SET
     score = CASE
         WHEN sqlc.arg(score_operator)::text = 'set' THEN EXCLUDED.score
-        WHEN sqlc.arg(score_operator)::text = 'incr' THEN LEAST(
-            COALESCE(sqlc.narg(clamp_max)::bigint, leaderboard_entries.score + EXCLUDED.score),
-            GREATEST(
-                COALESCE(sqlc.narg(clamp_min)::bigint, leaderboard_entries.score + EXCLUDED.score),
+        -- LEAST/GREATEST ignore NULL args, so an absent bound simply drops
+        -- out; wrapping COALESCE around either bound would instead feed the
+        -- accumulated score back in and cancel the other bound.
+        WHEN sqlc.arg(score_operator)::text = 'incr' THEN GREATEST(
+            sqlc.narg(clamp_min)::bigint,
+            LEAST(
+                sqlc.narg(clamp_max)::bigint,
                 leaderboard_entries.score + EXCLUDED.score
             )
         )

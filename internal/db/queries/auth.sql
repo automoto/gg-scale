@@ -95,12 +95,24 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: MarkPlayerVerified :exec
+-- A proven verification also restarts the lifetime budget and drops any
+-- lockout, mirroring CompletePlayerPasswordReset.
 UPDATE project_players
-SET email_verified_at               = now(),
-    email_verification_code_hash    = NULL,
-    email_verification_salt         = NULL,
-    email_verification_expires_at   = NULL,
-    email_verification_attempts     = 0
+SET email_verified_at                    = now(),
+    email_verification_code_hash         = NULL,
+    email_verification_salt              = NULL,
+    email_verification_expires_at        = NULL,
+    email_verification_attempts          = 0,
+    email_verification_lifetime_attempts = 0,
+    email_verification_locked_until      = NULL
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1;
+
+-- name: ClearPlayerVerificationLock :exec
+-- The ClearPlayerPasswordResetLock twin for email verification.
+UPDATE project_players
+SET email_verification_lifetime_attempts = 0,
+    email_verification_locked_until      = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
@@ -264,19 +276,35 @@ SET password_reset_locked_until = sqlc.arg(locked_until)
 WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
--- name: CompletePlayerPasswordReset :exec
+-- name: CompletePlayerPasswordReset :execrows
 -- Sets the new password, clears the challenge, and bumps the session epoch so
 -- every outstanding access token (possibly an attacker's) dies immediately.
+-- A proven reset also restarts the lifetime budget and drops any lockout:
+-- the caller just demonstrated control of the inbox. The code_hash condition
+-- pins completion to the exact challenge the caller validated — 0 rows means
+-- a concurrent re-request replaced it and the code no longer counts.
 UPDATE project_players
 SET password_hash                    = sqlc.arg(password_hash),
     password_reset_code_hash         = NULL,
     password_reset_salt              = NULL,
     password_reset_expires_at        = NULL,
     password_reset_attempts          = 0,
+    password_reset_lifetime_attempts = 0,
+    password_reset_locked_until      = NULL,
     session_epoch                    = session_epoch + 1
 WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND password_reset_code_hash = sqlc.arg(code_hash)
   AND deleted_at IS NULL;
+
+-- name: ClearPlayerPasswordResetLock :exec
+-- Runs when a confirm attempt arrives after the lockout expired: the lockout
+-- window is over, so the lifetime budget restarts with it.
+UPDATE project_players
+SET password_reset_lifetime_attempts = 0,
+    password_reset_locked_until      = NULL
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
 -- name: GetPlayerAuthCredentials :one
 -- Change-password / self-disable state read for the authenticated caller.

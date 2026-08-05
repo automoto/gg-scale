@@ -50,6 +50,12 @@ type RelayConfig struct {
 	PlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
 	PlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
 
+	// AllowPrivatePeers lets clients relay to loopback/RFC1918/link-local/ULA
+	// peers. Default false: the relay refuses to proxy into private space, so a
+	// valid credential can't become an SSRF hop to internal services. Enable
+	// only for a self-host relay bridging private peers on a trusted network.
+	AllowPrivatePeers bool `env:"RELAY_ALLOW_PRIVATE_PEERS" envDefault:"false"`
+
 	// HealthAddr, when set (e.g. ":9091"), serves /healthz and /metrics for the
 	// monitoring host to scrape the relay node over the tailnet.
 	HealthAddr string `env:"RELAY_HEALTH_ADDR"`

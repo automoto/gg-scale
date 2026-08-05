@@ -14,11 +14,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ggscale/ggscale/internal/db"
+	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/serverlist"
 )
 
-func newServerListTestDeps() Deps {
-	return Deps{ServerList: serverlist.New(30 * time.Second)}
+// fleetTestProjectID is the project pin the fleet handlers resolve for the
+// dedicated_servers entitlement check.
+const fleetTestProjectID int64 = 99
+
+func newServerListTestDeps(t *testing.T) Deps {
+	t.Helper()
+	authorizer, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+	authorizer.OverrideFeatureForTest(rbac.FeatureDedicatedServers, true)
+	return Deps{ServerList: serverlist.New(30 * time.Second), RBAC: authorizer}
 }
 
 // fleetTestRouter mounts the fleet heartbeat + servers-list huma operations on
@@ -45,14 +54,16 @@ func fleetRequest(t *testing.T, h http.Handler, method, target, body string, ten
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req = req.WithContext(db.WithTenant(context.Background(), tenantID))
+	ctx := db.WithTenant(context.Background(), tenantID)
+	ctx = db.WithProject(ctx, fleetTestProjectID)
+	req = req.WithContext(ctx)
 	rw := httptest.NewRecorder()
 	h.ServeHTTP(rw, req)
 	return rw
 }
 
 func TestFleetHeartbeat_StoresHeartbeat(t *testing.T) {
-	d := newServerListTestDeps()
+	d := newServerListTestDeps(t)
 	body := `{
 		"agones_name": "gs-1",
 		"fleet": "doomerang-east",
@@ -77,7 +88,7 @@ func TestFleetHeartbeat_StoresHeartbeat(t *testing.T) {
 // Regression: the heartbeat body cannot override the authenticated tenant.
 // Without this, a tenant-1 server could pose as tenant-2's fleet.
 func TestFleetHeartbeat_TenantFromContextNotBody(t *testing.T) {
-	d := newServerListTestDeps()
+	d := newServerListTestDeps(t)
 	body := `{"agones_name":"gs-1","fleet":"f","address":"a","name":"n","max_players":4}`
 	rw := fleetRequest(t, fleetTestRouter(d), http.MethodPost, "/v1/fleets/heartbeat", body, 7)
 
@@ -102,7 +113,7 @@ func TestFleetHeartbeat_RejectsInvalid(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d := newServerListTestDeps()
+			d := newServerListTestDeps(t)
 			rw := fleetRequest(t, fleetTestRouter(d), http.MethodPost, "/v1/fleets/heartbeat", tc.body, 1)
 			assert.Equal(t, tc.code, rw.Code, rw.Body.String())
 		})
@@ -110,7 +121,7 @@ func TestFleetHeartbeat_RejectsInvalid(t *testing.T) {
 }
 
 func TestFleetServersList_ReturnsLiveServers(t *testing.T) {
-	d := newServerListTestDeps()
+	d := newServerListTestDeps(t)
 	d.ServerList.Submit(serverlist.Heartbeat{
 		AgonesName: "gs-1", Fleet: "doomerang-east", Address: "10.0.0.1:7777",
 		Region: "us-east", Name: "A", CurrentPlayers: 1, MaxPlayers: 4, TenantID: 1,
@@ -131,7 +142,7 @@ func TestFleetServersList_ReturnsLiveServers(t *testing.T) {
 }
 
 func TestFleetServersList_TenantIsolation(t *testing.T) {
-	d := newServerListTestDeps()
+	d := newServerListTestDeps(t)
 	d.ServerList.Submit(serverlist.Heartbeat{
 		AgonesName: "gs-1", Fleet: "f", Address: "a", Name: "tenant-1-server", MaxPlayers: 4, TenantID: 1,
 	})

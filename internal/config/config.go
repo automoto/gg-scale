@@ -101,6 +101,10 @@ type Config struct {
 	// MatchmakerMaxAttempts is how many allocate-failed releases a ticket
 	// survives before flipping to 'failed'. Default 3.
 	MatchmakerMaxAttempts int `env:"MATCHMAKER_MAX_ATTEMPTS" envDefault:"3"`
+	// MatchmakerMaxUnclaimedFleetAllocs caps the concurrent unclaimed fleet
+	// allocations one player may hold, bounding the enqueue -> matched ->
+	// abandon hoarding loop. 0 disables the cap. Default 3.
+	MatchmakerMaxUnclaimedFleetAllocs int `env:"MATCHMAKER_MAX_UNCLAIMED_FLEET_ALLOCS" envDefault:"3"`
 	// MatchmakerWorkerCount is the size of the bucket-processing fan-out
 	// pool. Default 4. Higher lets slow backends run in parallel without
 	// back-pressuring the LISTEN reader.
@@ -138,6 +142,10 @@ type Config struct {
 	// TURN ops per player so one credential can't monopolise the pool. 0 = off.
 	RelayPlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
 	RelayPlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
+	// RelayAllowPrivatePeers lets the embedded relay proxy to loopback/RFC1918/
+	// link-local/ULA peers. Default false (refuse private peers); enable only
+	// for a trusted self-host relay bridging private peers.
+	RelayAllowPrivatePeers bool `env:"RELAY_ALLOW_PRIVATE_PEERS" envDefault:"false"`
 	// RelayURLs is the comma-separated list of TURN/TURNS URIs clients dial,
 	// reported verbatim in every issued credential set. Required when the relay
 	// credential issuer is enabled (FEATURE_P2P_RELAY_ENABLED with a shared

@@ -312,6 +312,20 @@ RETURNING id, tenant_id, project_id, mode, fleet_id, address, protocol,
           session_id, join_code, roster, created_at, expires_at, allocation_id,
           claimed_at, host_player_id;
 
+-- name: CountPlayerLiveFleetAllocations :one
+-- Unclaimed, unexpired fleet-allocation matches this player still holds. The
+-- per-player cap counts these at enqueue time so a player can't loop
+-- enqueue -> matched -> abandon to hoard dedicated servers until the 24h GC.
+-- Fleet matches carry no host, so the player is found via the roster.
+SELECT count(*)::bigint AS live
+FROM matchmaker_matches
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND mode = 'fleet_allocation'
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at > now()
+  AND roster @> jsonb_build_array(jsonb_build_object('player_id', sqlc.arg(player_id)::bigint));
+
 -- name: ListExpiredUnclaimedMatchmakerAllocations :many
 -- GC candidates whose allocation lease elapsed without a poll or realtime
 -- delivery. Privileged — runs without a tenant GUC.

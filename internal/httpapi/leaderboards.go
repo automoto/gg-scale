@@ -213,7 +213,7 @@ func callerMaySubmitScores(ctx context.Context, d Deps) (bool, error) {
 // in and the submitted value must sit inside the bounds. Checking the replica
 // row instead would let a lagging replica admit a score the developer just
 // forbade.
-func requireClientSubmission(board sqlcgen.GetLeaderboardRow, score int64) error {
+func requireClientSubmission(board sqlcgen.GetLeaderboardForSubmitRow, score int64) error {
 	if !board.ClientSubmissions {
 		return errClientSubmitNotAllowed
 	}
@@ -304,8 +304,10 @@ func submitScoreToBoard(ctx context.Context, d Deps, boardID, projectID int64, s
 			}
 		}
 		// Project-scoped: a leaderboard in a sibling project resolves to no
-		// rows, so the score can never land on another project's board.
-		board, err := q.GetLeaderboard(ctx, sqlcgen.GetLeaderboardParams{ID: boardID, ProjectID: projectID})
+		// rows, so the score can never land on another project's board. The
+		// FOR KEY SHARE read blocks on an in-flight period reset, so the
+		// period can never be one the reset job just archived.
+		board, err := q.GetLeaderboardForSubmit(ctx, sqlcgen.GetLeaderboardForSubmitParams{ID: boardID, ProjectID: projectID})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return errLeaderboardNotFound

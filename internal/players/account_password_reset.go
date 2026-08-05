@@ -132,6 +132,13 @@ func (h *Handler) accountResetPassword(w http.ResponseWriter, r *http.Request) {
 		if qerr := q.RevokeAllPlayerAccountSessions(r.Context(), accountID); qerr != nil {
 			return qerr
 		}
+		// A password change is exactly when remembered devices should stop
+		// skipping the 2FA challenge — a stale trusted-device cookie must not
+		// survive a reset triggered by a compromised inbox. This is the only
+		// change-password surface player accounts have.
+		if qerr := q.DeletePlayerAccountTrustedDevicesForAccount(r.Context(), accountID); qerr != nil {
+			return qerr
+		}
 		return q.InvalidatePlayerAccountPasswordResets(r.Context(), accountID)
 	})
 	if err != nil {

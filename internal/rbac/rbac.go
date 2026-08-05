@@ -122,10 +122,23 @@ func featureDefault(feature Feature) bool {
 
 // Authorizer wraps the Casbin enforcer and feature-grant checks.
 type Authorizer struct {
-	enforcer     *casbin.SyncedEnforcer
-	pool         *db.Pool
-	featureCache map[featureCacheKey]featureCacheEntry
-	featureMu    sync.Mutex
+	enforcer         *casbin.SyncedEnforcer
+	pool             *db.Pool
+	featureCache     map[featureCacheKey]featureCacheEntry
+	featureOverrides map[Feature]bool
+	featureMu        sync.Mutex
+}
+
+// OverrideFeatureForTest forces FeatureEnabled to report the given value for a
+// feature, bypassing the backing store. Intended for unit tests that drive a
+// feature-gated handler without a database.
+func (a *Authorizer) OverrideFeatureForTest(feature Feature, enabled bool) {
+	a.featureMu.Lock()
+	defer a.featureMu.Unlock()
+	if a.featureOverrides == nil {
+		a.featureOverrides = make(map[Feature]bool)
+	}
+	a.featureOverrides[feature] = enabled
 }
 
 type featureCacheKey struct {
@@ -251,7 +264,16 @@ func (a *Authorizer) CanPlayer(tenantID, playerID int64, obj, act string) (bool,
 // FeatureEnabled reports whether a feature is enabled for the tenant/project,
 // falling back to the feature's default when no feature_grants row exists.
 func (a *Authorizer) FeatureEnabled(ctx context.Context, tenantID, projectID int64, feature Feature) (bool, error) {
-	if a == nil || a.pool == nil {
+	if a == nil {
+		return featureDefault(feature), nil
+	}
+	a.featureMu.Lock()
+	if v, ok := a.featureOverrides[feature]; ok {
+		a.featureMu.Unlock()
+		return v, nil
+	}
+	a.featureMu.Unlock()
+	if a.pool == nil {
 		return featureDefault(feature), nil
 	}
 	key := featureCacheKey{tenantID: tenantID, projectID: projectID, feature: feature}

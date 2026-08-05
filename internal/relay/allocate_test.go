@@ -25,7 +25,10 @@ func startTestRelay(t *testing.T, secret string) (addr string, iss *relay.Issuer
 		PublicIP: "127.0.0.1",
 		BindAddr: "127.0.0.1",
 		BindPort: port,
-		Issuer:   iss,
+		// The end-to-end test relays between loopback clients, which the
+		// default private-peer filter denies; opt in like a trusted self-host.
+		AllowPrivatePeers: true,
+		Issuer:            iss,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = srv.Close() })

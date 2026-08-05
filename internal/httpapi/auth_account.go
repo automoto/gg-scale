@@ -60,10 +60,12 @@ func registerAuthAccountRoutes(api huma.API, d Deps) {
 }
 
 // playerCredentials reads the caller's stored password hash (nil for
-// anonymous / platform-only players).
+// anonymous / platform-only players). Reads the primary: this feeds
+// re-authentication decisions, and a lagging replica could accept a
+// just-replaced password or miss a just-linked one.
 func playerCredentials(ctx context.Context, d Deps, me int64) (sqlcgen.GetPlayerAuthCredentialsRow, error) {
 	var row sqlcgen.GetPlayerAuthCredentialsRow
-	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		var qerr error
 		row, qerr = sqlcgen.New(tx).GetPlayerAuthCredentials(ctx, me)
 		return qerr

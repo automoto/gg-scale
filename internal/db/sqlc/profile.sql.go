@@ -52,6 +52,29 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (GetProfileRow, erro
 	return i, err
 }
 
+const getProfileEmailState = `-- name: GetProfileEmailState :one
+SELECT email, email_verified_at, email_verification_last_sent_at
+FROM project_players
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+type GetProfileEmailStateRow struct {
+	Email                       *string
+	EmailVerifiedAt             pgtype.Timestamptz
+	EmailVerificationLastSentAt pgtype.Timestamptz
+}
+
+// Feeds the PATCH /v1/profile email guard: is the address changing, is it
+// already verified, and when did the last code go out (resend cooldown).
+func (q *Queries) GetProfileEmailState(ctx context.Context, id int64) (GetProfileEmailStateRow, error) {
+	row := q.db.QueryRow(ctx, getProfileEmailState, id)
+	var i GetProfileEmailStateRow
+	err := row.Scan(&i.Email, &i.EmailVerifiedAt, &i.EmailVerificationLastSentAt)
+	return i, err
+}
+
 const updateProfileEmail = `-- name: UpdateProfileEmail :exec
 UPDATE project_players
 SET email                           = $2,

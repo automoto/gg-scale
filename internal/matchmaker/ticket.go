@@ -287,6 +287,12 @@ var ErrAlreadyTerminal = errors.New("matchmaker: ticket already finalised")
 // is allowed; the caller must cancel it before opening another.
 var ErrTicketActive = errors.New("matchmaker: player already has an active ticket")
 
+// ErrTooManyUnclaimedAllocations is returned by Enqueue when a fleet_allocation
+// ticket would push the player past the per-player cap on concurrent unclaimed
+// dedicated-server allocations. Bounds the enqueue -> matched -> abandon loop
+// that would otherwise hoard fleet servers until the match TTL GC.
+var ErrTooManyUnclaimedAllocations = errors.New("matchmaker: too many unclaimed fleet allocations")
+
 // TicketActiveError wraps ErrTicketActive with the id of the ticket already
 // queued so the API can point the player at the ticket to cancel. errors.Is
 // against ErrTicketActive matches; errors.As recovers ActiveTicketID.

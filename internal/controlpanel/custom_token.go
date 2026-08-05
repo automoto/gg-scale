@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ggscale/ggscale/internal/customtoken"
+	"github.com/ggscale/ggscale/internal/db"
 	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
 	"github.com/ggscale/ggscale/internal/rbac"
 	"github.com/ggscale/ggscale/internal/webutil"
@@ -91,8 +92,12 @@ func (h *Handler) renderCustomTokenKeyError(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) updateCustomTokenKey(ctx context.Context, tenantID int64, pemKey string) error {
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		rows, err := sqlcgen.New(tx).UpdateTenantCustomTokenPublicKey(ctx, sqlcgen.UpdateTenantCustomTokenPublicKeyParams{
+	// tenants RLS only admits UPDATEs under the tenant GUC (the bootstrap
+	// policy is SELECT-only), so run in the tenant's scope like the tier
+	// handler does.
+	tctx := db.WithTenant(ctx, tenantID)
+	return h.pool.Q(tctx, func(tx pgx.Tx) error {
+		rows, err := sqlcgen.New(tx).UpdateTenantCustomTokenPublicKey(tctx, sqlcgen.UpdateTenantCustomTokenPublicKeyParams{
 			PublicKey: pemKey,
 			TenantID:  tenantID,
 		})

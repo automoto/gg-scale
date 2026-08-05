@@ -139,6 +139,12 @@ func (h *Handler) resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		if qerr := q.RevokeAllControlPanelSessionsForUser(r.Context(), userID); qerr != nil {
 			return qerr
 		}
+		// A password change is exactly when remembered devices should stop
+		// skipping the 2FA challenge — a stale trusted-device cookie must not
+		// survive a reset triggered by a compromised inbox.
+		if qerr := q.DeleteControlPanelTrustedDevicesForUser(r.Context(), userID); qerr != nil {
+			return qerr
+		}
 		if qerr := q.InvalidateControlPanelPasswordResets(r.Context(), userID); qerr != nil {
 			return qerr
 		}

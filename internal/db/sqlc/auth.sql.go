@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearPlayerPasswordResetLock = `-- name: ClearPlayerPasswordResetLock :exec
+UPDATE project_players
+SET password_reset_lifetime_attempts = 0,
+    password_reset_locked_until      = NULL
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+`
+
+// Runs when a confirm attempt arrives after the lockout expired: the lockout
+// window is over, so the lifetime budget restarts with it.
+func (q *Queries) ClearPlayerPasswordResetLock(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, clearPlayerPasswordResetLock, id)
+	return err
+}
+
 const clearPlayerVerificationCode = `-- name: ClearPlayerVerificationCode :exec
 UPDATE project_players
 SET email_verification_code_hash    = NULL,
@@ -26,29 +41,54 @@ func (q *Queries) ClearPlayerVerificationCode(ctx context.Context, id int64) err
 	return err
 }
 
-const completePlayerPasswordReset = `-- name: CompletePlayerPasswordReset :exec
+const clearPlayerVerificationLock = `-- name: ClearPlayerVerificationLock :exec
+UPDATE project_players
+SET email_verification_lifetime_attempts = 0,
+    email_verification_locked_until      = NULL
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+`
+
+// The ClearPlayerPasswordResetLock twin for email verification.
+func (q *Queries) ClearPlayerVerificationLock(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, clearPlayerVerificationLock, id)
+	return err
+}
+
+const completePlayerPasswordReset = `-- name: CompletePlayerPasswordReset :execrows
 UPDATE project_players
 SET password_hash                    = $1,
     password_reset_code_hash         = NULL,
     password_reset_salt              = NULL,
     password_reset_expires_at        = NULL,
     password_reset_attempts          = 0,
+    password_reset_lifetime_attempts = 0,
+    password_reset_locked_until      = NULL,
     session_epoch                    = session_epoch + 1
 WHERE id = $2
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND password_reset_code_hash = $3
   AND deleted_at IS NULL
 `
 
 type CompletePlayerPasswordResetParams struct {
 	PasswordHash []byte
 	ID           int64
+	CodeHash     []byte
 }
 
 // Sets the new password, clears the challenge, and bumps the session epoch so
 // every outstanding access token (possibly an attacker's) dies immediately.
-func (q *Queries) CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) error {
-	_, err := q.db.Exec(ctx, completePlayerPasswordReset, arg.PasswordHash, arg.ID)
-	return err
+// A proven reset also restarts the lifetime budget and drops any lockout:
+// the caller just demonstrated control of the inbox. The code_hash condition
+// pins completion to the exact challenge the caller validated — 0 rows means
+// a concurrent re-request replaced it and the code no longer counts.
+func (q *Queries) CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completePlayerPasswordReset, arg.PasswordHash, arg.ID, arg.CodeHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const createAnonymousPlayer = `-- name: CreateAnonymousPlayer :one
@@ -529,15 +569,19 @@ func (q *Queries) LockPlayerVerification(ctx context.Context, arg LockPlayerVeri
 
 const markPlayerVerified = `-- name: MarkPlayerVerified :exec
 UPDATE project_players
-SET email_verified_at               = now(),
-    email_verification_code_hash    = NULL,
-    email_verification_salt         = NULL,
-    email_verification_expires_at   = NULL,
-    email_verification_attempts     = 0
+SET email_verified_at                    = now(),
+    email_verification_code_hash         = NULL,
+    email_verification_salt              = NULL,
+    email_verification_expires_at        = NULL,
+    email_verification_attempts          = 0,
+    email_verification_lifetime_attempts = 0,
+    email_verification_locked_until      = NULL
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
 `
 
+// A proven verification also restarts the lifetime budget and drops any
+// lockout, mirroring CompletePlayerPasswordReset.
 func (q *Queries) MarkPlayerVerified(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markPlayerVerified, id)
 	return err

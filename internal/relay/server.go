@@ -37,6 +37,12 @@ type ServerConfig struct {
 	// player so one credential can't monopolise the global pool. <=0 disables.
 	PlayerAllocPerMinute int
 	PlayerAllocBurst     int
+	// AllowPrivatePeers lets clients relay to loopback/RFC1918/link-local/ULA
+	// peer addresses. Default false: the relay refuses to proxy into private
+	// space, so a valid credential can't turn the node into an SSRF hop to
+	// internal services. Set true only for a self-host relay that legitimately
+	// bridges private peers on a trusted network.
+	AllowPrivatePeers bool
 	// Logger receives the pion server's internal events; nil uses slog.Default.
 	Logger *slog.Logger
 	Issuer *Issuer
@@ -52,6 +58,7 @@ type Server struct {
 	playerLimiter  *playerAllocLimiter
 	authFailures   atomic.Int64
 	allocThrottled atomic.Int64
+	peerRejected   atomic.Int64
 }
 
 // NewServer binds the configured listeners and starts the underlying pion
@@ -94,9 +101,21 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("relay: bind udp %s:%d: %w", bindAddr, bindPort, err)
 	}
 	s.conns = append(s.conns, conn)
-	packetConns := []pionturn.PacketConnConfig{{PacketConn: conn, RelayAddressGenerator: s.alloc}}
+	permission := s.permissionHandler(cfg.AllowPrivatePeers)
+	if cfg.AllowPrivatePeers {
+		logger := cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("relay: private peer addresses are allowed; the relay can proxy UDP to loopback/RFC1918/link-local peers")
+	}
+	packetConns := []pionturn.PacketConnConfig{{
+		PacketConn:            conn,
+		RelayAddressGenerator: s.alloc,
+		PermissionHandler:     permission,
+	}}
 
-	listenerConfigs, err := s.buildTCPListeners(cfg, bindAddr, s.alloc)
+	listenerConfigs, err := s.buildTCPListeners(cfg, bindAddr, s.alloc, permission)
 	if err != nil {
 		_ = s.closeListeners()
 		return nil, err
@@ -136,7 +155,7 @@ func relayGenerator(ip net.IP, bindAddr string, minPort, maxPort int) pionturn.R
 // buildTCPListeners opens the optional TURN/TCP and TURNS/TLS listeners,
 // registering each with the shared relay-address generator. Opened listeners
 // are tracked on s so a later failure can release them.
-func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen pionturn.RelayAddressGenerator) ([]pionturn.ListenerConfig, error) {
+func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen pionturn.RelayAddressGenerator, permission pionturn.PermissionHandler) ([]pionturn.ListenerConfig, error) {
 	var configs []pionturn.ListenerConfig
 
 	if cfg.TCPPort != 0 {
@@ -145,7 +164,7 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tcp %s:%d: %w", bindAddr, cfg.TCPPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen})
+		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
 	if cfg.TLSPort != 0 {
@@ -161,10 +180,40 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tls %s:%d: %w", bindAddr, cfg.TLSPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen})
+		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
 	return configs, nil
+}
+
+// permissionHandler returns the pion PermissionHandler that filters
+// CreatePermission/ChannelBind peer addresses. With allowPrivate false (the
+// default) it refuses loopback, RFC1918, ULA, link-local, unspecified, and
+// interface-local peers, so a valid relay credential cannot proxy UDP into
+// private space. allowPrivate true admits everything (opt-in for trusted
+// self-host bridging).
+func (s *Server) permissionHandler(allowPrivate bool) pionturn.PermissionHandler {
+	return func(_ net.Addr, peerIP net.IP) bool {
+		if allowPrivate {
+			return true
+		}
+		if peerIP == nil || isPrivatePeer(peerIP) {
+			s.peerRejected.Add(1)
+			return false
+		}
+		return true
+	}
+}
+
+// isPrivatePeer reports whether peerIP is an address the relay must not proxy
+// to when private peers are disallowed.
+func isPrivatePeer(peerIP net.IP) bool {
+	return peerIP.IsLoopback() ||
+		peerIP.IsPrivate() ||
+		peerIP.IsLinkLocalUnicast() ||
+		peerIP.IsLinkLocalMulticast() ||
+		peerIP.IsInterfaceLocalMulticast() ||
+		peerIP.IsUnspecified()
 }
 
 // Close stops the TURN server and releases every listener.
@@ -219,16 +268,22 @@ func (s *Server) authHandler(iss *Issuer) pionturn.AuthHandler {
 			s.authFailures.Add(1)
 			return nil, false
 		}
+		// Resolve the HMAC password (selects the secret by the username's key
+		// id) BEFORE touching the per-player limiter. A username carrying an
+		// unknown key id is rejected here without allocating a limiter bucket,
+		// so a credential-less flood cannot grow the bucket map. The key id is
+		// derived from a server-side secret, so an attacker with no issued
+		// credential cannot forge a matching one.
+		pw, ok := iss.passwordForAuth(username)
+		if !ok {
+			s.authFailures.Add(1)
+			return nil, false
+		}
 		// Per-player throttle: a single credential can't flood the node with
 		// allocations and starve the global pool. A legit client's op rate is
 		// far below this; a flood is answered 401 with no allocation created.
 		if !s.playerLimiter.allow(tenantID, playerID) {
 			s.allocThrottled.Add(1)
-			return nil, false
-		}
-		pw, ok := iss.passwordForAuth(username)
-		if !ok {
-			s.authFailures.Add(1)
 			return nil, false
 		}
 		return pionturn.GenerateAuthKey(username, realm, pw), true
@@ -258,3 +313,8 @@ func (s *Server) AuthFailures() int64 { return s.authFailures.Load() }
 // AllocThrottled reports the cumulative count of authenticated TURN ops refused
 // by the per-player rate limit.
 func (s *Server) AllocThrottled() int64 { return s.allocThrottled.Load() }
+
+// PeerRejected reports the cumulative count of CreatePermission/ChannelBind
+// attempts refused because the peer address was private and private peers are
+// disallowed.
+func (s *Server) PeerRejected() int64 { return s.peerRejected.Load() }

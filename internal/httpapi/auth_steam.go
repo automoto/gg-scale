@@ -52,7 +52,9 @@ func registerAuthSteam(api huma.API, d Deps) {
 func verifySteamTicketForProject(ctx context.Context, d Deps, projectID int64, ticket string) (steamauth.Result, error) {
 	var appID string
 	var webAPIKey []byte
-	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
+	// Primary read: this is an authentication gate — clearing or rotating
+	// the Steam config must take effect immediately, not after replication.
+	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		cfg, qerr := sqlcgen.New(tx).GetProjectSteamAuthConfig(ctx, projectID)
 		if qerr != nil {
 			return qerr

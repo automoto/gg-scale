@@ -188,6 +188,7 @@ func runRelayCommand() error {
 		MaxAllocations:       rc.MaxAllocations,
 		PlayerAllocPerMinute: rc.PlayerAllocPerMinute,
 		PlayerAllocBurst:     rc.PlayerAllocBurst,
+		AllowPrivatePeers:    rc.AllowPrivatePeers,
 		Logger:               logger,
 		Issuer:               issuer,
 	})
@@ -480,6 +481,7 @@ func run() error {
 				MaxAllocations:       cfg.RelayMaxAllocations,
 				PlayerAllocPerMinute: cfg.RelayPlayerAllocPerMinute,
 				PlayerAllocBurst:     cfg.RelayPlayerAllocBurst,
+				AllowPrivatePeers:    cfg.RelayAllowPrivatePeers,
 				Logger:               logger,
 				Issuer:               relayIssuer,
 			})
@@ -531,7 +533,8 @@ func run() error {
 		}
 	}
 
-	mmQueue := matchmaker.NewPGQueue(appPool).WithFailureRecorder(metrics)
+	mmQueue := matchmaker.NewPGQueue(appPool).WithFailureRecorder(metrics).
+		WithMaxUnclaimedFleetAllocations(cfg.MatchmakerMaxUnclaimedFleetAllocs)
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()

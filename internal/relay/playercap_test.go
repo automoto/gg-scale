@@ -30,6 +30,24 @@ func TestPlayerAllocLimiterThrottlesFloodPerPlayer(t *testing.T) {
 	assert.False(t, lim.allow(1, 100))
 }
 
+func TestPlayerAllocLimiterCapsBucketMap(t *testing.T) {
+	now := time.Unix(1000, 0)
+	// High rate/burst so the map cap, not the token bucket, is what bites.
+	lim := newPlayerAllocLimiter(60000, 1000)
+	lim.now = func() time.Time { return now }
+	lim.maxBuckets = 3
+
+	assert.True(t, lim.allow(1, 1))
+	assert.True(t, lim.allow(1, 2))
+	assert.True(t, lim.allow(1, 3))
+	assert.False(t, lim.allow(1, 4), "a new subject beyond the map cap is refused")
+	assert.Len(t, lim.buckets, 3, "the map does not grow past the cap")
+
+	// A subject already tracked keeps working even while the map is full.
+	assert.True(t, lim.allow(1, 1))
+	assert.Len(t, lim.buckets, 3)
+}
+
 func TestPlayerAllocLimiterDisabled(t *testing.T) {
 	assert.Nil(t, newPlayerAllocLimiter(0, 20), "zero rate disables")
 	assert.Nil(t, newPlayerAllocLimiter(6, 0), "zero burst disables")

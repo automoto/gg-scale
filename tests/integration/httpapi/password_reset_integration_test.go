@@ -3,6 +3,7 @@
 package httpapi_test
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/url"
@@ -169,6 +170,81 @@ func TestForgotPassword_control_panel_full_flow(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 	assert.Equal(t, http.StatusGone, resp.StatusCode, "outstanding links must be invalidated by a reset")
+}
+
+func TestControlPanelReset_revokes_trusted_devices(t *testing.T) {
+	c := startCluster(t)
+	userID := seedControlPanelUser(t, c, "cp-td@example.com", "old-password-123", false)
+	srv, rec := newControlPanelAndPlayerServerWithLimiter(t, c, controlpanel.Config{
+		Mount:    true,
+		BaseURL:  "http://app.example.test",
+		MailFrom: "no-reply@example.test",
+	}, branchAllowAllLimiter{})
+
+	// A remembered device that must stop skipping 2FA once the password resets.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO control_panel_trusted_devices (control_panel_user_id, token_hash, expires_at)
+		 VALUES ($1, $2, now() + interval '30 days')`, userID, []byte("cp-trusted-hash"))
+	require.NoError(t, err)
+
+	resp, err := http.PostForm(srv.URL+"/v1/control-panel/forgot-password",
+		url.Values{"email": {"cp-td@example.com"}})
+	require.NoError(t, err)
+	resp.Body.Close()
+	sent := waitForSentCount(t, rec, 1)
+	token := tokenFromLink(t, resetLinkFromBody(t, sent[0].Body, "/v1/control-panel/reset-password"))
+
+	resp, err = http.PostForm(srv.URL+"/v1/control-panel/reset-password",
+		url.Values{"token": {token}, "password": {"brand-new-password-1"}})
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var n int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM control_panel_trusted_devices WHERE control_panel_user_id = $1`, userID).Scan(&n))
+	assert.Zero(t, n, "a password reset must revoke remembered 2FA devices")
+}
+
+func TestPlayerAccountReset_revokes_trusted_devices(t *testing.T) {
+	c := startCluster(t)
+	srv, rec := newControlPanelAndPlayerServerWithLimiter(t, c, controlpanel.Config{
+		Mount:    true,
+		BaseURL:  "http://app.example.test",
+		MailFrom: "no-reply@example.test",
+	}, branchAllowAllLimiter{})
+	seedVerifiedPlayerAccount(t, c, "acct-td@example.com", "old-account-pass1")
+
+	var accountID string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT id::text FROM player_accounts WHERE email = $1`, "acct-td@example.com").Scan(&accountID))
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO player_account_trusted_devices (player_account_id, token_hash, expires_at)
+		 VALUES ($1::uuid, $2, now() + interval '30 days')`, accountID, []byte("pa-trusted-hash"))
+	require.NoError(t, err)
+
+	account := playerAccountClient(t, srv.URL, "acct-td@example.com", "old-account-pass1")
+	status, forgotPage := getPage(t, account, srv.URL+"/v1/players/account/forgot-password")
+	require.Equal(t, http.StatusOK, status)
+	csrf := extractCSRFFromForm(t, forgotPage)
+	status, _ = postAccountForm(t, account, srv.URL+"/v1/players/account/forgot-password",
+		url.Values{"_csrf": {csrf}, "email": {"acct-td@example.com"}})
+	require.Equal(t, http.StatusOK, status)
+	sent := waitForSentCount(t, rec, 1)
+	link := resetLinkFromBody(t, sent[0].Body, "/v1/players/account/reset-password")
+	token := tokenFromLink(t, link)
+
+	status, formPage := getPage(t, account, srv.URL+link)
+	require.Equal(t, http.StatusOK, status, formPage)
+	resetCSRF := extractCSRFFromForm(t, formPage)
+	status, done := postAccountForm(t, account, srv.URL+"/v1/players/account/reset-password",
+		url.Values{"_csrf": {resetCSRF}, "token": {token}, "password": {"new-account-pass1"}})
+	require.Equal(t, http.StatusOK, status, done)
+
+	var n int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM player_account_trusted_devices WHERE player_account_id = $1::uuid`, accountID).Scan(&n))
+	assert.Zero(t, n, "a password reset must revoke remembered 2FA devices")
 }
 
 func TestForgotPassword_player_account_full_flow(t *testing.T) {

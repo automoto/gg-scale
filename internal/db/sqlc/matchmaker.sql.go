@@ -276,6 +276,28 @@ func (q *Queries) CountMatchmakerMatchesByMode(ctx context.Context, projectID in
 	return items, nil
 }
 
+const countPlayerLiveFleetAllocations = `-- name: CountPlayerLiveFleetAllocations :one
+SELECT count(*)::bigint AS live
+FROM matchmaker_matches
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND mode = 'fleet_allocation'
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+  AND expires_at > now()
+  AND roster @> jsonb_build_array(jsonb_build_object('player_id', $1::bigint))
+`
+
+// Unclaimed, unexpired fleet-allocation matches this player still holds. The
+// per-player cap counts these at enqueue time so a player can't loop
+// enqueue -> matched -> abandon to hoard dedicated servers until the 24h GC.
+// Fleet matches carry no host, so the player is found via the roster.
+func (q *Queries) CountPlayerLiveFleetAllocations(ctx context.Context, playerID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countPlayerLiveFleetAllocations, playerID)
+	var live int64
+	err := row.Scan(&live)
+	return live, err
+}
+
 const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
 DELETE FROM matchmaker_matches
 WHERE expires_at < now()

@@ -9,6 +9,15 @@ WHERE p.id = $1
   AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND p.deleted_at IS NULL;
 
+-- name: GetProfileEmailState :one
+-- Feeds the PATCH /v1/profile email guard: is the address changing, is it
+-- already verified, and when did the last code go out (resend cooldown).
+SELECT email, email_verified_at, email_verification_last_sent_at
+FROM project_players
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
 -- name: UpdateProfileXuid :exec
 -- Self-set secondary identifier. NULL clears it. The unique partial index
 -- on (project_id, xuid) rejects collisions with a constraint violation.

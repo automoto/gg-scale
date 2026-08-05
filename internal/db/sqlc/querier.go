@@ -59,7 +59,12 @@ type Querier interface {
 	// late poll from reviving an allocation after the GC lease has elapsed.
 	ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	ClearControlPanelVerificationCode(ctx context.Context, id int64) error
+	// Runs when a confirm attempt arrives after the lockout expired: the lockout
+	// window is over, so the lifetime budget restarts with it.
+	ClearPlayerPasswordResetLock(ctx context.Context, id int64) error
 	ClearPlayerVerificationCode(ctx context.Context, id int64) error
+	// The ClearPlayerPasswordResetLock twin for email verification.
+	ClearPlayerVerificationLock(ctx context.Context, id int64) error
 	ClearProjectSteamAuthConfig(ctx context.Context, projectID int64) (int64, error)
 	// Flip the given still-queued tickets holding this claim_id to 'matched'
 	// and stamp the match id, address + protocol. Rows that drifted (cancelled,
@@ -68,7 +73,11 @@ type Querier interface {
 	CommitMatchmakerTickets(ctx context.Context, arg CommitMatchmakerTicketsParams) (int64, error)
 	// Sets the new password, clears the challenge, and bumps the session epoch so
 	// every outstanding access token (possibly an attacker's) dies immediately.
-	CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) error
+	// A proven reset also restarts the lifetime budget and drops any lockout:
+	// the caller just demonstrated control of the inbox. The code_hash condition
+	// pins completion to the exact challenge the caller validated — 0 rows means
+	// a concurrent re-request replaced it and the code no longer counts.
+	CompletePlayerPasswordReset(ctx context.Context, arg CompletePlayerPasswordResetParams) (int64, error)
 	// last_used_step records the enrollment code's timestep so the same code
 	// cannot be replayed at the first login challenge.
 	ConfirmControlPanelTOTP(ctx context.Context, arg ConfirmControlPanelTOTPParams) (int64, error)
@@ -108,6 +117,11 @@ type Querier interface {
 	// tenant. Gates joining/resolving a private session by a non-member.
 	CountPendingGameInviteForSessionPlayer(ctx context.Context, arg CountPendingGameInviteForSessionPlayerParams) (int64, error)
 	CountPlayerAccountTOTPBackupCodesRemaining(ctx context.Context, playerAccountID pgtype.UUID) (int64, error)
+	// Unclaimed, unexpired fleet-allocation matches this player still holds. The
+	// per-player cap counts these at enqueue time so a player can't loop
+	// enqueue -> matched -> abandon to hoard dedicated servers until the 24h GC.
+	// Fleet matches carry no host, so the player is found via the roster.
+	CountPlayerLiveFleetAllocations(ctx context.Context, playerID int64) (int64, error)
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
@@ -339,6 +353,11 @@ type Querier interface {
 	// their period number.
 	GetLeaderboard(ctx context.Context, arg GetLeaderboardParams) (GetLeaderboardRow, error)
 	GetLeaderboardForControlPanel(ctx context.Context, arg GetLeaderboardForControlPanelParams) (GetLeaderboardForControlPanelRow, error)
+	// The submit-path twin of GetLeaderboard. FOR KEY SHARE conflicts with the
+	// reset job's FOR UPDATE (ListDueLeaderboardResets), so a submission blocks
+	// on an in-flight reset and re-reads the advanced period instead of writing
+	// into the just-archived one. Concurrent submissions do not block each other.
+	GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboardForSubmitParams) (GetLeaderboardForSubmitRow, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	GetPlayerAccountByEmail(ctx context.Context, email string) (GetPlayerAccountByEmailRow, error)
@@ -405,6 +424,9 @@ type Querier interface {
 	// display_name lives on the linked global account; NULL for anonymous /
 	// unlinked players.
 	GetProfile(ctx context.Context, id int64) (GetProfileRow, error)
+	// Feeds the PATCH /v1/profile email guard: is the address changing, is it
+	// already verified, and when did the last code go out (resend cooldown).
+	GetProfileEmailState(ctx context.Context, id int64) (GetProfileEmailStateRow, error)
 	// Runtime read for the Steam sign-in endpoint, tenant-scoped via RLS GUC.
 	GetProjectSteamAuthConfig(ctx context.Context, projectID int64) (GetProjectSteamAuthConfigRow, error)
 	// Control-panel read: reports whether a key is stored, never its value.
@@ -665,6 +687,8 @@ type Querier interface {
 	MarkControlPanelUserVerified(ctx context.Context, id int64) error
 	MarkPlayerAccountVerified(ctx context.Context, id pgtype.UUID) error
 	MarkPlayerInvitationAccepted(ctx context.Context, id int64) error
+	// A proven verification also restarts the lifetime budget and drops any
+	// lockout, mirroring CompletePlayerPasswordReset.
 	MarkPlayerVerified(ctx context.Context, id int64) error
 	MarkPlayerVerifiedByID(ctx context.Context, id int64) error
 	// Claims the right to send the single 100% warning email for this month.
