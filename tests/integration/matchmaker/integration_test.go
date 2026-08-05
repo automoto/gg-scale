@@ -4,6 +4,7 @@ package matchmaker_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -702,4 +703,149 @@ func TestPGQueueGameSessionModeCreatesJoinableSession(t *testing.T) {
 	assert.Equal(t, 2, maxPlayers, "session sized to roster")
 	assert.True(t, private, "matchmade sessions admit only the roster")
 	assert.Equal(t, 2, peerCount, "both players pre-seeded as members")
+}
+
+// countLiveUnclaimedAllocs returns the fleet matches that still count against a
+// player's per-player cap: allocated, unclaimed and unexpired.
+func countLiveUnclaimedAllocs(t *testing.T, pool *pgxpool.Pool, tenantID, playerID int64) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM matchmaker_matches
+		 WHERE tenant_id = $1 AND mode = 'fleet_allocation'
+		   AND allocation_id IS NOT NULL AND claimed_at IS NULL AND expires_at > now()
+		   AND roster @> jsonb_build_array(jsonb_build_object('player_id', $2::bigint))`,
+		tenantID, playerID).Scan(&n))
+	return n
+}
+
+// A match row is written before its tickets commit. When the commit finds no
+// rows the backend server is released, but the row itself keeps counting
+// against the player's cap for the whole match TTL — a day by default — so a
+// player who cancels at the wrong instant locks themselves out while holding
+// nothing. The row must go as soon as the server is released.
+func TestPGQueueDriftedCommitDoesNotStrandCapSlot(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID, playerID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-cap-drift') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-cap-drift') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+
+	queue := matchmaker.NewPGQueue(appPool)
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.9:7777", protocol: "udp"}
+	w := matchmaker.NewWorker(queue, &slowAllocator{inner: alloc, delay: 250 * time.Millisecond}, nil, matchmaker.WorkerConfig{})
+
+	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+		PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
+	})
+	require.NoError(t, err)
+
+	// Cancel while the worker is inside Allocate. Claiming leaves the ticket
+	// 'queued', so the cancel succeeds, and the later commit affects no rows.
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = queue.Cancel(tenantCtx, ticket.ID, playerID)
+	}()
+
+	// The worker allocates, writes the match row, then finds nothing to commit.
+	_ = w.Tick(ctx)
+
+	require.Eventually(t, func() bool { return alloc.deallocated.Load() >= 1 }, 5*time.Second, 20*time.Millisecond,
+		"the orphan server should be released")
+	assert.Eventually(t, func() bool { return countLiveUnclaimedAllocs(t, pool, tenantID, playerID) == 0 },
+		5*time.Second, 20*time.Millisecond,
+		"a drifted commit must not leave a row consuming a cap slot")
+}
+
+// The enqueue-time cap check counts committed matches only, and the worker
+// inserts its match in a later transaction. Two tickets enqueued around an
+// in-flight allocation must still not put the player over the cap.
+func TestPGQueueFleetCapHoldsAcrossConcurrentWorkers(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-cap-race') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`,
+		tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+
+	var playerID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id)
+		 VALUES ($1, $2, 'player-cap-race') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+
+	const cap = 2
+	queue := matchmaker.NewPGQueue(appPool).WithMaxUnclaimedFleetAllocations(cap)
+	tenantCtx := db.WithTenant(ctx, tenantID)
+	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.10:7777", protocol: "udp"}
+
+	// Each pass: enqueue one ticket and let a worker allocate and commit it.
+	// Past the cap the ticket must be refused, and the live count must never
+	// exceed it no matter how many passes run.
+	for range cap + 3 {
+		_, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
+			TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+			PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
+		})
+		if errors.Is(err, matchmaker.ErrTooManyUnclaimedAllocations) {
+			continue
+		}
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+		for range 3 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				w := matchmaker.NewWorker(queue, alloc, nil, matchmaker.WorkerConfig{})
+				_ = w.Tick(ctx)
+			}()
+		}
+		wg.Wait()
+
+		assert.LessOrEqual(t, countLiveUnclaimedAllocs(t, pool, tenantID, playerID), cap,
+			"live unclaimed allocations must never exceed the configured cap")
+	}
+
+	assert.Equal(t, cap, countLiveUnclaimedAllocs(t, pool, tenantID, playerID),
+		"the player should settle exactly at the cap")
+}
+
+// slowAllocator delays Allocate so a test can land a cancel inside the window
+// between the bucket claim and the ticket commit.
+type slowAllocator struct {
+	inner *allocatorRecorder
+	delay time.Duration
+}
+
+func (s *slowAllocator) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
+	time.Sleep(s.delay)
+	return s.inner.Allocate(ctx, req)
+}
+
+func (s *slowAllocator) Deallocate(ctx context.Context, id fleet.AllocationID) error {
+	return s.inner.Deallocate(ctx, id)
 }

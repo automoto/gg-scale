@@ -345,6 +345,23 @@ WHERE id = sqlc.arg(id)
   AND claimed_at IS NULL
   AND expires_at < now();
 
+-- name: LockPlayerForFleetAllocation :exec
+-- Transaction-scoped advisory lock serializing the per-player fleet-allocation
+-- cap. The enqueue check and the worker's match insert are separate
+-- transactions, so without it a ticket enqueued while an earlier one is still
+-- allocating counts a stale total and both commit. Released on commit/rollback.
+SELECT pg_advisory_xact_lock(hashtextextended('fleet_alloc_cap', sqlc.arg('player_id')));
+
+-- name: DeleteUnclaimedMatchmakerMatch :execrows
+-- Drop a match whose tickets never committed, once its backend server has been
+-- released. Same guards as the GC delete above minus the expiry, because this
+-- runs immediately rather than waiting out the match TTL: until the row is
+-- gone it still counts against the player's live-allocation cap.
+DELETE FROM matchmaker_matches
+WHERE id = sqlc.arg(id)
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL;
+
 -- name: DeleteExpiredMatchmakerMatches :execrows
 -- Drop expired matches that do not need allocation cleanup. Unclaimed fleet
 -- matches stay until the backend deallocation above succeeds.

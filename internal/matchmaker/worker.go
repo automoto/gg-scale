@@ -677,6 +677,13 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 	match.AllocationID = alloc.ID
 	if err := w.queue.CreateMatch(tenantCtx, match); err != nil {
 		w.deallocateOrphan(tenantCtx, alloc, "match setup failed")
+		// The insert re-checks the per-player allocation cap, which Enqueue
+		// could only check against a stale count. Hitting it here is a
+		// transient "already holding enough servers", not a broken ticket, so
+		// return the group penalty-free instead of spending an attempt.
+		if errors.Is(err, ErrTooManyUnclaimedAllocations) {
+			return w.returnOnCapacity(ctx, claim, group, err)
+		}
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("create match: %w", err))
 	}
 
@@ -685,16 +692,16 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 	case errors.Is(err, ErrShortCommit):
 		// A member drifted after the claim. Reclaim the orphan server and
 		// return the survivors penalty-free so they rematch next pass.
-		w.deallocateOrphan(tenantCtx, alloc, "short commit")
+		w.discardOrphanMatch(tenantCtx, alloc, match.ID, "short commit")
 		return w.returnAfterShortCommit(ctx, claim, group)
 	case err != nil:
-		w.deallocateOrphan(tenantCtx, alloc, "commit error")
+		w.discardOrphanMatch(tenantCtx, alloc, match.ID, "commit error")
 		// Release through the attempt counter instead of letting the group
 		// be un-claimed penalty-free; otherwise a recurring commit error
 		// re-allocates and re-fails forever, churning fleet servers.
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("commit tickets: %w", err))
 	case committed == 0:
-		w.deallocateOrphan(tenantCtx, alloc, "claim drifted")
+		w.discardOrphanMatch(tenantCtx, alloc, match.ID, "claim drifted")
 		return nil
 	}
 	if w.cfg.MatchCounter != nil {
@@ -745,16 +752,35 @@ func (w *Worker) newMatch(b Bucket, tickets []*Ticket) (*Match, error) {
 
 // deallocateOrphan releases an allocation we made but couldn't bind to any
 // ticket. Runs on context.Background() so a cancelled request doesn't strand
-// the resource. Errors are logged; nothing else we can do.
-func (w *Worker) deallocateOrphan(ctx context.Context, alloc *fleet.Allocation, reason string) {
+// the resource. Reports whether the backend released it; errors are logged.
+func (w *Worker) deallocateOrphan(ctx context.Context, alloc *fleet.Allocation, reason string) bool {
 	cleanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if err := w.alloc.Deallocate(cleanCtx, alloc.ID); err != nil {
 		w.log.Warn("matchmaker: orphan deallocate failed",
 			"reason", reason, "allocation_id", alloc.ID, "err", err)
-		return
+		return false
 	}
 	w.log.Info("matchmaker: orphan allocation released", "reason", reason, "allocation_id", alloc.ID)
+	return true
+}
+
+// discardOrphanMatch releases a server whose tickets never committed and drops
+// the match row written just before the commit. That row is unclaimed and
+// unexpired, so until it is gone it still counts against the player's live
+// fleet-allocation cap — for the whole match TTL. When the backend release
+// fails the row is kept, so GC retries the deallocation and the cap stays
+// conservative in the meantime.
+func (w *Worker) discardOrphanMatch(ctx context.Context, alloc *fleet.Allocation, matchID, reason string) {
+	if !w.deallocateOrphan(ctx, alloc, reason) {
+		return
+	}
+	cleanCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := w.queue.DeleteUnclaimedMatch(cleanCtx, matchID); err != nil {
+		w.log.Warn("matchmaker: orphan match delete failed",
+			"reason", reason, "match_id", matchID, "err", err)
+	}
 }
 
 // matchedEventType is the realtime envelope type for committed matches.

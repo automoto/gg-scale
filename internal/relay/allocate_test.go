@@ -1,6 +1,7 @@
 package relay_test
 
 import (
+	"crypto/tls"
 	"net"
 	"strconv"
 	"strings"
@@ -52,6 +53,39 @@ func newTURNClient(t *testing.T, turnAddr string, creds *relay.Credentials) *tur
 	t.Cleanup(func() {
 		c.Close()
 		_ = conn.Close()
+	})
+	return c
+}
+
+func newTURNStreamClient(t *testing.T, turnAddr string, creds *relay.Credentials, useTLS bool) *turn.Client {
+	t.Helper()
+	var (
+		conn net.Conn
+		err  error
+	)
+	if useTLS {
+		conn, err = tls.Dial("tcp4", turnAddr, &tls.Config{ //nolint:gosec // ephemeral test certificate
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS12,
+		})
+	} else {
+		conn, err = net.Dial("tcp4", turnAddr)
+	}
+	require.NoError(t, err)
+	packetConn := turn.NewSTUNConn(conn)
+	c, err := turn.NewClient(&turn.ClientConfig{
+		TURNServerAddr: turnAddr,
+		Conn:           packetConn,
+		Username:       creds.Username,
+		Password:       creds.Password,
+		Realm:          creds.Realm,
+		LoggerFactory:  logging.NewDefaultLoggerFactory(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, c.Listen())
+	t.Cleanup(func() {
+		c.Close()
+		_ = packetConn.Close()
 	})
 	return c
 }
@@ -136,6 +170,118 @@ func TestRelayRejectsBadPassword(t *testing.T) {
 	client := newTURNClient(t, addr, creds)
 	_, err = client.Allocate()
 	require.Error(t, err)
+}
+
+// A forged request can copy a real username and deliberately send bad
+// MESSAGE-INTEGRITY. It must be rejected before the authenticated subject's
+// allocation budget is charged.
+func TestRelayBadIntegrityCannotDrainVictimLimiter(t *testing.T) {
+	port := unusedUDPPort(t)
+	iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	srv, err := relay.NewServer(relay.ServerConfig{
+		PublicIP:             "127.0.0.1",
+		BindAddr:             "127.0.0.1",
+		BindPort:             port,
+		PlayerAllocPerMinute: 6,
+		PlayerAllocBurst:     1,
+		Issuer:               iss,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srv.Close() })
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	victim, err := iss.Issue(1, 42)
+	require.NoError(t, err)
+	forged := *victim
+	forged.Password = "tampered-password"
+
+	attacker := newTURNClient(t, addr, &forged)
+	_, err = attacker.Allocate()
+	require.Error(t, err)
+	assert.Zero(t, srv.AllocThrottled(), "bad integrity never reaches the limiter")
+
+	client := newTURNClient(t, addr, victim)
+	allocation, err := client.Allocate()
+	require.NoError(t, err, "the forged request did not spend the victim's token")
+	require.NoError(t, allocation.Close())
+	assert.Zero(t, srv.AllocThrottled())
+}
+
+func TestRelayBadIntegrityCannotDrainVictimLimiterOverStreams(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		useTLS bool
+	}{
+		{name: "tcp"},
+		{name: "tls", useTLS: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streamPort := unusedTCPPort(t)
+			iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+			cfg := relay.ServerConfig{
+				PublicIP:             "127.0.0.1",
+				BindAddr:             "127.0.0.1",
+				BindPort:             unusedUDPPort(t),
+				PlayerAllocPerMinute: 6,
+				PlayerAllocBurst:     1,
+				Issuer:               iss,
+			}
+			if tc.useTLS {
+				cfg.TLSPort = streamPort
+				cfg.TLSCertFile, cfg.TLSKeyFile = writeSelfSignedCert(t)
+			} else {
+				cfg.TCPPort = streamPort
+			}
+			srv, err := relay.NewServer(cfg)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = srv.Close() })
+			addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(streamPort))
+
+			victim, err := iss.Issue(1, 42)
+			require.NoError(t, err)
+			forged := *victim
+			forged.Password = "tampered-password"
+
+			attacker := newTURNStreamClient(t, addr, &forged, tc.useTLS)
+			_, err = attacker.Allocate()
+			require.Error(t, err)
+			assert.Zero(t, srv.AllocThrottled(), "bad integrity never reaches the limiter")
+
+			client := newTURNStreamClient(t, addr, victim, tc.useTLS)
+			allocation, err := client.Allocate()
+			require.NoError(t, err, "the forged request did not spend the victim's token")
+			require.NoError(t, allocation.Close())
+			assert.Zero(t, srv.AllocThrottled())
+		})
+	}
+}
+
+func TestRelayAuthenticatedAllocationsReachPlayerLimiter(t *testing.T) {
+	port := unusedUDPPort(t)
+	iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	srv, err := relay.NewServer(relay.ServerConfig{
+		PublicIP:             "127.0.0.1",
+		BindAddr:             "127.0.0.1",
+		BindPort:             port,
+		PlayerAllocPerMinute: 6,
+		PlayerAllocBurst:     1,
+		Issuer:               iss,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = srv.Close() })
+	addr := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+
+	creds, err := iss.Issue(1, 42)
+	require.NoError(t, err)
+	first := newTURNClient(t, addr, creds)
+	allocation, err := first.Allocate()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = allocation.Close() })
+
+	second := newTURNClient(t, addr, creds)
+	_, err = second.Allocate()
+	require.Error(t, err, "the second authenticated allocation exhausts burst one")
+	assert.Positive(t, srv.AllocThrottled(), "post-authentication refusals are counted")
 }
 
 // TestRelayAllocationCapEnforced confirms MaxAllocations bounds concurrent

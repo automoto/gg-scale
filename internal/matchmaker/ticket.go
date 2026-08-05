@@ -259,6 +259,11 @@ type Queue interface {
 	// CreateMatch persists a committed match result. Tenant-scoped: the
 	// worker supplies a tenant context derived from the bucket.
 	CreateMatch(ctx context.Context, m *Match) error
+	// DeleteUnclaimedMatch removes a still-unclaimed match whose tickets
+	// never committed, once its backend server has been released. Without
+	// it the row keeps counting against the player's live-allocation cap
+	// until the match TTL elapses. Tenant-scoped; safe to retry.
+	DeleteUnclaimedMatch(ctx context.Context, id string) error
 	// GetMatch returns the match by id for the tenant on ctx, or
 	// ErrNotFound.
 	GetMatch(ctx context.Context, id string) (*Match, error)

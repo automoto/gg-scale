@@ -55,6 +55,16 @@ func (q *MemQueue) CreateMatch(_ context.Context, m *Match) error {
 	return nil
 }
 
+// DeleteUnclaimedMatch drops an unclaimed match whose tickets never committed.
+func (q *MemQueue) DeleteUnclaimedMatch(_ context.Context, id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if m, ok := q.matches[id]; ok && m.ClaimedAt.IsZero() {
+		delete(q.matches, id)
+	}
+	return nil
+}
+
 // GetMatch returns the match by id for the tenant on ctx.
 func (q *MemQueue) GetMatch(ctx context.Context, id string) (*Match, error) {
 	tenantID, err := tenantFromCtx(ctx)

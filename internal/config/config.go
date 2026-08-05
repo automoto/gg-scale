@@ -139,7 +139,7 @@ type Config struct {
 	// a single credential can't exhaust the port range. 0 = unlimited.
 	RelayMaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"4000"`
 	// RelayPlayerAllocPerMinute/RelayPlayerAllocBurst throttle authenticated
-	// TURN ops per player so one credential can't monopolise the pool. 0 = off.
+	// allocations per player so one credential can't monopolise the pool. 0 = off.
 	RelayPlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
 	RelayPlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
 	// RelayAllowPrivatePeers lets the embedded relay proxy to loopback/RFC1918/

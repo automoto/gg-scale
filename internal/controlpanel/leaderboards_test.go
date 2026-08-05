@@ -63,6 +63,13 @@ func TestParseLeaderboardForm_field_errors(t *testing.T) {
 		{"metadata_not_object", url.Values{"name": {"b"}, "metadata": {`[1,2]`}}, "metadata"},
 		{"metadata_invalid_json", url.Values{"name": {"b"}, "metadata": {`{"a":`}}, "metadata"},
 		{"metadata_oversized", url.Values{"name": {"b"}, "metadata": {`{"pad":"` + strings.Repeat("x", 17<<10) + `"}`}}, "metadata"},
+		// PostgreSQL cannot store NUL in text, and the duplicate-name
+		// translator does not match that error, so an unscreened name renders
+		// a 500 instead of a field error.
+		{"name_with_nul", url.Values{"name": {"we\x00ekly"}}, "name"},
+		{"name_with_control_char", url.Values{"name": {"we\x01ekly"}}, "name"},
+		{"name_invalid_utf8", url.Values{"name": {"weekly\xff"}}, "name"},
+		{"name_overlong", url.Values{"name": {strings.Repeat("x", leaderboardNameMax+1)}}, "name"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

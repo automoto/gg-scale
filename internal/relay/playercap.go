@@ -1,108 +1,108 @@
 package relay
 
 import (
+	"encoding/binary"
+	"hash/maphash"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"golang.org/x/time/rate"
 )
 
-// playerKey identifies a credential subject; the username embeds both, and
-// playerID is only unique within a tenant.
-type playerKey struct {
-	tenant int64
-	player int64
-}
-
-// playerAllocLimiter throttles authenticated TURN operations per player so a
-// single credential can't flood the node with allocations and monopolise the
-// global pool. pion invokes the AuthHandler on every authenticated request
-// (Allocate, Refresh, CreatePermission, ChannelBind), so the bucket is sized
-// well above a legit client's tiny op rate but far below an allocation flood; a
-// throttled request is answered 401 and no allocation is created. Combined with
-// the ~10-minute allocation lifetime, this bounds one credential to roughly
-// rate×lifetime concurrent allocations instead of the entire pool.
+// playerAllocLimiter throttles authenticated TURN allocations per player so one
+// credential cannot flood the node with allocations and monopolise the global
+// pool. The budget is sized well above a real client's tiny operation rate but
+// far below an allocation flood.
 //
-// The relay node holds no database, so state is process-local (per relay VM) —
-// the correct scope, since each VM defends its own port pool. Buckets are held
-// in a bounded map, lazily swept of players idle longer than ttl, and hard-
-// capped at maxBuckets so a flood of distinct forged subjects (an authenticated
-// attacker who has seen one valid key id) cannot grow the map without bound.
+// State is a fixed array of token-bucket cells indexed by a hash of the
+// credential subject. It is allocated once, never grows, needs no eviction,
+// and has no full condition. Two subjects can share a cell and then share a
+// budget, which is acceptable because the budget sits far above a real
+// client's operation rate. A per-instance random seed makes those incidental
+// collisions unpredictable.
+//
+// The relay node holds no database, so this state is process-local (per relay
+// VM) — the correct scope, since each VM defends its own port pool.
 type playerAllocLimiter struct {
-	mu         sync.Mutex
-	buckets    map[playerKey]*playerBucket
-	rate       rate.Limit
-	burst      int
-	ttl        time.Duration
-	maxBuckets int
-	nextSweep  time.Time
-	now        func() time.Time
+	mu    sync.Mutex
+	cells []allocCell
+
+	// rate is tokens per second; burst is the cell ceiling.
+	rate  float64
+	burst float64
+
+	seed      maphash.Seed
+	now       func() time.Time
+	throttled atomic.Int64
 }
 
-// maxPlayerBuckets bounds the limiter map. At ~100 bytes per entry this caps
-// the map near 10 MB per relay VM. Normal operation stays far below it; the cap
-// only bites during an active flood, where new subjects are refused tracking
-// (and thus their TURN op) until the sweep frees idle entries.
-const maxPlayerBuckets = 100_000
+// allocCells is the fixed number of token-bucket cells. At 32 bytes per cell
+// this is 2 MiB per relay VM, allocated once at startup. Sized well above the
+// player count a single relay node serves, so sharing is rare in practice.
+const allocCells = 1 << 16
 
-type playerBucket struct {
-	lim      *rate.Limiter
-	lastSeen time.Time
+// allocCell is one token bucket. A zero cell self-initialises on first use:
+// the elapsed time since the zero instant is enormous, so the refill below
+// saturates it to burst.
+type allocCell struct {
+	tokens float64
+	last   time.Time
 }
 
-// newPlayerAllocLimiter returns a limiter allowing perMinute authenticated ops
-// per player with the given burst. perMinute <= 0 or burst <= 0 returns nil,
-// which allow() treats as unlimited.
+// newPlayerAllocLimiter returns a limiter allowing perMinute authenticated
+// allocations per player with the given burst. perMinute <= 0 or burst <= 0
+// returns nil, which allow() treats as unlimited.
 func newPlayerAllocLimiter(perMinute, burst int) *playerAllocLimiter {
 	if perMinute <= 0 || burst <= 0 {
 		return nil
 	}
 	return &playerAllocLimiter{
-		buckets:    make(map[playerKey]*playerBucket),
-		rate:       rate.Limit(float64(perMinute) / 60.0),
-		burst:      burst,
-		ttl:        10 * time.Minute,
-		maxBuckets: maxPlayerBuckets,
-		now:        time.Now,
+		cells: make([]allocCell, allocCells),
+		rate:  float64(perMinute) / 60.0,
+		burst: float64(burst),
+		seed:  maphash.MakeSeed(),
+		now:   time.Now,
 	}
 }
 
-// allow reports whether the player may perform one more authenticated op now. A
+// Throttled reports the cumulative count of allocations refused by the
+// per-player budget.
+func (p *playerAllocLimiter) Throttled() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.throttled.Load()
+}
+
+// allow reports whether the player may create one more TURN allocation now. A
 // nil limiter is unlimited.
 func (p *playerAllocLimiter) allow(tenantID, playerID int64) bool {
 	if p == nil {
 		return true
 	}
 	now := p.now()
+	idx := p.cellIndex(tenantID, playerID)
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.sweepLocked(now)
-	key := playerKey{tenant: tenantID, player: playerID}
-	b := p.buckets[key]
-	if b == nil {
-		// Map full even after the sweep: refuse to track a new subject rather
-		// than grow without bound. The op is denied (401, no allocation); an
-		// already-tracked legit player is unaffected because its bucket exists.
-		if p.maxBuckets > 0 && len(p.buckets) >= p.maxBuckets {
-			return false
-		}
-		b = &playerBucket{lim: rate.NewLimiter(p.rate, p.burst)}
-		p.buckets[key] = b
+	c := &p.cells[idx]
+	if elapsed := now.Sub(c.last); elapsed > 0 {
+		c.tokens = min(p.burst, c.tokens+elapsed.Seconds()*p.rate)
+		c.last = now
 	}
-	b.lastSeen = now
-	return b.lim.AllowN(now, 1)
+	if c.tokens < 1 {
+		p.throttled.Add(1)
+		return false
+	}
+	c.tokens--
+	return true
 }
 
-// sweepLocked drops buckets for players idle beyond ttl, at most once per ttl so
-// the hot path stays cheap. Caller holds p.mu.
-func (p *playerAllocLimiter) sweepLocked(now time.Time) {
-	if now.Before(p.nextSweep) {
-		return
-	}
-	p.nextSweep = now.Add(p.ttl)
-	for k, b := range p.buckets {
-		if now.Sub(b.lastSeen) > p.ttl {
-			delete(p.buckets, k)
-		}
-	}
+// cellIndex maps a credential subject to its token-bucket cell.
+func (p *playerAllocLimiter) cellIndex(tenantID, playerID int64) uint64 {
+	var buf [16]byte
+	// Reinterpreting the ids as unsigned is the point: the hash wants their bit
+	// pattern, and the conversion is bijective, so no value is lost.
+	binary.LittleEndian.PutUint64(buf[0:8], uint64(tenantID))  //nolint:gosec // hashing a bit pattern, not a magnitude
+	binary.LittleEndian.PutUint64(buf[8:16], uint64(playerID)) //nolint:gosec // hashing a bit pattern, not a magnitude
+	return maphash.Bytes(p.seed, buf[:]) % uint64(len(p.cells))
 }

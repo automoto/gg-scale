@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -119,10 +120,15 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		gen := sqlcgen.New(tx)
 		// Per-player concurrent-allocation cap: a fleet ticket that would push
 		// the player past the cap of outstanding unclaimed allocations is
-		// refused here. Counted in the same transaction as the insert so two
-		// races can't both slip past (the one-active-queued index already bars
-		// a second queued ticket, bounding overshoot to the in-flight ticket).
+		// refused here. The count only sees committed matches, and the worker
+		// inserts its match in a later transaction, so the advisory lock is
+		// what serializes this check against that insert. Without it a ticket
+		// enqueued while an earlier one is still allocating reads a stale
+		// total and both commit.
 		if req.Mode == ModeFleetAllocation && q.maxUnclaimedFleetAllocs > 0 {
+			if lerr := gen.LockPlayerForFleetAllocation(ctx, req.PlayerID); lerr != nil {
+				return lerr
+			}
 			live, cerr := gen.CountPlayerLiveFleetAllocations(ctx, req.PlayerID)
 			if cerr != nil {
 				return cerr
@@ -660,7 +666,11 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 		claimedAt = pgtype.Timestamptz{Time: m.ClaimedAt, Valid: true}
 	}
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).InsertMatchmakerMatch(ctx, sqlcgen.InsertMatchmakerMatchParams{
+		gen := sqlcgen.New(tx)
+		if err := q.reserveFleetCap(ctx, gen, m); err != nil {
+			return err
+		}
+		return gen.InsertMatchmakerMatch(ctx, sqlcgen.InsertMatchmakerMatchParams{
 			ID:           m.ID,
 			ProjectID:    m.ProjectID,
 			Mode:         string(m.Mode),
@@ -675,6 +685,44 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 			ExpiresAt:    pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
 			HostPlayerID: hostPlayerID,
 		})
+	})
+}
+
+// reserveFleetCap re-checks the per-player unclaimed-allocation cap inside the
+// insert transaction. Enqueue already checked it, but that ran before the
+// backend allocation and in its own transaction, so a ticket enqueued during
+// an in-flight allocation could read a stale total. Locking each roster player
+// here serializes against that check. Players are locked in id order so two
+// workers sharing a roster cannot deadlock.
+func (q *PGQueue) reserveFleetCap(ctx context.Context, gen *sqlcgen.Queries, m *Match) error {
+	if m.Mode != ModeFleetAllocation || q.maxUnclaimedFleetAllocs <= 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(m.Roster))
+	for _, r := range m.Roster {
+		ids = append(ids, r.PlayerID)
+	}
+	slices.Sort(ids)
+	for _, playerID := range slices.Compact(ids) {
+		if err := gen.LockPlayerForFleetAllocation(ctx, playerID); err != nil {
+			return err
+		}
+		live, err := gen.CountPlayerLiveFleetAllocations(ctx, playerID)
+		if err != nil {
+			return err
+		}
+		if live >= int64(q.maxUnclaimedFleetAllocs) {
+			return ErrTooManyUnclaimedAllocations
+		}
+	}
+	return nil
+}
+
+// DeleteUnclaimedMatch drops an unclaimed match whose tickets never committed.
+func (q *PGQueue) DeleteUnclaimedMatch(ctx context.Context, id string) error {
+	return q.pool.Q(ctx, func(tx pgx.Tx) error {
+		_, err := sqlcgen.New(tx).DeleteUnclaimedMatchmakerMatch(ctx, id)
+		return err
 	})
 }
 

@@ -249,6 +249,11 @@ type Querier interface {
 	// paired match row's retention window — otherwise a poll would 404 while the
 	// match is still recoverable.
 	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
+	// Drop a match whose tickets never committed, once its backend server has been
+	// released. Same guards as the GC delete above minus the expiry, because this
+	// runs immediately rather than waiting out the match TTL: until the row is
+	// gone it still counts against the player's live-allocation cap.
+	DeleteUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error)
 	DenyTenantChangeRequest(ctx context.Context, arg DenyTenantChangeRequestParams) (int64, error)
 	DenyTenantSignupRequest(ctx context.Context, arg DenyTenantSignupRequestParams) (int64, error)
 	// A platform disable supersedes an existing self-disable: it promotes
@@ -667,6 +672,11 @@ type Querier interface {
 	// admin rows before counting them in the surrounding transaction.
 	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
 	LockPlayerAccountVerification(ctx context.Context, arg LockPlayerAccountVerificationParams) error
+	// Transaction-scoped advisory lock serializing the per-player fleet-allocation
+	// cap. The enqueue check and the worker's match insert are separate
+	// transactions, so without it a ticket enqueued while an earlier one is still
+	// allocating counts a stale total and both commit. Released on commit/rollback.
+	LockPlayerForFleetAllocation(ctx context.Context, playerID int64) error
 	LockPlayerPasswordReset(ctx context.Context, arg LockPlayerPasswordResetParams) error
 	LockPlayerVerification(ctx context.Context, arg LockPlayerVerificationParams) error
 	// Transaction-scoped advisory lock serializing session creation per project

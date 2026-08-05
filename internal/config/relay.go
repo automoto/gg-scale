@@ -42,9 +42,10 @@ type RelayConfig struct {
 	// it must stay <= (RELAY_MAX_PORT - RELAY_MIN_PORT + 1) when a range is set.
 	MaxAllocations int `env:"RELAY_MAX_ALLOCATIONS" envDefault:"4000"`
 
-	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated TURN ops per
-	// player so one credential can't monopolise the global pool with an
-	// allocation flood. A legit client's op rate is far below these; 0 disables.
+	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated allocations
+	// per player so one credential can't monopolise the global pool with an
+	// allocation flood. A legit client's allocation rate is far below these; 0
+	// disables.
 	// Roughly bounds one credential to rate×allocation-lifetime concurrent
 	// allocations. Default 6/min, burst 20.
 	PlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`

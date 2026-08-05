@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -485,4 +486,38 @@ func TestBranchFollowup_storage_warning_failed_delivery_is_retried(t *testing.T)
 	require.Len(t, failing.sent, 1)
 	assert.Equal(t, []string{"warning-retry@example.test"}, failing.sent[0].To)
 	assert.Equal(t, int16(80), tenantStorageWarningState(t, c, tenantID))
+}
+
+// PostgreSQL rejects NUL in text, and an unmapped driver error becomes a 500.
+// A key the caller controls must never reach the database unvalidated.
+func TestStorageKey_rejects_control_characters_and_overlong_keys(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-key-validation")
+	srv := newQuotaServerWithAllowAllLimiter(t, c)
+	access := anonymousLogin(t, srv.URL, "storage-key-validation")
+
+	cases := []struct {
+		name string
+		key  string
+	}{
+		{"percent encoded nul", "bad%00key"},
+		{"encoded control char", "bad%01key"},
+		{"overlong key", "k" + strings.Repeat("x", 400)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			target := srv.URL + "/v1/storage/objects/" + tc.key
+			for _, method := range []string{http.MethodPut, http.MethodGet, http.MethodDelete} {
+				var body []byte
+				if method == http.MethodPut {
+					body = []byte(`{"valid":true}`)
+				}
+				result := storageRequestStatus(method, target, "storage-key-validation", access, body, "")
+				require.NoError(t, result.err)
+				assert.Equal(t, http.StatusBadRequest, result.status,
+					"%s should be a bounded validation error, got %d: %s", method, result.status, result.body)
+			}
+		})
+	}
 }

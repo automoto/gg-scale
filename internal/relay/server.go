@@ -33,8 +33,8 @@ type ServerConfig struct {
 	// MaxAllocations caps concurrently-live relay allocations node-wide,
 	// bounding port-range exhaustion from a single credential. 0 = unlimited.
 	MaxAllocations int
-	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated TURN ops per
-	// player so one credential can't monopolise the global pool. <=0 disables.
+	// PlayerAllocPerMinute/PlayerAllocBurst throttle authenticated allocations
+	// per player so one credential can't monopolise the global pool. <=0 disables.
 	PlayerAllocPerMinute int
 	PlayerAllocBurst     int
 	// AllowPrivatePeers lets clients relay to loopback/RFC1918/link-local/ULA
@@ -109,9 +109,10 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		}
 		logger.Warn("relay: private peer addresses are allowed; the relay can proxy UDP to loopback/RFC1918/link-local peers")
 	}
+	trackedConn, trackedGenerator := trackPacketConn(conn, cfg.Issuer, s.playerLimiter, &s.allocThrottled, s.alloc)
 	packetConns := []pionturn.PacketConnConfig{{
-		PacketConn:            conn,
-		RelayAddressGenerator: s.alloc,
+		PacketConn:            trackedConn,
+		RelayAddressGenerator: trackedGenerator,
 		PermissionHandler:     permission,
 	}}
 
@@ -164,7 +165,8 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tcp %s:%d: %w", bindAddr, cfg.TCPPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
+		trackedListener, trackedGenerator := trackListener(ln, cfg.Issuer, s.playerLimiter, &s.allocThrottled, relayGen)
+		configs = append(configs, pionturn.ListenerConfig{Listener: trackedListener, RelayAddressGenerator: trackedGenerator, PermissionHandler: permission})
 	}
 
 	if cfg.TLSPort != 0 {
@@ -180,7 +182,8 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tls %s:%d: %w", bindAddr, cfg.TLSPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
+		trackedListener, trackedGenerator := trackListener(ln, cfg.Issuer, s.playerLimiter, &s.allocThrottled, relayGen)
+		configs = append(configs, pionturn.ListenerConfig{Listener: trackedListener, RelayAddressGenerator: trackedGenerator, PermissionHandler: permission})
 	}
 
 	return configs, nil
@@ -205,15 +208,21 @@ func (s *Server) permissionHandler(allowPrivate bool) pionturn.PermissionHandler
 	}
 }
 
+// cgnat is the RFC 6598 carrier-grade NAT range. It is not routable on the
+// public internet, and it is the range Tailscale assigns from, so a relay node
+// on a tailnet reaches its own operator network through it.
+var cgnat = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
 // isPrivatePeer reports whether peerIP is an address the relay must not proxy
 // to when private peers are disallowed.
 func isPrivatePeer(peerIP net.IP) bool {
-	return peerIP.IsLoopback() ||
-		peerIP.IsPrivate() ||
-		peerIP.IsLinkLocalUnicast() ||
-		peerIP.IsLinkLocalMulticast() ||
-		peerIP.IsInterfaceLocalMulticast() ||
-		peerIP.IsUnspecified()
+	// IsGlobalUnicast is false for loopback, the unspecified address, IPv4
+	// broadcast, every multicast scope, and link-local unicast. It is true for
+	// RFC1918, ULA and CGNAT, so those are checked separately below.
+	if !peerIP.IsGlobalUnicast() {
+		return true
+	}
+	return peerIP.IsPrivate() || cgnat.Contains(peerIP)
 }
 
 // Close stops the TURN server and releases every listener.
@@ -263,27 +272,12 @@ func (s *Server) authHandler(iss *Issuer) pionturn.AuthHandler {
 			s.authFailures.Add(1)
 			return nil, false
 		}
-		tenantID, playerID, _, err := iss.parseUsername(username)
-		if err != nil {
-			s.authFailures.Add(1)
-			return nil, false
-		}
-		// Resolve the HMAC password (selects the secret by the username's key
-		// id) BEFORE touching the per-player limiter. A username carrying an
-		// unknown key id is rejected here without allocating a limiter bucket,
-		// so a credential-less flood cannot grow the bucket map. The key id is
-		// derived from a server-side secret, so an attacker with no issued
-		// credential cannot forge a matching one.
+		// Resolve the HMAC password, selecting the secret by the username's key
+		// id. The player limiter runs later at the relay-address generator: Pion
+		// reaches that public boundary only after MESSAGE-INTEGRITY succeeds.
 		pw, ok := iss.passwordForAuth(username)
 		if !ok {
 			s.authFailures.Add(1)
-			return nil, false
-		}
-		// Per-player throttle: a single credential can't flood the node with
-		// allocations and starve the global pool. A legit client's op rate is
-		// far below this; a flood is answered 401 with no allocation created.
-		if !s.playerLimiter.allow(tenantID, playerID) {
-			s.allocThrottled.Add(1)
 			return nil, false
 		}
 		return pionturn.GenerateAuthKey(username, realm, pw), true
@@ -310,8 +304,8 @@ func (s *Server) RejectedAllocations() int64 {
 // AuthFailures reports the cumulative count of rejected TURN auth attempts.
 func (s *Server) AuthFailures() int64 { return s.authFailures.Load() }
 
-// AllocThrottled reports the cumulative count of authenticated TURN ops refused
-// by the per-player rate limit.
+// AllocThrottled reports the cumulative count of authenticated allocations
+// refused by the per-player rate limit.
 func (s *Server) AllocThrottled() int64 { return s.allocThrottled.Load() }
 
 // PeerRejected reports the cumulative count of CreatePermission/ChannelBind

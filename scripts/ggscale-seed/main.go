@@ -497,10 +497,14 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 			return fmt.Errorf("leaderboard: %w", err)
 		}
 
-		// Scores
-		scoreCount := 10 + s.rng.IntN(30)
-		for j := 0; j < scoreCount && j < len(players); j++ {
-			player := players[s.rng.IntN(len(players))]
+		// Scores. One row per player per period, so draw without replacement:
+		// leaderboard_entries is unique on (leaderboard_id, player_id, period).
+		scoreCount := min(10+s.rng.IntN(30), len(players))
+		picks := make([]playerSeed, len(players))
+		copy(picks, players)
+		s.rng.Shuffle(len(picks), func(a, b int) { picks[a], picks[b] = picks[b], picks[a] })
+
+		for _, player := range picks[:scoreCount] {
 			score := int64(s.rng.IntN(100000))
 			if sortOrder == "asc" {
 				score = int64(s.rng.IntN(3600)) // seconds
@@ -643,10 +647,18 @@ func (s *seeder) seedProject(ctx context.Context, tenantID int64, p projectSeed)
 		}
 	}
 
-	// Matchmaking tickets
+	// Matchmaking tickets. A player may hold only one queued ticket per
+	// project, so a repeat draw becomes a historical ticket instead.
+	queued := make(map[int64]bool)
 	for i := 0; i < 10+s.rng.IntN(15); i++ {
 		status := ticketStati[s.rng.IntN(len(ticketStati))]
 		player := players[s.rng.IntN(len(players))]
+		if status == "queued" && queued[player.id] {
+			status = "matched"
+		}
+		if status == "queued" {
+			queued[player.id] = true
+		}
 		region := regions[s.rng.IntN(len(regions))]
 		mode := gameModes[s.rng.IntN(len(gameModes))]
 		fleetID := fleetIDs[s.rng.IntN(len(fleetIDs))]

@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
@@ -65,6 +66,26 @@ type storagePutInput struct {
 	Key     string `path:"key" example:"save-slot-1"`
 	IfMatch string `header:"If-Match" example:"7"`
 	Body    json.RawMessage
+}
+
+// storageKeyMaxChars bounds an object key. The column is unbounded text, and
+// the key is caller-supplied, so without a limit one object can carry an
+// arbitrarily large key through every index that covers it.
+const storageKeyMaxChars = 256
+
+// checkStorageKey rejects keys PostgreSQL cannot store or that are unbounded.
+// A NUL byte raises SQLSTATE 22021, which has no mapped wire error and would
+// surface as a 500, so the key is screened before it reaches a query. Invalid
+// UTF-8 is checked separately because validPrintableName ranges over runes and
+// would silently see U+FFFD.
+func checkStorageKey(key string) error {
+	if key == "" {
+		return huma.Error400BadRequest("key required")
+	}
+	if !utf8.ValidString(key) || !validPrintableName(key, storageKeyMaxChars) {
+		return huma.Error400BadRequest(fmt.Sprintf("key must be 1-%d printable characters", storageKeyMaxChars))
+	}
+	return nil
 }
 
 type storageKeyInput struct {
@@ -155,8 +176,8 @@ func storagePut(d Deps) func(context.Context, *storagePutInput) (*storageObjectO
 // player-session PUT and the server-tier PUT, which resolve the owner
 // differently but must behave identically from here on.
 func putStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, in *storagePutInput) (*storageObjectOutput, error) {
-	if in.Key == "" {
-		return nil, huma.Error400BadRequest("key required")
+	if err := checkStorageKey(in.Key); err != nil {
+		return nil, err
 	}
 	if !json.Valid(in.Body) {
 		return nil, huma.Error400BadRequest("value must be valid JSON")
@@ -296,6 +317,9 @@ func storageGet(d Deps) func(context.Context, *storageKeyInput) (*storageObjectO
 // getStorageForOwner reads one storage object for an explicit (project, owner)
 // pair. Shared by the player-session GET and the server-tier GET.
 func getStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, key string) (*storageObjectOutput, error) {
+	if err := checkStorageKey(key); err != nil {
+		return nil, err
+	}
 	var resp storageObjectResponse
 	err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).GetStorageObject(ctx, sqlcgen.GetStorageObjectParams{
@@ -328,6 +352,9 @@ func storageDelete(d Deps) func(context.Context, *storageKeyInput) (*struct{}, e
 		ownerID, ok := playerauth.IDFromContext(ctx)
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
+		}
+		if err := checkStorageKey(in.Key); err != nil {
+			return nil, err
 		}
 
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
@@ -373,6 +400,13 @@ func storageList(d Deps) func(context.Context, *storageListInput) (*storageListO
 // (project, owner) pair. Shared by the player-session list and the server-tier
 // list.
 func listStorageForOwner(ctx context.Context, d Deps, projectID, ownerID int64, in *storageListInput) (*storageListOutput, error) {
+	// An empty prefix lists everything; a non-empty one is caller input bound
+	// for the same text column as a key, so it gets the same screening.
+	if in.KeyPrefix != "" {
+		if err := checkStorageKey(in.KeyPrefix); err != nil {
+			return nil, err
+		}
+	}
 	limit := parseLimit(in.Limit, 50, storageListMaxLimit)
 	cursor := parseCursor(in.Cursor)
 

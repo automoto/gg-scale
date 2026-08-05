@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -83,4 +84,43 @@ func TestCustomTokenKey_empty_save_clears_the_key(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 
 	assert.Empty(t, storedCustomTokenKey(t, raw, tenantID))
+}
+
+func ed25519PrivatePEM(t *testing.T) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(cryptorand.Reader)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	require.NoError(t, err)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+}
+
+// A mistakenly pasted private key is rejected, and the rejection page must not
+// hand it back. Re-rendering the submitted value leaves the key in the DOM
+// after an error the user may not notice, where a screenshot or a saved page
+// would carry it.
+func TestCustomTokenKey_private_key_is_not_echoed_back(t *testing.T) {
+	srv, raw, userID, tenantID, _, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	stored := ed25519PublicPEM(t)
+	resp, body := tfPostForm(t, admin, srv.URL+customTokenSettingsPath(tenantID),
+		url.Values{"_csrf": {csrf}, "custom_token_public_key": {stored}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode, body)
+
+	private := ed25519PrivatePEM(t)
+	resp, body = tfPostForm(t, admin, srv.URL+customTokenSettingsPath(tenantID),
+		url.Values{"_csrf": {csrf}, "custom_token_public_key": {private}})
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Contains(t, body, "That is a private key",
+		"the reset field is explained, so the user knows why it changed")
+	assert.NotContains(t, body, "BEGIN PRIVATE KEY", "the rejected private key must not be rendered")
+	for _, line := range strings.Split(strings.TrimSpace(private), "\n") {
+		if len(line) > 20 && !strings.HasPrefix(line, "-----") {
+			assert.NotContains(t, body, line, "no private key material in the response")
+		}
+	}
+	assert.Contains(t, storedCustomTokenKey(t, raw, tenantID), "BEGIN PUBLIC KEY",
+		"the stored public key is untouched")
 }

@@ -20,11 +20,10 @@ import (
 // decrements it. When the cap is reached, further allocations are refused with a
 // counted error instead of degrading into pion's failed-bind retry loop.
 //
-// The cap is global, not per-credential: pion does not pass the username to the
-// generator, so a true per-credential cap would need a pion fork (deferred, see
-// docs/relay-ga.md M5). Per-player abuse is bounded upstream by the issuance
-// rate limit and monthly meter; this cap is the relay-node backstop and the
-// source of the active/rejected gauges.
+// The cap is global. A separate wrapper correlates the current authenticated
+// Allocate request with this generator call to enforce the per-player budget;
+// this cap remains the relay-node backstop and the source of the
+// active/rejected gauges.
 type allocationLimiter struct {
 	inner    pionturn.RelayAddressGenerator
 	max      int64 // 0 = unlimited

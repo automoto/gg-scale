@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,8 +21,9 @@ import (
 )
 
 // updateCustomTokenKeyHandler saves the tenant's custom-token verification
-// key. The value is a public key: safe to display, nothing to mask. An empty
-// submission clears it, which disables custom-token sign-in.
+// key. A stored value is always a public key, so the settings page may display
+// it; a rejected submission is not, and is never echoed back. An empty
+// submission clears the key, which disables custom-token sign-in.
 func (h *Handler) updateCustomTokenKeyHandler(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := parsePathID(w, r, "tenantID")
 	if !ok {
@@ -73,6 +75,11 @@ func (h *Handler) updateCustomTokenKeyHandler(w http.ResponseWriter, r *http.Req
 	h.redirectTenantSettings(w, r, tenantID, msg)
 }
 
+// renderCustomTokenKeyError re-renders the settings page with a field error.
+// The rejected submission is deliberately not echoed back: a mistakenly pasted
+// private key would otherwise sit in the response DOM after an error the user
+// may not notice, where a screenshot or a saved page would carry it. The
+// textarea falls back to the stored public key that tenantSettingsView loaded.
 func (h *Handler) renderCustomTokenKeyError(w http.ResponseWriter, r *http.Request, tenantID int64, pemKey string) {
 	view, err := h.tenantSettingsView(r.Context(), tenantID)
 	if err != nil {
@@ -83,12 +90,21 @@ func (h *Handler) renderCustomTokenKeyError(w http.ResponseWriter, r *http.Reque
 	view.UserEmail = session.User.Email
 	view.CSRFToken = session.CSRFToken
 	view.IsPlatformAdmin = session.User.IsPlatformAdmin
-	view.CustomTokenPublicKey = pemKey
 	view.FieldErrors = map[string]string{ //nolint:gosec // form-field name + help text, not credentials
-		"custom_token_public_key": "Paste a PEM-encoded Ed25519 or RSA (2048-bit or larger) public key.",
+		"custom_token_public_key": customTokenKeyErrorMessage(pemKey),
 	}
 	w.WriteHeader(http.StatusUnprocessableEntity)
 	webutil.Render(r, w, TenantSettingsPage(view))
+}
+
+// customTokenKeyErrorMessage names the private-key mistake explicitly, because
+// the field resets to the stored key and an unexplained reset is confusing.
+// The message never quotes the submitted value.
+func customTokenKeyErrorMessage(pemKey string) string {
+	if block, _ := pem.Decode([]byte(pemKey)); block != nil && strings.Contains(block.Type, "PRIVATE") {
+		return "That is a private key. Paste the matching public key; the private key must stay on your backend."
+	}
+	return "Paste a PEM-encoded Ed25519 or RSA (2048-bit or larger) public key."
 }
 
 func (h *Handler) updateCustomTokenKey(ctx context.Context, tenantID int64, pemKey string) error {

@@ -251,6 +251,68 @@ func TestWorkerDeallocatesOrphanWhenCommitFindsNoRows(t *testing.T) {
 	assert.Empty(t, hub.Sent(), "no MatchReady should be sent when CommitClaim affects 0 rows")
 }
 
+// matchSpy records the match rows a worker creates and deletes, so a test can
+// assert that a match whose tickets never committed does not survive.
+type matchSpy struct {
+	*matchmaker.MemQueue
+	mu      sync.Mutex
+	created []string
+	deleted []string
+}
+
+func (s *matchSpy) CreateMatch(ctx context.Context, m *matchmaker.Match) error {
+	s.mu.Lock()
+	s.created = append(s.created, m.ID)
+	s.mu.Unlock()
+	return s.MemQueue.CreateMatch(ctx, m)
+}
+
+func (s *matchSpy) DeleteUnclaimedMatch(ctx context.Context, id string) error {
+	s.mu.Lock()
+	s.deleted = append(s.deleted, id)
+	s.mu.Unlock()
+	return s.MemQueue.DeleteUnclaimedMatch(ctx, id)
+}
+
+func (s *matchSpy) snapshot() (created, deleted []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.created...), append([]string(nil), s.deleted...)
+}
+
+// The worker inserts the match row before it commits the tickets. When the
+// commit affects no rows the server is released, but the row itself still
+// counts against the player's live fleet-allocation cap until the match TTL
+// elapses, so it has to go too.
+func TestWorkerDeletesOrphanMatchWhenCommitFindsNoRows(t *testing.T) {
+	spy := &matchSpy{MemQueue: matchmaker.NewMemQueue()}
+	alloc := &fakeAllocator{address: "10.0.0.1:7777"}
+	t1 := enqueue(t, spy.MemQueue, matchmaker.EnqueueRequest{TenantID: 1, ProjectID: 7, FleetID: 5, PlayerID: 42, Region: "us-east-1", GameMode: "1v1"})
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		_ = spy.Cancel(db.WithTenant(context.Background(), 1), t1.ID, 42)
+	}()
+	delayed := &delayingAllocator{inner: alloc, delay: 20 * time.Millisecond}
+	w := matchmaker.NewWorker(spy, delayed, &fakeNotifier{}, matchmaker.WorkerConfig{})
+
+	require.NoError(t, w.Tick(context.Background()))
+	require.Eventually(t, func() bool { return len(alloc.Deallocated()) == 1 }, time.Second, 5*time.Millisecond,
+		"orphan allocation should have been released")
+
+	require.Eventually(t, func() bool {
+		_, deleted := spy.snapshot()
+		return len(deleted) == 1
+	}, time.Second, 5*time.Millisecond, "orphan match row should have been deleted")
+
+	created, deleted := spy.snapshot()
+	require.Len(t, created, 1)
+	assert.Equal(t, created, deleted, "the deleted match is the one the worker created")
+
+	_, err := spy.GetMatch(db.WithTenant(context.Background(), 1), created[0])
+	assert.ErrorIs(t, err, matchmaker.ErrNotFound, "orphan match must not be readable")
+}
+
 // delayingAllocator wraps another allocator and sleeps in Allocate so tests
 // can race a Cancel against the commit step.
 type delayingAllocator struct {

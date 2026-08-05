@@ -352,6 +352,25 @@ func (q *Queries) DeleteTerminalMatchmakerTickets(ctx context.Context, retention
 	return result.RowsAffected(), nil
 }
 
+const deleteUnclaimedMatchmakerMatch = `-- name: DeleteUnclaimedMatchmakerMatch :execrows
+DELETE FROM matchmaker_matches
+WHERE id = $1
+  AND allocation_id IS NOT NULL
+  AND claimed_at IS NULL
+`
+
+// Drop a match whose tickets never committed, once its backend server has been
+// released. Same guards as the GC delete above minus the expiry, because this
+// runs immediately rather than waiting out the match TTL: until the row is
+// gone it still counts against the player's live-allocation cap.
+func (q *Queries) DeleteUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUnclaimedMatchmakerMatch, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const expireMatchmakerTickets = `-- name: ExpireMatchmakerTickets :execrows
 UPDATE matchmaking_tickets
 SET status = 'failed',
@@ -799,6 +818,19 @@ func (q *Queries) ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMa
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockPlayerForFleetAllocation = `-- name: LockPlayerForFleetAllocation :exec
+SELECT pg_advisory_xact_lock(hashtextextended('fleet_alloc_cap', $1))
+`
+
+// Transaction-scoped advisory lock serializing the per-player fleet-allocation
+// cap. The enqueue check and the worker's match insert are separate
+// transactions, so without it a ticket enqueued while an earlier one is still
+// allocating counts a stale total and both commit. Released on commit/rollback.
+func (q *Queries) LockPlayerForFleetAllocation(ctx context.Context, playerID int64) error {
+	_, err := q.db.Exec(ctx, lockPlayerForFleetAllocation, playerID)
+	return err
 }
 
 const matchmakerQueueStats = `-- name: MatchmakerQueueStats :many
