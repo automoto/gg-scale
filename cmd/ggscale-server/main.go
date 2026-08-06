@@ -216,9 +216,10 @@ func runRelayCommand() error {
 }
 
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
-// and the rejected-allocation / auth-failure counters on reg. These are the
-// signals the ops runbook alerts on (port-range exhaustion, credential
-// probing); pion/turn v3 exposes no bandwidth or per-session hooks.
+// and the rejected-allocation / auth-failure / peer-filter counters on reg.
+// These are the signals the ops runbook alerts on (port-range exhaustion,
+// credential probing, attempts to relay into private space); pion/turn v3
+// exposes no bandwidth or per-session hooks.
 func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "ggscale_relay_active_allocations",
@@ -236,6 +237,10 @@ func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 		Name: "ggscale_relay_alloc_throttled_total",
 		Help: "Authenticated TURN ops refused by the per-player allocation rate limit.",
 	}, func() float64 { return float64(srv.AllocThrottled()) }))
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "ggscale_relay_peer_rejected_total",
+		Help: "CreatePermission/ChannelBind attempts refused because the peer address is private.",
+	}, func() float64 { return float64(srv.PeerRejected()) }))
 }
 
 // startRelayHealth serves /healthz and /metrics for the monitoring host to

@@ -5,94 +5,145 @@ All notable changes to ggscale are recorded here. The format is based on
 pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
-## [Unreleased]
+## [0.9.2] - 2026-08-05
 
-### Managed relay GA (in progress)
+The GA release. Managed TURN relay and matchmaking graduate from beta, and the
+API gap work lands in full: player identity, in-client auth flows, Steam
+sign-in, account linking, a session browser, friend codes, remote config,
+leaderboard periods, and a secret-key server tier. Migrations `0018`–`0042`
+apply in order.
 
-Managed TURN relay graduates from "built but shipped OFF/BYO-only" toward GA,
-hosted by ggscale as a **dedicated relay VM per region**. Per-tenant enablement
-is still gated by the `p2p_relay` feature grant. See `docs/relay-ga.md` (plan)
-and `docs/relay-ops.md` (runbook).
+### Upgrade notes
 
-#### Added
+- **Custom tokens now need a public key** (Ed25519 or RSA). Migration `0038`
+  drops `tenants.custom_token_secret` with no compatibility path; every tenant
+  using custom tokens must upload a key before its clients sign in again.
+- **Docker fleet backend removed** — it was not safe for production. Migration
+  `0035` drops its grants. Remove `DOCKER_*` and `GAME_SERVER_PUBLIC_IP` from
+  deployment configs.
+- **`MATCHMAKER_MAX_TICKETS_PER_PLAYER` removed** — the one-active-ticket rule
+  replaces it.
+- **Migration `0042` rewrites leaderboard entries** into one row per
+  (leaderboard, player, period), keeping each player's best. Back up first.
 
-- **Standalone relay mode.** `ggscale-server relay` runs only the pion TURN
-  listener (no DB/HTTP/matchmaker) for deployment on a dedicated relay VM, with
-  an optional `RELAY_HEALTH_ADDR` serving `/healthz` + `/metrics`.
-- **TURN/TCP and TURNS/TLS transports** (`RELAY_TCP_PORT`, `RELAY_TLS_PORT`,
-  `RELAY_TLS_CERT_FILE`, `RELAY_TLS_KEY_FILE`) so clients behind UDP-blocking
-  firewalls can reach the relay.
-- **`RELAY_URLS`** — the TURN/TURNS URIs clients dial, now echoed in every
-  issued credential set (previously always empty; credentials were undialable).
-  Required when the credential issuer is enabled.
-- **Zero-downtime secret rotation.** Credentials embed a key id; configure
-  `RELAY_SHARED_SECRET_NEXT` alongside the active secret to rotate across a
-  credential-TTL overlap window.
-- **Per-player relay issuance rate limit** so one player can't drain a tenant's
-  monthly allowance in a burst. New metric `ggscale_relay_issue_throttled_total`;
-  relay nodes expose `ggscale_relay_up`.
-- **Global relay allocation cap** (`RELAY_MAX_ALLOCATIONS`, default 4000) so a
-  single (possibly leaked) credential can't exhaust the relay node's port range.
-  New relay-node metrics `ggscale_relay_active_allocations`,
-  `ggscale_relay_allocations_rejected_total`, and `ggscale_relay_auth_failures_total`,
-  plus the pion server log wired to slog. Optional `RELAY_METRICS_TOKEN` puts a
-  bearer guard on the relay-node `/metrics`.
-- **Per-player relay allocation throttle** (`RELAY_PLAYER_ALLOC_PER_MIN` default
-  6, `RELAY_PLAYER_ALLOC_BURST` default 20) so a single credential can't flood a
-  relay node with allocations and monopolise the pool — a per-`(tenant,player)`
-  token bucket in the TURN AuthHandler. Metric `ggscale_relay_alloc_throttled_total`.
+### Breaking
 
-#### Changed
+- One active matchmaking ticket per player per project; a second create returns
+  409 with the active ticket id to cancel.
+- `match_ready` is replaced by `matchmaker_matched`, with a unified payload
+  carrying `host_player_id` and per-member `attributes`.
+- `score` is required on both leaderboard submit routes (422 when absent), and
+  `sort_order` locks once a board has entries.
+- The always-`null` per-peer `relay` field is gone from the game-session peer
+  response; credentials come from `POST /v1/relay/credentials`.
 
-- Removed the always-`null` per-peer `relay` field from the game-session peer
-  response (server + Go/C# SDKs + OpenAPI); relay credentials come from
-  `POST /v1/relay/credentials`, not the peer roster.
-- **`RELAY_PUBLIC_IP` must be IPv4** and a half-set `RELAY_MIN_PORT`/`RELAY_MAX_PORT`
-  now fails startup loudly, instead of silently binding an unreachable address or
-  the whole ephemeral range. The per-player rate-limit check now runs before the
-  ban lookup so a throttled caller costs no DB query.
+### Added
 
-### Matchmaking GA
+**Relay** — standalone `ggscale-server relay` mode serving `/healthz` and
+`/metrics`; TURN/TCP and TURNS/TLS transports; `RELAY_URLS` and
+`RELAY_STUN_URLS` echoed in every credential set; zero-downtime secret rotation
+through a key id and `RELAY_SHARED_SECRET_NEXT`; a global allocation cap,
+per-player issuance and allocation limits, and a private-peer filter
+(`RELAY_ALLOW_PRIVATE_PEERS`). Metrics: `active_allocations`,
+`allocations_rejected_total`, `auth_failures_total`, `alloc_throttled_total`,
+`peer_rejected_total`, `issue_throttled_total`, `up`. See `docs/relay-ga.md`
+and `docs/relay-ops.md`.
 
-Matchmaking graduates from beta for the peer-to-peer paths (`match_only`,
-`game_session`). `fleet_allocation` (dedicated servers) remains
-entitlement-gated and is not part of this GA.
+**Auth and identity** — display names with public and batch player lookup;
+in-client password reset by emailed code, verification resend, change-password
+and self-disable; anonymous-to-registered linking by email or Steam; native
+Steam sign-in verified against Valve; friend codes with regenerate and resolve.
+Provider credentials are sealed at rest (`CREDENTIAL_ENC_KEY`, auto-generated
+when unset). See `docs/account-linking.md` and `docs/steam-auth.md`.
 
-#### Breaking
+**Discovery and live-ops** — `GET /v1/game-sessions` public session browser
+(cursor paged, heartbeat-driven liveness, private sessions never listed);
+per-project remote config on `GET /v1/config` with ETag/304, readable with a
+project key before login; peer-to-peer signaling on
+`/v1/game-session/{id}/signals`. See `docs/session-browser.md` and
+`docs/remote-config.md`.
 
-- **One active ticket per player per project.** A player may hold at most one
-  queued matchmaking ticket per project (enforced by a partial unique index).
-  A second create while one is still queued now returns **HTTP 409** with a
-  structured error carrying the active ticket id to cancel, instead of opening
-  a second ticket. Multi-ticket queuing is removed.
-- **`match_ready` realtime event replaced by `matchmaker_matched`.** The server
-  emits only `matchmaker_matched`. Its payload is unified across modes and adds
-  `host_player_id` (the P2P host for `match_only`/`game_session`) and per-member
-  `attributes`. Consumers of the old `match_ready` event must migrate; the Go
-  and C# SDK high-level helpers already parse the new event.
-- **`MATCHMAKER_MAX_TICKETS_PER_PLAYER` removed.** The environment variable and
-  its config/validation wiring are deleted; the one-active-ticket rule replaces
-  it. Remove the variable from deployment configs.
+**Leaderboards** — score operators (`best`/`set`/`incr`), per-score and
+per-board metadata, calendar-aligned periods with a leader-elected archive job
+and history endpoints, optional per-period attempt caps, opt-in client
+submissions with a per-player rate limit and score bounds, plus board discovery
+and friends views. See `docs/leaderboards.md`.
 
-#### Added
+**Server tier** — secret-key routes to submit a score for a player and to
+read, write and list a player's storage with no player session. See
+`docs/server-tier.md`.
 
-- Machine-readable `failure_reason` on failed tickets (`expired` |
-  `attempts_exhausted`), surfaced in the ticket poll response.
-- Poll-based match recovery: a committed match is retrievable by polling even
-  when the realtime push is missed.
-- Observability metrics for matchmaker queue health:
-  - `ggscale_matchmaker_ticket_failures_total{reason}` — tickets that ended in
-    `failed`, by reason.
-  - `ggscale_matchmaker_time_to_match_seconds` — queued→matched latency
-    histogram.
-  - `ggscale_matchmaker_queue_depth{mode,region,game_mode}` and
-    `ggscale_matchmaker_oldest_ticket_age_seconds{mode,region,game_mode}` —
-    per-bucket gauges sampled on the sweep cadence (head-of-line-blocking early
-    warning).
+**Administration** — tenant self-disable and platform disable; forgot-password
+for control-panel and player web sessions; player-initiated account unlink;
+one-click invite-email unsubscribe with a suppression list; per-tenant quota
+overrides and `quota_override` change requests; secret API keys manageable by
+tenant admins.
 
-#### Migrations
+**Matchmaking** — machine-readable `failure_reason`, poll-based match recovery,
+and queue-health metrics (`ticket_failures_total`, `time_to_match_seconds`,
+`queue_depth`, `oldest_ticket_age_seconds`).
 
-- `0018`–`0021` add the one-active-ticket dedup + partial unique index (built
-  `CONCURRENTLY`), the `failure_reason` column, and the match `host_player_id`
-  column. `0021` builds its index in its own transaction; see the deploy
-  runbook for the `CONCURRENTLY`-abort recovery.
+**Build** — multi-architecture Docker images (`linux/amd64`, `linux/arm64`).
+
+### Changed
+
+- Match formation no longer collapses under concurrent enqueue: capacity errors
+  requeue penalty-free, matchmade sessions start on a 10-minute pending TTL, and
+  the per-project open-session cap rose from 100 to 1000. A 50-client load test
+  went from 2 matched tickets to 1,755.
+- Per-player cap on unclaimed fleet allocations
+  (`MATCHMAKER_MAX_UNCLAIMED_FLEET_ALLOCS`, default 3); over the cap returns 429.
+- `api_keys.key_type` defaults to `publishable`, so a forgotten `key_type` no
+  longer mints a limiter-exempt key.
+- `RELAY_PUBLIC_IP` must be IPv4, and a half-set relay port range fails startup.
+- Dropped the matchmaker's `pg_notify` trigger (a cluster-global lock held
+  through the commit fsync) and replaced the `FOR UPDATE` + `COUNT(*)` player
+  quota gate with a maintained counter. Both serialized every enqueue or
+  anonymous sign-in.
+
+### Fixed
+
+- The relay peer filter admitted CGNAT, multicast and broadcast peers.
+- The fleet allocation cap drifted and orphan match rows leaked.
+- A NUL byte in a storage key or leaderboard name returned 500; control
+  characters, overlong keys and an unbounded `key_prefix` are now rejected.
+- `GET /v1/game-session/{id}` reported expired sessions as `open`.
+- Password-reset recovery could dead-end at the lifetime attempt cap.
+- Saving a custom-token public key always returned 404 (bootstrap scope vs RLS).
+- The custom-token form echoed a rejected private key, and `make seed` failed on
+  the leaderboard and matchmaking unique indexes.
+
+### Security
+
+- The relay resolves the HMAC password before touching the per-player limiter,
+  caps the bucket map, and rate limits at pion's allocation boundary, which is
+  reached only after MESSAGE-INTEGRITY succeeds. Forged traffic cannot move a
+  victim's budget.
+- `PATCH /v1/profile` no longer re-sends verification mail for an unchanged,
+  already-verified address, and it honors the per-recipient cooldown.
+- Password reset deletes trusted-device rows, so a stale remembered-device
+  cookie cannot skip 2FA.
+- Re-auth credential reads and client-submission policy checks moved to the
+  primary pool; replica lag must not admit a replaced password or a score the
+  board just forbade.
+- Fleet heartbeat and server list check `FeatureDedicatedServers`.
+- grpc → v1.82.1, x/text → v0.39.0.
+
+### Removed
+
+- Docker fleet backend (`internal/fleet/docker`, `compose/fleet-docker.yml`, and
+  all `DOCKER_*` and `GAME_SERVER_PUBLIC_IP` settings).
+- `compose/fleet-agones.yml` and the fleet test scripts, moved to their own repo.
+
+### Migrations
+
+- `0018`–`0021` — one-active-ticket index (built `CONCURRENTLY`),
+  `failure_reason`, match `host_player_id`.
+- `0022`–`0026` — game-session signaling; drop the matchmaker notify trigger;
+  tenant-admin secret keys; `key_type` default.
+- `0027`–`0035` — player-count counter; quota overrides and change requests;
+  player unlink; password resets; tenant disable; email suppressions; drop the
+  Docker fleet grants.
+- `0036`–`0042` — remote config; Steam config; custom-token public key; friend
+  codes; in-client player password reset; server storage policy; leaderboard
+  rewrite.
