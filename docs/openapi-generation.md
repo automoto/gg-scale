@@ -27,12 +27,31 @@ operations and are intentionally absent — only the JSON API is specified.
   zero `Deps` suffices. The `register*` list there mirrors `NewRouter`'s
   registrations (NewRouter spreads them across middleware-scoped chi groups;
   the doc only needs the operation metadata, so they collapse onto one
-  adapter). `TestOpenAPIDoc_covers_expected_paths` fails if that list drifts.
+  adapter).
 - `cmd/openapi-dump` — thin `main` that calls `OpenAPIDoc` and writes the YAML.
+  Its `specVersion` constant stamps `info.version`.
 - Schemas, request/response bodies, status codes, and `ApiKeyAuth` /
   `PlayerSession` security all come straight from each operation's Go types and
   `huma.Operation` metadata. No conventions to keep extraction happy — the
   types *are* the spec.
+
+## Guard tests
+
+`internal/httpapi/openapi_test.go` holds the checks that keep the generator and
+the committed file honest. The important ones:
+
+- `TestOpenAPIDoc_covers_expected_paths` — fails when the `register*` list in
+  `OpenAPIDoc` drifts from the routes the server actually serves.
+- `TestOpenAPIDoc_committed_spec_is_current` — regenerates the document and
+  diffs it against the checked-in `openapi.yaml`. This is the one that catches
+  a route or schema field added without running `make openapi`; the path-set
+  test above only guards the in-memory document. Keep its `specVersion`
+  constant in step with `cmd/openapi-dump`.
+- `TestOpenAPIDoc_never_documents_internal_surface` — keeps control-panel and
+  other non-`/v1` routes out of the published spec.
+- `TestOpenAPIDoc_schemas_carry_examples` — wire structs must carry example
+  values, because Redoc composes its response samples from them. Without
+  examples the rendered docs show empty or null samples.
 
 ## Hand-maintained additions
 
