@@ -1,0 +1,17 @@
+{
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "healthz",
+        "description": "Wait for /v1/healthz to return 200 before routing traffic",
+        "path": "/v1/healthz",
+        "port": 8080,
+        "initialDelay": 5,
+        "attempts": 10,
+        "wait": 5,
+        "timeout": 5
+      }
+    ]
+  }
+}
