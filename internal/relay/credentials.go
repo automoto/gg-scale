@@ -1,4 +1,4 @@
-// Package relay wraps a pion/turn/v3 TURN server with ggscale's tenant +
+// Package relay wraps a pion/turn/v5 TURN server with ggscale's tenant +
 // player identity model. Credentials are issued via the standard TURN
 // REST API (RFC draft-uberti-rtcweb-turn-rest-00) so any client SDK can
 // consume them; the server-side AuthHandler reconstructs the HMAC password
@@ -124,7 +124,7 @@ func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
 
 // Verify checks the username + password pair against every accepted secret,
 // returning the embedded (tenantID, playerID) on success. The in-process TURN
-// server authenticates via passwordForAuth (pion recomputes and compares the
+// server authenticates via authForUsername (pion recomputes and compares the
 // HMAC key itself); Verify is the standalone entrypoint for verifying a
 // credential pair out of band — e.g. an external relay or a conformance test.
 func (i *Issuer) Verify(username, password string) (int64, int64, error) {
@@ -140,20 +140,40 @@ func (i *Issuer) Verify(username, password string) (int64, int64, error) {
 	return 0, 0, ErrCredentialsInvalid
 }
 
-// passwordForAuth returns the TURN password to authenticate username, selecting
-// the accepted secret by the key id embedded in the username. ok is false when
-// the username is malformed, expired, or names an unknown key id. Used by the
-// server AuthHandler (same package).
-func (i *Issuer) passwordForAuth(username string) (string, bool) {
-	_, _, kid, err := i.parseUsername(username)
+// authForUsername resolves a valid TURN-REST username to its stable allocation
+// subject and HMAC password. The full username remains part of the integrity
+// key, while the subject deliberately excludes its expiry and signing-key id so
+// renewed credentials continue to control the same live allocation.
+func (i *Issuer) authForUsername(username string) (tenantID, playerID int64, password string, ok bool) {
+	tenantID, playerID, kid, err := i.parseUsername(username)
 	if err != nil {
-		return "", false
+		return 0, 0, "", false
 	}
 	e, ok := i.byKID[kid]
 	if !ok {
-		return "", false
+		return 0, 0, "", false
 	}
-	return passwordWith(e.key, username), true
+	return tenantID, playerID, passwordWith(e.key, username), true
+}
+
+func allocationUserID(tenantID, playerID int64) string {
+	return strconv.FormatInt(tenantID, 10) + ":" + strconv.FormatInt(playerID, 10)
+}
+
+func parseAllocationUserID(userID string) (tenantID, playerID int64, ok bool) {
+	parts := strings.Split(userID, ":")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	tenantID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	playerID, err = strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return tenantID, playerID, true
 }
 
 // parseUsername splits and validates the "expires:tenant:player:kid" username,

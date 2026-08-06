@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"sync/atomic"
 
-	pionturn "github.com/pion/turn/v3"
+	pionturn "github.com/pion/turn/v5"
 )
 
 // ServerConfig wires NewServer. PublicIP is the address peers connect to;
@@ -48,7 +48,7 @@ type ServerConfig struct {
 	Issuer *Issuer
 }
 
-// Server wraps pion/turn/v3. One Server per process. It owns every listener it
+// Server wraps pion/turn/v5. One Server per process. It owns every listener it
 // opens (UDP packet conns + TCP/TLS listeners); Close releases them all.
 type Server struct {
 	turn           *pionturn.Server
@@ -109,14 +109,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		}
 		logger.Warn("relay: private peer addresses are allowed; the relay can proxy UDP to loopback/RFC1918/link-local peers")
 	}
-	trackedConn, trackedGenerator := trackPacketConn(conn, cfg.Issuer, s.playerLimiter, &s.allocThrottled, s.alloc)
+	relayGen := newPlayerAllocationGenerator(s.alloc, s.playerLimiter, &s.allocThrottled)
 	packetConns := []pionturn.PacketConnConfig{{
-		PacketConn:            trackedConn,
-		RelayAddressGenerator: trackedGenerator,
+		PacketConn:            conn,
+		RelayAddressGenerator: relayGen,
 		PermissionHandler:     permission,
 	}}
 
-	listenerConfigs, err := s.buildTCPListeners(cfg, bindAddr, s.alloc, permission)
+	listenerConfigs, err := s.buildTCPListeners(cfg, bindAddr, relayGen, permission)
 	if err != nil {
 		_ = s.closeListeners()
 		return nil, err
@@ -128,6 +128,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		PacketConnConfigs: packetConns,
 		ListenerConfigs:   listenerConfigs,
 		LoggerFactory:     newSlogLoggerFactory(cfg.Logger),
+		EventHandler:      s.authEventHandler(),
 	})
 	if err != nil {
 		_ = s.closeListeners()
@@ -165,8 +166,7 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tcp %s:%d: %w", bindAddr, cfg.TCPPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		trackedListener, trackedGenerator := trackListener(ln, cfg.Issuer, s.playerLimiter, &s.allocThrottled, relayGen)
-		configs = append(configs, pionturn.ListenerConfig{Listener: trackedListener, RelayAddressGenerator: trackedGenerator, PermissionHandler: permission})
+		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
 	if cfg.TLSPort != 0 {
@@ -182,8 +182,7 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tls %s:%d: %w", bindAddr, cfg.TLSPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
-		trackedListener, trackedGenerator := trackListener(ln, cfg.Issuer, s.playerLimiter, &s.allocThrottled, relayGen)
-		configs = append(configs, pionturn.ListenerConfig{Listener: trackedListener, RelayAddressGenerator: trackedGenerator, PermissionHandler: permission})
+		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
 	return configs, nil
@@ -267,21 +266,37 @@ func isClosedNetError(err error) bool {
 // / expired / unknown-kid username) bumps authFailures so credential probing is
 // observable on the node.
 func (s *Server) authHandler(iss *Issuer) pionturn.AuthHandler {
-	return func(username, realm string, _ net.Addr) ([]byte, bool) {
-		if realm != iss.realm {
+	return func(attrs *pionturn.RequestAttributes) (string, []byte, bool) {
+		if attrs == nil || attrs.Realm != iss.realm {
 			s.authFailures.Add(1)
-			return nil, false
+			return "", nil, false
 		}
-		// Resolve the HMAC password, selecting the secret by the username's key
-		// id. The player limiter runs later at the relay-address generator: Pion
-		// reaches that public boundary only after MESSAGE-INTEGRITY succeeds.
-		pw, ok := iss.passwordForAuth(username)
+		username := attrs.Username
+		// Resolve the HMAC password from the complete expiring username. Pion's
+		// user ID is stable across credential renewal so Refresh,
+		// CreatePermission, and ChannelBind keep finding the live allocation.
+		tenantID, playerID, pw, ok := iss.authForUsername(username)
 		if !ok {
 			s.authFailures.Add(1)
-			return nil, false
+			return "", nil, false
 		}
-		return pionturn.GenerateAuthKey(username, realm, pw), true
+		return allocationUserID(tenantID, playerID), pionturn.GenerateAuthKey(username, attrs.Realm, pw), true
 	}
+}
+
+// authEventHandler counts MESSAGE-INTEGRITY failures. Pion emits OnAuth only
+// after AuthHandler resolved a key, so these failures are disjoint from the
+// malformed, expired, unknown-key and wrong-realm cases counted above.
+func (s *Server) authEventHandler() pionturn.EventHandler {
+	return pionturn.EventHandler{OnAuth: func(
+		_, _ net.Addr,
+		_, _, _, _ string,
+		verdict bool,
+	) {
+		if !verdict {
+			s.authFailures.Add(1)
+		}
+	}}
 }
 
 // ActiveAllocations reports the number of currently-live relay allocations.

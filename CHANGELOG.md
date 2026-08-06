@@ -5,6 +5,18 @@ All notable changes to ggscale are recorded here. The format is based on
 pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
+## [Unreleased]
+
+### Security
+
+- Upgrade the relay from Pion TURN `v3.0.3` to `v5.0.12`, removing the
+  vulnerable `pion/dtls/v2` dependency path reported by GO-2026-4479. The
+  per-player allocation limiter supports Pion v5's stable authenticated user
+  IDs, while unsupported EVEN-PORT and RFC 6062 TCP relay allocations fail
+  closed. TURN-over-TCP and TURNS remain supported as client transports, with
+  Pion's TLS handshake deadline intact. Pion v5 auth events also make
+  MESSAGE-INTEGRITY failures visible in the auth-failure metric.
+
 ## [0.9.2] - 2026-08-05
 
 The GA release. Managed TURN relay and matchmaking graduate from beta, and the

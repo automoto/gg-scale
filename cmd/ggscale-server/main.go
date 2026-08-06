@@ -218,8 +218,8 @@ func runRelayCommand() error {
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
 // and the rejected-allocation / auth-failure / peer-filter counters on reg.
 // These are the signals the ops runbook alerts on (port-range exhaustion,
-// credential probing, attempts to relay into private space); pion/turn v3
-// exposes no bandwidth or per-session hooks.
+// credential probing, attempts to relay into private space); pion/turn v5
+// exposes no bandwidth hook.
 func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "ggscale_relay_active_allocations",

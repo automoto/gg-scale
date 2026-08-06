@@ -1,29 +1,32 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 
-	pionturn "github.com/pion/turn/v3"
+	pionturn "github.com/pion/turn/v5"
 )
+
+var errTCPRelayUnsupported = errors.New("relay: RFC 6062 TCP allocations are not supported")
 
 // allocationLimiter wraps a pion RelayAddressGenerator with a global cap on
 // concurrently-live relay allocations plus active/rejected counters.
 //
 // One valid credential can otherwise call Allocate without limit until its TTL
 // elapses, binding one relayed-media port each time and exhausting the node's
-// port range (relay-node DoS). pion/turn v3 exposes no per-allocation lifecycle
-// callback, so we account through the generator: every AllocatePacketConn /
-// AllocateConn increments the live counter and the returned conn's Close
-// decrements it. When the cap is reached, further allocations are refused with a
-// counted error instead of degrading into pion's failed-bind retry loop.
+// port range (relay-node DoS). We account through the generator: every
+// AllocatePacketConn increments the live counter and the returned socket's
+// Close decrements it. RFC 6062 TCP allocations and outbound peer connections
+// are deliberately unsupported. When the cap is reached, further allocations
+// are refused with a counted error instead of degrading into pion's failed-bind
+// retry loop.
 //
-// The cap is global. A separate wrapper correlates the current authenticated
-// Allocate request with this generator call to enforce the per-player budget;
-// this cap remains the relay-node backstop and the source of the
-// active/rejected gauges.
+// The cap is global. A separate wrapper uses Pion v5's authenticated UserID to
+// enforce the per-player budget; this cap remains the relay-node backstop and
+// the source of the active/rejected gauges.
 type allocationLimiter struct {
 	inner    pionturn.RelayAddressGenerator
 	max      int64 // 0 = unlimited
@@ -37,11 +40,14 @@ func newAllocationLimiter(inner pionturn.RelayAddressGenerator, max int) *alloca
 
 func (a *allocationLimiter) Validate() error { return a.inner.Validate() }
 
-func (a *allocationLimiter) AllocatePacketConn(network string, requestedPort int) (net.PacketConn, net.Addr, error) {
+func (a *allocationLimiter) AllocatePacketConn(conf pionturn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
+	if conf.UserID == "" {
+		return nil, nil, errAllocationSubjectUnavailable
+	}
 	if !a.acquire() {
 		return nil, nil, fmt.Errorf("relay: allocation cap %d reached", a.max)
 	}
-	conn, addr, err := a.inner.AllocatePacketConn(network, requestedPort)
+	conn, addr, err := a.inner.AllocatePacketConn(conf)
 	if err != nil {
 		a.release()
 		return nil, nil, err
@@ -49,16 +55,12 @@ func (a *allocationLimiter) AllocatePacketConn(network string, requestedPort int
 	return &countedPacketConn{PacketConn: conn, release: a.release}, addr, nil
 }
 
-func (a *allocationLimiter) AllocateConn(network string, requestedPort int) (net.Conn, net.Addr, error) {
-	if !a.acquire() {
-		return nil, nil, fmt.Errorf("relay: allocation cap %d reached", a.max)
-	}
-	conn, addr, err := a.inner.AllocateConn(network, requestedPort)
-	if err != nil {
-		a.release()
-		return nil, nil, err
-	}
-	return &countedConn{Conn: conn, release: a.release}, addr, nil
+func (a *allocationLimiter) AllocateListener(pionturn.AllocateListenerConfig) (net.Listener, net.Addr, error) {
+	return nil, nil, errTCPRelayUnsupported
+}
+
+func (a *allocationLimiter) AllocateConn(pionturn.AllocateConnConfig) (net.Conn, error) {
+	return nil, errTCPRelayUnsupported
 }
 
 // acquire reserves an allocation slot, returning false (and counting a
@@ -84,16 +86,4 @@ type countedPacketConn struct {
 func (c *countedPacketConn) Close() error {
 	c.once.Do(c.release)
 	return c.PacketConn.Close()
-}
-
-// countedConn releases one allocation slot the first time it is closed.
-type countedConn struct {
-	net.Conn
-	release func()
-	once    sync.Once
-}
-
-func (c *countedConn) Close() error {
-	c.once.Do(c.release)
-	return c.Conn.Close()
 }

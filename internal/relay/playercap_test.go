@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	pionturn "github.com/pion/turn/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -207,12 +208,41 @@ func TestAuthHandlerForgedUsernamesDoNotGrowLimiterState(t *testing.T) {
 
 	for i := range 1_000 {
 		username := fmt.Sprintf("%s:%d:%d:%s", expires, 7, 500_000+i, kid)
-		key, ok := auth(username, "ggscale", nil)
+		userID, key, ok := auth(&pionturn.RequestAttributes{Username: username, Realm: "ggscale"})
 		require.True(t, ok, "a well-formed username still resolves a key for pion to verify")
+		require.Equal(t, allocationUserID(7, int64(500_000+i)), userID)
 		require.NotEmpty(t, key)
 	}
 
 	assert.Len(t, s.playerLimiter.cells, before,
 		"1000 forged pre-authentication identities must not grow the limiter")
 	assert.Zero(t, liveCells(s.playerLimiter), "forged identities touch no limiter cells")
+}
+
+func TestAuthHandlerReturnsStableUserIDAcrossCredentialRenewal(t *testing.T) {
+	now := time.Unix(1_000, 0)
+	iss := NewIssuer("shared-secret", "ggscale", 10*time.Minute)
+	iss.now = func() time.Time { return now }
+	auth := (&Server{}).authHandler(iss)
+
+	first, err := iss.Issue(7, 42)
+	require.NoError(t, err)
+	firstUserID, _, ok := auth(&pionturn.RequestAttributes{
+		Username: first.Username,
+		Realm:    first.Realm,
+	})
+	require.True(t, ok)
+
+	now = now.Add(5 * time.Minute)
+	renewed, err := iss.Issue(7, 42)
+	require.NoError(t, err)
+	renewedUserID, _, ok := auth(&pionturn.RequestAttributes{
+		Username: renewed.Username,
+		Realm:    renewed.Realm,
+	})
+	require.True(t, ok)
+
+	assert.NotEqual(t, first.Username, renewed.Username)
+	assert.Equal(t, allocationUserID(7, 42), firstUserID)
+	assert.Equal(t, firstUserID, renewedUserID)
 }

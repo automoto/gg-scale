@@ -1,85 +1,93 @@
 package relay
 
 import (
+	"net"
+	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/pion/stun/v2"
+	pionturn "github.com/pion/turn/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAllocationRequestTrackerChargesEvenPortProbesOnce(t *testing.T) {
-	issuer := NewIssuer("shared-secret", "ggscale", time.Minute)
-	creds, err := issuer.Issue(1, 42)
-	require.NoError(t, err)
-	msg := stun.MustBuild(
-		stun.TransactionID,
-		stun.NewType(stun.MethodAllocate, stun.ClassRequest),
-		stun.NewUsername(creds.Username),
-	)
-	tracker := &allocationRequestTracker{}
-	limiter := newPlayerAllocLimiter(6, 1)
-
-	scope := tracker.begin(msg.Raw, issuer)
-	require.NotNil(t, scope)
-	allowed, first, err := tracker.allow(limiter)
-	require.NoError(t, err)
-	assert.True(t, allowed)
-	assert.True(t, first)
-	allowed, first, err = tracker.allow(limiter)
-	require.NoError(t, err)
-	assert.True(t, allowed, "one Allocate request may call the generator more than once")
-	assert.False(t, first, "the repeated generator call reuses the first decision")
-	scope.end()
-
-	scope = tracker.begin(msg.Raw, issuer)
-	require.NotNil(t, scope)
-	t.Cleanup(scope.end)
-	allowed, first, err = tracker.allow(limiter)
-	require.NoError(t, err)
-	assert.False(t, allowed, "the next Allocate request consumes a new token")
-	assert.True(t, first)
+type recordingRelayGenerator struct {
+	packetConfigs   []pionturn.AllocateListenerConfig
+	listenerConfigs []pionturn.AllocateListenerConfig
+	connConfigs     []pionturn.AllocateConnConfig
 }
 
-func TestAllocationRequestTrackerRejectsGeneratorWithoutAllocateRequest(t *testing.T) {
-	tracker := &allocationRequestTracker{}
+func (*recordingRelayGenerator) Validate() error { return nil }
 
-	allowed, first, err := tracker.allow(newPlayerAllocLimiter(6, 1))
+func (g *recordingRelayGenerator) AllocatePacketConn(conf pionturn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
+	g.packetConfigs = append(g.packetConfigs, conf)
+	return nil, &net.UDPAddr{}, nil
+}
 
-	assert.False(t, allowed)
-	assert.False(t, first)
+func (g *recordingRelayGenerator) AllocateListener(conf pionturn.AllocateListenerConfig) (net.Listener, net.Addr, error) {
+	g.listenerConfigs = append(g.listenerConfigs, conf)
+	return nil, &net.TCPAddr{}, nil
+}
+
+func (g *recordingRelayGenerator) AllocateConn(conf pionturn.AllocateConnConfig) (net.Conn, error) {
+	g.connConfigs = append(g.connConfigs, conf)
+	return nil, nil
+}
+
+func TestPlayerAllocationGeneratorThrottlesStableAuthenticatedSubject(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	var throttled atomic.Int64
+	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), &throttled)
+	conf := pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)}
+
+	_, _, err := generator.AllocatePacketConn(conf)
+	require.NoError(t, err)
+	_, _, err = generator.AllocatePacketConn(conf)
+
+	assert.ErrorIs(t, err, errPlayerAllocationThrottled)
+	assert.Len(t, inner.packetConfigs, 1, "a throttled allocation never reaches the node allocator")
+	assert.Equal(t, int64(1), throttled.Load())
+}
+
+func TestPlayerAllocationGeneratorRejectsMissingAuthenticatedSubject(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	var throttled atomic.Int64
+	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), &throttled)
+
+	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4"})
+
 	assert.ErrorIs(t, err, errAllocationSubjectUnavailable)
+	assert.Empty(t, inner.packetConfigs, "an uncorrelated allocation never reaches the node allocator")
+	assert.Zero(t, throttled.Load())
 }
 
-func TestAllocationScopeReleasesBeforeMatchingResponseWrite(t *testing.T) {
-	issuer := NewIssuer("shared-secret", "ggscale", time.Minute)
-	creds, err := issuer.Issue(1, 42)
-	require.NoError(t, err)
-	request := stun.MustBuild(
-		stun.TransactionID,
-		stun.NewType(stun.MethodAllocate, stun.ClassRequest),
-		stun.NewUsername(creds.Username),
-	)
-	tracker := &allocationRequestTracker{}
-	var slot allocationScopeSlot
-	slot.replace(tracker.begin(request.Raw, issuer))
-	response := stun.MustBuild(
-		stun.NewTransactionIDSetter(request.TransactionID),
-		stun.NewType(stun.MethodAllocate, stun.ClassErrorResponse),
-		&stun.ErrorCodeAttribute{Code: stun.CodeBadRequest},
-	)
+func TestPlayerAllocationGeneratorRejectsMalformedUserID(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), nil)
 
-	slot.clearResponse(response.Raw)
+	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{
+		Network: "udp4",
+		UserID:  "not-a-stable-subject",
+	})
 
-	nextCh := make(chan *allocationRequestScope, 1)
-	go func() { nextCh <- tracker.begin(request.Raw, issuer) }()
-	select {
-	case next := <-nextCh:
-		require.NotNil(t, next, "the matching response releases the listener gate")
-		next.end()
-	case <-time.After(time.Second):
-		slot.clear()
-		t.Fatal("the matching response did not release the listener gate")
-	}
+	assert.ErrorIs(t, err, errAllocationSubjectUnavailable)
+	assert.Empty(t, inner.packetConfigs)
+}
+
+func TestPlayerAllocationGeneratorRejectsRFC6062(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), nil)
+
+	_, _, listenerErr := generator.AllocateListener(pionturn.AllocateListenerConfig{
+		Network: "tcp4",
+		UserID:  allocationUserID(1, 42),
+	})
+	_, connErr := generator.AllocateConn(pionturn.AllocateConnConfig{
+		Network: "tcp4",
+		UserID:  allocationUserID(1, 42),
+	})
+
+	assert.ErrorIs(t, listenerErr, errTCPRelayUnsupported)
+	assert.ErrorIs(t, connErr, errTCPRelayUnsupported)
+	assert.Empty(t, inner.listenerConfigs)
+	assert.Empty(t, inner.connConfigs)
 }
