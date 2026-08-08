@@ -13,14 +13,14 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/gamesession"
-	"github.com/ggscale/ggscale/internal/matchmaker"
-	"github.com/ggscale/ggscale/internal/matchmaker/query"
-	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/matchmaker/query"
+	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 const (

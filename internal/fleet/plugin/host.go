@@ -16,8 +16,8 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // validPluginName constrains FLEET_BACKEND=plugin:<name> so the launcher

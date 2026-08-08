@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/config"
+	"github.com/automoto/gg-scale/internal/config"
 )
 
 func baseProd() *config.Config {

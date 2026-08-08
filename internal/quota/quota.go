@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // Unlimited is the sentinel for a class axis with no cap (tier_3 projects and

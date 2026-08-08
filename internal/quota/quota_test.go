@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/quota"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 func TestLimitsForClass_ladder_values(t *testing.T) {

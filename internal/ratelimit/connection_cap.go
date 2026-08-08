@@ -7,8 +7,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/cache"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // CloseCodeTenantConnectionCap is the WebSocket close code used when a new

@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/gamesession"
 )
 
 func TestParseRequestedTier(t *testing.T) {

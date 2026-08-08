@@ -7,8 +7,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/serverlist"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/serverlist"
 )
 
 // heartbeatRequest fields are schema-optional so the handler owns the

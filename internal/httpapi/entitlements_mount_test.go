@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/httpapi"
 )
 
 func TestRouter_mounts_entitlements_behind_bearer_when_token_set(t *testing.T) {

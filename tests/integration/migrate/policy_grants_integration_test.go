@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/migrate"
-	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 // TestMigrations_seed_casbin_p_policy_matches_code guards against the class of

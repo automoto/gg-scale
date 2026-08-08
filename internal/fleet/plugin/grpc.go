@@ -9,8 +9,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	fleetpb "github.com/ggscale/ggscale/internal/fleet/plugin/proto"
+	"github.com/automoto/gg-scale/internal/fleet"
+	fleetpb "github.com/automoto/gg-scale/internal/fleet/plugin/proto"
 )
 
 func statusToProto(s fleet.Status) fleetpb.AllocationStatus {

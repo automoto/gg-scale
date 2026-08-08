@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 type adapter struct {

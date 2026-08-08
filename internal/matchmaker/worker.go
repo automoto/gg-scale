@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/matchmaker/query"
-	"github.com/ggscale/ggscale/internal/realtime"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/matchmaker/query"
+	"github.com/automoto/gg-scale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // Allocator is the slice of fleet.Manager the worker uses. The narrow

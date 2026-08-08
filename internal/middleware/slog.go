@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 // ContextHandler is a slog.Handler that enriches every log record with

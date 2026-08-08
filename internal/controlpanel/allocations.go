@@ -12,11 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/db"
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const (

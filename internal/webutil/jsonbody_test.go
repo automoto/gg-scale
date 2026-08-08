@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 type body struct {

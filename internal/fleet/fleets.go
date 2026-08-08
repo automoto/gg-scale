@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/db"
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 )
 
 // Fleet is an operator-defined template that allocations are drawn from. It

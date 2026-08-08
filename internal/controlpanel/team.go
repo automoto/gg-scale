@@ -12,10 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/ggscale/ggscale/internal/auditlog"
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/auditlog"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 var (

@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/relay"
+	"github.com/automoto/gg-scale/internal/relay"
 )
 
 // startTestRelay boots a real TURN server on a loopback UDP port and returns

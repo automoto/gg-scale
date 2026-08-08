@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/migrate"
-	"github.com/ggscale/ggscale/internal/signedcookie"
-	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/signedcookie"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 func startSigningKeyDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {

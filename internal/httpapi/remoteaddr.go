@@ -10,10 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/ggscale/ggscale/internal/db"
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/remoteaddr"
+	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/remoteaddr"
 )
 
 // maxRemoteAddrs is the slot count: LAN IP, public IP, DNS, iroh.

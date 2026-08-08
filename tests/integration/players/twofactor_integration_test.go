@@ -24,14 +24,14 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/mailer"
-	_ "github.com/ggscale/ggscale/internal/mailer/noop"
-	"github.com/ggscale/ggscale/internal/migrate"
-	"github.com/ggscale/ggscale/internal/players"
-	"github.com/ggscale/ggscale/internal/twofactor"
-	"github.com/ggscale/ggscale/internal/verifycode"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/mailer"
+	_ "github.com/automoto/gg-scale/internal/mailer/noop"
+	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/players"
+	"github.com/automoto/gg-scale/internal/twofactor"
+	"github.com/automoto/gg-scale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const (

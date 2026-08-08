@@ -1,7 +1,7 @@
 package controlpanel
 
 import (
-	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 // Re-exported for the rest of the control panel package; the shared

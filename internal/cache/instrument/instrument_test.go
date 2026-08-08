@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/cache/instrument"
-	"github.com/ggscale/ggscale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache/instrument"
+	"github.com/automoto/gg-scale/internal/cache/memory"
 )
 
 func newStore(t *testing.T) (cache.Store, *prometheus.Registry) {

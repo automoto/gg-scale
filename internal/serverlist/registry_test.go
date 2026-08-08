@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/serverlist"
+	"github.com/automoto/gg-scale/internal/serverlist"
 )
 
 func mkHB(tenant int64, fleet, name string, players int) serverlist.Heartbeat {

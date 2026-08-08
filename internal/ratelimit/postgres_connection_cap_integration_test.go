@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/migrate"
 )
 
 func startConnectionCapPostgres(t *testing.T) *db.Pool {

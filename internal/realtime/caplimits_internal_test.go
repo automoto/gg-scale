@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 func TestTenantCapLimits(t *testing.T) {

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/migrate"
 )
 
 func execMigrationFile(t *testing.T, db execer, name string) {

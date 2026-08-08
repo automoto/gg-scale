@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
+	"github.com/automoto/gg-scale/internal/fleet"
+	fleetplugin "github.com/automoto/gg-scale/internal/fleet/plugin"
 )
 
 // buildExamplePlugin compiles examples/ggscale-fleet-example into a fresh temp
@@ -25,7 +25,7 @@ func buildExamplePlugin(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "ggscale-fleet-example")
-	cmd := exec.Command("go", "build", "-o", bin, "github.com/ggscale/ggscale/examples/ggscale-fleet-example")
+	cmd := exec.Command("go", "build", "-o", bin, "github.com/automoto/gg-scale/examples/ggscale-fleet-example")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "build example plugin: %s", out)

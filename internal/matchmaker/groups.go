@@ -4,7 +4,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/matchmaker/query"
+	"github.com/automoto/gg-scale/internal/matchmaker/query"
 )
 
 // groupConfig tunes group formation for one bucket pass.

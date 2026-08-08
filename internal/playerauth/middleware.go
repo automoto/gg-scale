@@ -11,8 +11,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 const headerName = "X-Session-Token"

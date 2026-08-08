@@ -17,10 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/verifycode"
-	"github.com/ggscale/ggscale/internal/webutil"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/quota"
+	"github.com/automoto/gg-scale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // InviteAcceptView is the data rendered by the player invite-accept page.

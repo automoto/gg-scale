@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ggscale/ggscale/internal/entitlement"
+	"github.com/automoto/gg-scale/internal/entitlement"
 )
 
 // mountInternalAPI mounts the /internal surface — currently only the

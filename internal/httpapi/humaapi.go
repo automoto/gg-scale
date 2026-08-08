@@ -49,7 +49,7 @@ func newHumaConfig(version string) huma.Config {
 		"additionally require a session token in X-Session-Token."
 	cfg.Info.Contact = &huma.Contact{
 		Name: "ggscale",
-		URL:  "https://github.com/ggscale/ggscale",
+		URL:  "https://github.com/automoto/gg-scale",
 	}
 	cfg.Servers = []*huma.Server{
 		{URL: "http://localhost:8080", Description: "Local development server (default HTTP_ADDR)"},

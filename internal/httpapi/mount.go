@@ -8,9 +8,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ggscale/ggscale/internal/observability"
-	"github.com/ggscale/ggscale/internal/realtime"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Handler {

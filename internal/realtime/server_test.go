@@ -16,11 +16,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/cache/memory"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/realtime"
 )
 
 // wrap inserts tenant + player ids into the request context, standing in

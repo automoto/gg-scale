@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // fleetsListPage renders the project's fleet templates. An operator creates

@@ -1626,7 +1626,7 @@ components:
 info:
   contact:
     name: ggscale
-    url: https://github.com/ggscale/ggscale
+    url: https://github.com/automoto/gg-scale
   description: "Player-facing and game-server-facing HTTP API for ggscale. Authenticate with a tenant API key (Authorization: Bearer). Player endpoints additionally require a session token in X-Session-Token."
   title: ggscale API
   version: 1.0.0

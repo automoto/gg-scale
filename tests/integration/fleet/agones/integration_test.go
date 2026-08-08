@@ -18,8 +18,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	agonesbackend "github.com/ggscale/ggscale/internal/fleet/agones"
+	"github.com/automoto/gg-scale/internal/fleet"
+	agonesbackend "github.com/automoto/gg-scale/internal/fleet/agones"
 )
 
 // TestBackend_RealCluster_Allocate_to_Deallocate exercises the agones

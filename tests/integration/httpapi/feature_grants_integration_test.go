@@ -12,15 +12,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/fleet"
-	"github.com/ggscale/ggscale/internal/httpapi"
-	"github.com/ggscale/ggscale/internal/matchmaker"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/relay"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/relay"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 func TestFeatureEnabled_disabledGrantOverridesEnabledGrantAfterCacheRefresh(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 )
 
 // NewSQLLookup builds a Lookup that resolves api_keys against pool. The

@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/ggscale/ggscale/internal/gamesession"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 func (h *Handler) rateLimitsPage(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,6 @@
 package ratelimit
 
-import "github.com/ggscale/ggscale/internal/tenant"
+import "github.com/automoto/gg-scale/internal/tenant"
 
 // Limits captures the token-bucket parameters for a tier.
 type Limits struct {

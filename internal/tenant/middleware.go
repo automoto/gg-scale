@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 // ErrUnknownKey is returned by a Lookup when no api_keys row matches the

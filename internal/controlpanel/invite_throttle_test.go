@@ -8,8 +8,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/cache/memory"
-	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 func TestInviteThrottled_denies_second_send_to_same_recipient(t *testing.T) {

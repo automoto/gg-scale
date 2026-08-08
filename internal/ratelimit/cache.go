@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache"
 )
 
 // CacheLimiter implements Limiter on top of the process-local cache.Store. It

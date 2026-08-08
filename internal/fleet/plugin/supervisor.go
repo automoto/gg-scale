@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 // SupervisorConfig wires NewSupervisor. The interval/budget knobs exist

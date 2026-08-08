@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/controlpanel"
 )
 
 func getRemoteConfig(t *testing.T, baseURL, apiKey, ifNoneMatch string) (*http.Response, []byte) {

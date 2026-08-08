@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
-	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 // guardTier classifies the authorization a mutating route must sit behind.

@@ -27,7 +27,7 @@ import (
 	"github.com/pquerna/otp"
 	"github.com/pquerna/otp/totp"
 
-	"github.com/ggscale/ggscale/internal/signedcookie"
+	"github.com/automoto/gg-scale/internal/signedcookie"
 )
 
 const (

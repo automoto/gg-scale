@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 // roleHandlerRequest builds a request carrying a session with the given

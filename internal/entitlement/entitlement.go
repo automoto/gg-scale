@@ -24,12 +24,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/auditlog"
-	"github.com/ggscale/ggscale/internal/db"
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/mailer"
-	"github.com/ggscale/ggscale/internal/observability"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/auditlog"
+	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // managedFeatures are the tenant-level features the billing service may grant

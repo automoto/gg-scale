@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ggscale/ggscale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/matchmaker"
 )
 
 // sessionCreator is the slice of Service the adapter needs; tests inject a

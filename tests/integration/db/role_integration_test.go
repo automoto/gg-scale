@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 func TestAssertAppRoleHandlesTenantTableOwnerSessionByEnvironment(t *testing.T) {

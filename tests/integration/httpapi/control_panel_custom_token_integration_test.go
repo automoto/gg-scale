@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/controlpanel"
 )
 
 func testEd25519PublicKeyPEM(t *testing.T) string {

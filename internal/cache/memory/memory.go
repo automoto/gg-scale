@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache"
 )
 
 type bucket struct {

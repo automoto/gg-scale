@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 // fakeBackend lets each test script backend behaviour without standing up a

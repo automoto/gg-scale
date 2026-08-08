@@ -19,14 +19,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/mailer"
-	"github.com/ggscale/ggscale/internal/observability"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/signedcookie"
-	"github.com/ggscale/ggscale/internal/twofactor"
-	"github.com/ggscale/ggscale/internal/verifycode"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/signedcookie"
+	"github.com/automoto/gg-scale/internal/twofactor"
+	"github.com/automoto/gg-scale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const (

@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	fleetpb "github.com/ggscale/ggscale/internal/fleet/plugin/proto"
+	"github.com/automoto/gg-scale/internal/fleet"
+	fleetpb "github.com/automoto/gg-scale/internal/fleet/plugin/proto"
 )
 
 // ── translation tables ──────────────────────────────────────────────────────

@@ -18,8 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
-	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/mailer"
 )
 
 // sendPlayerInvite drives the control-panel player-invite form and returns the

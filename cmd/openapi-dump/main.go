@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/httpapi"
 )
 
 // specVersion is the info.version stamped into the generated document.

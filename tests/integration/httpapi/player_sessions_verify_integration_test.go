@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/automoto/gg-scale/internal/auth"
 )
 
 // signSession issues a session JWT with the claims a real /v1/auth

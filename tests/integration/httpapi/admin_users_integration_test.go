@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
-	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 func TestPlatformUsers_lists_for_platform_admin(t *testing.T) {

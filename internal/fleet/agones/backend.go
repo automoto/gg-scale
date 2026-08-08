@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 // API narrows the Agones clientset surface to the operations this backend

@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/webassets"
+	"github.com/automoto/gg-scale/internal/webassets"
 )
 
 func get(t *testing.T, path string) *httptest.ResponseRecorder {

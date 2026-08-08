@@ -10,8 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/cache"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 type postgresGrantStore struct {

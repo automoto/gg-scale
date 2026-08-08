@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/webassets"
+	"github.com/automoto/gg-scale/internal/webassets"
 )
 
 var playerTestVerifySigningKey = []byte("0123456789abcdef0123456789abcdef")

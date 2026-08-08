@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache"
 )
 
 // Factory builds a fresh Store for one test. The returned cleanup runs at

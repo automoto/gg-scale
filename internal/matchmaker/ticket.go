@@ -19,7 +19,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 // Status is the lifecycle position of a ticket.

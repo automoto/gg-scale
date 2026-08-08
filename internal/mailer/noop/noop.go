@@ -2,13 +2,13 @@
 // all mail. Useful for self-hosters who don't need email, and for CI
 // environments. Import for side-effects:
 //
-//	import _ "github.com/ggscale/ggscale/internal/mailer/noop"
+//	import _ "github.com/automoto/gg-scale/internal/mailer/noop"
 package noop
 
 import (
 	"context"
 
-	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/mailer"
 )
 
 func init() {

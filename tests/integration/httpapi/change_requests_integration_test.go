@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
-	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/quota"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 func changeRequestSubmitURL(base string, tenantID int64) string {

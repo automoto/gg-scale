@@ -6,8 +6,8 @@
 // the same database/sql driver pattern. The built-in providers are in the smtp
 // and noop sub-packages; import them for side-effects in main.go:
 //
-//	import _ "github.com/ggscale/ggscale/internal/mailer/noop"
-//	import _ "github.com/ggscale/ggscale/internal/mailer/smtp"
+//	import _ "github.com/automoto/gg-scale/internal/mailer/noop"
+//	import _ "github.com/automoto/gg-scale/internal/mailer/smtp"
 //
 // External providers (e.g. SendGrid, Mailgun) follow the same pattern without
 // ggscale ever importing them — no vendor lock-in enters the core binary.

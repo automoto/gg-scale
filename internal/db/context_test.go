@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 func TestWithTenant_round_trips_tenant_id(t *testing.T) {

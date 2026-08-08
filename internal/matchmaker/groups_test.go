@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/matchmaker/query"
+	"github.com/automoto/gg-scale/internal/matchmaker/query"
 )
 
 func gt(id int64, age time.Duration, region string, minC, maxC, mult int, cross bool) *Ticket {

@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/gamesession"
-	"github.com/ggscale/ggscale/internal/quota"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/quota"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // ── helpers ─────────────────────────────────────────────────────────────────

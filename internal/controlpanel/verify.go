@@ -15,12 +15,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/mailer"
-	"github.com/ggscale/ggscale/internal/observability"
-	"github.com/ggscale/ggscale/internal/signedcookie"
-	"github.com/ggscale/ggscale/internal/verifycode"
-	"github.com/ggscale/ggscale/internal/webutil"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/signedcookie"
+	"github.com/automoto/gg-scale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const (

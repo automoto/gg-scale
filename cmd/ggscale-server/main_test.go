@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/config"
-	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/config"
+	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

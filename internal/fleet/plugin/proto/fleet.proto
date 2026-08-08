@@ -9,7 +9,7 @@ syntax = "proto3";
 
 package ggscale.fleet.v1;
 
-option go_package = "github.com/ggscale/ggscale/internal/fleet/plugin/proto;fleetpb";
+option go_package = "github.com/automoto/gg-scale/internal/fleet/plugin/proto;fleetpb";
 
 // FleetBackend is the gRPC surface a plugin exposes. Method-by-method
 // equivalents of fleet.Backend; Watch is a server-stream so the manager can

@@ -2,6 +2,12 @@
 
 The open platform for multiplayer games. A simple web service and a Postgres database give you everything you need to build and run an online game with players.
 
+## Run gg-scale without running the infrastructure
+
+Prefer a managed service? Deploy your game on gg-scale cloud and leave the hosting to us.
+
+**[Try ggscale Cloud →](https://ggscale.com)**
+
 ## Documentation
 
 Full documentation, including Architecture, Features, API Route descriptions, and Onboarding guides, has been moved to our GitHub Wiki:

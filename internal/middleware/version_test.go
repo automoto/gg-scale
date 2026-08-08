@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"

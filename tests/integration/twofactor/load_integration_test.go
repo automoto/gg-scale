@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/migrate"
-	"github.com/ggscale/ggscale/internal/twofactor"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/twofactor"
 )
 
 func startTwoFactorLoadDB(t *testing.T) (*db.Pool, *pgxpool.Pool) {

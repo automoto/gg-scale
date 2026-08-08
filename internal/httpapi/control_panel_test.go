@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ggscale/ggscale/internal/controlpanel"
-	"github.com/ggscale/ggscale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

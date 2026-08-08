@@ -1024,7 +1024,7 @@ const file_internal_fleet_plugin_proto_fleet_proto_rawDesc = "" +
 	"\x06Status\x12\x1f.ggscale.fleet.v1.StatusRequest\x1a .ggscale.fleet.v1.StatusResponse\x12I\n" +
 	"\x05Watch\x12\x1e.ggscale.fleet.v1.WatchRequest\x1a\x1e.ggscale.fleet.v1.StatusUpdate0\x01\x12Z\n" +
 	"\vHealthCheck\x12$.ggscale.fleet.v1.HealthCheckRequest\x1a%.ggscale.fleet.v1.HealthCheckResponse\x12E\n" +
-	"\x04Ping\x12\x1d.ggscale.fleet.v1.PingRequest\x1a\x1e.ggscale.fleet.v1.PingResponseB@Z>github.com/ggscale/ggscale/internal/fleet/plugin/proto;fleetpbb\x06proto3"
+	"\x04Ping\x12\x1d.ggscale.fleet.v1.PingRequest\x1a\x1e.ggscale.fleet.v1.PingResponseB@Z>github.com/automoto/gg-scale/internal/fleet/plugin/proto;fleetpbb\x06proto3"
 
 var (
 	file_internal_fleet_plugin_proto_fleet_proto_rawDescOnce sync.Once

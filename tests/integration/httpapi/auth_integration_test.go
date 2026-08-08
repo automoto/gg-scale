@@ -23,15 +23,15 @@ import (
 	"github.com/stretchr/testify/require"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/cache/memory"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/httpapi"
-	"github.com/ggscale/ggscale/internal/migrate"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // testSignerKey is the HMAC key every integration test signs and

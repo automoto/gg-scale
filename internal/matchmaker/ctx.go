@@ -3,7 +3,7 @@ package matchmaker
 import (
 	"context"
 
-	"github.com/ggscale/ggscale/internal/db"
+	"github.com/automoto/gg-scale/internal/db"
 )
 
 func tenantFromCtx(ctx context.Context) (int64, error) {

@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	agonesbackend "github.com/ggscale/ggscale/internal/fleet/agones"
-	pluginbackend "github.com/ggscale/ggscale/internal/fleet/plugin"
+	"github.com/automoto/gg-scale/internal/fleet"
+	agonesbackend "github.com/automoto/gg-scale/internal/fleet/agones"
+	pluginbackend "github.com/automoto/gg-scale/internal/fleet/plugin"
 )
 
 // Config is the runtime input to New.

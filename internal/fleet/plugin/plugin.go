@@ -9,8 +9,8 @@ import (
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	fleetpb "github.com/ggscale/ggscale/internal/fleet/plugin/proto"
+	"github.com/automoto/gg-scale/internal/fleet"
+	fleetpb "github.com/automoto/gg-scale/internal/fleet/plugin/proto"
 )
 
 // Handshake is the magic-cookie/protocol pair both host and plugin must agree

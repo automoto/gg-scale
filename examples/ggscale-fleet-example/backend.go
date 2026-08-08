@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/ggscale/ggscale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 // noopBackend is the reference fleet.Backend implementation. It allocates

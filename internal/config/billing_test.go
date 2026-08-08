@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/config"
+	"github.com/automoto/gg-scale/internal/config"
 )
 
 func baseDev() *config.Config {

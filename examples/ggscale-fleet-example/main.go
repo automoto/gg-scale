@@ -9,7 +9,7 @@ package main
 import (
 	goplugin "github.com/hashicorp/go-plugin"
 
-	fleetplugin "github.com/ggscale/ggscale/internal/fleet/plugin"
+	fleetplugin "github.com/automoto/gg-scale/internal/fleet/plugin"
 )
 
 func main() {

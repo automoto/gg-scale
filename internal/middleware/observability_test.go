@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/automoto/gg-scale/internal/middleware"
 )
 
 // fullyCapableWriter wraps httptest.ResponseRecorder with the optional

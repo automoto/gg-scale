@@ -12,7 +12,7 @@ import "bytes"
 
 import "strconv"
 
-import "github.com/ggscale/ggscale/internal/webassets"
+import "github.com/automoto/gg-scale/internal/webassets"
 
 func pid(n int64) string { return strconv.FormatInt(n, 10) }
 

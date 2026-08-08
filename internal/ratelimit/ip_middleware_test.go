@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 func ipReq(remoteAddr string) *http.Request {

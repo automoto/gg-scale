@@ -13,13 +13,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/cache/memory"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/httpapi"
-	"github.com/ggscale/ggscale/internal/mailer"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // Many score submissions from distinct players produce a stable top-N from

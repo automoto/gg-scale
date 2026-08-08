@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/auth"
+	"github.com/automoto/gg-scale/internal/auth"
 )
 
 // After email signup + verify + login, the access token must parse and verify

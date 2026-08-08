@@ -9,7 +9,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache"
 )
 
 // Store wraps any cache.Store and records ggscale_cache_ops_total{op,result}.

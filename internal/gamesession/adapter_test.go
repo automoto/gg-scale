@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/matchmaker"
-	"github.com/ggscale/ggscale/internal/quota"
+	"github.com/automoto/gg-scale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/quota"
 )
 
 type fakeCreator struct {

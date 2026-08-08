@@ -12,11 +12,11 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/ggscale/ggscale/internal/cache"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/playerauth"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/cache"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // Options configures ServeWS. Hub is required; everything else is optional.

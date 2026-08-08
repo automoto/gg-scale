@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/jobs"
-	"github.com/ggscale/ggscale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/mailer"
 )
 
 func TestSendPasswordResetEmail_delivers_for_known_account_only(t *testing.T) {

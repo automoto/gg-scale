@@ -13,10 +13,10 @@ import (
 	"github.com/pquerna/otp"
 	"golang.org/x/crypto/bcrypt"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/observability"
-	"github.com/ggscale/ggscale/internal/twofactor"
-	"github.com/ggscale/ggscale/internal/webutil"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/twofactor"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const (

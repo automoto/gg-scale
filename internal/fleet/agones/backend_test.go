@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/fleet"
-	agonesbackend "github.com/ggscale/ggscale/internal/fleet/agones"
+	"github.com/automoto/gg-scale/internal/fleet"
+	agonesbackend "github.com/automoto/gg-scale/internal/fleet/agones"
 )
 
 // fakeAPI scripts agones responses for the unit tests. Each call records

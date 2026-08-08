@@ -6,7 +6,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/ggscale/ggscale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 // inviteThrottled checks the per-inviter / per-domain / per-recipient invite

@@ -18,9 +18,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
-	"github.com/ggscale/ggscale/internal/jobs"
-	"github.com/ggscale/ggscale/internal/webutil"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // accountResetSendTimeout bounds the detached lookup+mint+send fallback when

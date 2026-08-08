@@ -1,4 +1,4 @@
-module github.com/ggscale/ggscale
+module github.com/automoto/gg-scale
 
 go 1.26.5
 

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/cache"
+	"github.com/automoto/gg-scale/internal/cache"
 )
 
 // admit is a small helper: run AdmitBurst n times at a fixed instant and report

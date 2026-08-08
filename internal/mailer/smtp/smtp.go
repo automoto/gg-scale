@@ -1,6 +1,6 @@
 // Package smtp registers the "smtp" mailer provider. Import for side-effects:
 //
-//	import _ "github.com/ggscale/ggscale/internal/mailer/smtp"
+//	import _ "github.com/automoto/gg-scale/internal/mailer/smtp"
 package smtp
 
 import (
@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ggscale/ggscale/internal/mailer"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // TLS modes accepted by SMTP_TLS. starttls is the default and fails the

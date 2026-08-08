@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/ggscale/ggscale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 func (h *Handler) reloadRBACPolicy(ctx context.Context) {

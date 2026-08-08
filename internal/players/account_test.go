@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	sqlcgen "github.com/ggscale/ggscale/internal/db/sqlc"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 )
 
 func TestAccountHomePage_renders_signed_in_header(t *testing.T) {

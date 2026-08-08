@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ggscale/ggscale/internal/middleware"
+	"github.com/automoto/gg-scale/internal/middleware"
 )
 
 func TestRequestDeadline_returns_503_when_handler_exceeds_deadline(t *testing.T) {

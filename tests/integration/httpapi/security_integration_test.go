@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 // disablePlayer flips disabled_at to now() for the given player.

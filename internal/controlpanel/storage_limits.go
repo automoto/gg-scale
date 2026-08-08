@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/auditlog"
-	"github.com/ggscale/ggscale/internal/storagelimit"
-	"github.com/ggscale/ggscale/internal/webutil"
+	"github.com/automoto/gg-scale/internal/auditlog"
+	"github.com/automoto/gg-scale/internal/storagelimit"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // errInvalidStorageMB is returned when a storage-limit form field is not a

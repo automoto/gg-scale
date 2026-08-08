@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/observability"
+	"github.com/automoto/gg-scale/internal/observability"
 )
 
 func TestNewMetrics_counts_with_labels(t *testing.T) {

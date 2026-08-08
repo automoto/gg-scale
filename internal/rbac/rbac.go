@@ -15,8 +15,8 @@ import (
 	stringadapter "github.com/casbin/casbin/v3/persist/string-adapter"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 //go:embed model.conf

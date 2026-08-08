@@ -13,13 +13,13 @@ import (
 	"github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/auth"
-	"github.com/ggscale/ggscale/internal/db"
-	"github.com/ggscale/ggscale/internal/httpapi"
-	"github.com/ggscale/ggscale/internal/ratelimit"
-	"github.com/ggscale/ggscale/internal/rbac"
-	"github.com/ggscale/ggscale/internal/realtime"
-	"github.com/ggscale/ggscale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // newRealtimeServer builds a full router with the WS hub enabled and a fast

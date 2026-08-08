@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ggscale/ggscale/internal/twofactor"
+	"github.com/automoto/gg-scale/internal/twofactor"
 )
 
 const testTwoFactorHexKey = "6368616e676520746869732070617373776f726420746f206120736563726574"
