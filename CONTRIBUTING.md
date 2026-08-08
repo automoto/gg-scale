@@ -1,5 +1,7 @@
 # Contributing to ggscale
 
+*Note: We are not accepting external pull requests at this time due to PR spam but please feel free to file an issue or request a feature in our discussion board.*
+
 Thank you for considering contributing. ggscale is Apache 2.0 licensed; by
 contributing you agree your contribution is licensed under the same terms.
 

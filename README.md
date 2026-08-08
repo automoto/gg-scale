@@ -1,8 +1,8 @@
 # gg-scale
 
-The open platform for multiplayer games. A simple web service and a Postgres database give you everything you need to build and run an online game with players.
+A simple and open backend for multiplayer games. gg-scale has everything an online game needs: player accounts and auth, game sessions and lobbies, matchmaking, peer to peer relays, dedicated servers(beta), cloud saves, leaderboards, friends and a control panel to manage it all.
 
-## Run gg-scale without running the infrastructure
+## gg-scale Managed Cloud
 
 Prefer a managed service? Deploy your game on gg-scale cloud and leave the hosting to us.
 
