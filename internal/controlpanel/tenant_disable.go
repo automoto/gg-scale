@@ -122,10 +122,10 @@ func (h *Handler) disableTenantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !changed {
-		h.redirectTenantSettings(w, r, tenantID, "Tenant is already disabled.")
+		h.redirectTenantSettings(w, r, tenantID, "Account Tenant is already disabled.")
 		return
 	}
-	h.redirectTenantSettings(w, r, tenantID, "Tenant disabled. API keys and player traffic are blocked.")
+	h.redirectTenantSettings(w, r, tenantID, "Account Tenant disabled. API keys and player traffic are blocked.")
 }
 
 func (h *Handler) enableTenantHandler(w http.ResponseWriter, r *http.Request) {
@@ -171,8 +171,8 @@ func (h *Handler) enableTenantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !changed {
-		h.redirectTenantSettings(w, r, tenantID, "Tenant was not re-enabled. A platform disable can only be undone by a platform admin.")
+		h.redirectTenantSettings(w, r, tenantID, "Account Tenant was not re-enabled. A platform disable can only be undone by a platform admin.")
 		return
 	}
-	h.redirectTenantSettings(w, r, tenantID, "Tenant re-enabled.")
+	h.redirectTenantSettings(w, r, tenantID, "Account Tenant re-enabled.")
 }

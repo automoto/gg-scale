@@ -206,7 +206,7 @@ func TestHomePage_RendersPlatformMenuWhenAuthorized(t *testing.T) {
 	assert.Contains(t, html, `<li class="nav-section">Admin</li>`)
 	assert.Contains(t, html, `href="/v1/control-panel/admin/users"`)
 	assert.Contains(t, html, `href="/v1/control-panel/admin/player-accounts"`)
-	assert.Contains(t, html, `aria-current="page">All tenants</a>`)
+	assert.Contains(t, html, `aria-current="page">All Account Tenants</a>`)
 }
 
 func TestHomePage_HidesAdminItemsWhenNotAuthorized(t *testing.T) {
@@ -250,7 +250,7 @@ func TestProjectsPage_RendersTenantNavigationAndNoSecondaryHeaderButtons(t *test
 
 	assert.Contains(t, html, "<summary>Menu</summary>")
 	assert.Contains(t, html, `href="/v1/control-panel/tenants/42/api-keys"`)
-	assert.Contains(t, html, `aria-current="page">Projects</a>`)
+	assert.Contains(t, html, `aria-current="page">Game Projects</a>`)
 	assert.NotContains(t, html, `role="button" class="secondary outline btn-inline">Settings</a>`)
 	assert.NotContains(t, html, `role="button" class="secondary outline btn-inline">Rate limits</a>`)
 }
@@ -300,8 +300,8 @@ func TestProjectsPage_HasNewProjectButtonInHeader(t *testing.T) {
 		CSRFToken: "tok",
 	}))
 	assert.Contains(t, html, `href="/v1/control-panel/tenants/42/projects/new"`)
-	assert.Contains(t, html, "+ New project")
-	assert.NotContains(t, html, `<h2>Create project</h2>`, "the inline create form moved to its own page")
+	assert.Contains(t, html, "+ New Game Project")
+	assert.NotContains(t, html, `<h2>Create Game Project</h2>`, "the inline create form moved to its own page")
 }
 
 func TestAPIKeysPage_feature_dialog_reflects_grantability(t *testing.T) {
@@ -337,7 +337,7 @@ func TestAPIKeyFeaturesDialog_reflects_grantability(t *testing.T) {
 	assert.Contains(t, html, `value="fleet" checked`)
 	assert.Contains(t, html, `value="p2p_relay"`)
 	assert.Contains(t, html, "Available")
-	assert.Contains(t, html, "Not available for this project")
+	assert.Contains(t, html, "Not available for this Game Project")
 }
 
 func TestAPIKeysPage_revocation_has_specific_confirmation(t *testing.T) {
@@ -423,10 +423,10 @@ func TestProjectsPage_RendersFlashMessage(t *testing.T) {
 	html := renderToString(t, ProjectsPage(ProjectsView{
 		UserEmail: "alice@example.com",
 		TenantID:  42,
-		Message:   "Project \"arcade-prod\" created.",
+		Message:   "Game Project \"arcade-prod\" created.",
 	}))
 	assert.Contains(t, html, `class="flash-success"`)
-	assert.Contains(t, html, `Project &#34;arcade-prod&#34; created.`)
+	assert.Contains(t, html, `Game Project &#34;arcade-prod&#34; created.`)
 }
 
 func TestNewProjectPage_RendersFormWithCSRFAndCancelLink(t *testing.T) {
@@ -445,9 +445,9 @@ func TestNewProjectPage_RendersFieldErrorAndPreservesInput(t *testing.T) {
 		UserEmail:   "alice@example.com",
 		TenantID:    42,
 		Name:        "arcade prod",
-		FieldErrors: map[string]string{"name": "Project name is required"},
+		FieldErrors: map[string]string{"name": "Game Project name is required"},
 	}))
-	assert.Contains(t, html, "Project name is required")
+	assert.Contains(t, html, "Game Project name is required")
 	assert.Contains(t, html, `value="arcade prod"`)
 }
 
@@ -529,6 +529,14 @@ func TestNewTenantPage_HasCSRFHeaderForHTMX(t *testing.T) {
 	assert.Contains(t, html, "hx-headers=")
 	assert.Contains(t, html, "X-CSRF-Token")
 	assert.Contains(t, html, "tok-xyz")
+}
+
+func TestNewTenantPage_uses_user_facing_resource_names(t *testing.T) {
+	html := renderToString(t, NewTenantPage(NewTenantView{}))
+
+	assert.Contains(t, html, "New Account Tenant")
+	assert.Contains(t, html, "Account Tenant name")
+	assert.Contains(t, html, "Starter Game Project name")
 }
 
 func TestFormErrorFragment_RendersAlertRole(t *testing.T) {
@@ -725,16 +733,35 @@ func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) 
 func TestInviteTeamPage_should_explain_roles_at_selection(t *testing.T) {
 	html := renderToString(t, InviteTeamPage(InviteTeamView{TenantID: 1}))
 
-	assert.Contains(t, html, "Tenant admins manage everything in the tenant")
+	assert.Contains(t, html, ">Tenant admin</option>")
+	assert.Contains(t, html, ">Tenant member</option>")
+	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
 	assert.Contains(t, html, "Tenant members have read-only access")
+	assert.Contains(t, html, "view Game Projects and players")
 }
 
 func TestHelpPage_should_document_team_roles(t *testing.T) {
 	html := renderToString(t, HelpPage(HelpView{}))
 
 	assert.Contains(t, html, `id="roles"`)
-	assert.Contains(t, html, "Tenant admins manage everything in the tenant")
+	assert.Contains(t, html, "<dt>Account Tenant</dt>")
+	assert.Contains(t, html, "<dt>Game Project</dt>")
+	assert.Contains(t, html, "<dt>Tenant admin</dt>")
+	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
 	assert.Contains(t, html, "Tenant members have read-only access")
+	assert.Contains(t, html, "view Game Projects and players")
+}
+
+func TestRoleExplanation_uses_resource_names_and_preserves_role_names(t *testing.T) {
+	h := &Handler{cfg: Config{BaseURL: "https://example.com"}}
+
+	admin := h.roleExplanation(roleInviteTenantAdmin)
+	member := h.roleExplanation(roleInviteTenantMember)
+
+	assert.Contains(t, admin, "As a tenant admin")
+	assert.Contains(t, admin, "in the Account Tenant: Game Projects")
+	assert.Contains(t, member, "As a tenant member")
+	assert.Contains(t, member, "view Game Projects and players")
 }
 
 func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {

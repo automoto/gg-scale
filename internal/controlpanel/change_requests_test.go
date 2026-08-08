@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/gamesession"
 )
 
@@ -87,8 +88,8 @@ func TestQuotaOverrideDetail(t *testing.T) {
 	limit := int64(9000)
 	unlimited := int64(-1)
 
-	assert.Equal(t, "Open game sessions per project → 9000", quotaOverrideDetail(&axis, &limit))
-	assert.Equal(t, "Open game sessions per project → unlimited", quotaOverrideDetail(&axis, &unlimited))
+	assert.Equal(t, "Open game sessions per Game Project → 9000", quotaOverrideDetail(&axis, &limit))
+	assert.Equal(t, "Open game sessions per Game Project → unlimited", quotaOverrideDetail(&axis, &unlimited))
 	assert.Equal(t, "", quotaOverrideDetail(nil, &limit), "missing axis renders empty")
 	assert.Equal(t, "", quotaOverrideDetail(&axis, nil), "missing limit renders empty")
 }
@@ -163,4 +164,11 @@ func TestTenantSettingsPage_renders_denied_reason(t *testing.T) {
 	assert.Contains(t, html, "Request tier upgrade")
 	assert.Contains(t, html, "not on this plan")
 	assert.True(t, strings.Contains(html, "settings/change-requests"), "form posts to the submit route")
+}
+
+func TestChangeRequestDecisionEmail_uses_account_tenant_name(t *testing.T) {
+	subject, body := changeRequestDecisionEmail(sqlcgen.GetTenantChangeRequestByIDRow{}, true, "")
+
+	assert.Equal(t, "Your ggscale change request was approved", subject)
+	assert.Contains(t, body, "applied to your Account Tenant")
 }

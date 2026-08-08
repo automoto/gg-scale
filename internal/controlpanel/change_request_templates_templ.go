@@ -29,7 +29,7 @@ func ChangeRequestsPage(vm ChangeRequestsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Change requests</div><div class=\"page-header\"><div><h1>Change requests</h1><p class=\"subtitle\">Tenants request tier upgrades and feature grants from their settings page. Approving auto-applies the change; denying can include a reason the tenant sees.</p></div></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Change requests</div><div class=\"page-header\"><div><h1>Change requests</h1><p class=\"subtitle\">Account Tenants request tier upgrades and feature grants from their settings page. Approving auto-applies the change; denying can include a reason the Account Tenant sees.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -48,7 +48,7 @@ func ChangeRequestsPage(vm ChangeRequestsView) templ.Component {
 				}
 			} else {
 				for _, req := range vm.Requests {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<article class=\"card\"><dl class=\"kv\"><dt>Tenant</dt><dd>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<article class=\"card\"><dl class=\"kv\"><dt>Account Tenant</dt><dd>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}

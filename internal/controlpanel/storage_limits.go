@@ -64,7 +64,7 @@ func (h *Handler) updateTenantStorageLimitHandler(w http.ResponseWriter, r *http
 		http.Error(w, "storage limit update failed", http.StatusInternalServerError)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Tenant storage limit updated.")
+	h.redirectRateLimits(w, r, tenantID, "Account Tenant storage limit updated.")
 }
 
 // updateProjectStorageLimitHandler sets a per-project storage value cap
@@ -88,7 +88,7 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := h.requireProjectInTenant(r.Context(), tenantID, projectID); err != nil {
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, "Game Project not found", http.StatusNotFound)
 		return
 	}
 	if bytes > 0 {
@@ -98,7 +98,7 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 			return
 		}
 		if bytes > ceiling {
-			h.redirectRateLimits(w, r, tenantID, "Per-project storage limit can't exceed the tenant limit.")
+			h.redirectRateLimits(w, r, tenantID, "Per Game Project storage limit can't exceed the Account Tenant limit.")
 			return
 		}
 	}
@@ -107,7 +107,7 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 		http.Error(w, "storage limit update failed", http.StatusInternalServerError)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Project storage limit updated.")
+	h.redirectRateLimits(w, r, tenantID, "Game Project storage limit updated.")
 }
 
 // setStorageLimit persists the override (bytes <= 0 clears it) and writes an

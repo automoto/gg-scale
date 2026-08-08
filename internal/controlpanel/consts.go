@@ -17,7 +17,7 @@ const (
 	msgFleetDetailFailed      = "fleet detail failed"
 	msgFleetLookupFailed      = "fleet lookup failed"
 	msgNoFleetBackend         = "no fleet backend configured"
-	msgProjectListFailed      = "project list failed"
+	msgProjectListFailed      = "Game Project list failed"
 	msgControlPanelPoolNeeded = "control panel: database pool is required"
 	msgSetupUnavailable       = "control panel setup is no longer available"
 )

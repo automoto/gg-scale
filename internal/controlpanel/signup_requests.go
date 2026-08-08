@@ -113,11 +113,11 @@ func validateTenantSignupInput(in tenantSignupInput) map[string]string {
 		errs["email"] = "Enter a valid email address."
 	}
 	if !validTenantName(in.RequestedTenantName) {
-		errs["tenant_name"] = fmt.Sprintf("Tenant name must be %d–%d characters.", tenantNameMin, tenantNameMax)
+		errs["tenant_name"] = fmt.Sprintf("Account Tenant name must be %d–%d characters.", tenantNameMin, tenantNameMax)
 	}
 	desc := strings.TrimSpace(in.ProjectDescription)
 	if desc == "" || len(desc) > projectDescriptionMax {
-		errs["project_description"] = fmt.Sprintf("Describe your game/project (up to %d characters).", projectDescriptionMax)
+		errs["project_description"] = fmt.Sprintf("Describe your Game Project (up to %d characters).", projectDescriptionMax)
 	}
 	if len(in.StudioName) > studioNameMax {
 		errs["studio_name"] = fmt.Sprintf("Studio name is too long (max %d characters).", studioNameMax)
@@ -198,7 +198,7 @@ func (h *Handler) tenantSignupHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if taken {
-			fieldErrors["tenant_name"] = "That tenant name is taken. Choose another."
+			fieldErrors["tenant_name"] = "That Account Tenant name is taken. Choose another."
 		}
 	}
 	if len(fieldErrors) > 0 {
@@ -225,7 +225,7 @@ func (h *Handler) tenantSignupHandler(w http.ResponseWriter, r *http.Request) {
 				TenantName:         in.RequestedTenantName,
 				ProjectDescription: in.ProjectDescription,
 				StudioName:         in.StudioName,
-				FieldErrors:        map[string]string{"tenant_name": "That tenant name is taken. Choose another."},
+				FieldErrors:        map[string]string{"tenant_name": "That Account Tenant name is taken. Choose another."},
 			}))
 			return
 		}
@@ -345,9 +345,9 @@ func (h *Handler) setPublicSignupEnabledHandler(w http.ResponseWriter, r *http.R
 		webutil.InternalError(w, "tenant signup: toggle", err)
 		return
 	}
-	msg := "Public tenant sign-up disabled."
+	msg := "Public Account Tenant sign-up disabled."
 	if enabled {
-		msg = "Public tenant sign-up enabled."
+		msg = "Public Account Tenant sign-up enabled."
 	}
 	h.redirectSignupAdmin(w, r, msg)
 }
@@ -363,7 +363,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 	session, _ := sessionFromContext(r.Context())
 	finalName := strings.TrimSpace(r.Form.Get("tenant_name"))
 	if !validTenantName(finalName) {
-		h.redirectSignupAdmin(w, r, fmt.Sprintf("Enter a valid tenant name (%d–%d characters).", tenantNameMin, tenantNameMax))
+		h.redirectSignupAdmin(w, r, fmt.Sprintf("Enter a valid Account Tenant name (%d–%d characters).", tenantNameMin, tenantNameMax))
 		return
 	}
 	taken, err := h.tenantNameTaken(r.Context(), finalName, id)
@@ -372,7 +372,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if taken {
-		h.redirectSignupAdmin(w, r, "That tenant name is taken; edit it and try again.")
+		h.redirectSignupAdmin(w, r, "That Account Tenant name is taken; edit it and try again.")
 		return
 	}
 
@@ -416,7 +416,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 			strconv.FormatInt(id, 10), map[string]any{"tenant_name": finalName, "email": req.Email})
 	})
 	if errors.Is(err, errSignupNameTaken) {
-		h.redirectSignupAdmin(w, r, "That tenant name is taken; edit it and try again.")
+		h.redirectSignupAdmin(w, r, "That Account Tenant name is taken; edit it and try again.")
 		return
 	}
 	if err != nil {
@@ -711,7 +711,7 @@ func (h *Handler) tenantSignupAcceptHandler(w http.ResponseWriter, r *http.Reque
 			view.FieldErrors = map[string]string{"password": "Incorrect password for that account."}
 		case errors.Is(err, errSignupNameTaken):
 			status = http.StatusConflict
-			view.Error = "That tenant name is no longer available. Contact your platform admin."
+			view.Error = "That Account Tenant name is no longer available. Contact your platform admin."
 		case errors.Is(err, errInviteExpired):
 			status = http.StatusGone
 			view.Error = "This invite has expired. Ask a platform admin to re-approve."
@@ -723,7 +723,7 @@ func (h *Handler) tenantSignupAcceptHandler(w http.ResponseWriter, r *http.Reque
 			view.Error = "This account has been disabled. Contact your platform admin."
 		default:
 			slog.ErrorContext(r.Context(), "accept tenant signup", "err", err)
-			view.Error = "Could not create your tenant."
+			view.Error = "Could not create your Account Tenant."
 		}
 		w.WriteHeader(status)
 		webutil.Render(r, w, TenantSignupAcceptPage(view))
@@ -769,13 +769,13 @@ func (h *Handler) sendSignupApprovalEmail(ctx context.Context, email, tenantName
 		return
 	}
 	body := strings.TrimSpace(fmt.Sprintf(
-		"Your ggscale tenant request for %q was approved.\n\nClick to set up your account and create the tenant (expires %s):\n%s",
+		"Your ggscale Account Tenant request for %q was approved.\n\nClick to set up your account and create the Account Tenant (expires %s):\n%s",
 		tenantName, expires.UTC().Format("2006-01-02 15:04 UTC"), h.signupAcceptURL(code),
 	))
 	if err := h.mailer.Send(ctx, mailer.Message{
 		From:    h.cfg.MailFrom,
 		To:      []string{email},
-		Subject: "Your ggscale tenant request was approved",
+		Subject: "Your ggscale Account Tenant request was approved",
 		Body:    body,
 	}); err != nil {
 		slog.ErrorContext(ctx, "tenant signup approval mailer", "err", err)
@@ -787,14 +787,14 @@ func (h *Handler) sendSignupDenialEmail(ctx context.Context, email, reason strin
 		slog.WarnContext(ctx, "tenant signup denial: no mailer configured", "email", email)
 		return
 	}
-	body := "Thanks for your interest in ggscale. After review, we're not able to approve your tenant request at this time."
+	body := "Thanks for your interest in ggscale. After review, we're not able to approve your Account Tenant request at this time."
 	if reason != "" {
 		body += "\n\nReason: " + reason
 	}
 	if err := h.mailer.Send(ctx, mailer.Message{
 		From:    h.cfg.MailFrom,
 		To:      []string{email},
-		Subject: "About your ggscale tenant request",
+		Subject: "About your ggscale Account Tenant request",
 		Body:    body,
 	}); err != nil {
 		slog.ErrorContext(ctx, "tenant signup denial mailer", "err", err)

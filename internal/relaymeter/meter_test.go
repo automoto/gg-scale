@@ -29,3 +29,13 @@ func TestWarnThresholds(t *testing.T) {
 	assert.True(t, crossed100(1000, 1000))
 	assert.False(t, crossed100(999, 1000))
 }
+
+func TestWarningEmails_use_account_tenant_name(t *testing.T) {
+	warn80 := warn80Email(800, 1000)
+	warn100 := warn100Email(1000)
+
+	assert.Contains(t, warn80.body, "Your Account Tenant's managed relay")
+	assert.Contains(t, warn80.body, "Account Tenant settings")
+	assert.Contains(t, warn100.body, "Your Account Tenant's managed relay")
+	assert.Contains(t, warn100.body, "Account Tenant settings")
+}

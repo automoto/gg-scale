@@ -28,10 +28,10 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 						<details class="dropdown nav-menu">
 							<summary>Menu</summary>
 							<ul>
-								<li>@navLink("/v1/control-panel", "All tenants", nav.IsActive(navTenants))</li>
+								<li>@navLink("/v1/control-panel", "All Account Tenants", nav.IsActive(navTenants))</li>
 								if nav.TenantID > 0 {
 									<li class="nav-divider"></li>
-									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Projects", nav.IsActive(navProjects))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Game Projects", nav.IsActive(navProjects))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/api-keys", "API keys", nav.IsActive(navAPIKeys))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/team", "Team", nav.IsActive(navTeam))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/settings", "Settings", nav.IsActive(navTenantSettings))</li>
@@ -41,7 +41,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 									<li class="nav-divider"></li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/players", "Players", nav.IsActive(navPlayers))</li>
 									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/leaderboards", "Leaderboards", nav.IsActive(navLeaderboards))</li>
-									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Project settings", nav.IsActive(navProjectSettings))</li>
+									<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Game Project settings", nav.IsActive(navProjectSettings))</li>
 									if nav.FleetEnabled {
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/fleets", "Fleets", nav.IsActive(navFleets))</li>
 										<li>@navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/allocations", "Allocations", nav.IsActive(navAllocations))</li>
@@ -51,7 +51,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 								if nav.isPlatformAdmin(ctx) {
 									<li class="nav-section">Admin</li>
 									<li>@navLink("/v1/control-panel/admin/users", "Control panel users", nav.IsActive(navPlatformUsers))</li>
-									<li>@navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups))</li>
+									<li>@navLink("/v1/control-panel/admin/tenant-signups", "Account Tenant sign-ups", nav.IsActive(navTenantSignups))</li>
 									<li>@navLink("/v1/control-panel/admin/change-requests", "Change requests", nav.IsActive(navChangeRequests))</li>
 									<li>@navLink("/v1/control-panel/admin/player-accounts", "Player accounts", nav.IsActive(navPlayerAccounts))</li>
 									<li>@navLink("/v1/control-panel/admin/team", "Platform admins", nav.IsActive(navPlatformTeam))</li>
@@ -239,28 +239,28 @@ templ HomePage(vm HomeView) {
 	@appLayout("ggscale Control panel", vm.UserEmail, vm.CSRFToken, vm.nav()) {
 		<div class="page-header">
 			<div>
-				<h1>Tenants</h1>
-				<p class="subtitle">Tenants you have access to.</p>
+				<h1>Account Tenants</h1>
+				<p class="subtitle">Account Tenants you have access to.</p>
 			</div>
 			if vm.IsPlatformAdmin {
-				<a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">+ New tenant</a>
+				<a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">+ New Account Tenant</a>
 			}
 		</div>
 		<section class="card">
 			if len(vm.Tenants) == 0 {
 				<div class="empty-state">
-					<p>No tenants yet.</p>
+					<p>No Account Tenants yet.</p>
 					if vm.IsPlatformAdmin {
-						<p><a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">Create your first tenant</a></p>
+						<p><a href="/v1/control-panel/tenants/new" role="button" class="btn-inline">Create your first Account Tenant</a></p>
 					} else {
-						<p>Ask a platform admin to invite you to a tenant.</p>
+						<p>Ask a platform admin to invite you to an Account Tenant.</p>
 					}
 				</div>
 			} else {
 				<table class="data-table">
 					<thead>
 						<tr>
-							<th>Tenant</th>
+							<th>Account Tenant</th>
 							<th>Role</th>
 							<th></th>
 						</tr>
@@ -274,7 +274,7 @@ templ HomePage(vm HomeView) {
 									<details class="dropdown row-menu dropdown-right">
 										<summary>Manage</summary>
 										<ul>
-											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") }>Projects</a></li>
+											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/projects") }>Game Projects</a></li>
 											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/api-keys") }>API keys</a></li>
 											<li><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(tenant.ID) + "/team") }>Team</a></li>
 										</ul>
@@ -290,12 +290,12 @@ templ HomePage(vm HomeView) {
 }
 
 templ NewTenantPage(vm NewTenantView) {
-	@appLayout("New tenant — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenants}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / New</div>
+	@appLayout("New Account Tenant — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenants}) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / New</div>
 		<div class="page-header">
 			<div>
-				<h1>New tenant</h1>
-				<p class="subtitle">Sets up a tenant with a starter project and its first API key.</p>
+				<h1>New Account Tenant</h1>
+				<p class="subtitle">Sets up an Account Tenant with a starter Game Project and its first API key.</p>
 			</div>
 		</div>
 		<section class="card">
@@ -304,12 +304,12 @@ templ NewTenantPage(vm NewTenantView) {
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<div class="grid">
 					<label>
-						Tenant name
+						Account Tenant name
 						<input name="tenant_name" required autofocus aria-describedby="tenant_name-error"/>
 						@fieldError(vm.FieldErrors, "tenant_name")
 					</label>
 					<label>
-						Starter project name
+						Starter Game Project name
 						<input name="project_name" required aria-describedby="project_name-error"/>
 						@fieldError(vm.FieldErrors, "project_name")
 					</label>
@@ -321,7 +321,7 @@ templ NewTenantPage(vm NewTenantView) {
 				</label>
 				<div class="form-actions">
 					<a href="/v1/control-panel" role="button" class="secondary outline btn-inline">Cancel</a>
-					<button type="submit" class="btn-inline">Create tenant</button>
+					<button type="submit" class="btn-inline">Create Account Tenant</button>
 				</div>
 			</form>
 			<div id="signup-result"></div>
@@ -330,21 +330,21 @@ templ NewTenantPage(vm NewTenantView) {
 }
 
 templ ProjectsPage(vm ProjectsView) {
-	@appLayout("Projects — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Projects</div>
+	@appLayout("Game Projects — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Game Projects</div>
 		<div class="page-header">
 			<div>
-				<h1>Projects</h1>
-				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+				<h1>Game Projects</h1>
+				<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New project</a>
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New Game Project</a>
 		</div>
 		@flashSuccess(vm.Message)
 		<section class="card">
 			if len(vm.Projects) == 0 {
 				<div class="empty-state">
-					<p>No projects yet.</p>
-					<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">Create your first project</a></p>
+					<p>No Game Projects yet.</p>
+					<p><a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">Create your first Game Project</a></p>
 				</div>
 			} else {
 				<table class="data-table">
@@ -385,14 +385,14 @@ templ ProjectsPage(vm ProjectsView) {
 }
 
 templ NewProjectPage(vm NewProjectView) {
-	@appLayout("New project — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID}) {
+	@appLayout("New Game Project — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / New
+			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / New
 		</div>
 		<div class="page-header">
 			<div>
-				<h1>New project</h1>
-				<p class="subtitle">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p>
+				<h1>New Game Project</h1>
+				<p class="subtitle">Game Projects partition an Account Tenant&apos;s workloads (e.g. one game per Game Project).</p>
 			</div>
 		</div>
 		<section class="card">
@@ -400,13 +400,13 @@ templ NewProjectPage(vm NewProjectView) {
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
-					Project name
+					Game Project name
 					<input name="name" value={ vm.Name } required autofocus placeholder="e.g. arcade-prod" aria-describedby="name-error"/>
 					@fieldError(vm.FieldErrors, "name")
 				</label>
 				<div class="form-actions">
 					<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") } role="button" class="secondary outline btn-inline">Cancel</a>
-					<button type="submit" class="btn-inline">Create project</button>
+					<button type="submit" class="btn-inline">Create Game Project</button>
 				</div>
 			</form>
 		</section>
@@ -415,13 +415,13 @@ templ NewProjectPage(vm NewProjectView) {
 
 templ SignupSuccessPage(vm SignupSuccessView) {
 	<section class="color-block color-block--lime">
-		<p class="eyebrow">Tenant created</p>
+		<p class="eyebrow">Account Tenant created</p>
 		<h2>Save your API key</h2>
 		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
 		<dl class="kv">
-			<dt>Tenant ID</dt>
+			<dt>Account Tenant ID</dt>
 			<dd>{ stringFromInt(vm.TenantID) }</dd>
-			<dt>Project ID</dt>
+			<dt>Game Project ID</dt>
 			<dd>{ stringFromInt(vm.ProjectID) }</dd>
 			<dt>API key ID</dt>
 			<dd>{ stringFromInt(vm.APIKeyID) }</dd>
@@ -437,7 +437,7 @@ templ SignupSuccessPage(vm SignupSuccessView) {
 templ APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) {
 	@appLayout("API key created — ggscale", userEmail, csrfToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / Created
+			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / Created
 		</div>
 		<div class="page-header">
 			<div>
@@ -464,7 +464,7 @@ templ APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) {
 templ NewAPIKeyPage(vm NewAPIKeyView) {
 	@appLayout("New API key — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / New
+			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / New
 		</div>
 		<div class="page-header">
 			<div>
@@ -478,9 +478,9 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<div class="grid">
 					<label>
-						Project
+						Game Project
 						<select id="project_id" name="project_id" aria-describedby="project_id-error">
-							<option value="" selected?={ vm.ProjectID == "" }>Tenant-wide (all projects)</option>
+							<option value="" selected?={ vm.ProjectID == "" }>All Game Projects in the Account Tenant</option>
 							for _, p := range vm.Projects {
 								<option value={ stringFromInt(p.ID) } selected?={ vm.ProjectID == stringFromInt(p.ID) }>{ p.Name }</option>
 							}
@@ -512,11 +512,11 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 
 templ APIKeysPage(vm APIKeysView) {
 	@appLayout("API keys — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / API keys</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / API keys</div>
 		<div class="page-header">
 			<div>
 				<h1>API keys</h1>
-				<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+				<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/new") } role="button" class="btn-inline">+ New API key</a>
 		</div>
@@ -531,7 +531,7 @@ templ APIKeysPage(vm APIKeysView) {
 				<table class="data-table">
 					<thead>
 						<tr>
-							<th>Project</th>
+							<th>Game Project</th>
 							<th>Key Name</th>
 							<th>Type</th>
 							<th>Feature access</th>
@@ -545,7 +545,7 @@ templ APIKeysPage(vm APIKeysView) {
 							<tr>
 								<td>
 									if key.ProjectID == nil {
-										<span class="muted">tenant-wide</span>
+										<span class="muted">all Game Projects</span>
 									} else if key.ProjectName != "" {
 										{ key.ProjectName }
 									} else {
@@ -659,7 +659,7 @@ templ apiKeyFeatureRow(key APIKeyView, scope, label, help string, grantable bool
 		} else if grantable {
 			<span class="badge">Available</span>
 		} else {
-			<span class="muted">Not available for this project</span>
+			<span class="muted">Not available for this Game Project</span>
 		}
 	</label>
 }
@@ -692,7 +692,7 @@ templ apiLimitCard(vm APILimitCardView) {
 	<section class="card">
 		<h2>HTTP API limit</h2>
 		<p class="card-subtitle">
-			Per-second rate and burst applied to this tenant's API keys. Blank
+			Per-second rate and burst applied to this Account Tenant's API keys. Blank
 			restores the tier default ({ rlNum(vm.DefaultRate) }/s, burst { rlNum(vm.DefaultBurst) }).
 		</p>
 		if vm.IsPlatformAdmin {
@@ -722,14 +722,14 @@ templ apiLimitCard(vm APILimitCardView) {
 
 templ RateLimitsPage(vm RateLimitsView) {
 	@appLayout("Rate limits — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navRateLimits, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Rate limits</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Rate limits</div>
 		<div class="page-header">
 			<div>
 				<h1>Rate limits</h1>
 				if vm.TenantName != "" {
-					<p class="subtitle">{ vm.TenantName } — tenant #{ stringFromInt(vm.TenantID) }</p>
+					<p class="subtitle">{ vm.TenantName } — Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 				} else {
-					<p class="subtitle">Tenant #{ stringFromInt(vm.TenantID) }</p>
+					<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 				}
 			</div>
 		</div>
@@ -739,8 +739,8 @@ templ RateLimitsPage(vm RateLimitsView) {
 		<section class="card">
 			<h2>Invite quotas</h2>
 			<p class="card-subtitle">
-				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour,
-				{ rlNum(vm.DefaultDomainDay) }/project/day).
+				Per Game Project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour,
+				{ rlNum(vm.DefaultDomainDay) }/Game Project/day).
 			</p>
 			if vm.IsPlatformAdmin {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/invites/recipient") } class="rate-limit-row">
@@ -758,7 +758,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 				<p class="card-subtitle">Recipient limit: { rlNum(vm.RecipientBurst) } per { rlNum(vm.RecipientCooldownSecs) }s (set by a platform admin).</p>
 			}
 			if len(vm.Projects) == 0 {
-				<div class="empty-state"><p>No projects yet.</p></div>
+				<div class="empty-state"><p>No Game Projects yet.</p></div>
 			} else {
 				for _, p := range vm.Projects {
 					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(p.ProjectID) + "/invites") } class="rate-limit-row">
@@ -767,7 +767,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 						<label>Invites / inviter / hour
 							<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(p.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
 						</label>
-						<label>Invites / project / day
+						<label>Invites / Game Project / day
 							<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(p.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
 						</label>
 						<button type="submit" class="btn-inline">Save</button>
@@ -781,11 +781,11 @@ templ RateLimitsPage(vm RateLimitsView) {
 				Maximum size (MB) of a single stored value. Blank = default. Platform default:
 				{ storageMB(vm.StoragePlatformDefault) } MB.
 			</p>
-			<p class="card-subtitle">Total tenant storage: { storageTotalLabel(vm.StorageTotalBytes) }.</p>
+			<p class="card-subtitle">Total Account Tenant storage: { storageTotalLabel(vm.StorageTotalBytes) }.</p>
 			if vm.IsPlatformAdmin {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/storage") } class="rate-limit-row">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<strong>Tenant default</strong>
+					<strong>Account Tenant default</strong>
 					<label>Max value size (MB)
 						<input name="max_value_mb" type="number" step="any" min="0" value={ storageMBValue(vm.StorageTenantOverride) } placeholder={ storageMB(vm.StoragePlatformDefault) }/>
 					</label>
@@ -808,9 +808,9 @@ templ RateLimitsPage(vm RateLimitsView) {
 			}
 		</section>
 		<section class="card">
-			<h2>Tenant quotas</h2>
+			<h2>Account Tenant quotas</h2>
 			<p class="card-subtitle">
-				Per-axis limits for this tenant's class, applied when quota enforcement is on.
+				Per-axis limits for this Account Tenant's class, applied when quota enforcement is on.
 				Blank = tier default; -1 = unlimited.
 			</p>
 			if vm.IsPlatformAdmin {
@@ -843,7 +843,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 						}
 					</tbody>
 				</table>
-				<p class="muted">Only platform admins can change quotas. Request a change from tenant settings.</p>
+				<p class="muted">Only platform admins can change quotas. Request a change from Account Tenant settings.</p>
 			}
 		</section>
 	}
@@ -862,25 +862,25 @@ templ HelpPage(vm HelpView) {
 			<h2>The 30-second version</h2>
 			<p class="card-subtitle">What you need to put ggscale in front of players.</p>
 			<ol class="quick-steps">
-				<li><strong>Create a tenant.</strong> The control panel sets up a tenant, a starter project, and a first API key in one step.</li>
+				<li><strong>Create an Account Tenant.</strong> The control panel sets up an Account Tenant, a starter Game Project, and a first API key in one step.</li>
 				<li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li>
-				<li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the tenant&apos;s API key.</li>
+				<li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the Account Tenant&apos;s API key.</li>
 			</ol>
 		</section>
 		<section class="card">
 			<h2>The pieces</h2>
 			<p class="card-subtitle">Each row is one row in the database, and one place in this control panel.</p>
 			<dl class="concept-list">
-				<dt>Tenant</dt>
-				<dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (projects, API keys, player accounts, save data, leaderboards) belongs to exactly one tenant. Tenants never see each other&apos;s data.</dd>
-				<dt>Project</dt>
-				<dd>A workload partition inside a tenant. Most studios use one project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting projects keeps prod and staging data separate while still rolling up to one tenant for billing and admin.</dd>
+				<dt>Account Tenant</dt>
+				<dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (Game Projects, API keys, player accounts, save data, leaderboards) belongs to exactly one Account Tenant. Account Tenants never see each other&apos;s data.</dd>
+				<dt>Game Project</dt>
+				<dd>A workload partition inside an Account Tenant. Most studios use one Game Project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting Game Projects keeps production and staging data separate while still rolling up to one Account Tenant for billing and administration.</dd>
 				<dt>API key</dt>
-				<dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd>
+				<dd>How your game authenticates to ggscale. Always scoped to an Account Tenant. Optionally pinned to a single Game Project; otherwise it can act on any Game Project in the Account Tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd>
 				<dt>Control panel user</dt>
-				<dd>You. Humans who log in here to manage tenants, projects, and keys. Control panel users are separate from players; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd>
+				<dd>You. Humans who log in here to manage Account Tenants, Game Projects, and keys. Control panel users are separate from players; they get Account Tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd>
 				<dt>Player</dt>
-				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. Players never touch this control panel.</dd>
+				<dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the Account Tenant&apos;s API key. Players never touch this control panel.</dd>
 			</dl>
 		</section>
 		<section class="card" id="roles">
@@ -888,11 +888,11 @@ templ HelpPage(vm HelpView) {
 			<p class="card-subtitle">What a teammate can do depends on the role their invite carries.</p>
 			<dl class="concept-list">
 				<dt>Tenant admin</dt>
-				<dd>Tenant admins manage everything in the tenant: projects, API keys, players, team, and settings.</dd>
+				<dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd>
 				<dt>Tenant member</dt>
-				<dd>Tenant members have read-only access: they can view projects and players, but cannot change anything.</dd>
+				<dd>Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</dd>
 				<dt>Tenant owner</dt>
-				<dd>Like a tenant admin, plus owner-only actions on the tenant itself. The user who creates a tenant is its owner.</dd>
+				<dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd>
 			</dl>
 		</section>
 		<section class="card">
@@ -901,19 +901,19 @@ templ HelpPage(vm HelpView) {
 			<pre class="flow-diagram">
 your game ──► ggscale HTTP API
               │
-              ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project)
-              └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Tenant
+              ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to an Account Tenant (and maybe a Game Project)
+              └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Account Tenant
               │
               ▼
        Postgres (Row-Level Security)
        Only rows belonging to that tenant_id are visible.</pre>
-			<p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses tenant lines.</p>
+			<p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses Account Tenant boundaries.</p>
 		</section>
 		<section class="card">
 			<h2>What to do next</h2>
 			<ul class="next-steps">
-				<li><a href="/v1/control-panel/tenants/new">Create your first tenant</a> — gets you a tenant, a starter project, and your first API key in one step.</li>
-				<li>Open the <a href="/v1/control-panel">Control panel</a> to see tenants you can manage.</li>
+				<li><a href="/v1/control-panel/tenants/new">Create your first Account Tenant</a> — gets you an Account Tenant, a starter Game Project, and your first API key in one step.</li>
+				<li>Open the <a href="/v1/control-panel">Control panel</a> to see Account Tenants you can manage.</li>
 				<li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li>
 			</ul>
 		</section>
@@ -1056,12 +1056,12 @@ templ TwoFactorBackupCodesPage(vm TwoFactorBackupCodesView) {
 
 templ TeamPage(vm TeamView) {
 	@appLayout("Team — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTeam, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Team</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Team</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Team</p>
-				<h1>Tenant team</h1>
-				<p class="subtitle">Members of tenant #{ stringFromInt(vm.TenantID) }.</p>
+				<h1>Account Tenant team</h1>
+				<p class="subtitle">Members of Account Tenant #{ stringFromInt(vm.TenantID) }.</p>
 			</div>
 			<a href={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") } role="button" class="btn-inline">+ Invite teammate</a>
 		</div>
@@ -1149,7 +1149,7 @@ templ TeamPage(vm TeamView) {
 templ InviteTeamPage(vm InviteTeamView) {
 	@appLayout("Invite teammate — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTeam, TenantID: vm.TenantID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
+			<a href="/v1/control-panel">Account Tenants</a> /
 			<a href={ templ.URL(tenantTeamPath(vm.TenantID)) }>Team</a> / Invite
 		</div>
 		<div class="page-header">
@@ -1176,8 +1176,8 @@ templ InviteTeamPage(vm InviteTeamView) {
 					</select>
 					@fieldError(vm.FieldErrors, "role")
 					<small id="role-help">
-						Tenant admins manage everything in the tenant: projects, API keys, players, team, and settings.
-						Tenant members have read-only access: they can view projects and players, but cannot change anything.
+						Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.
+						Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.
 					</small>
 				</label>
 				<div class="form-actions">
@@ -1195,7 +1195,7 @@ templ PlatformTeamPage(vm PlatformTeamView) {
 		<div class="page-header">
 			<div>
 				<h1>Platform admins</h1>
-				<p class="subtitle">Users with full administrative access to every tenant.</p>
+				<p class="subtitle">Users with full administrative access to every Account Tenant.</p>
 			</div>
 			<a href="/v1/control-panel/admin/team/invite" role="button" class="btn-inline">+ Invite platform admin</a>
 		</div>
@@ -1258,7 +1258,7 @@ templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
 			<div>
 				<p class="eyebrow">Invite platform admin</p>
 				<h1>Invite a platform admin</h1>
-				<p class="subtitle">They will have full administrative access to every tenant.</p>
+				<p class="subtitle">They will have full administrative access to every Account Tenant.</p>
 			</div>
 		</div>
 		<section class="card">
@@ -1282,13 +1282,13 @@ templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
 templ PlayersPage(vm PlayersView) {
 	@appLayout("Players — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayers, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Players
+			<a href="/v1/control-panel">Account Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Players
 		</div>
 		<div class="page-header">
 			<div>
 				<h1>Players</h1>
-				<p class="subtitle">Game players in project #{ stringFromInt(vm.ProjectID) }.</p>
+				<p class="subtitle">Game players in Game Project #{ stringFromInt(vm.ProjectID) }.</p>
 			</div>
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") } role="button" class="btn-inline">+ Invite player</a>
 		</div>
@@ -1431,7 +1431,7 @@ templ InvitePlayerPage(vm InvitePlayerView) {
 templ PlayerDetailPage(vm PlayerDetailView) {
 	@appLayout("Player — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayers, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
+			<a href="/v1/control-panel">Account Tenants</a> /
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / { vm.Player.Email }
 		</div>
 		<div class="page-header">
@@ -1458,7 +1458,7 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 					<button type="submit" class="btn-inline">Re-enable player</button>
 				} else {
 					<input type="hidden" name="enable" value="false"/>
-					<button type="submit" class="secondary outline btn-inline">Disable player (this project)</button>
+					<button type="submit" class="secondary outline btn-inline">Disable player (this Game Project)</button>
 				}
 			</form>
 		</section>
@@ -1481,7 +1481,7 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 							}
 						</dd>
 					}
-					<dt>Tenant ban</dt>
+					<dt>Account Tenant ban</dt>
 					<dd>
 						if vm.Player.TenantBanned {
 							<span class="badge badge-revoked">banned</span>
@@ -1490,17 +1490,17 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 						}
 					</dd>
 				</dl>
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/ban") } data-confirm="Ban this player's account across the whole tenant?">
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/ban") } data-confirm="Ban this player's account across the whole Account Tenant?">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					if vm.Player.TenantBanned {
 						<input type="hidden" name="ban" value="false"/>
-						<button type="submit" class="secondary outline btn-inline">Lift tenant ban</button>
+						<button type="submit" class="secondary outline btn-inline">Lift Account Tenant ban</button>
 					} else {
 						<input type="hidden" name="ban" value="true"/>
 						<label>Reason (optional)
 							<input name="reason" type="text" maxlength="200"/>
 						</label>
-						<button type="submit" class="contrast outline btn-inline">Ban account tenant-wide</button>
+						<button type="submit" class="contrast outline btn-inline">Ban account across Account Tenant</button>
 					}
 				</form>
 			</section>
@@ -1565,15 +1565,15 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 templ FleetPage(vm FleetView) {
 	@appLayout("Fleet — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleet
+			<a href="/v1/control-panel">Account Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Fleet
 		</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Fleet</p>
 				<h1>Allocations</h1>
 				<p class="subtitle">
-					Project #{ stringFromInt(vm.ProjectID) } —
+					Game Project #{ stringFromInt(vm.ProjectID) } —
 					if vm.BackendName != "" {
 						backend <code>{ vm.BackendName }</code>
 					} else {
@@ -1654,7 +1654,7 @@ templ FleetTableFragment(vm FleetView) {
 templ FleetDetailPage(vm FleetDetailView) {
 	@appLayout("Allocation — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
+			<a href="/v1/control-panel">Account Tenants</a> /
 			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
 			#{ stringFromInt(vm.Allocation.ID) }
 		</div>
@@ -1739,7 +1739,7 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 			} else {
 				if len(vm.Fleets) == 0 {
 					<p role="alert">
-						No fleet templates exist for this project. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create one</a> before allocating.
+						No fleet templates exist for this Game Project. <a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/new") }>Create one</a> before allocating.
 					</p>
 				}
 				if len(vm.Fleets) > 0 {
@@ -1822,7 +1822,7 @@ templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 
 templ FleetBackendsPage(vm FleetBackendsView) {
 	@appLayout("Backends — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, FleetEnabled: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Backends</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Backends</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Backends</p>
@@ -1850,7 +1850,7 @@ templ FleetBackendsPage(vm FleetBackendsView) {
 		<section class="card">
 			<h2>Allocations by backend</h2>
 			if len(vm.Backends) == 0 {
-				<div class="empty-state"><p>No allocations recorded for this tenant.</p></div>
+				<div class="empty-state"><p>No allocations recorded for this Account Tenant.</p></div>
 			} else {
 				<table class="data-table">
 					<thead><tr><th>Backend</th><th>Allocation count</th></tr></thead>
@@ -1868,14 +1868,14 @@ templ FleetBackendsPage(vm FleetBackendsView) {
 templ MatchmakerQueuePage(vm MatchmakerQueueView) {
 	@appLayout("Matchmaker — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navMatchmaker, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
+			<a href="/v1/control-panel">Account Tenants</a> /
 			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
 		</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Matchmaker</p>
 				<h1>Queue depth</h1>
-				<p class="subtitle">Tickets grouped by region, game mode, and status — project #{ stringFromInt(vm.ProjectID) }.</p>
+				<p class="subtitle">Tickets grouped by region, game mode, and status — Game Project #{ stringFromInt(vm.ProjectID) }.</p>
 			</div>
 		</div>
 		<section class="card"
@@ -1957,11 +1957,11 @@ templ PlatformPluginsPage(vm PlatformPluginsView) {
 
 templ PlatformUsersPage(vm PlatformUsersView) {
 	@appLayout("Control panel users — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlatformUsers, IsPlatformAdmin: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Control panel users</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Control panel users</div>
 		<div class="page-header">
 			<div>
 				<h1>Control panel users</h1>
-				<p class="subtitle">Every control panel user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
+				<p class="subtitle">Every control panel user across all Account Tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -1986,7 +1986,7 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 						<tr>
 							<th>Email</th>
 							<th>Role</th>
-							<th>Tenants</th>
+							<th>Account Tenants</th>
 							<th>Status</th>
 							<th>Last login</th>
 							<th>Joined</th>
@@ -2041,11 +2041,11 @@ templ PlatformUsersPage(vm PlatformUsersView) {
 
 templ PlayerAccountsPage(vm PlayerAccountsView) {
 	@appLayout("Player accounts — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayerAccounts, IsPlatformAdmin: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Player accounts</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Player accounts</div>
 		<div class="page-header">
 			<div>
 				<h1>Player accounts</h1>
-				<p class="subtitle">Global gg-scale accounts across every project. Disabling locks the account out of the platform and revokes its sessions.</p>
+				<p class="subtitle">Global gg-scale accounts across every Game Project. Disabling locks the account out of the platform and revokes its sessions.</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -2108,7 +2108,7 @@ templ PlayerAccountsPage(vm PlayerAccountsView) {
 
 templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
 	@appLayout("Player account — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayerAccounts, IsPlatformAdmin: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / <a href="/v1/control-panel/admin/player-accounts">Player accounts</a> / { vm.Email }</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / <a href="/v1/control-panel/admin/player-accounts">Player accounts</a> / { vm.Email }</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Player account</p>
@@ -2159,8 +2159,8 @@ templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
 				<table class="data-table">
 					<thead>
 						<tr>
-							<th>Project</th>
-							<th>Tenant</th>
+							<th>Game Project</th>
+							<th>Account Tenant</th>
 							<th>External ID</th>
 						</tr>
 					</thead>
@@ -2182,15 +2182,15 @@ templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
 templ FleetsListPage(vm FleetsListView) {
 	@appLayout("Fleets — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Fleets
+			<a href="/v1/control-panel">Account Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Fleets
 		</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Fleets</p>
 				<h1>Fleet templates</h1>
 				<p class="subtitle">
-					Project #{ stringFromInt(vm.ProjectID) } — operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
+					Game Project #{ stringFromInt(vm.ProjectID) } — operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
 				</p>
 			</div>
 			if vm.Enabled {
@@ -2386,13 +2386,13 @@ templ EditFleetPage(vm EditFleetView) {
 templ LeaderboardsListPage(vm LeaderboardsListView) {
 	@appLayout("Leaderboards — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navLeaderboards, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Leaderboards
+			<a href="/v1/control-panel">Account Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Leaderboards
 		</div>
 		<div class="page-header">
 			<div>
 				<h1>Leaderboards</h1>
-				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
+				<p class="subtitle">Game Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
 			</div>
 			<div class="actions-cell">
 				<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New leaderboard</a>
@@ -2509,7 +2509,7 @@ templ NewLeaderboardPage(vm LeaderboardFormView) {
 			<div>
 				<p class="eyebrow">Leaderboard</p>
 				<h1>New leaderboard</h1>
-				<p class="subtitle">Names must be unique within the project.</p>
+				<p class="subtitle">Names must be unique within the Game Project.</p>
 			</div>
 		</div>
 		<section class="card">
@@ -2583,20 +2583,20 @@ templ leaderboardSortOrderField(sortOrder string, fieldErrors map[string]string)
 }
 
 templ TenantSettingsPage(vm TenantSettingsView) {
-	@appLayout("Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Settings</div>
+	@appLayout("Account Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Settings</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Tenant settings</p>
+				<p class="eyebrow">Account Tenant settings</p>
 				<h1>Settings</h1>
-				<p class="subtitle">{ vm.TenantName } — tenant #{ stringFromInt(vm.TenantID) }</p>
+				<p class="subtitle">{ vm.TenantName } — Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
 		<section class="card">
-			<h2>Tenant</h2>
+			<h2>Account Tenant</h2>
 			<dl class="kv">
-				<dt>Tenant ID</dt>
+				<dt>Account Tenant ID</dt>
 				<dd>{ stringFromInt(vm.TenantID) }</dd>
 				<dt>Name</dt>
 				<dd>{ vm.TenantName }</dd>
@@ -2604,7 +2604,7 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 				<dd>{ vm.Tier }</dd>
 			</dl>
 			if vm.IsPlatformAdmin {
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/tier") } class="settings-form" data-confirm="Change this tenant's tier?">
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/tier") } class="settings-form" data-confirm="Change this Account Tenant's tier?">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<label>
 						Tier
@@ -2639,7 +2639,7 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 									</td>
 									<td class="actions-cell">
 										if f.Enabled || f.EnvAllowed {
-											<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/features") } data-confirm="Change this tenant's feature grant?">
+										<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/features") } data-confirm="Change this Account Tenant's feature grant?">
 												<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 												<input type="hidden" name="feature" value={ f.Value }/>
 												if f.Enabled {
@@ -2677,25 +2677,25 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 			</form>
 		</section>
 		<section class="card">
-			<h2>Tenant status</h2>
+			<h2>Account Tenant status</h2>
 			if vm.Disabled {
-				<p role="alert">This tenant is disabled. API keys do not resolve and players cannot play.</p>
+				<p role="alert">This Account Tenant is disabled. API keys do not resolve and players cannot play.</p>
 				if vm.DisabledBy == "platform" && !vm.IsPlatformAdmin {
 					<p class="muted">Disabled by the platform. Contact support to re-enable it.</p>
 				} else {
-					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/enable") } data-confirm="Re-enable this tenant? API keys and player traffic resume immediately.">
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/enable") } data-confirm="Re-enable this Account Tenant? API keys and player traffic resume immediately.">
 						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-						<button type="submit" class="btn-inline">Re-enable tenant</button>
+						<button type="submit" class="btn-inline">Re-enable Account Tenant</button>
 					</form>
 				}
 			} else {
 				<p class="card-subtitle">
-					Disabling blocks the tenant's API keys and all player traffic.
+					Disabling blocks the Account Tenant's API keys and all player traffic.
 					Control-panel access stays, so you can re-enable or export data later.
 				</p>
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/disable") } data-confirm="Disable this tenant? API keys and player traffic stop immediately.">
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/disable") } data-confirm="Disable this Account Tenant? API keys and player traffic stop immediately.">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-					<button type="submit" class="contrast outline btn-inline">Disable tenant</button>
+					<button type="submit" class="contrast outline btn-inline">Disable Account Tenant</button>
 				</form>
 			}
 		</section>
@@ -2812,16 +2812,16 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 }
 
 templ ProjectSettingsPage(vm ProjectSettingsView) {
-	@appLayout("Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
+	@appLayout("Game Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
-			<a href="/v1/control-panel">Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Projects</a> / Settings
+			<a href="/v1/control-panel">Account Tenants</a> /
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Settings
 		</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Project settings</p>
+				<p class="eyebrow">Game Project settings</p>
 				<h1>{ vm.ProjectName }</h1>
-				<p class="subtitle">Project #{ stringFromInt(vm.ProjectID) }</p>
+				<p class="subtitle">Game Project #{ stringFromInt(vm.ProjectID) }</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -2832,7 +2832,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label for="remote-config">Config JSON</label>
 				<textarea id="remote-config" name="config" rows="14" spellcheck="false" aria-describedby="config-help config-error">{ vm.RemoteConfig }</textarea>
-				<small id="config-help">A top-level JSON object, up to 64 KiB. Both publishable and secret project keys can read it.</small>
+				<small id="config-help">A top-level JSON object, up to 64 KiB. Both publishable and secret Game Project keys can read it.</small>
 				@fieldError(vm.FieldErrors, "config")
 				<button type="submit" class="btn-inline">Save remote config</button>
 			</form>
@@ -2861,7 +2861,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 		<section class="card">
 			<h2>Invite quotas</h2>
 			<p class="card-subtitle">
-				Per-project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour, { rlNum(vm.DefaultDomainDay) }/project/day).
+				Per Game Project caps on invites sent. Blank = default ({ rlNum(vm.DefaultInviterHour) }/inviter/hour, { rlNum(vm.DefaultDomainDay) }/Game Project/day).
 			</p>
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(vm.ProjectID) + "/invites") } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
@@ -2869,16 +2869,16 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 				<label>Invites / inviter / hour
 					<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(vm.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
 				</label>
-				<label>Invites / project / day
+				<label>Invites / Game Project / day
 					<input name="domain_per_day" type="number" step="any" min="0" value={ rlValue(vm.DomainPerDay) } placeholder={ rlNum(vm.DefaultDomainDay) }/>
 				</label>
 				<button type="submit" class="btn-inline">Save quotas</button>
 			</form>
 		</section>
 		<section class="card">
-			<h2>Project</h2>
+			<h2>Game Project</h2>
 			<dl class="kv">
-				<dt>Project ID</dt>
+				<dt>Game Project ID</dt>
 				<dd>{ stringFromInt(vm.ProjectID) }</dd>
 				<dt>Name</dt>
 				<dd>{ vm.ProjectName }</dd>
@@ -2891,7 +2891,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 
 templ ServerSettingsPage(vm ServerSettingsView) {
 	@appLayout("Server settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navServerSettings, IsPlatformAdmin: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Server settings</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Server settings</div>
 		<div class="page-header">
 			<div>
 				<h1>Server settings</h1>

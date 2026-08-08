@@ -454,7 +454,7 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 			view.Error = "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s."
 			w.WriteHeader(http.StatusTooManyRequests)
 		case errors.Is(err, errProjectNotInTenant):
-			view.Error = "That project does not belong to this tenant."
+			view.Error = "That Game Project does not belong to this Account Tenant."
 			w.WriteHeader(http.StatusNotFound)
 		case isUniqueViolation(err):
 			view.Error = "An invite for that email is already pending."
@@ -575,9 +575,9 @@ func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
 			h.renderLinkDialogError(w, r, vm, http.StatusTooManyRequests,
 				"Too many invites in a short time. Try again in "+strconv.Itoa(retry)+"s.")
 		case errors.Is(err, errProjectNotInTenant):
-			h.renderLinkDialogError(w, r, vm, http.StatusNotFound, "That project does not belong to this tenant.")
+			h.renderLinkDialogError(w, r, vm, http.StatusNotFound, "That Game Project does not belong to this Account Tenant.")
 		case errors.Is(err, errPlayerEmailTaken):
-			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "That email is already used by another player in this project.")
+			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "That email is already used by another player in this Game Project.")
 		case isUniqueViolation(err):
 			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "An invite for that email is already pending.")
 		default:
@@ -775,7 +775,7 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 	if ban {
 		h.metrics.BanIssued(observability.BanScopeTenant)
 	}
-	flash := "Player banned tenant-wide."
+	flash := "Player banned across the Account Tenant."
 	if !ban {
 		flash = "Player unbanned."
 	}

@@ -31,7 +31,7 @@ func TenantSignupPage(vm TenantSignupFormView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Request a ggscale tenant</h1><p class=\"subtitle\">Tell us about your game. A platform admin reviews every request; if approved, we'll email you a link to finish setting up.</p><form method=\"post\" action=\"/v1/control-panel/request-access\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Request a ggscale Account Tenant</h1><p class=\"subtitle\">Tell us about your game. A platform admin reviews every request; if approved, we'll email you a link to finish setting up.</p><form method=\"post\" action=\"/v1/control-panel/request-access\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -39,7 +39,7 @@ func TenantSignupPage(vm TenantSignupFormView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Tenant name <input name=\"tenant_name\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Account Tenant name <input name=\"tenant_name\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -71,7 +71,7 @@ func TenantSignupPage(vm TenantSignupFormView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <label>Project / game description <textarea name=\"project_description\" rows=\"4\" required aria-describedby=\"project_description-error\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <label>Game Project description <textarea name=\"project_description\" rows=\"4\" required aria-describedby=\"project_description-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -117,7 +117,7 @@ func TenantSignupPage(vm TenantSignupFormView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = authLayout("Request a ggscale tenant").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = authLayout("Request a ggscale Account Tenant").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -147,7 +147,7 @@ func TenantSignupClosedPage() templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Sign-ups are closed</h1><p class=\"subtitle\">Public tenant sign-up isn't open right now. If you're expecting access, contact the platform administrator.</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Sign-ups are closed</h1><p class=\"subtitle\">Public Account Tenant sign-up isn't open right now. If you're expecting access, contact the platform administrator.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -186,7 +186,7 @@ func TenantSignupAcknowledgePage() templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Request received</h1><p class=\"subtitle\">Thanks — your request is in. A platform admin will review it, and if approved you'll get an email with a link to finish setting up your tenant.</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Request received</h1><p class=\"subtitle\">Thanks — your request is in. A platform admin will review it, and if approved you'll get an email with a link to finish setting up your Account Tenant.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -225,7 +225,7 @@ func TenantSignupRequestsPage(vm TenantSignupRequestsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Tenant sign-ups</div><div class=\"page-header\"><div><h1>Tenant sign-ups</h1><p class=\"subtitle\">Developers request a tenant at <code>/v1/control-panel/request-access</code>. Nothing is granted until you approve it here; approving emails an invite and the tenant is created when they accept.</p></div></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Account Tenant sign-ups</div><div class=\"page-header\"><div><h1>Account Tenant sign-ups</h1><p class=\"subtitle\">Developers request an Account Tenant at <code>/v1/control-panel/request-access</code>. Nothing is granted until you approve it here; approving emails an invite and the Account Tenant is created when they accept.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -238,7 +238,7 @@ func TenantSignupRequestsPage(vm TenantSignupRequestsView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if vm.SignupEnabled {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>Status: <span class=\"badge badge-active\">enabled</span> — the request form is live.</p><form method=\"post\" action=\"/v1/control-panel/admin/tenant-signups/config\" data-confirm=\"Disable public tenant sign-up? The request form stops accepting submissions.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>Status: <span class=\"badge badge-active\">enabled</span> — the request form is live.</p><form method=\"post\" action=\"/v1/control-panel/admin/tenant-signups/config\" data-confirm=\"Disable public Account Tenant sign-up? The request form stops accepting submissions.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -367,7 +367,7 @@ func TenantSignupRequestsPage(vm TenantSignupRequestsView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Tenant name (edit before approving if needed) <input name=\"tenant_name\" value=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Account Tenant name (edit before approving if needed) <input name=\"tenant_name\" value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -407,7 +407,7 @@ func TenantSignupRequestsPage(vm TenantSignupRequestsView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("Tenant sign-ups — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSignups, IsPlatformAdmin: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var9), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("Account Tenant sign-ups — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSignups, IsPlatformAdmin: true}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var9), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -437,7 +437,7 @@ func TenantSignupAcceptPage(vm TenantSignupAcceptView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Set up your tenant</h1>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<h1>Set up your Account Tenant</h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -520,7 +520,7 @@ func TenantSignupAcceptPage(vm TenantSignupAcceptView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>You already have a ggscale account. Enter your existing password to confirm and create this tenant.</p><label>Password <input name=\"password\" type=\"password\" autocomplete=\"current-password\" required aria-describedby=\"password-error\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>You already have a ggscale account. Enter your existing password to confirm and create this Account Tenant.</p><label>Password <input name=\"password\" type=\"password\" autocomplete=\"current-password\" required aria-describedby=\"password-error\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -533,7 +533,7 @@ func TenantSignupAcceptPage(vm TenantSignupAcceptView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"form-actions\"><button type=\"submit\" class=\"btn-inline\">Create tenant</button></div></form>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"form-actions\"><button type=\"submit\" class=\"btn-inline\">Create Account Tenant</button></div></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -543,7 +543,7 @@ func TenantSignupAcceptPage(vm TenantSignupAcceptView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = authLayout("Set up your tenant — ggscale").Render(templ.WithChildren(ctx, templ_7745c5c3_Var18), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = authLayout("Set up your Account Tenant — ggscale").Render(templ.WithChildren(ctx, templ_7745c5c3_Var18), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

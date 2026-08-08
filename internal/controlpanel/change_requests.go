@@ -61,11 +61,11 @@ var requestableFeatures = []struct{ Value, Label string }{
 // the internal/quota Axis* constants, carried in the change request's feature
 // column and in tenant_quota_overrides.axis.
 var quotaOverrideAxes = []struct{ Value, Label string }{
-	{quota.AxisProjects, "Projects"},
+	{quota.AxisProjects, "Game Projects"},
 	{quota.AxisPlayers, "Registered players"},
 	{quota.AxisStorage, "Storage (bytes)"},
 	{quota.AxisRelaySessions, "Relay sessions per month"},
-	{quota.AxisOpenSessions, "Open game sessions per project"},
+	{quota.AxisOpenSessions, "Open game sessions per Game Project"},
 }
 
 func isQuotaAxis(axis string) bool {
@@ -269,7 +269,7 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 		}
 		if verr := validateOverrideLimit(axis, limit); verr != nil {
 			h.redirectTenantSettings(w, r, tenantID, fmt.Sprintf(
-				"Open game sessions per project can't exceed %d (the platform-wide cap) and can't be unlimited.",
+				"Open game sessions per Game Project can't exceed %d (the platform-wide cap) and can't be unlimited.",
 				gamesession.SessionsHardCap))
 			return
 		}
@@ -311,7 +311,7 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if errors.Is(err, errFeatureAlreadyEnabled) {
-		h.redirectTenantSettings(w, r, tenantID, "That feature is already enabled for this tenant.")
+		h.redirectTenantSettings(w, r, tenantID, "That feature is already enabled for this Account Tenant.")
 		return
 	}
 	if isUniqueViolation(err) {
@@ -460,7 +460,7 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if errors.Is(err, errNotAnUpgrade) {
-			h.redirectChangeAdmin(w, r, "The tenant is already at or above the requested class; the request was not approved.")
+			h.redirectChangeAdmin(w, r, "The Account Tenant is already at or above the requested class; the request was not approved.")
 			return
 		}
 		if errors.Is(err, errOverrideAboveHardCap) {
@@ -606,7 +606,7 @@ func changeRequestDecisionEmail(req sqlcgen.GetTenantChangeRequestByIDRow, appro
 	}
 	if approved {
 		return "Your ggscale change request was approved",
-			fmt.Sprintf("Your request (%s) was approved and applied to your tenant.", what)
+			fmt.Sprintf("Your request (%s) was approved and applied to your Account Tenant.", what)
 	}
 	body = fmt.Sprintf("Your request (%s) was not approved at this time.", what)
 	if reason != "" {

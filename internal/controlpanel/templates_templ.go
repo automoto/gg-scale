@@ -122,7 +122,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navLink("/v1/control-panel", "All tenants", nav.IsActive(navTenants)).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navLink("/v1/control-panel", "All Account Tenants", nav.IsActive(navTenants)).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -135,7 +135,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Projects", nav.IsActive(navProjects)).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects", "Game Projects", nav.IsActive(navProjects)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -197,7 +197,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Project settings", nav.IsActive(navProjectSettings)).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = navLink("/v1/control-panel/tenants/"+stringFromInt(nav.TenantID)+"/projects/"+stringFromInt(nav.ProjectID)+"/settings", "Game Project settings", nav.IsActive(navProjectSettings)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -249,7 +249,7 @@ func appLayout(title, userEmail, csrfToken string, nav AppNav) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = navLink("/v1/control-panel/admin/tenant-signups", "Tenant sign-ups", nav.IsActive(navTenantSignups)).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = navLink("/v1/control-panel/admin/tenant-signups", "Account Tenant sign-ups", nav.IsActive(navTenantSignups)).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1055,12 +1055,12 @@ func HomePage(vm HomeView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><h1>Tenants</h1><p class=\"subtitle\">Tenants you have access to.</p></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><h1>Account Tenants</h1><p class=\"subtitle\">Account Tenants you have access to.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if vm.IsPlatformAdmin {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<a href=\"/v1/control-panel/tenants/new\" role=\"button\" class=\"btn-inline\">+ New tenant</a>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<a href=\"/v1/control-panel/tenants/new\" role=\"button\" class=\"btn-inline\">+ New Account Tenant</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1070,17 +1070,17 @@ func HomePage(vm HomeView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(vm.Tenants) == 0 {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No tenants yet.</p>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No Account Tenants yet.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if vm.IsPlatformAdmin {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p><a href=\"/v1/control-panel/tenants/new\" role=\"button\" class=\"btn-inline\">Create your first tenant</a></p>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p><a href=\"/v1/control-panel/tenants/new\" role=\"button\" class=\"btn-inline\">Create your first Account Tenant</a></p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>Ask a platform admin to invite you to a tenant.</p>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p>Ask a platform admin to invite you to an Account Tenant.</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1090,7 +1090,7 @@ func HomePage(vm HomeView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Tenant</th><th>Role</th><th></th></tr></thead> <tbody>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Account Tenant</th><th>Role</th><th></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1139,7 +1139,7 @@ func HomePage(vm HomeView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a></li><li><a href=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a></li><li><a href=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -1206,7 +1206,7 @@ func NewTenantPage(vm NewTenantView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / New</div><div class=\"page-header\"><div><h1>New tenant</h1><p class=\"subtitle\">Sets up a tenant with a starter project and its first API key.</p></div></div><section class=\"card\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / New</div><div class=\"page-header\"><div><h1>New Account Tenant</h1><p class=\"subtitle\">Sets up an Account Tenant with a starter Game Project and its first API key.</p></div></div><section class=\"card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1230,7 +1230,7 @@ func NewTenantPage(vm NewTenantView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Tenant name <input name=\"tenant_name\" required autofocus aria-describedby=\"tenant_name-error\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Account Tenant name <input name=\"tenant_name\" required autofocus aria-describedby=\"tenant_name-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1238,7 +1238,7 @@ func NewTenantPage(vm NewTenantView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <label>Starter project name <input name=\"project_name\" required aria-describedby=\"project_name-error\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label> <label>Starter Game Project name <input name=\"project_name\" required aria-describedby=\"project_name-error\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1254,7 +1254,7 @@ func NewTenantPage(vm NewTenantView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label><div class=\"form-actions\"><a href=\"/v1/control-panel\" role=\"button\" class=\"secondary outline btn-inline\">Cancel</a> <button type=\"submit\" class=\"btn-inline\">Create tenant</button></div></form><div id=\"signup-result\"></div></section>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</label><div class=\"form-actions\"><a href=\"/v1/control-panel\" role=\"button\" class=\"secondary outline btn-inline\">Cancel</a> <button type=\"submit\" class=\"btn-inline\">Create Account Tenant</button></div></form><div id=\"signup-result\"></div></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1263,7 +1263,7 @@ func NewTenantPage(vm NewTenantView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("New tenant — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenants}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var42), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("New Account Tenant — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenants}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var42), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1293,14 +1293,14 @@ func ProjectsPage(vm ProjectsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Projects</div><div class=\"page-header\"><div><h1>Projects</h1><p class=\"subtitle\">Tenant #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Game Projects</div><div class=\"page-header\"><div><h1>Game Projects</h1><p class=\"subtitle\">Account Tenant #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 337, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 337, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -1315,7 +1315,7 @@ func ProjectsPage(vm ProjectsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">+ New project</a></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">+ New Game Project</a></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1328,7 +1328,7 @@ func ProjectsPage(vm ProjectsView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(vm.Projects) == 0 {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No projects yet.</p><p><a href=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No Game Projects yet.</p><p><a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1337,7 +1337,7 @@ func ProjectsPage(vm ProjectsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">Create your first project</a></p></div>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"btn-inline\">Create your first Game Project</a></p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1465,7 +1465,7 @@ func ProjectsPage(vm ProjectsView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("Projects — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var44), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("Game Projects — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var44), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1495,7 +1495,7 @@ func NewProjectPage(vm NewProjectView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1504,7 +1504,7 @@ func NewProjectPage(vm NewProjectView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / New</div><div class=\"page-header\"><div><h1>New project</h1><p class=\"subtitle\">Projects partition a tenant&apos;s workloads (e.g. one game per project).</p></div></div><section class=\"card\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / New</div><div class=\"page-header\"><div><h1>New Game Project</h1><p class=\"subtitle\">Game Projects partition an Account Tenant&apos;s workloads (e.g. one game per Game Project).</p></div></div><section class=\"card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1529,7 +1529,7 @@ func NewProjectPage(vm NewProjectView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Project name <input name=\"name\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <label>Game Project name <input name=\"name\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1554,7 +1554,7 @@ func NewProjectPage(vm NewProjectView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline btn-inline\">Cancel</a> <button type=\"submit\" class=\"btn-inline\">Create project</button></div></form></section>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" role=\"button\" class=\"secondary outline btn-inline\">Cancel</a> <button type=\"submit\" class=\"btn-inline\">Create Game Project</button></div></form></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1563,7 +1563,7 @@ func NewProjectPage(vm NewProjectView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("New project — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var58), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("New Game Project — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var58), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1587,7 +1587,7 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 			templ_7745c5c3_Var62 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section class=\"color-block color-block--lime\"><p class=\"eyebrow\">Tenant created</p><h2>Save your API key</h2><p class=\"reveal-warning\">Store this API key now. It will not be shown again.</p><dl class=\"kv\"><dt>Tenant ID</dt><dd>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section class=\"color-block color-block--lime\"><p class=\"eyebrow\">Account Tenant created</p><h2>Save your API key</h2><p class=\"reveal-warning\">Store this API key now. It will not be shown again.</p><dl class=\"kv\"><dt>Account Tenant ID</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1600,7 +1600,7 @@ func SignupSuccessPage(vm SignupSuccessView) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</dd><dt>Project ID</dt><dd>")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</dd><dt>Game Project ID</dt><dd>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1678,7 +1678,7 @@ func APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) templ.
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1761,7 +1761,7 @@ func NewAPIKeyPage(vm NewAPIKeyView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1795,7 +1795,7 @@ func NewAPIKeyPage(vm NewAPIKeyView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Project <select id=\"project_id\" name=\"project_id\" aria-describedby=\"project_id-error\"><option value=\"\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"><div class=\"grid\"><label>Game Project <select id=\"project_id\" name=\"project_id\" aria-describedby=\"project_id-error\"><option value=\"\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1805,7 +1805,7 @@ func NewAPIKeyPage(vm NewAPIKeyView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(">Tenant-wide (all projects)</option> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(">All Game Projects in the Account Tenant</option> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1946,14 +1946,14 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / API keys</div><div class=\"page-header\"><div><h1>API keys</h1><p class=\"subtitle\">Tenant #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / API keys</div><div class=\"page-header\"><div><h1>API keys</h1><p class=\"subtitle\">Account Tenant #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var82 string
 			templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 518, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 518, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 			if templ_7745c5c3_Err != nil {
@@ -1995,7 +1995,7 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Project</th><th>Key Name</th><th>Type</th><th>Feature access</th><th>Created</th><th>Status</th><th></th></tr></thead> <tbody>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Game Project</th><th>Key Name</th><th>Type</th><th>Feature access</th><th>Created</th><th>Status</th><th></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2005,7 +2005,7 @@ func APIKeysPage(vm APIKeysView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					if key.ProjectID == nil {
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">tenant-wide</span>")
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">all Game Projects</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -2396,7 +2396,7 @@ func apiKeyFeatureRow(key APIKeyView, scope, label, help string, grantable bool)
 				return templ_7745c5c3_Err
 			}
 		} else {
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">Not available for this project</span>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<span class=\"muted\">Not available for this Game Project</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2495,7 +2495,7 @@ func apiLimitCard(vm APILimitCardView) templ.Component {
 			templ_7745c5c3_Var102 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section class=\"card\"><h2>HTTP API limit</h2><p class=\"card-subtitle\">Per-second rate and burst applied to this tenant's API keys. Blank restores the tier default (")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<section class=\"card\"><h2>HTTP API limit</h2><p class=\"card-subtitle\">Per-second rate and burst applied to this Account Tenant's API keys. Blank restores the tier default (")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2670,7 +2670,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Rate limits</div><div class=\"page-header\"><div><h1>Rate limits</h1>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Rate limits</div><div class=\"page-header\"><div><h1>Rate limits</h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2688,14 +2688,14 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" — tenant #")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" — Account Tenant #")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var111 string
 				templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 729, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 729, Col: 91}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 				if templ_7745c5c3_Err != nil {
@@ -2706,14 +2706,14 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"subtitle\">Tenant #")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"subtitle\">Account Tenant #")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var112 string
 				templ_7745c5c3_Var112, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 731, Col: 61}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 731, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var112))
 				if templ_7745c5c3_Err != nil {
@@ -2748,14 +2748,14 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <section class=\"card\"><h2>Invite quotas</h2><p class=\"card-subtitle\">Per-project caps on invites sent. Blank = default (")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <section class=\"card\"><h2>Invite quotas</h2><p class=\"card-subtitle\">Per Game Project caps on invites sent. Blank = default (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var113 string
 			templ_7745c5c3_Var113, templ_7745c5c3_Err = templ.JoinStringErrs(rlNum(vm.DefaultInviterHour))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 741, Col: 85}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 741, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var113))
 			if templ_7745c5c3_Err != nil {
@@ -2774,7 +2774,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("/project/day).</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("/Game Project/day).</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2865,7 +2865,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 				}
 			}
 			if len(vm.Projects) == 0 {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No projects yet.</p></div>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No Game Projects yet.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -2917,7 +2917,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <label>Invites / project / day <input name=\"domain_per_day\" type=\"number\" step=\"any\" min=\"0\" value=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <label>Invites / Game Project / day <input name=\"domain_per_day\" type=\"number\" step=\"any\" min=\"0\" value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -2952,14 +2952,14 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" MB.</p><p class=\"card-subtitle\">Total tenant storage: ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" MB.</p><p class=\"card-subtitle\">Total Account Tenant storage: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var121 string
 			templ_7745c5c3_Var121, templ_7745c5c3_Err = templ.JoinStringErrs(storageTotalLabel(vm.StorageTotalBytes))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 783, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 783, Col: 99}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var121))
 			if templ_7745c5c3_Err != nil {
@@ -2987,7 +2987,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <strong>Tenant default</strong> <label>Max value size (MB) <input name=\"max_value_mb\" type=\"number\" step=\"any\" min=\"0\" value=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <strong>Account Tenant default</strong> <label>Max value size (MB) <input name=\"max_value_mb\" type=\"number\" step=\"any\" min=\"0\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -3096,7 +3096,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section><section class=\"card\"><h2>Tenant quotas</h2><p class=\"card-subtitle\">Per-axis limits for this tenant's class, applied when quota enforcement is on. Blank = tier default; -1 = unlimited.</p>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</section><section class=\"card\"><h2>Account Tenant quotas</h2><p class=\"card-subtitle\">Per-axis limits for this Account Tenant's class, applied when quota enforcement is on. Blank = tier default; -1 = unlimited.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3214,7 +3214,7 @@ func RateLimitsPage(vm RateLimitsView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table><p class=\"muted\">Only platform admins can change quotas. Request a change from tenant settings.</p>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</tbody></table><p class=\"muted\">Only platform admins can change quotas. Request a change from Account Tenant settings.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -3258,7 +3258,7 @@ func HelpPage(vm HelpView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><p class=\"eyebrow\">Help</p><h1>Concepts &amp; quick start</h1><p class=\"subtitle\">A 2-minute tour of how ggscale fits together.</p></div></div><section class=\"card\"><h2>The 30-second version</h2><p class=\"card-subtitle\">What you need to put ggscale in front of players.</p><ol class=\"quick-steps\"><li><strong>Create a tenant.</strong> The control panel sets up a tenant, a starter project, and a first API key in one step.</li><li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li><li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the tenant&apos;s API key.</li></ol></section><section class=\"card\"><h2>The pieces</h2><p class=\"card-subtitle\">Each row is one row in the database, and one place in this control panel.</p><dl class=\"concept-list\"><dt>Tenant</dt><dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (projects, API keys, player accounts, save data, leaderboards) belongs to exactly one tenant. Tenants never see each other&apos;s data.</dd><dt>Project</dt><dd>A workload partition inside a tenant. Most studios use one project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting projects keeps prod and staging data separate while still rolling up to one tenant for billing and admin.</dd><dt>API key</dt><dd>How your game authenticates to ggscale. Always scoped to a tenant. Optionally pinned to a single project; otherwise it can act on any project in the tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd><dt>Control panel user</dt><dd>You. Humans who log in here to manage tenants, projects, and keys. Control panel users are separate from players; they get tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd><dt>Player</dt><dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the tenant&apos;s API key. Players never touch this control panel.</dd></dl></section><section class=\"card\" id=\"roles\"><h2>Team roles</h2><p class=\"card-subtitle\">What a teammate can do depends on the role their invite carries.</p><dl class=\"concept-list\"><dt>Tenant admin</dt><dd>Tenant admins manage everything in the tenant: projects, API keys, players, team, and settings.</dd><dt>Tenant member</dt><dd>Tenant members have read-only access: they can view projects and players, but cannot change anything.</dd><dt>Tenant owner</dt><dd>Like a tenant admin, plus owner-only actions on the tenant itself. The user who creates a tenant is its owner.</dd></dl></section><section class=\"card\"><h2>How a request flows</h2><p class=\"card-subtitle\">Why each piece matters at runtime.</p><pre class=\"flow-diagram\">your game ──► ggscale HTTP API │ ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to a Tenant (and maybe a Project) └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Tenant │ ▼ Postgres (Row-Level Security) Only rows belonging to that tenant_id are visible.</pre><p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses tenant lines.</p></section><section class=\"card\"><h2>What to do next</h2><ul class=\"next-steps\"><li><a href=\"/v1/control-panel/tenants/new\">Create your first tenant</a> — gets you a tenant, a starter project, and your first API key in one step.</li><li>Open the <a href=\"/v1/control-panel\">Control panel</a> to see tenants you can manage.</li><li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li></ul></section>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"page-header\"><div><p class=\"eyebrow\">Help</p><h1>Concepts &amp; quick start</h1><p class=\"subtitle\">A 2-minute tour of how ggscale fits together.</p></div></div><section class=\"card\"><h2>The 30-second version</h2><p class=\"card-subtitle\">What you need to put ggscale in front of players.</p><ol class=\"quick-steps\"><li><strong>Create an Account Tenant.</strong> The control panel sets up an Account Tenant, a starter Game Project, and a first API key in one step.</li><li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li><li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the Account Tenant&apos;s API key.</li></ol></section><section class=\"card\"><h2>The pieces</h2><p class=\"card-subtitle\">Each row is one row in the database, and one place in this control panel.</p><dl class=\"concept-list\"><dt>Account Tenant</dt><dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (Game Projects, API keys, player accounts, save data, leaderboards) belongs to exactly one Account Tenant. Account Tenants never see each other&apos;s data.</dd><dt>Game Project</dt><dd>A workload partition inside an Account Tenant. Most studios use one Game Project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting Game Projects keeps production and staging data separate while still rolling up to one Account Tenant for billing and administration.</dd><dt>API key</dt><dd>How your game authenticates to ggscale. Always scoped to an Account Tenant. Optionally pinned to a single Game Project; otherwise it can act on any Game Project in the Account Tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd><dt>Control panel user</dt><dd>You. Humans who log in here to manage Account Tenants, Game Projects, and keys. Control panel users are separate from players; they get Account Tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd><dt>Player</dt><dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the Account Tenant&apos;s API key. Players never touch this control panel.</dd></dl></section><section class=\"card\" id=\"roles\"><h2>Team roles</h2><p class=\"card-subtitle\">What a teammate can do depends on the role their invite carries.</p><dl class=\"concept-list\"><dt>Tenant admin</dt><dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd><dt>Tenant member</dt><dd>Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</dd><dt>Tenant owner</dt><dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd></dl></section><section class=\"card\"><h2>How a request flows</h2><p class=\"card-subtitle\">Why each piece matters at runtime.</p><pre class=\"flow-diagram\">your game ──► ggscale HTTP API │ ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to an Account Tenant (and maybe a Game Project) └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Account Tenant │ ▼ Postgres (Row-Level Security) Only rows belonging to that tenant_id are visible.</pre><p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses Account Tenant boundaries.</p></section><section class=\"card\"><h2>What to do next</h2><ul class=\"next-steps\"><li><a href=\"/v1/control-panel/tenants/new\">Create your first Account Tenant</a> — gets you an Account Tenant, a starter Game Project, and your first API key in one step.</li><li>Open the <a href=\"/v1/control-panel\">Control panel</a> to see Account Tenants you can manage.</li><li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li></ul></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3699,14 +3699,14 @@ func TeamPage(vm TeamView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Team</div><div class=\"page-header\"><div><p class=\"eyebrow\">Team</p><h1>Tenant team</h1><p class=\"subtitle\">Members of tenant #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Team</div><div class=\"page-header\"><div><p class=\"eyebrow\">Team</p><h1>Account Tenant team</h1><p class=\"subtitle\">Members of Account Tenant #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var149 string
 			templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1063, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1063, Col: 79}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var149))
 			if templ_7745c5c3_Err != nil {
@@ -3981,7 +3981,7 @@ func InviteTeamPage(vm InviteTeamView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4059,7 +4059,7 @@ func InviteTeamPage(vm InviteTeamView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<small id=\"role-help\">Tenant admins manage everything in the tenant: projects, API keys, players, team, and settings. Tenant members have read-only access: they can view projects and players, but cannot change anything.</small></label><div class=\"form-actions\"><a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<small id=\"role-help\">Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings. Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</small></label><div class=\"form-actions\"><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4107,7 +4107,7 @@ func PlatformTeamPage(vm PlatformTeamView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\">Platform admins</div><div class=\"page-header\"><div><h1>Platform admins</h1><p class=\"subtitle\">Users with full administrative access to every tenant.</p></div><a href=\"/v1/control-panel/admin/team/invite\" role=\"button\" class=\"btn-inline\">+ Invite platform admin</a></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\">Platform admins</div><div class=\"page-header\"><div><h1>Platform admins</h1><p class=\"subtitle\">Users with full administrative access to every Account Tenant.</p></div><a href=\"/v1/control-panel/admin/team/invite\" role=\"button\" class=\"btn-inline\">+ Invite platform admin</a></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4269,7 +4269,7 @@ func InvitePlatformAdminPage(vm InvitePlatformAdminView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel/admin/team\">Platform admins</a> / Invite</div><div class=\"page-header\"><div><p class=\"eyebrow\">Invite platform admin</p><h1>Invite a platform admin</h1><p class=\"subtitle\">They will have full administrative access to every tenant.</p></div></div><section class=\"card\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel/admin/team\">Platform admins</a> / Invite</div><div class=\"page-header\"><div><p class=\"eyebrow\">Invite platform admin</p><h1>Invite a platform admin</h1><p class=\"subtitle\">They will have full administrative access to every Account Tenant.</p></div></div><section class=\"card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4340,7 +4340,7 @@ func PlayersPage(vm PlayersView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4349,14 +4349,14 @@ func PlayersPage(vm PlayersView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / Players</div><div class=\"page-header\"><div><h1>Players</h1><p class=\"subtitle\">Game players in project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / Players</div><div class=\"page-header\"><div><h1>Players</h1><p class=\"subtitle\">Game players in Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var176 string
 			templ_7745c5c3_Var176, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1290, Col: 78}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1290, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var176))
 			if templ_7745c5c3_Err != nil {
@@ -4785,7 +4785,7 @@ func PlayerDetailPage(vm PlayerDetailView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -4907,7 +4907,7 @@ func PlayerDetailPage(vm PlayerDetailView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"enable\" value=\"false\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Disable player (this project)</button>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"enable\" value=\"false\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Disable player (this Game Project)</button>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -4995,7 +4995,7 @@ func PlayerDetailPage(vm PlayerDetailView) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<dt>Tenant ban</dt><dd>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<dt>Account Tenant ban</dt><dd>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -5019,7 +5019,7 @@ func PlayerDetailPage(vm PlayerDetailView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Ban this player&#39;s account across the whole tenant?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Ban this player&#39;s account across the whole Account Tenant?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -5032,12 +5032,12 @@ func PlayerDetailPage(vm PlayerDetailView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				if vm.Player.TenantBanned {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"ban\" value=\"false\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Lift tenant ban</button>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"ban\" value=\"false\"> <button type=\"submit\" class=\"secondary outline btn-inline\">Lift Account Tenant ban</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"ban\" value=\"true\"> <label>Reason (optional) <input name=\"reason\" type=\"text\" maxlength=\"200\"></label> <button type=\"submit\" class=\"contrast outline btn-inline\">Ban account tenant-wide</button>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<input type=\"hidden\" name=\"ban\" value=\"true\"> <label>Reason (optional) <input name=\"reason\" type=\"text\" maxlength=\"200\"></label> <button type=\"submit\" class=\"contrast outline btn-inline\">Ban account across Account Tenant</button>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -5310,7 +5310,7 @@ func FleetPage(vm FleetView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -5319,14 +5319,14 @@ func FleetPage(vm FleetView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / Fleet</div><div class=\"page-header\"><div><p class=\"eyebrow\">Fleet</p><h1>Allocations</h1><p class=\"subtitle\">Project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / Fleet</div><div class=\"page-header\"><div><p class=\"eyebrow\">Fleet</p><h1>Allocations</h1><p class=\"subtitle\">Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var220 string
 			templ_7745c5c3_Var220, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1575, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1575, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var220))
 			if templ_7745c5c3_Err != nil {
@@ -5618,7 +5618,7 @@ func FleetDetailPage(vm FleetDetailView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -5984,7 +5984,7 @@ func NewFleetAllocationPage(vm NewAllocationView) templ.Component {
 				}
 			} else {
 				if len(vm.Fleets) == 0 {
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">No fleet templates exist for this project. <a href=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">No fleet templates exist for this Game Project. <a href=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -6369,7 +6369,7 @@ func FleetBackendsPage(vm FleetBackendsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Backends</div><div class=\"page-header\"><div><p class=\"eyebrow\">Backends</p><h1>Fleet backends</h1><p class=\"subtitle\">Configured backend: ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Backends</div><div class=\"page-header\"><div><p class=\"eyebrow\">Backends</p><h1>Fleet backends</h1><p class=\"subtitle\">Configured backend: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -6435,7 +6435,7 @@ func FleetBackendsPage(vm FleetBackendsView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(vm.Backends) == 0 {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No allocations recorded for this tenant.</p></div>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"empty-state\"><p>No allocations recorded for this Account Tenant.</p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -6520,7 +6520,7 @@ func MatchmakerQueuePage(vm MatchmakerQueueView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -6529,14 +6529,14 @@ func MatchmakerQueuePage(vm MatchmakerQueueView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Fleet</a> / Matchmaker</div><div class=\"page-header\"><div><p class=\"eyebrow\">Matchmaker</p><h1>Queue depth</h1><p class=\"subtitle\">Tickets grouped by region, game mode, and status — project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Fleet</a> / Matchmaker</div><div class=\"page-header\"><div><p class=\"eyebrow\">Matchmaker</p><h1>Queue depth</h1><p class=\"subtitle\">Tickets grouped by region, game mode, and status — Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var283 string
 			templ_7745c5c3_Var283, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1877, Col: 115}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 1877, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var283))
 			if templ_7745c5c3_Err != nil {
@@ -6947,7 +6947,7 @@ func PlatformUsersPage(vm PlatformUsersView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Control panel users</div><div class=\"page-header\"><div><h1>Control panel users</h1><p class=\"subtitle\">Every control panel user across all tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p></div></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Control panel users</div><div class=\"page-header\"><div><h1>Control panel users</h1><p class=\"subtitle\">Every control panel user across all Account Tenants. Disabling locks the account out of the platform; re-enabling restores login but does NOT restore revoked sessions or invitations.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -6983,7 +6983,7 @@ func PlatformUsersPage(vm PlatformUsersView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Email</th><th>Role</th><th>Tenants</th><th>Status</th><th>Last login</th><th>Joined</th><th></th></tr></thead> <tbody>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Email</th><th>Role</th><th>Account Tenants</th><th>Status</th><th>Last login</th><th>Joined</th><th></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -7199,7 +7199,7 @@ func PlayerAccountsPage(vm PlayerAccountsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Player accounts</div><div class=\"page-header\"><div><h1>Player accounts</h1><p class=\"subtitle\">Global gg-scale accounts across every project. Disabling locks the account out of the platform and revokes its sessions.</p></div></div>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Player accounts</div><div class=\"page-header\"><div><h1>Player accounts</h1><p class=\"subtitle\">Global gg-scale accounts across every Game Project. Disabling locks the account out of the platform and revokes its sessions.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -7354,14 +7354,14 @@ func PlayerAccountDetailPage(vm PlayerAccountDetailView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"/v1/control-panel/admin/player-accounts\">Player accounts</a> / ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"/v1/control-panel/admin/player-accounts\">Player accounts</a> / ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var322 string
 			templ_7745c5c3_Var322, templ_7745c5c3_Err = templ.JoinStringErrs(vm.Email)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2110, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2110, Col: 158}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var322))
 			if templ_7745c5c3_Err != nil {
@@ -7509,7 +7509,7 @@ func PlayerAccountDetailPage(vm PlayerAccountDetailView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Project</th><th>Tenant</th><th>External ID</th></tr></thead> <tbody>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<table class=\"data-table\"><thead><tr><th>Game Project</th><th>Account Tenant</th><th>External ID</th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -7602,7 +7602,7 @@ func FleetsListPage(vm FleetsListView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -7611,14 +7611,14 @@ func FleetsListPage(vm FleetsListView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / Fleets</div><div class=\"page-header\"><div><p class=\"eyebrow\">Fleets</p><h1>Fleet templates</h1><p class=\"subtitle\">Project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / Fleets</div><div class=\"page-header\"><div><p class=\"eyebrow\">Fleets</p><h1>Fleet templates</h1><p class=\"subtitle\">Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var334 string
 			templ_7745c5c3_Var334, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2192, Col: 43}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2192, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var334))
 			if templ_7745c5c3_Err != nil {
@@ -7631,7 +7631,7 @@ func FleetsListPage(vm FleetsListView) templ.Component {
 			var templ_7745c5c3_Var335 string
 			templ_7745c5c3_Var335, templ_7745c5c3_Err = templ.JoinStringErrs(vm.BackendConfigured)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2192, Col: 156}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2192, Col: 161}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var335))
 			if templ_7745c5c3_Err != nil {
@@ -8296,7 +8296,7 @@ func LeaderboardsListPage(vm LeaderboardsListView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -8305,14 +8305,14 @@ func LeaderboardsListPage(vm LeaderboardsListView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / Leaderboards</div><div class=\"page-header\"><div><h1>Leaderboards</h1><p class=\"subtitle\">Project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / Leaderboards</div><div class=\"page-header\"><div><h1>Leaderboards</h1><p class=\"subtitle\">Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var364 string
 			templ_7745c5c3_Var364, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2394, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2394, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var364))
 			if templ_7745c5c3_Err != nil {
@@ -8715,7 +8715,7 @@ func NewLeaderboardPage(vm LeaderboardFormView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Leaderboards</a> / New</div><div class=\"page-header\"><div><p class=\"eyebrow\">Leaderboard</p><h1>New leaderboard</h1><p class=\"subtitle\">Names must be unique within the project.</p></div></div><section class=\"card\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Leaderboards</a> / New</div><div class=\"page-header\"><div><p class=\"eyebrow\">Leaderboard</p><h1>New leaderboard</h1><p class=\"subtitle\">Names must be unique within the Game Project.</p></div></div><section class=\"card\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -8995,7 +8995,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Settings</div><div class=\"page-header\"><div><p class=\"eyebrow\">Tenant settings</p><h1>Settings</h1><p class=\"subtitle\">")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Settings</div><div class=\"page-header\"><div><p class=\"eyebrow\">Account Tenant settings</p><h1>Settings</h1><p class=\"subtitle\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -9008,14 +9008,14 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" — tenant #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" — Account Tenant #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var389 string
 			templ_7745c5c3_Var389, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.TenantID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2591, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2591, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var389))
 			if templ_7745c5c3_Err != nil {
@@ -9029,7 +9029,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <section class=\"card\"><h2>Tenant</h2><dl class=\"kv\"><dt>Tenant ID</dt><dd>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(" <section class=\"card\"><h2>Account Tenant</h2><dl class=\"kv\"><dt>Account Tenant ID</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -9082,7 +9082,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" class=\"settings-form\" data-confirm=\"Change this tenant&#39;s tier?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" class=\"settings-form\" data-confirm=\"Change this Account Tenant&#39;s tier?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -9181,7 +9181,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
-							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Change this tenant&#39;s feature grant?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Change this Account Tenant&#39;s feature grant?\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
@@ -9290,12 +9290,12 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<button type=\"submit\" class=\"btn-inline\">Save signing key</button></form></section><section class=\"card\"><h2>Tenant status</h2>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<button type=\"submit\" class=\"btn-inline\">Save signing key</button></form></section><section class=\"card\"><h2>Account Tenant status</h2>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if vm.Disabled {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">This tenant is disabled. API keys do not resolve and players cannot play.</p>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p role=\"alert\">This Account Tenant is disabled. API keys do not resolve and players cannot play.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -9314,7 +9314,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Re-enable this tenant? API keys and player traffic resume immediately.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Re-enable this Account Tenant? API keys and player traffic resume immediately.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -9322,13 +9322,13 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"btn-inline\">Re-enable tenant</button></form>")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"btn-inline\">Re-enable Account Tenant</button></form>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			} else {
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"card-subtitle\">Disabling blocks the tenant's API keys and all player traffic. Control-panel access stays, so you can re-enable or export data later.</p><form method=\"post\" action=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<p class=\"card-subtitle\">Disabling blocks the Account Tenant's API keys and all player traffic. Control-panel access stays, so you can re-enable or export data later.</p><form method=\"post\" action=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -9337,7 +9337,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Disable this tenant? API keys and player traffic stop immediately.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\" data-confirm=\"Disable this Account Tenant? API keys and player traffic stop immediately.\"><input type=\"hidden\" name=\"_csrf\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -9345,7 +9345,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"contrast outline btn-inline\">Disable tenant</button></form>")
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"> <button type=\"submit\" class=\"contrast outline btn-inline\">Disable Account Tenant</button></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -9784,7 +9784,7 @@ func TenantSettingsPage(vm TenantSettingsView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var387), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("Account Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var387), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -9814,7 +9814,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / <a href=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -9823,7 +9823,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Projects</a> / Settings</div><div class=\"page-header\"><div><p class=\"eyebrow\">Project settings</p><h1>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\">Game Projects</a> / Settings</div><div class=\"page-header\"><div><p class=\"eyebrow\">Game Project settings</p><h1>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -9836,14 +9836,14 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</h1><p class=\"subtitle\">Project #")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</h1><p class=\"subtitle\">Game Project #")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var426 string
 			templ_7745c5c3_Var426, templ_7745c5c3_Err = templ.JoinStringErrs(stringFromInt(vm.ProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2823, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2823, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var426))
 			if templ_7745c5c3_Err != nil {
@@ -9887,7 +9887,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</textarea> <small id=\"config-help\">A top-level JSON object, up to 64 KiB. Both publishable and secret project keys can read it.</small>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("</textarea> <small id=\"config-help\">A top-level JSON object, up to 64 KiB. Both publishable and secret Game Project keys can read it.</small>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -9951,14 +9951,14 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<label class=\"checkbox-label\"><input type=\"checkbox\" name=\"steam_clear\" value=\"1\"> Disable Steam sign-in and delete the stored key</label> <button type=\"submit\" class=\"btn-inline\">Save Steam settings</button></form></section><section class=\"card\"><h2>Invite quotas</h2><p class=\"card-subtitle\">Per-project caps on invites sent. Blank = default (")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<label class=\"checkbox-label\"><input type=\"checkbox\" name=\"steam_clear\" value=\"1\"> Disable Steam sign-in and delete the stored key</label> <button type=\"submit\" class=\"btn-inline\">Save Steam settings</button></form></section><section class=\"card\"><h2>Invite quotas</h2><p class=\"card-subtitle\">Per Game Project caps on invites sent. Blank = default (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var430 string
 			templ_7745c5c3_Var430, templ_7745c5c3_Err = templ.JoinStringErrs(rlNum(vm.DefaultInviterHour))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2863, Col: 85}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2863, Col: 90}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var430))
 			if templ_7745c5c3_Err != nil {
@@ -9971,13 +9971,13 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			var templ_7745c5c3_Var431 string
 			templ_7745c5c3_Var431, templ_7745c5c3_Err = templ.JoinStringErrs(rlNum(vm.DefaultDomainDay))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2863, Col: 130}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 2863, Col: 135}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var431))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("/project/day).</p><form method=\"post\" action=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("/Game Project/day).</p><form method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -10018,7 +10018,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <label>Invites / project / day <input name=\"domain_per_day\" type=\"number\" step=\"any\" min=\"0\" value=\"")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <label>Invites / Game Project / day <input name=\"domain_per_day\" type=\"number\" step=\"any\" min=\"0\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -10034,7 +10034,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <button type=\"submit\" class=\"btn-inline\">Save quotas</button></form></section><section class=\"card\"><h2>Project</h2><dl class=\"kv\"><dt>Project ID</dt><dd>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("\"></label> <button type=\"submit\" class=\"btn-inline\">Save quotas</button></form></section><section class=\"card\"><h2>Game Project</h2><dl class=\"kv\"><dt>Game Project ID</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -10082,7 +10082,7 @@ func ProjectSettingsPage(vm ProjectSettingsView) templ.Component {
 			}
 			return templ_7745c5c3_Err
 		})
-		templ_7745c5c3_Err = appLayout("Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var423), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = appLayout("Game Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}).Render(templ.WithChildren(ctx, templ_7745c5c3_Var423), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -10112,7 +10112,7 @@ func ServerSettingsPage(vm ServerSettingsView) templ.Component {
 				templ_7745c5c3_Buffer = templ.GetBuffer()
 				defer templ.ReleaseBuffer(templ_7745c5c3_Buffer)
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Tenants</a> / Server settings</div><div class=\"page-header\"><div><h1>Server settings</h1><p class=\"subtitle\">Read-only view of server-wide configuration. Set via environment variables; secrets show only whether they are configured.</p></div></div><section class=\"card\"><h2>Runtime</h2><dl class=\"kv\"><dt>Environment</dt><dd>")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString("<div class=\"breadcrumb\"><a href=\"/v1/control-panel\">Account Tenants</a> / Server settings</div><div class=\"page-header\"><div><h1>Server settings</h1><p class=\"subtitle\">Read-only view of server-wide configuration. Set via environment variables; secrets show only whether they are configured.</p></div></div><section class=\"card\"><h2>Runtime</h2><dl class=\"kv\"><dt>Environment</dt><dd>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -1,6 +1,7 @@
 package controlpanel
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/automoto/gg-scale/internal/mailer"
 )
 
 func TestUniqueViolationConstraint(t *testing.T) {
@@ -118,16 +121,19 @@ func TestTenantSignupPage_renders_form(t *testing.T) {
 	assert.Contains(t, html, `name="project_description"`)
 	assert.Contains(t, html, `name="studio_name"`)
 	assert.Contains(t, html, `name="_csrf" value="tok"`)
+	assert.Contains(t, html, "Request a ggscale Account Tenant")
+	assert.Contains(t, html, "Account Tenant name")
+	assert.Contains(t, html, "Game Project description")
 }
 
 func TestTenantSignupPage_shows_field_errors(t *testing.T) {
 	html := renderToString(t, TenantSignupPage(TenantSignupFormView{
 		CSRFToken:   "tok",
 		TenantName:  "x",
-		FieldErrors: map[string]string{"tenant_name": "Tenant name must be 2–60 characters."},
+		FieldErrors: map[string]string{"tenant_name": "Account Tenant name must be 2–60 characters."},
 	}))
 
-	assert.Contains(t, html, "Tenant name must be")
+	assert.Contains(t, html, "Account Tenant name must be")
 }
 
 func TestTenantSignupClosedPage_says_closed(t *testing.T) {
@@ -198,4 +204,21 @@ func TestTenantSignupAcceptPage_error_hides_form(t *testing.T) {
 
 	assert.Contains(t, html, "Invite not found")
 	assert.NotContains(t, html, `name="password"`)
+}
+
+func TestSignupDecisionEmails_use_account_tenant_name(t *testing.T) {
+	recorder := &mailer.Recorder{}
+	h := &Handler{
+		cfg:    Config{BaseURL: "https://example.com", MailFrom: "admin@example.com"},
+		mailer: recorder,
+	}
+
+	h.sendSignupApprovalEmail(context.Background(), "dev@example.com", "Abyssal Depths", "code", time.Unix(0, 0))
+	h.sendSignupDenialEmail(context.Background(), "dev@example.com", "")
+
+	assert.Len(t, recorder.Sent, 2)
+	assert.Contains(t, recorder.Sent[0].Subject, "Account Tenant request")
+	assert.Contains(t, recorder.Sent[0].Body, "create the Account Tenant")
+	assert.Contains(t, recorder.Sent[1].Subject, "Account Tenant request")
+	assert.Contains(t, recorder.Sent[1].Body, "Account Tenant request")
 }

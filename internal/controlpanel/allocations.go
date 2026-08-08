@@ -211,7 +211,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 
 	f, ferr := h.fleet.Fleets().GetByName(tenantCtx, projectID, fleetName)
 	if errors.Is(ferr, fleet.ErrFleetNotFound) {
-		view.FieldErrors = map[string]string{"fleet": "Unknown fleet for this project."}
+		view.FieldErrors = map[string]string{"fleet": "Unknown fleet for this Game Project."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
@@ -567,7 +567,7 @@ func (h *Handler) parseTenantAndProject(w http.ResponseWriter, r *http.Request) 
 	ok, err := h.projectBelongsToTenant(r.Context(), tenantID, projectID)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "project ownership check failed", "err", err, "tenant", tenantID, "project", projectID)
-		http.Error(w, "project lookup failed", http.StatusInternalServerError)
+		http.Error(w, "Game Project lookup failed", http.StatusInternalServerError)
 		return 0, 0, false
 	}
 	if !ok {

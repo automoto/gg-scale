@@ -109,7 +109,7 @@ func (h *Handler) updateQuotaOverrideHandler(w http.ResponseWriter, r *http.Requ
 			h.redirectRateLimits(w, r, tenantID, "Enter a limit of 0 or more (-1 for unlimited), or leave blank to restore the tier default.")
 		case errors.Is(err, errOverrideAboveHardCap):
 			h.redirectRateLimits(w, r, tenantID, fmt.Sprintf(
-				"Open game sessions per project can't exceed %d (the platform-wide cap) and can't be unlimited.",
+				"Open game sessions per Game Project can't exceed %d (the platform-wide cap) and can't be unlimited.",
 				gamesession.SessionsHardCap))
 		default:
 			http.Error(w, "quota override update failed", http.StatusInternalServerError)
@@ -153,9 +153,9 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 	case errors.Is(err, errIncompleteLimit):
 		h.redirectRateLimits(w, r, tenantID, "Enter both rate and burst, or clear both to restore the default.")
 	case errors.Is(err, errExceedsCap):
-		h.redirectRateLimits(w, r, tenantID, "Per-project invite quota can't exceed the tenant cap.")
+		h.redirectRateLimits(w, r, tenantID, "Per Game Project invite quota can't exceed the Account Tenant cap.")
 	case errors.Is(err, errProjectNotInTenant):
-		http.Error(w, "project not found", http.StatusNotFound)
+		http.Error(w, "Game Project not found", http.StatusNotFound)
 	default:
 		http.Error(w, "rate limit update failed", http.StatusInternalServerError)
 	}

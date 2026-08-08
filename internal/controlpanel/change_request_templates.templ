@@ -2,11 +2,11 @@ package controlpanel
 
 templ ChangeRequestsPage(vm ChangeRequestsView) {
 	@appLayout("Change requests — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navChangeRequests, IsPlatformAdmin: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Tenants</a> / Change requests</div>
+		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Change requests</div>
 		<div class="page-header">
 			<div>
 				<h1>Change requests</h1>
-				<p class="subtitle">Tenants request tier upgrades and feature grants from their settings page. Approving auto-applies the change; denying can include a reason the tenant sees.</p>
+				<p class="subtitle">Account Tenants request tier upgrades and feature grants from their settings page. Approving auto-applies the change; denying can include a reason the Account Tenant sees.</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -18,7 +18,7 @@ templ ChangeRequestsPage(vm ChangeRequestsView) {
 				for _, req := range vm.Requests {
 					<article class="card">
 						<dl class="kv">
-							<dt>Tenant</dt>
+							<dt>Account Tenant</dt>
 							<dd>{ req.TenantName } <span class="muted">#{ stringFromInt(req.TenantID) }</span></dd>
 							<dt>Request</dt>
 							if req.Kind == "tier_upgrade" {

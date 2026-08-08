@@ -135,9 +135,9 @@ type warningEmail struct {
 func warn80Email(sessions, allowance int64) warningEmail {
 	return warningEmail{
 		subject: "Your ggscale relay usage is at 80% of this month's allowance",
-		body: fmt.Sprintf("Your tenant's managed relay has used %d of its %d relay sessions for this month.\n\n"+
+		body: fmt.Sprintf("Your Account Tenant's managed relay has used %d of its %d relay sessions for this month.\n\n"+
 			"Once the allowance is exhausted, new relay sessions are refused until it resets on the 1st; "+
-			"sessions already connected are never dropped. Request a tier upgrade from tenant settings to raise the allowance.",
+			"sessions already connected are never dropped. Request a tier upgrade from Account Tenant settings to raise the allowance.",
 			sessions, allowance),
 	}
 }
@@ -145,9 +145,9 @@ func warn80Email(sessions, allowance int64) warningEmail {
 func warn100Email(allowance int64) warningEmail {
 	return warningEmail{
 		subject: "Your ggscale relay allowance for this month is used up",
-		body: fmt.Sprintf("Your tenant's managed relay has reached its monthly allowance of %d relay sessions.\n\n"+
+		body: fmt.Sprintf("Your Account Tenant's managed relay has reached its monthly allowance of %d relay sessions.\n\n"+
 			"New relay sessions are refused until the allowance resets on the 1st; sessions already connected "+
-			"are never dropped. Request a tier upgrade from tenant settings to raise the allowance.",
+			"are never dropped. Request a tier upgrade from Account Tenant settings to raise the allowance.",
 			allowance),
 	}
 }

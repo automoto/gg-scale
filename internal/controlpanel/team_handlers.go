@@ -509,9 +509,9 @@ func (h *Handler) roleExplanation(role string) string {
 	helpLine := "\nMore on roles: " + base + "/v1/control-panel/help#roles"
 	switch role {
 	case roleInviteTenantMember:
-		return "\nAs a tenant member you have read-only access: you can view projects and players, but cannot change anything." + helpLine
+		return "\nAs a tenant member you have read-only access: you can view Game Projects and players, but cannot change anything." + helpLine
 	default:
-		return "\nAs a tenant admin you manage everything in the tenant: projects, API keys, players, team, and settings." + helpLine
+		return "\nAs a tenant admin you manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings." + helpLine
 	}
 }
 

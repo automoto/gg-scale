@@ -139,7 +139,7 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 	}
 	target, err := parseRequestedTier(r.Form.Get("tier"))
 	if err != nil {
-		h.redirectTenantSettings(w, r, tenantID, "Choose a valid tenant tier.")
+		h.redirectTenantSettings(w, r, tenantID, "Choose a valid Account Tenant tier.")
 		return
 	}
 	changed, err := h.setTenantTier(r.Context(), session.User.ID, tenantID, target)
@@ -152,10 +152,10 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !changed {
-		h.redirectTenantSettings(w, r, tenantID, "Tenant is already on "+tenant.Tier(target).String()+".")
+		h.redirectTenantSettings(w, r, tenantID, "Account Tenant is already on "+tenant.Tier(target).String()+".")
 		return
 	}
-	h.redirectTenantSettings(w, r, tenantID, "Tenant tier changed to "+tenant.Tier(target).String()+".")
+	h.redirectTenantSettings(w, r, tenantID, "Account Tenant tier changed to "+tenant.Tier(target).String()+".")
 }
 
 func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, target int16) (bool, error) {

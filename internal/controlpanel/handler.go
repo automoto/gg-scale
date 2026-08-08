@@ -386,7 +386,7 @@ func (h *Handler) home(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	tenants, err := h.listTenants(r.Context(), session.User)
 	if err != nil {
-		http.Error(w, "tenant list failed", http.StatusInternalServerError)
+		http.Error(w, "Account Tenant list failed", http.StatusInternalServerError)
 		return
 	}
 	webutil.Render(r, w, HomePage(HomeView{
@@ -465,7 +465,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 			CSRFToken: session.CSRFToken,
 			TenantID:  tenantID,
 			Name:      name,
-			Error:     "project create failed",
+			Error:     "Game Project creation failed",
 		}
 		status := http.StatusInternalServerError
 		var qe *quota.ErrQuotaExceeded
@@ -473,21 +473,21 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInvalidProjectName):
 			status = http.StatusUnprocessableEntity
 			view.Error = ""
-			view.FieldErrors = map[string]string{"name": "Project name is required"}
+			view.FieldErrors = map[string]string{"name": "Game Project name is required"}
 		case errors.Is(err, errDuplicateProject):
 			status = http.StatusConflict
 			view.Error = ""
-			view.FieldErrors = map[string]string{"name": "A project with that name already exists"}
+			view.FieldErrors = map[string]string{"name": "A Game Project with that name already exists"}
 		case errors.As(err, &qe):
 			status = http.StatusConflict
-			view.Error = fmt.Sprintf("You've reached your plan's project limit (%d). "+
-				"Request a tier upgrade from tenant settings to add more.", qe.Limit)
+			view.Error = fmt.Sprintf("You've reached your plan's Game Project limit (%d). "+
+				"Request a tier upgrade from Account Tenant settings to add more.", qe.Limit)
 		}
 		w.WriteHeader(status)
 		webutil.Render(r, w, NewProjectPage(view))
 		return
 	}
-	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Project \""+strings.TrimSpace(name)+"\" created.")
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Game Project \""+strings.TrimSpace(name)+"\" created.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
@@ -505,14 +505,14 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status := http.StatusInternalServerError
-		msg := "tenant signup failed"
+		msg := "Account Tenant creation failed"
 		switch {
 		case errors.Is(err, errInvalidSignup):
 			status = http.StatusUnprocessableEntity
-			msg = "Tenant name and project name are required"
+			msg = "Account Tenant name and Game Project name are required"
 		case errors.Is(err, errDuplicateTenantName):
 			status = http.StatusConflict
-			msg = "A tenant with that name already exists"
+			msg = "An Account Tenant with that name already exists"
 		}
 		w.WriteHeader(status)
 		webutil.Render(r, w, FormErrorFragment(msg))
@@ -632,7 +632,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if err != nil || id <= 0 {
 			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 				http.StatusUnprocessableEntity,
-				map[string]string{"project_id": "Pick a valid project (or leave empty for tenant-wide)"}, "")
+				map[string]string{"project_id": "Pick a valid Game Project (or leave empty for all Game Projects in the Account Tenant)"}, "")
 			return
 		}
 		projectID = &id
@@ -647,7 +647,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errProjectNotInTenant) {
 			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 				http.StatusUnprocessableEntity,
-				map[string]string{"project_id": "Pick a valid project (or leave empty for tenant-wide)"}, "")
+				map[string]string{"project_id": "Pick a valid Game Project (or leave empty for all Game Projects in the Account Tenant)"}, "")
 			return
 		}
 		h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
@@ -802,7 +802,7 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 			obj, act := tenantAccessPermission(minRole)
 			allowed, err := h.rbac.CanControlPanel(session.User.ID, tenantID, obj, act)
 			if err != nil {
-				http.Error(w, "tenant access check failed", http.StatusInternalServerError)
+				http.Error(w, "Account Tenant access check failed", http.StatusInternalServerError)
 				return
 			}
 			if !allowed {
@@ -815,7 +815,7 @@ func (h *Handler) requireTenantAccess(minRole string) func(http.Handler) http.Ha
 			if !session.User.IsPlatformAdmin {
 				locked, lerr := h.tenantPlatformDisabled(r.Context(), tenantID)
 				if lerr != nil {
-					http.Error(w, "tenant access check failed", http.StatusInternalServerError)
+					http.Error(w, "Account Tenant access check failed", http.StatusInternalServerError)
 					return
 				}
 				if locked {
