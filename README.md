@@ -2,6 +2,8 @@
 
 A simple and open backend for multiplayer games. gg-scale has everything an online game needs: player accounts and auth, game sessions and lobbies, matchmaking, peer to peer relays, dedicated servers(beta), cloud saves, leaderboards, friends and a control panel to manage it all.
 
+<img src="docs/dashboard.png" alt="gg-scale control panel" width="600">
+
 ## gg-scale Managed Cloud
 
 Prefer a managed service? Deploy your game on gg-scale cloud and leave the hosting to us.
