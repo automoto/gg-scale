@@ -1335,7 +1335,9 @@ templ PlayersPage(vm PlayersView) {
 									}
 								</td>
 								<td>
-									if !p.DisabledAt.IsZero() {
+									if !p.DeleteRequestedAt.IsZero() {
+										<span class="badge badge-revoked">deletion scheduled</span>
+									} else if !p.DisabledAt.IsZero() {
 										<span class="badge">disabled</span>
 									} else {
 										<span class="badge badge-role">active</span>
@@ -1451,16 +1453,31 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 				<dt>Created</dt>
 				<dd>{ timeString(vm.Player.CreatedAt) }</dd>
 			</dl>
-			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/disable") }>
-				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				if !vm.Player.DisabledAt.IsZero() {
-					<input type="hidden" name="enable" value="true"/>
-					<button type="submit" class="btn-inline">Re-enable player</button>
-				} else {
-					<input type="hidden" name="enable" value="false"/>
-					<button type="submit" class="secondary outline btn-inline">Disable player (this Game Project)</button>
-				}
-			</form>
+			if !vm.Player.DeleteRequestedAt.IsZero() {
+				<p role="alert">
+					Deletion scheduled for <strong>{ timeString(vm.Player.ScheduledPurgeAt) }</strong>.
+					The player is disabled until the data is deleted or the deletion is cancelled.
+				</p>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/cancel-delete") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<button type="submit" class="btn-inline">Cancel deletion</button>
+				</form>
+			} else {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/disable") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					if !vm.Player.DisabledAt.IsZero() {
+						<input type="hidden" name="enable" value="true"/>
+						<button type="submit" class="btn-inline">Re-enable player</button>
+					} else {
+						<input type="hidden" name="enable" value="false"/>
+						<button type="submit" class="secondary outline btn-inline">Disable player (this Game Project)</button>
+					}
+				</form>
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/request-delete") } data-confirm="Schedule permanent deletion of this player's data in this Game Project?">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<button type="submit" class="contrast outline btn-inline">Request data deletion…</button>
+				</form>
+			}
 		</section>
 		if vm.Player.AccountID != "" {
 			<section class="card">

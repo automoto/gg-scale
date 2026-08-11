@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -22,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
@@ -1051,7 +1053,7 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 	var out []LinkedProject
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx,
-			`SELECT player_id, tenant_id, project_id, project_name, external_id
+			`SELECT player_id, tenant_id, project_id, project_name, external_id, delete_requested_at
 			 FROM player_account_linked_projects($1)`, toPgUUID(accountID))
 		if qerr != nil {
 			return qerr
@@ -1059,14 +1061,52 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 		defer rows.Close()
 		for rows.Next() {
 			var lp LinkedProject
-			if scanErr := rows.Scan(&lp.PlayerID, &lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID); scanErr != nil {
+			var requestedAt pgtype.Timestamptz
+			if scanErr := rows.Scan(&lp.PlayerID, &lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID, &requestedAt); scanErr != nil {
 				return scanErr
+			}
+			if requestedAt.Valid {
+				lp.DeleteRequestedAt = requestedAt.Time
+				lp.ScheduledPurgeAt = requestedAt.Time.Add(h.deleteGrace())
 			}
 			out = append(out, lp)
 		}
 		return rows.Err()
 	})
 	return out, err
+}
+
+// defaultDeleteGracePeriod backs Config.DeleteGracePeriod when unset, keeping
+// test fixtures and sparse deployments on the documented 30-day window.
+const defaultDeleteGracePeriod = 720 * time.Hour
+
+func (h *Handler) deleteGrace() time.Duration {
+	if h.cfg.DeleteGracePeriod > 0 {
+		return h.cfg.DeleteGracePeriod
+	}
+	return defaultDeleteGracePeriod
+}
+
+// graceLabel renders the grace period on the confirmation page without
+// truncation: whole days when even, whole hours otherwise, and the exact
+// duration for anything finer — the destructive-action warning must match
+// the configured behavior.
+func graceLabel(d time.Duration) string {
+	const day = 24 * time.Hour
+	if d%day == 0 {
+		return pluralUnit(int64(d/day), "day")
+	}
+	if d%time.Hour == 0 {
+		return pluralUnit(int64(d/time.Hour), "hour")
+	}
+	return d.String()
+}
+
+func pluralUnit(n int64, unit string) string {
+	if n == 1 {
+		return "1 " + unit
+	}
+	return strconv.FormatInt(n, 10) + " " + unit + "s"
 }
 
 // --- project unlink ----------------------------------------------------------
@@ -1110,12 +1150,26 @@ func (h *Handler) accountProjectUnlinkPage(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	if !lp.DeleteRequestedAt.IsZero() {
+		h.redirectUnlinkBlockedByDelete(w, r, lp)
+		return
+	}
 	webutil.Render(r, w, UnlinkProjectPage(UnlinkProjectView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
 		PlayerID:     lp.PlayerID,
 		ProjectName:  lp.ProjectName,
 	}))
+}
+
+// redirectUnlinkBlockedByDelete refuses an unlink while a deletion is
+// pending: severing the account link would remove the portal's only
+// cancellation path while the purge stays scheduled. The update query carries
+// the same guard, so a stale form races safely too.
+func (h *Handler) redirectUnlinkBlockedByDelete(w http.ResponseWriter, r *http.Request, lp LinkedProject) {
+	http.Redirect(w, r, accountBasePath+"/?error="+url.QueryEscape(
+		"A data deletion is scheduled for "+lp.ProjectName+". Cancel the deletion before unlinking."),
+		http.StatusSeeOther)
 }
 
 func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
@@ -1133,6 +1187,10 @@ func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !lp.DeleteRequestedAt.IsZero() {
+		h.redirectUnlinkBlockedByDelete(w, r, lp)
+		return
+	}
 	if err := h.unlinkProjectPlayer(r.Context(), sess.AccountID, lp); err != nil {
 		webutil.InternalError(w, "account unlink", err)
 		return
@@ -1140,6 +1198,163 @@ func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(
 		"Unlinked from "+lp.ProjectName+". Your game data is kept; accepting a new invite restores it."),
 		http.StatusSeeOther)
+}
+
+// --- project data deletion ---------------------------------------------------
+
+// accountProjectDeletePage renders the delete confirmation step (no-JS
+// pattern, same as the unlink confirm). A pending request renders the same
+// page in its "already scheduled" state.
+func (h *Handler) accountProjectDeletePage(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	lp, found, err := h.linkedProjectForRequest(r, sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account delete: linked projects", err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	webutil.Render(r, w, DeleteProjectDataPage(DeleteProjectDataView{
+		AccountEmail:     sess.Email,
+		CSRFToken:        h.csrf(r),
+		PlayerID:         lp.PlayerID,
+		ProjectName:      lp.ProjectName,
+		GraceLabel:       graceLabel(h.deleteGrace()),
+		ScheduledPurgeAt: lp.ScheduledPurgeAt,
+	}))
+}
+
+func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	lp, found, err := h.linkedProjectForRequest(r, sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account delete: linked projects", err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	purgeAt, err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp)
+	if err != nil {
+		webutil.InternalError(w, "account delete", err)
+		return
+	}
+	flash := "Deletion of your " + lp.ProjectName + " data is scheduled. You can cancel until the purge runs."
+	if !purgeAt.IsZero() {
+		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeAt.Format("2006-01-02") +
+			". You can cancel until then."
+	}
+	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+}
+
+func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Request) {
+	sess, ok := h.accountSessionFromRequest(r)
+	if !ok {
+		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
+		return
+	}
+	lp, found, err := h.linkedProjectForRequest(r, sess.AccountID)
+	if err != nil {
+		webutil.InternalError(w, "account delete cancel: linked projects", err)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	cancelled, err := h.cancelProjectPlayerDelete(r.Context(), sess.AccountID, lp)
+	if err != nil {
+		webutil.InternalError(w, "account delete cancel", err)
+		return
+	}
+	flash := "Deletion cancelled. Your " + lp.ProjectName + " data is kept."
+	if !cancelled {
+		// The purge won the race, or the request was already cancelled.
+		flash = "No pending deletion for " + lp.ProjectName + "."
+	}
+	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+}
+
+// requestProjectPlayerDelete disables the player, stamps the delete request,
+// and revokes live game sessions in one transaction under the project's
+// tenant scope. An already-pending request (0 rows) is a benign double
+// submit: the stored timestamp is reloaded so the caller reports the real
+// purge date even when another surface won the race. A zero return means the
+// date could not be determined (the row vanished mid-flight).
+func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) (time.Time, error) {
+	requestedAt := lp.DeleteRequestedAt
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
+			return err
+		}
+		q := sqlcgen.New(tx)
+		ts, err := q.RequestPlayerDeleteByAccount(ctx, sqlcgen.RequestPlayerDeleteByAccountParams{
+			ID:              lp.PlayerID,
+			PlayerAccountID: toPgUUID(accountID),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			stored, gerr := q.GetPlayerDeleteRequestedByAccount(ctx, sqlcgen.GetPlayerDeleteRequestedByAccountParams{
+				ID:              lp.PlayerID,
+				PlayerAccountID: toPgUUID(accountID),
+			})
+			if gerr != nil && !errors.Is(gerr, pgx.ErrNoRows) {
+				return gerr
+			}
+			if stored.Valid {
+				requestedAt = stored.Time
+			}
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		requestedAt = ts.Time
+		if _, err = q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
+			ProjectID: lp.ProjectID,
+			PlayerID:  lp.PlayerID,
+		}); err != nil {
+			return err
+		}
+		return auditlog.Write(ctx, tx, lp.PlayerID, "account.player.delete_request", "",
+			map[string]any{"scheduled_purge_at": ts.Time.Add(h.deleteGrace())})
+	})
+	if err != nil || requestedAt.IsZero() {
+		return time.Time{}, err
+	}
+	return requestedAt.Add(h.deleteGrace()), nil
+}
+
+// cancelProjectPlayerDelete clears a pending delete request under the
+// project's tenant scope; false means there was nothing to cancel.
+func (h *Handler) cancelProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) (bool, error) {
+	var cancelled bool
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
+			return err
+		}
+		q := sqlcgen.New(tx)
+		n, err := q.CancelPlayerDeleteByAccount(ctx, sqlcgen.CancelPlayerDeleteByAccountParams{
+			ID:              lp.PlayerID,
+			PlayerAccountID: toPgUUID(accountID),
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		cancelled = true
+		return auditlog.Write(ctx, tx, lp.PlayerID, "account.player.delete_cancel", "", nil)
+	})
+	return cancelled, err
 }
 
 // unlinkProjectPlayer marks the link inactive and revokes the player's live

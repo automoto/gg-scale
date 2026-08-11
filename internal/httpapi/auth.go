@@ -163,6 +163,20 @@ func registerAuthPasswordRoutes(api huma.API, d Deps) {
 		Tags:        []string{"Authentication"},
 		Security:    apiKeySecurity,
 	}, authLogin(d))
+
+	huma.Register(api, huma.Operation{
+		OperationID: "authDeleteCancel",
+		Method:      http.MethodPost,
+		Path:        "/v1/auth/delete/cancel",
+		Summary:     "Cancel a pending player deletion with email and password",
+		Description: "Re-authenticates with credentials because the delete request " +
+			"revoked every session. Clears the pending deletion and re-enables " +
+			"sign-in. 404 covers unknown email, wrong password, and no pending " +
+			"deletion alike.",
+		Tags:          []string{"Authentication"},
+		Security:      apiKeySecurity,
+		DefaultStatus: http.StatusNoContent,
+	}, authDeleteCancel(d))
 }
 
 // registerAuthTokenRoutes registers the non-bcrypt /v1/auth/*

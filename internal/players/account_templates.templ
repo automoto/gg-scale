@@ -3,6 +3,7 @@ package players
 import (
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // Global player-account pages (project-agnostic). Kept deliberately minimal,
@@ -321,6 +322,10 @@ type LinkedProject struct {
 	ProjectID   int64
 	ProjectName string
 	ExternalID  string
+	// DeleteRequestedAt and ScheduledPurgeAt are set while a data-deletion
+	// request is pending; zero otherwise.
+	DeleteRequestedAt time.Time
+	ScheduledPurgeAt  time.Time
 }
 
 // UnlinkProjectView is the data for the unlink confirmation page.
@@ -329,6 +334,19 @@ type UnlinkProjectView struct {
 	CSRFToken    string
 	PlayerID     int64
 	ProjectName  string
+}
+
+// DeleteProjectDataView is the data for the delete confirmation page.
+type DeleteProjectDataView struct {
+	AccountEmail string
+	CSRFToken    string
+	PlayerID     int64
+	ProjectName  string
+	// GraceLabel is the configured grace period rendered as text, e.g.
+	// "30 days" or "36 hours".
+	GraceLabel string
+	// ScheduledPurgeAt is non-zero when a request is already pending.
+	ScheduledPurgeAt time.Time
 }
 
 type AccountHomeView struct {
@@ -413,7 +431,16 @@ templ AccountHomePage(vm AccountHomeView) {
 								<td>{ p.ProjectName }</td>
 								<td><code>{ p.ExternalID }</code></td>
 								<td class="actions-cell">
-									<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/unlink") } role="button" class="secondary outline btn-inline">Unlink</a>
+									if !p.DeleteRequestedAt.IsZero() {
+										<span>Deletion scheduled { p.ScheduledPurgeAt.Format("2006-01-02") }</span>
+										<form method="post" action={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/delete/cancel") } class="inline-form">
+											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+											<button type="submit" class="secondary outline btn-inline">Cancel deletion</button>
+										</form>
+									} else {
+										<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/unlink") } role="button" class="secondary outline btn-inline">Unlink</a>
+										<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/delete") } role="button" class="secondary outline btn-inline">Delete data</a>
+									}
 								</td>
 							</tr>
 						}
@@ -453,6 +480,42 @@ templ UnlinkProjectPage(vm UnlinkProjectView) {
 					<button type="submit" class="contrast btn-inline">Unlink game</button>
 				</div>
 			</form>
+		</section>
+	}
+}
+
+templ DeleteProjectDataPage(vm DeleteProjectDataView) {
+	@playerLayout("Delete game data", playerNavAccount, vm.CSRFToken, vm.AccountEmail) {
+		<div class="page-header">
+			<div>
+				<h1>Delete your data in { vm.ProjectName }</h1>
+			</div>
+		</div>
+		<section class="card">
+			if !vm.ScheduledPurgeAt.IsZero() {
+				<p>
+					Deletion is already scheduled for <strong>{ vm.ScheduledPurgeAt.Format("2006-01-02") }</strong>.
+					You can cancel it from the account page until then.
+				</p>
+				<p><a href="/v1/players/account/" role="button" class="secondary outline btn-inline">Back to account</a></p>
+			} else {
+				<p>
+					Delete your data in <strong>{ vm.ProjectName }</strong>?
+					Your profile, saves, scores, and sessions in this game are removed permanently.
+					Your data in other games and your ggscale account are not touched.
+				</p>
+				<p>
+					Sign-in to this game stops immediately. The data is deleted after
+					{ vm.GraceLabel }; you can cancel until then.
+				</p>
+				<form method="post" action={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(vm.PlayerID, 10) + "/delete") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<div class="form-actions">
+						<a href="/v1/players/account/" role="button" class="secondary outline btn-inline">Cancel</a>
+						<button type="submit" class="contrast btn-inline">Delete my data</button>
+					</div>
+				</form>
+			}
 		</section>
 	}
 }

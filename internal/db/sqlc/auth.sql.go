@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelPlayerDeleteSelf = `-- name: CancelPlayerDeleteSelf :execrows
+UPDATE project_players
+SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
+    delete_requested_at = NULL
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL
+`
+
+// Clears the pending request; lifts the disable only when the request created
+// it (disabled_at = delete_requested_at), so a suspension that predates the
+// request survives the cancel. 0 rows = no pending request (or purged).
+func (q *Queries) CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelPlayerDeleteSelf, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearPlayerPasswordResetLock = `-- name: ClearPlayerPasswordResetLock :exec
 UPDATE project_players
 SET password_reset_lifetime_attempts = 0,
@@ -332,6 +353,43 @@ func (q *Queries) GetPlayerPasswordResetState(ctx context.Context, arg GetPlayer
 	return i, err
 }
 
+const getPlayerPendingDeleteByEmail = `-- name: GetPlayerPendingDeleteByEmail :one
+SELECT id, project_id, password_hash, delete_requested_at
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND email = $2
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL
+`
+
+type GetPlayerPendingDeleteByEmailParams struct {
+	ProjectID int64
+	Email     *string
+}
+
+type GetPlayerPendingDeleteByEmailRow struct {
+	ID                int64
+	ProjectID         int64
+	PasswordHash      []byte
+	DeleteRequestedAt pgtype.Timestamptz
+}
+
+// Credential lookup for the pre-session delete-cancel endpoint: the request
+// revoked every session and login filters disabled players, so cancel
+// re-authenticates with email + password against the pending row directly.
+func (q *Queries) GetPlayerPendingDeleteByEmail(ctx context.Context, arg GetPlayerPendingDeleteByEmailParams) (GetPlayerPendingDeleteByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getPlayerPendingDeleteByEmail, arg.ProjectID, arg.Email)
+	var i GetPlayerPendingDeleteByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.PasswordHash,
+		&i.DeleteRequestedAt,
+	)
+	return i, err
+}
+
 const getPlayerVerificationState = `-- name: GetPlayerVerificationState :one
 SELECT
     id,
@@ -612,6 +670,29 @@ func (q *Queries) ReplacePlayerExternalID(ctx context.Context, arg ReplacePlayer
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const requestPlayerDeleteSelf = `-- name: RequestPlayerDeleteSelf :one
+UPDATE project_players
+SET delete_requested_at = now(),
+    disabled_at   = COALESCE(disabled_at, now()),
+    session_epoch = session_epoch + 1
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
+RETURNING delete_requested_at
+`
+
+// Self-service delete request: disables the player (keeping an earlier
+// suspension timestamp intact) and stamps delete_requested_at with the same
+// now() so cancel can tell the two apart. The purge sweep hard-deletes the
+// row once the grace window passes. 0 rows = gone or already pending.
+func (q *Queries) RequestPlayerDeleteSelf(ctx context.Context, id int64) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, requestPlayerDeleteSelf, id)
+	var delete_requested_at pgtype.Timestamptz
+	err := row.Scan(&delete_requested_at)
+	return delete_requested_at, err
 }
 
 const reservePlayerPasswordResetAttempt = `-- name: ReservePlayerPasswordResetAttempt :one

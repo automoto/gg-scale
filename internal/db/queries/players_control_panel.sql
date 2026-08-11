@@ -9,6 +9,7 @@ SELECT
     coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
+    u.delete_requested_at,
     u.created_at
 FROM project_players u
 JOIN projects p ON p.id = u.project_id
@@ -39,6 +40,7 @@ SELECT
     coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
+    u.delete_requested_at,
     u.created_at,
     u.tenant_id,
     u.project_id,
@@ -58,14 +60,45 @@ WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND u.id = sqlc.arg(id)
   AND u.deleted_at IS NULL;
 
--- name: SetPlayerDisabledInProject :exec
+-- name: SetPlayerDisabledInProject :execrows
 -- Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
 -- tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
--- server-verify immediately.
+-- server-verify immediately. A pending delete request owns the disabled
+-- state: 0 rows on an existing player means "cancel the deletion first".
 UPDATE project_players
 SET disabled_at   = sqlc.arg(disabled_at),
     session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id)
   AND project_id = sqlc.arg(project_id)
   AND tenant_id = sqlc.arg(tenant_id)
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL;
+
+-- name: RequestPlayerDeleteInProject :one
+-- Admin-side delete request: disables the player (keeping an earlier
+-- suspension timestamp intact) and stamps delete_requested_at with the same
+-- now() so cancel can tell the two apart. 0 rows = gone or already pending.
+UPDATE project_players
+SET delete_requested_at = now(),
+    disabled_at   = COALESCE(disabled_at, now()),
+    session_epoch = session_epoch + 1
+WHERE id = sqlc.arg(id)
+  AND project_id = sqlc.arg(project_id)
+  AND tenant_id = sqlc.arg(tenant_id)
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
+RETURNING delete_requested_at;
+
+-- name: CancelPlayerDeleteInProject :execrows
+-- Clears the pending request; lifts the disable only when the request created
+-- it (disabled_at = delete_requested_at), so a pre-existing admin suspension
+-- survives the cancel. SET expressions read pre-update values, so the CASE
+-- sees delete_requested_at before it is cleared.
+UPDATE project_players
+SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
+    delete_requested_at = NULL
+WHERE id = sqlc.arg(id)
+  AND project_id = sqlc.arg(project_id)
+  AND tenant_id = sqlc.arg(tenant_id)
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL;

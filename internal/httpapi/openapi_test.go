@@ -17,6 +17,8 @@ var expectedV1Paths = []string{
 	"/v1/account/remote-addrs",
 	"/v1/auth/anonymous",
 	"/v1/auth/custom-token",
+	"/v1/auth/delete",
+	"/v1/auth/delete/cancel",
 	"/v1/auth/disable",
 	"/v1/auth/link",
 	"/v1/auth/link/steam",

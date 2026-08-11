@@ -47,6 +47,19 @@ type Querier interface {
 	// Cancelling a claimed-but-not-yet-committed ticket is allowed: the worker's
 	// CommitClaim will find zero rows and deallocate the orphan server.
 	CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error)
+	// Clears the pending request; lifts the disable only when the request created
+	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
+	// survives the cancel. 0 rows = no pending request (or already purged).
+	CancelPlayerDeleteByAccount(ctx context.Context, arg CancelPlayerDeleteByAccountParams) (int64, error)
+	// Clears the pending request; lifts the disable only when the request created
+	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
+	// survives the cancel. SET expressions read pre-update values, so the CASE
+	// sees delete_requested_at before it is cleared.
+	CancelPlayerDeleteInProject(ctx context.Context, arg CancelPlayerDeleteInProjectParams) (int64, error)
+	// Clears the pending request; lifts the disable only when the request created
+	// it (disabled_at = delete_requested_at), so a suspension that predates the
+	// request survives the cancel. 0 rows = no pending request (or purged).
+	CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error)
 	// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
 	// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 	// subsequent ClaimBucket (different worker) skips them. The caller commits
@@ -238,6 +251,11 @@ type Querier interface {
 	DeletePlayerAccountTOTP(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeletePlayerAccountTOTPBackupCodes(ctx context.Context, playerAccountID pgtype.UUID) error
 	DeletePlayerAccountTrustedDevicesForAccount(ctx context.Context, playerAccountID pgtype.UUID) error
+	// from/to player columns carry no foreign keys, and signals in a surviving
+	// session outlive the player-row cascade. Remove every signal the purged
+	// players sent or were addressed by, so no player IDs or SDP payloads remain
+	// after the purge (the 2-minute TTL GC is not guaranteed to have run).
+	DeletePlayerGameSessionSignals(ctx context.Context, ids []int64) error
 	// Clear one axis override so the class ladder applies again.
 	DeleteQuotaOverride(ctx context.Context, arg DeleteQuotaOverrideParams) error
 	DeleteRateLimitOverride(ctx context.Context, arg DeleteRateLimitOverrideParams) error
@@ -390,6 +408,10 @@ type Querier interface {
 	// the URL and looks up tenant + verification state in one shot.
 	GetPlayerByEmailProject(ctx context.Context, arg GetPlayerByEmailProjectParams) (GetPlayerByEmailProjectRow, error)
 	GetPlayerByExternalID(ctx context.Context, arg GetPlayerByExternalIDParams) (GetPlayerByExternalIDRow, error)
+	// Race repair for the idempotent portal request: when the guarded UPDATE
+	// matched no rows because another surface scheduled the deletion first, this
+	// reads the timestamp that request stored.
+	GetPlayerDeleteRequestedByAccount(ctx context.Context, arg GetPlayerDeleteRequestedByAccountParams) (pgtype.Timestamptz, error)
 	// Tenant-scoped: finds an existing (possibly unlinked) player by project +
 	// email so a public-join / invite can link it instead of creating a duplicate.
 	GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForAccountLinkParams) (GetPlayerForAccountLinkRow, error)
@@ -420,6 +442,10 @@ type Querier interface {
 	// Reset-request/confirm state read, keyed like login. Filters mirror
 	// GetPlayerByEmail: disabled/unlinked players read as unknown.
 	GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error)
+	// Credential lookup for the pre-session delete-cancel endpoint: the request
+	// revoked every session and login filters disabled players, so cancel
+	// re-authenticates with email + password against the pending row directly.
+	GetPlayerPendingDeleteByEmail(ctx context.Context, arg GetPlayerPendingDeleteByEmailParams) (GetPlayerPendingDeleteByEmailRow, error)
 	GetPlayerSession(ctx context.Context, refreshHash []byte) (GetPlayerSessionRow, error)
 	// PK lookup used at token issuance to snapshot the current epoch into the JWT.
 	GetPlayerSessionEpoch(ctx context.Context, id int64) (int32, error)
@@ -487,6 +513,10 @@ type Querier interface {
 	// The tenant's billing tier, used to show the correct compiled default on the
 	// rate-limits page (enforcement keys off the same tier via the API key).
 	GetTenantTier(ctx context.Context, id int64) (int16, error)
+	// The point of no return: FK cascades remove sessions, presence, leaderboard
+	// entries, storage objects, matchmaking tickets, invites, and hosted game
+	// sessions; audit_log rows survive with actor_user_id set NULL.
+	HardDeletePlayers(ctx context.Context, ids []int64) (int64, error)
 	IncrementControlPanelVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttempts(ctx context.Context, id int64) (int32, error)
 	IncrementPlayerVerificationAttemptsByID(ctx context.Context, id int64) (int32, error)
@@ -630,6 +660,12 @@ type Querier interface {
 	// open sockets per sweep interval (O(tenants), not O(sockets)). A player
 	// missing from the result (deleted) reads as revoked.
 	ListPlayerSessionEpochs(ctx context.Context, ids []int64) ([]ListPlayerSessionEpochsRow, error)
+	// One purge batch for the current tenant. FOR UPDATE serializes against a
+	// racing cancel: the cancel either lands first (the row drops out of the
+	// result) or blocks until the delete commits and reports "no pending
+	// deletion". deleted_at is returned so the caller only releases quota slots
+	// for rows that ever held one.
+	ListPlayersDueForPurge(ctx context.Context, arg ListPlayersDueForPurgeParams) ([]ListPlayersDueForPurgeRow, error)
 	// Control-panel-side player management queries. Privileged: the control panel
 	// runs them as platform/tenant admin via BootstrapQ, so we filter by
 	// tenant_id explicitly rather than relying on RLS.
@@ -749,6 +785,11 @@ type Querier interface {
 	// flipped to 'failed' this call so the caller can meter the
 	// attempts_exhausted failure counter without re-reading the rows.
 	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
+	// Counter mirror of ReserveTenantPlayerSlot for the delete-purge path: the
+	// caller passes how many non-soft-deleted players it hard-deleted in the same
+	// transaction (soft-deleted rows never held a slot). GREATEST guards against
+	// drift from out-of-band writes ever pushing the counter negative.
+	ReleaseTenantPlayerSlots(ctx context.Context, n int64) error
 	// Steam linking: swap a generated identity for the platform identity.
 	// Compare-and-swap on the old value so a concurrent change loses cleanly;
 	// the per-project external_id unique index rejects an identity another
@@ -761,6 +802,25 @@ type Querier interface {
 	// place; pending/accepted are idempotent (WHERE filters them, DO UPDATE
 	// no-ops); blocked is terminal (WHERE omits it).
 	RequestFriendByAccount(ctx context.Context, arg RequestFriendByAccountParams) (RequestFriendByAccountRow, error)
+	// Per-project player deletion: account-portal request/cancel plus the purge
+	// sweep. The portal queries run under BootstrapQ with app.tenant_id set for
+	// the link's tenant (same pattern as UnlinkPlayerFromAccount); the sweep runs
+	// per tenant under Pool.Q. The account guard stops one account from deleting
+	// another account's player.
+	// Portal-side delete request: disables the player (keeping an earlier
+	// suspension timestamp intact) and stamps delete_requested_at with the same
+	// now() so cancel can tell the two apart. 0 rows = not this account's player
+	// or already pending.
+	RequestPlayerDeleteByAccount(ctx context.Context, arg RequestPlayerDeleteByAccountParams) (pgtype.Timestamptz, error)
+	// Admin-side delete request: disables the player (keeping an earlier
+	// suspension timestamp intact) and stamps delete_requested_at with the same
+	// now() so cancel can tell the two apart. 0 rows = gone or already pending.
+	RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error)
+	// Self-service delete request: disables the player (keeping an earlier
+	// suspension timestamp intact) and stamps delete_requested_at with the same
+	// now() so cancel can tell the two apart. The purge sweep hard-deletes the
+	// row once the grace window passes. 0 rows = gone or already pending.
+	RequestPlayerDeleteSelf(ctx context.Context, id int64) (pgtype.Timestamptz, error)
 	// Atomic check-and-bump, same shape as ReserveControlPanelVerifyAttempt: the
 	// cap lives in the WHERE so parallel wrong codes cannot overshoot it.
 	// Returns 0 rows when already at cap (caller treats as locked).
@@ -867,8 +927,9 @@ type Querier interface {
 	SetPlayerDisabled(ctx context.Context, arg SetPlayerDisabledParams) error
 	// Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
 	// tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
-	// server-verify immediately.
-	SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error
+	// server-verify immediately. A pending delete request owns the disabled
+	// state: 0 rows on an existing player means "cancel the deletion first".
+	SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) (int64, error)
 	// Self-service disable: the epoch bump revokes live access tokens through the
 	// middleware gate. 0 rows = already disabled or gone.
 	SetPlayerDisabledSelf(ctx context.Context, id int64) (int64, error)
@@ -949,6 +1010,8 @@ type Querier interface {
 	// (unlinked_at filters on the auth queries). The epoch bump kills live access
 	// tokens immediately; the caller also revokes the player's sessions. The
 	// account guard stops one account from unlinking another account's player.
+	// A pending deletion blocks the unlink: severing the link would remove the
+	// portal's only cancellation path while the purge stays scheduled.
 	UnlinkPlayerFromAccount(ctx context.Context, arg UnlinkPlayerFromAccountParams) (int64, error)
 	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error
 	UpdateControlPanelPassword(ctx context.Context, arg UpdateControlPanelPasswordParams) error

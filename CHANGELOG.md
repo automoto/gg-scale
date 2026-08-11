@@ -5,7 +5,20 @@ All notable changes to ggscale are recorded here. The format is based on
 pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
-## [Unreleased]
+## [v0.9.6]
+
+### Added
+
+- **Per-project player data deletion with a grace period.** An explicit
+  request disables the player in that project, revokes every session, and
+  schedules a permanent purge after `PLAYER_DELETE_GRACE_PERIOD` (default 30
+  days); data in other projects and the global account are untouched. Players
+  request from the game API (`POST /v1/auth/delete`, with a credential-based
+  `POST /v1/auth/delete/cancel`) or from the account pages; tenant and
+  platform admins request and cancel from the control panel. The purge is an
+  hourly job that hard-deletes the row (sessions, presence, leaderboard
+  entries, storage, tickets, and invites cascade) while audit history is kept
+  with the actor cleared. Migration `0043`.
 
 ### Security
 

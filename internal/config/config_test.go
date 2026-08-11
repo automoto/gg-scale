@@ -270,6 +270,38 @@ func TestLoad_rejects_nonpositive_db_max_conn_idle_time(t *testing.T) {
 	assert.Contains(t, err.Error(), "DB_MAX_CONN_IDLE_TIME")
 }
 
+func TestLoad_defaults_player_delete_grace_period_to_30d(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 720*time.Hour, cfg.PlayerDeleteGracePeriod)
+}
+
+func TestLoad_overrides_player_delete_grace_period(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("PLAYER_DELETE_GRACE_PERIOD", "24h")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 24*time.Hour, cfg.PlayerDeleteGracePeriod)
+}
+
+func TestLoad_rejects_nonpositive_player_delete_grace_period(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("PLAYER_DELETE_GRACE_PERIOD", "0")
+
+	_, err := config.Load()
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "PLAYER_DELETE_GRACE_PERIOD")
+}
+
 func TestLoad_read_pool_off_by_default(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")

@@ -78,6 +78,10 @@ type Deps struct {
 	// StorageMaxValueBytes is the platform default cap on a storage object's
 	// value; 0 uses the compiled fallback (1 MiB).
 	StorageMaxValueBytes int64
+	// DeleteGracePeriod is how long a requested player deletion stays
+	// cancellable before the purge sweep hard-deletes the data; 0 uses the
+	// compiled fallback (30 days).
+	DeleteGracePeriod time.Duration
 	// StorageLimits (may be nil) resolves per-tenant/project storage-size
 	// overrides on top of StorageMaxValueBytes.
 	StorageLimits storagelimit.LimitStore

@@ -50,6 +50,10 @@ type Config struct {
 	// links in player-account emails (password reset). Empty means "use a
 	// relative path" — fine for dev but not for production.
 	BaseURL string
+	// DeleteGracePeriod is how long a requested player deletion stays
+	// cancellable before the purge sweep hard-deletes the data; 0 uses the
+	// compiled fallback (30 days).
+	DeleteGracePeriod time.Duration
 }
 
 // Enabled reports whether the player site should be mounted.
@@ -120,6 +124,9 @@ func New(d Deps) http.Handler {
 		r.Get("/", h.accountHomePage)
 		r.Get("/projects/{playerID}/unlink", h.accountProjectUnlinkPage)
 		r.Post("/projects/{playerID}/unlink", h.accountProjectUnlink)
+		r.Get("/projects/{playerID}/delete", h.accountProjectDeletePage)
+		r.Post("/projects/{playerID}/delete", h.accountProjectDelete)
+		r.Post("/projects/{playerID}/delete/cancel", h.accountProjectDeleteCancel)
 		r.Get("/remote-addrs", h.accountRemoteAddrListPage)
 		r.Get("/remote-addrs/new", h.accountRemoteAddrNewPage)
 		r.Post("/remote-addrs", h.accountRemoteAddrCreate)

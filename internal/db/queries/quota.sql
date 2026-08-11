@@ -52,6 +52,15 @@ WHERE id = current_setting('app.tenant_id', true)::bigint
        OR sqlc.arg(player_limit)::bigint = -1
        OR player_count < sqlc.arg(player_limit)::bigint);
 
+-- name: ReleaseTenantPlayerSlots :exec
+-- Counter mirror of ReserveTenantPlayerSlot for the delete-purge path: the
+-- caller passes how many non-soft-deleted players it hard-deleted in the same
+-- transaction (soft-deleted rows never held a slot). GREATEST guards against
+-- drift from out-of-band writes ever pushing the counter negative.
+UPDATE tenants
+SET player_count = GREATEST(player_count - sqlc.arg(n)::bigint, 0)
+WHERE id = current_setting('app.tenant_id', true)::bigint;
+
 -- name: SetTenantEnforceQuotas :exec
 -- Flip the per-tenant enforcement flag. Used by provisioning when the operator
 -- has enabled quota enforcement for new tenants. player_count is maintained
