@@ -96,6 +96,35 @@ components:
       required:
         - token
       type: object
+    DeleteCancelInputBody:
+      additionalProperties: false
+      properties:
+        email:
+          examples:
+            - player@example.com
+          format: email
+          type: string
+        password:
+          examples:
+            - correct-horse-battery-staple
+          type: string
+      required:
+        - email
+        - password
+      type: object
+    DeleteRequestOutputBody:
+      additionalProperties: false
+      properties:
+        delete_requested_at:
+          format: date-time
+          type: string
+        scheduled_purge_at:
+          format: date-time
+          type: string
+      required:
+        - delete_requested_at
+        - scheduled_purge_at
+      type: object
     DisableInputBody:
       additionalProperties: false
       properties:
@@ -1730,9 +1759,62 @@ paths:
       summary: Exchange a tenant-signed token for a session
       tags:
         - Authentication
+  /v1/auth/delete:
+    post:
+      description: Disables the player, revokes every session, and schedules a permanent deletion of the player's data in this project once the grace period passes. Data in other projects is not touched. Players with credentials must re-authenticate with their password and can cancel with POST /v1/auth/delete/cancel until the purge runs; anonymous players cancel through a linked account or the project's support.
+      operationId: requestPlayerDelete
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DisableInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteRequestOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Request deletion of the calling player's data in this project
+      tags:
+        - Authentication
+  /v1/auth/delete/cancel:
+    post:
+      description: Re-authenticates with credentials because the delete request revoked every session. Clears the pending deletion and re-enables sign-in. 404 covers unknown email, wrong password, and no pending deletion alike.
+      operationId: authDeleteCancel
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteCancelInputBody"
+        required: true
+      responses:
+        "204":
+          description: No Content
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+      summary: Cancel a pending player deletion with email and password
+      tags:
+        - Authentication
   /v1/auth/disable:
     post:
-      description: "Self-service deactivation: revokes every session immediately and blocks sign-in. Players with credentials must re-authenticate with their password; anonymous players disable on the session alone. A project admin can re-enable the player with all data intact. Permanent deletion is requested through the account pages."
+      description: "Self-service deactivation: revokes every session immediately and blocks sign-in. Players with credentials must re-authenticate with their password; anonymous players disable on the session alone. A project admin can re-enable the player with all data intact. Permanent deletion is requested with POST /v1/auth/delete."
       operationId: disablePlayer
       requestBody:
         content:

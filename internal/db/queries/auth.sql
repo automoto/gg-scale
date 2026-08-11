@@ -331,3 +331,42 @@ WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
   AND disabled_at IS NULL;
+
+-- name: RequestPlayerDeleteSelf :one
+-- Self-service delete request: disables the player (keeping an earlier
+-- suspension timestamp intact) and stamps delete_requested_at with the same
+-- now() so cancel can tell the two apart. The purge sweep hard-deletes the
+-- row once the grace window passes. 0 rows = gone or already pending.
+UPDATE project_players
+SET delete_requested_at = now(),
+    disabled_at   = COALESCE(disabled_at, now()),
+    session_epoch = session_epoch + 1
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
+RETURNING delete_requested_at;
+
+-- name: GetPlayerPendingDeleteByEmail :one
+-- Credential lookup for the pre-session delete-cancel endpoint: the request
+-- revoked every session and login filters disabled players, so cancel
+-- re-authenticates with email + password against the pending row directly.
+SELECT id, project_id, password_hash, delete_requested_at
+FROM project_players
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND email = $2
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL;
+
+-- name: CancelPlayerDeleteSelf :execrows
+-- Clears the pending request; lifts the disable only when the request created
+-- it (disabled_at = delete_requested_at), so a suspension that predates the
+-- request survives the cancel. 0 rows = no pending request (or purged).
+UPDATE project_players
+SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
+    delete_requested_at = NULL
+WHERE id = sqlc.arg(id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL;

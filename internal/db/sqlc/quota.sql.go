@@ -148,6 +148,21 @@ func (q *Queries) ListQuotaOverridesForTenant(ctx context.Context, tenantID int6
 	return items, nil
 }
 
+const releaseTenantPlayerSlots = `-- name: ReleaseTenantPlayerSlots :exec
+UPDATE tenants
+SET player_count = GREATEST(player_count - $1::bigint, 0)
+WHERE id = current_setting('app.tenant_id', true)::bigint
+`
+
+// Counter mirror of ReserveTenantPlayerSlot for the delete-purge path: the
+// caller passes how many non-soft-deleted players it hard-deleted in the same
+// transaction (soft-deleted rows never held a slot). GREATEST guards against
+// drift from out-of-band writes ever pushing the counter negative.
+func (q *Queries) ReleaseTenantPlayerSlots(ctx context.Context, n int64) error {
+	_, err := q.db.Exec(ctx, releaseTenantPlayerSlots, n)
+	return err
+}
+
 const reserveTenantPlayerSlot = `-- name: ReserveTenantPlayerSlot :execrows
 UPDATE tenants
 SET player_count = player_count + 1

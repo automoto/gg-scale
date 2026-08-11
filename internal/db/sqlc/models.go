@@ -629,6 +629,7 @@ type ProjectPlayer struct {
 	PasswordResetLifetimeAttempts     int32
 	PasswordResetLockedUntil          pgtype.Timestamptz
 	PasswordResetLastSentAt           pgtype.Timestamptz
+	DeleteRequestedAt                 pgtype.Timestamptz
 }
 
 type RateLimitOverride struct {

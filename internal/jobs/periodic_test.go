@@ -30,6 +30,10 @@ func TestPeriodicRegistrations_game_session_gc_keeps_pace_with_session_ttl(t *te
 	assert.LessOrEqual(t, intervalFor(t, GameSessionGCKind), gamesession.DefaultTTL)
 }
 
+func TestPeriodicRegistrations_player_delete_purge_runs_hourly(t *testing.T) {
+	assert.Equal(t, time.Hour, intervalFor(t, PlayerDeletePurgeKind))
+}
+
 func TestPeriodicRegistrations_all_jobs_registered_with_positive_interval(t *testing.T) {
 	kinds := make(map[string]bool)
 	for _, r := range PeriodicRegistrations() {
@@ -38,7 +42,7 @@ func TestPeriodicRegistrations_all_jobs_registered_with_positive_interval(t *tes
 	}
 	for _, want := range []string{
 		GameSessionGCKind, TrustedDeviceGCKind, ConnectionGrantGCKind,
-		MatchmakerGCKind, StorageWarnKind,
+		MatchmakerGCKind, StorageWarnKind, PlayerDeletePurgeKind,
 	} {
 		assert.True(t, kinds[want], "missing periodic registration for %s", want)
 	}

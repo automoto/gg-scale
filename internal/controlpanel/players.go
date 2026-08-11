@@ -215,6 +215,10 @@ type PlayerView struct {
 	EmailVerifiedAt time.Time
 	DisabledAt      time.Time
 	CreatedAt       time.Time
+	// DeleteRequestedAt and ScheduledPurgeAt are set while a data-deletion
+	// request is pending; zero otherwise.
+	DeleteRequestedAt time.Time
+	ScheduledPurgeAt  time.Time
 	// Account link + remote-address / ban fields. AccountID is empty for
 	// anonymous players.
 	AccountID    string
@@ -319,6 +323,10 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 			pv.Email = row.Email
 			pv.EmailVerifiedAt = row.EmailVerifiedAt.Time
 			pv.DisabledAt = row.DisabledAt.Time
+			if row.DeleteRequestedAt.Valid {
+				pv.DeleteRequestedAt = row.DeleteRequestedAt.Time
+				pv.ScheduledPurgeAt = row.DeleteRequestedAt.Time.Add(h.deleteGrace())
+			}
 			pv.InvitePending = pending[row.ID]
 			players = append(players, pv)
 		}
@@ -381,13 +389,17 @@ func (h *Handler) playerDetailPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "player lookup failed", http.StatusInternalServerError)
 		return
 	}
+	pv := playerViewFromDetail(row)
+	if !pv.DeleteRequestedAt.IsZero() {
+		pv.ScheduledPurgeAt = pv.DeleteRequestedAt.Add(h.deleteGrace())
+	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, PlayerDetailPage(PlayerDetailView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
 		TenantID:  tenantID,
 		ProjectID: projectID,
-		Player:    playerViewFromDetail(row),
+		Player:    pv,
 		Message:   r.URL.Query().Get("flash"),
 	}))
 
@@ -626,16 +638,29 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 		disabledAt = pgtype.Timestamptz{Time: h.now(), Valid: true}
 	}
 	ctx := db.WithTenant(r.Context(), tenantID)
+	var updated int64
 	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SetPlayerDisabledInProject(ctx, sqlcgen.SetPlayerDisabledInProjectParams{
+		var terr error
+		updated, terr = sqlcgen.New(tx).SetPlayerDisabledInProject(ctx, sqlcgen.SetPlayerDisabledInProjectParams{
 			ID:         playerID,
 			ProjectID:  projectID,
 			TenantID:   tenantID,
 			DisabledAt: disabledAt,
 		})
+		return terr
 	})
 	if err != nil {
 		http.Error(w, "update failed", http.StatusInternalServerError)
+		return
+	}
+	if updated == 0 {
+		// The guarded UPDATE skips players with a pending deletion — that
+		// state owns the disable flag until the deletion is cancelled.
+		if h.playerHasPendingDelete(ctx, tenantID, projectID, playerID) {
+			http.Error(w, "deletion pending; cancel the deletion first", http.StatusConflict)
+			return
+		}
+		http.NotFound(w, r)
 		return
 	}
 	flash := "Player disabled."
@@ -648,15 +673,164 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	htmxRedirect(w, r, target)
 }
 
+// defaultDeleteGracePeriod backs Config.DeleteGracePeriod when unset, keeping
+// test fixtures and sparse deployments on the documented 30-day window.
+const defaultDeleteGracePeriod = 720 * time.Hour
+
+func (h *Handler) deleteGrace() time.Duration {
+	if h.cfg.DeleteGracePeriod > 0 {
+		return h.cfg.DeleteGracePeriod
+	}
+	return defaultDeleteGracePeriod
+}
+
+// playerHasPendingDelete reads the pending-deletion flag to pick the right
+// error for a guarded write that matched no rows. A lookup failure reads as
+// "no pending delete" — the caller then answers 404, which is still accurate
+// for a vanished row.
+func (h *Handler) playerHasPendingDelete(ctx context.Context, tenantID, projectID, playerID int64) bool {
+	var pending bool
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		row, qerr := sqlcgen.New(tx).GetPlayerForProject(ctx, sqlcgen.GetPlayerForProjectParams{
+			TenantID: tenantID, ProjectID: projectID, ID: playerID,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		pending = row.DeleteRequestedAt.Valid
+		return nil
+	})
+	return err == nil && pending
+}
+
+func (h *Handler) playerRequestDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projectID, ok := parsePathID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
+		return
+	}
+	playerID, ok := parsePathID(w, r, "playerID")
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	ctx := db.WithTenant(r.Context(), tenantID)
+	var scheduledPurgeAt time.Time
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		requestedAt, qerr := q.RequestPlayerDeleteInProject(ctx, sqlcgen.RequestPlayerDeleteInProjectParams{
+			ID:        playerID,
+			ProjectID: projectID,
+			TenantID:  tenantID,
+		})
+		if qerr != nil {
+			return qerr
+		}
+		scheduledPurgeAt = requestedAt.Time.Add(h.deleteGrace())
+		if _, qerr = q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
+			ProjectID: projectID, PlayerID: playerID,
+		}); qerr != nil {
+			return qerr
+		}
+		return auditlog.WritePlatform(ctx, tx, session.User.ID, "control_panel.player.delete_request",
+			strconv.FormatInt(playerID, 10), map[string]any{
+				"tenant_id":          tenantID,
+				"project_id":         projectID,
+				"scheduled_purge_at": scheduledPurgeAt,
+			})
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if h.playerHasPendingDelete(ctx, tenantID, projectID, playerID) {
+			http.Error(w, "deletion already requested", http.StatusConflict)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, "delete request failed", http.StatusInternalServerError)
+		return
+	}
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) +
+		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash +
+		url.QueryEscape("Deletion scheduled for "+scheduledPurgeAt.Format("2006-01-02")+". Cancel until then to keep the data.")
+	htmxRedirect(w, r, target)
+}
+
+func (h *Handler) playerCancelDeleteHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	projectID, ok := parsePathID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectPlayersObject(projectID), rbac.ActionManage) {
+		return
+	}
+	playerID, ok := parsePathID(w, r, "playerID")
+	if !ok {
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	ctx := db.WithTenant(r.Context(), tenantID)
+	var cancelled int64
+	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		var qerr error
+		cancelled, qerr = q.CancelPlayerDeleteInProject(ctx, sqlcgen.CancelPlayerDeleteInProjectParams{
+			ID:        playerID,
+			ProjectID: projectID,
+			TenantID:  tenantID,
+		})
+		if qerr != nil || cancelled == 0 {
+			return qerr
+		}
+		return auditlog.WritePlatform(ctx, tx, session.User.ID, "control_panel.player.delete_cancel",
+			strconv.FormatInt(playerID, 10), map[string]any{
+				"tenant_id":  tenantID,
+				"project_id": projectID,
+			})
+	})
+	if err != nil {
+		http.Error(w, "delete cancel failed", http.StatusInternalServerError)
+		return
+	}
+	if cancelled == 0 {
+		http.Error(w, "no pending deletion", http.StatusNotFound)
+		return
+	}
+	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) +
+		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash +
+		url.QueryEscape("Deletion cancelled. The player's data is kept.")
+	htmxRedirect(w, r, target)
+}
+
 func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
 	pv := PlayerView{
-		ID:              row.ID,
-		ExternalID:      row.ExternalID,
-		Email:           row.Email,
-		EmailVerifiedAt: row.EmailVerifiedAt.Time,
-		DisabledAt:      row.DisabledAt.Time,
-		CreatedAt:       row.CreatedAt.Time,
-		TenantBanned:    row.TenantBanned,
+		ID:                row.ID,
+		ExternalID:        row.ExternalID,
+		Email:             row.Email,
+		EmailVerifiedAt:   row.EmailVerifiedAt.Time,
+		DisabledAt:        row.DisabledAt.Time,
+		CreatedAt:         row.CreatedAt.Time,
+		DeleteRequestedAt: row.DeleteRequestedAt.Time,
+		TenantBanned:      row.TenantBanned,
 	}
 	if row.PlayerAccountID.Valid {
 		pv.AccountID = uuid.UUID(row.PlayerAccountID.Bytes).String()

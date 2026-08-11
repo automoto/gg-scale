@@ -524,7 +524,7 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		BaseURL:  cfg.ControlPanelBaseURL,
 	}
-	riverClient, stopRiver := startRiverJobs(ctx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, logger)
+	riverClient, stopRiver := startRiverJobs(ctx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
 	if stopRiver != nil {
 		defer stopRiver()
 	}
@@ -585,6 +585,7 @@ func run() error {
 		Limiter:               ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:    ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
+		DeleteGracePeriod:     cfg.PlayerDeleteGracePeriod,
 		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
 		ProxyTrust:            ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
 		Signer:                signer,
@@ -619,6 +620,7 @@ func run() error {
 			FleetEnabled:           cfg.FeatureFleetEnabled,
 			RelayEnabled:           cfg.FeatureP2PRelayEnabled,
 			StorageMaxValueBytes:   cfg.StorageMaxValueBytes,
+			DeleteGracePeriod:      cfg.PlayerDeleteGracePeriod,
 			BillingPortalURL:       cfg.BillingPortalURL,
 			BillingUpgradeURL:      cfg.BillingUpgradeURL,
 			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
@@ -637,9 +639,10 @@ func run() error {
 			},
 		},
 		Players: players.Config{
-			Mount:        cfg.PlayersEnabled,
-			CookieSecure: cfg.ControlPanelCookieSecure,
-			BaseURL:      cfg.ControlPanelBaseURL,
+			Mount:             cfg.PlayersEnabled,
+			CookieSecure:      cfg.ControlPanelCookieSecure,
+			BaseURL:           cfg.ControlPanelBaseURL,
+			DeleteGracePeriod: cfg.PlayerDeleteGracePeriod,
 		},
 		ControlPanelBootstrap:  controlPanelBootstrap,
 		ControlPanelPluginInfo: pluginInfo,
@@ -748,7 +751,7 @@ func riverPeriodicJobs() []*river.PeriodicJob {
 // nil if River couldn't start. River runs under the app DB role via the
 // pool's SET ROLE; its tables are granted in migration 0055. Failures are
 // logged and swallowed so a River problem never blocks boot.
-func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, matchReleaser jobs.MatchmakerAllocationReleaser, m mailer.Mailer, mailFrom string, resetDeps jobs.PasswordResetDeps, logger *slog.Logger) (*river.Client[pgx.Tx], func()) {
+func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, matchReleaser jobs.MatchmakerAllocationReleaser, m mailer.Mailer, mailFrom string, resetDeps jobs.PasswordResetDeps, deleteGrace time.Duration, logger *slog.Logger) (*river.Client[pgx.Tx], func()) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
@@ -758,6 +761,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	river.AddWorker(workers, jobs.NewPasswordResetEmailWorker(resetDeps))
 	river.AddWorker(workers, jobs.NewPasswordResetGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewLeaderboardPeriodResetWorker(appPool))
+	river.AddWorker(workers, jobs.NewPlayerDeletePurgeWorker(appPool, deleteGrace))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,

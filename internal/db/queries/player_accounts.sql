@@ -238,13 +238,16 @@ WHERE id = sqlc.arg(id)
 -- (unlinked_at filters on the auth queries). The epoch bump kills live access
 -- tokens immediately; the caller also revokes the player's sessions. The
 -- account guard stops one account from unlinking another account's player.
+-- A pending deletion blocks the unlink: severing the link would remove the
+-- portal's only cancellation path while the purge stays scheduled.
 UPDATE project_players
 SET player_account_id = NULL,
     unlinked_at = now(),
     session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id)
   AND player_account_id = sqlc.arg(player_account_id)
-  AND deleted_at IS NULL;
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL;
 
 -- name: BindPlayerLinkedEmail :execrows
 -- Tenant-scoped: admin "link player" accept binds a proven email + global

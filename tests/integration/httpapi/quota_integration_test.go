@@ -233,7 +233,7 @@ func TestBranchFollowup_project_quota_exact_and_concurrent(t *testing.T) {
 			case http.StatusSeeOther:
 				successes.Add(1)
 			case http.StatusConflict:
-				require.Contains(t, body, "project limit")
+				require.Contains(t, body, "Game Project limit")
 				rejected.Add(1)
 			default:
 				t.Errorf("unexpected status %d: %s", resp.StatusCode, body)

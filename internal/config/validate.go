@@ -337,6 +337,7 @@ func (c *Config) checkFields() error {
 		{"DB_MAX_CONN_IDLE_TIME", c.DBMaxConnIdleTime},
 		{"DB_STATEMENT_TIMEOUT", c.DBStatementTimeout},
 		{"HTTP_REQUEST_TIMEOUT", c.HTTPRequestTimeout},
+		{"PLAYER_DELETE_GRACE_PERIOD", c.PlayerDeleteGracePeriod},
 	} {
 		if d.val <= 0 {
 			return fmt.Errorf("%s %q: must be a positive duration", d.name, d.val)

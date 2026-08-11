@@ -36,6 +36,10 @@ type Config struct {
 	// StorageMaxValueBytes is the platform default storage value cap, shown on
 	// the rate-limits page as the fallback when no tenant/project override is set.
 	StorageMaxValueBytes int64
+	// DeleteGracePeriod is how long a requested player deletion stays
+	// cancellable before the purge sweep hard-deletes the data; 0 uses the
+	// compiled fallback (30 days).
+	DeleteGracePeriod time.Duration
 	// BillingPortalURL mirrors BILLING_PORTAL_URL: the static Stripe Customer
 	// Portal link rendered as "Manage billing" on tenant settings. Empty
 	// renders nothing (self-host default).

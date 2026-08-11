@@ -878,6 +878,7 @@ SET player_account_id = NULL,
 WHERE id = $1
   AND player_account_id = $2
   AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
 `
 
 type UnlinkPlayerFromAccountParams struct {
@@ -890,6 +891,8 @@ type UnlinkPlayerFromAccountParams struct {
 // (unlinked_at filters on the auth queries). The epoch bump kills live access
 // tokens immediately; the caller also revokes the player's sessions. The
 // account guard stops one account from unlinking another account's player.
+// A pending deletion blocks the unlink: severing the link would remove the
+// portal's only cancellation path while the purge stays scheduled.
 func (q *Queries) UnlinkPlayerFromAccount(ctx context.Context, arg UnlinkPlayerFromAccountParams) (int64, error) {
 	result, err := q.db.Exec(ctx, unlinkPlayerFromAccount, arg.ID, arg.PlayerAccountID)
 	if err != nil {

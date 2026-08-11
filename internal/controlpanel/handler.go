@@ -201,6 +201,8 @@ func New(d Deps) http.Handler {
 			r.Get("/projects/{projectID}/players/{playerID}", h.playerDetailPage)
 			r.Post("/projects/{projectID}/players/{playerID}/disable", h.playerToggleDisableHandler)
 			r.Post("/projects/{projectID}/players/{playerID}/ban", h.playerToggleBanHandler)
+			r.Post("/projects/{projectID}/players/{playerID}/request-delete", h.playerRequestDeleteHandler)
+			r.Post("/projects/{projectID}/players/{playerID}/cancel-delete", h.playerCancelDeleteHandler)
 			r.Get("/projects/{projectID}/players/invite", h.invitePlayerPage)
 			r.Post("/projects/{projectID}/players/invite", h.invitePlayerHandler)
 			r.Get("/projects/{projectID}/players/{playerID}/link", h.linkPlayerDialog)

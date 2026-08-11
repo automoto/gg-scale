@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelPlayerDeleteInProject = `-- name: CancelPlayerDeleteInProject :execrows
+UPDATE project_players
+SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
+    delete_requested_at = NULL
+WHERE id = $1
+  AND project_id = $2
+  AND tenant_id = $3
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NOT NULL
+`
+
+type CancelPlayerDeleteInProjectParams struct {
+	ID        int64
+	ProjectID int64
+	TenantID  int64
+}
+
+// Clears the pending request; lifts the disable only when the request created
+// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
+// survives the cancel. SET expressions read pre-update values, so the CASE
+// sees delete_requested_at before it is cleared.
+func (q *Queries) CancelPlayerDeleteInProject(ctx context.Context, arg CancelPlayerDeleteInProjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelPlayerDeleteInProject, arg.ID, arg.ProjectID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countPlayersForProject = `-- name: CountPlayersForProject :one
 SELECT COUNT(*)::bigint
 FROM project_players u
@@ -41,6 +70,7 @@ SELECT
     coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
+    u.delete_requested_at,
     u.created_at,
     u.tenant_id,
     u.project_id,
@@ -73,6 +103,7 @@ type GetPlayerForProjectRow struct {
 	Email              string
 	EmailVerifiedAt    pgtype.Timestamptz
 	DisabledAt         pgtype.Timestamptz
+	DeleteRequestedAt  pgtype.Timestamptz
 	CreatedAt          pgtype.Timestamptz
 	TenantID           int64
 	ProjectID          int64
@@ -97,6 +128,7 @@ func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProje
 		&i.Email,
 		&i.EmailVerifiedAt,
 		&i.DisabledAt,
+		&i.DeleteRequestedAt,
 		&i.CreatedAt,
 		&i.TenantID,
 		&i.ProjectID,
@@ -118,6 +150,7 @@ SELECT
     coalesce(u.email, '')::text AS email,
     u.email_verified_at,
     u.disabled_at,
+    u.delete_requested_at,
     u.created_at
 FROM project_players u
 JOIN projects p ON p.id = u.project_id
@@ -138,12 +171,13 @@ type ListPlayersForProjectParams struct {
 }
 
 type ListPlayersForProjectRow struct {
-	ID              int64
-	ExternalID      string
-	Email           string
-	EmailVerifiedAt pgtype.Timestamptz
-	DisabledAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
+	ID                int64
+	ExternalID        string
+	Email             string
+	EmailVerifiedAt   pgtype.Timestamptz
+	DisabledAt        pgtype.Timestamptz
+	DeleteRequestedAt pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
 }
 
 // Control-panel-side player management queries. Privileged: the control panel
@@ -170,6 +204,7 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 			&i.Email,
 			&i.EmailVerifiedAt,
 			&i.DisabledAt,
+			&i.DeleteRequestedAt,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -182,7 +217,36 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 	return items, nil
 }
 
-const setPlayerDisabledInProject = `-- name: SetPlayerDisabledInProject :exec
+const requestPlayerDeleteInProject = `-- name: RequestPlayerDeleteInProject :one
+UPDATE project_players
+SET delete_requested_at = now(),
+    disabled_at   = COALESCE(disabled_at, now()),
+    session_epoch = session_epoch + 1
+WHERE id = $1
+  AND project_id = $2
+  AND tenant_id = $3
+  AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
+RETURNING delete_requested_at
+`
+
+type RequestPlayerDeleteInProjectParams struct {
+	ID        int64
+	ProjectID int64
+	TenantID  int64
+}
+
+// Admin-side delete request: disables the player (keeping an earlier
+// suspension timestamp intact) and stamps delete_requested_at with the same
+// now() so cancel can tell the two apart. 0 rows = gone or already pending.
+func (q *Queries) RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, requestPlayerDeleteInProject, arg.ID, arg.ProjectID, arg.TenantID)
+	var delete_requested_at pgtype.Timestamptz
+	err := row.Scan(&delete_requested_at)
+	return delete_requested_at, err
+}
+
+const setPlayerDisabledInProject = `-- name: SetPlayerDisabledInProject :execrows
 UPDATE project_players
 SET disabled_at   = $1,
     session_epoch = session_epoch + 1
@@ -190,6 +254,7 @@ WHERE id = $2
   AND project_id = $3
   AND tenant_id = $4
   AND deleted_at IS NULL
+  AND delete_requested_at IS NULL
 `
 
 type SetPlayerDisabledInProjectParams struct {
@@ -201,13 +266,17 @@ type SetPlayerDisabledInProjectParams struct {
 
 // Project-level disable (NOT tenant-wide — a tenant-wide ban lives in
 // tenant_player_bans). Bumps session_epoch so live JWTs are rejected at
-// server-verify immediately.
-func (q *Queries) SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) error {
-	_, err := q.db.Exec(ctx, setPlayerDisabledInProject,
+// server-verify immediately. A pending delete request owns the disabled
+// state: 0 rows on an existing player means "cancel the deletion first".
+func (q *Queries) SetPlayerDisabledInProject(ctx context.Context, arg SetPlayerDisabledInProjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPlayerDisabledInProject,
 		arg.DisabledAt,
 		arg.ID,
 		arg.ProjectID,
 		arg.TenantID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

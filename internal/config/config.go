@@ -204,6 +204,9 @@ type Config struct {
 	ControlPanelBaseURL string `env:"CONTROL_PANEL_BASE_URL"`
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`
+	// PlayerDeleteGracePeriod is how long a requested per-project player
+	// deletion stays cancellable before the purge sweep hard-deletes the data.
+	PlayerDeleteGracePeriod time.Duration `env:"PLAYER_DELETE_GRACE_PERIOD" envDefault:"720h"`
 
 	// BillingPortalURL, when set, renders an "Upgrade / Manage billing" link on
 	// the tenant settings page pointing at an external billing portal (e.g. a
