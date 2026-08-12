@@ -3,7 +3,6 @@ package realtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -32,15 +31,6 @@ type Options struct {
 	// tenant's class is read from the request's API key; the limit is the
 	// class envelope unless EnvMaxPerTenant overrides it.
 	TenantCap ratelimit.ConnectionCap
-
-	// ConnectionLimits resolves an optional tenant-specific connection
-	// envelope. It is checked on admission after EnvMaxPerTenant and before the
-	// compiled tier default. nil means tier defaults only.
-	ConnectionLimits ratelimit.ConnectionLimitStore
-	// ConnectionLimitLookupError records a failed override refresh. Admission
-	// continues with the last known override or the tenant's tier default so the
-	// leased cap can apply its bounded database-outage behavior.
-	ConnectionLimitLookupError func()
 
 	// EnvMaxPerTenant, when > 0, overrides the tier-derived per-tenant cap
 	// with a fixed hard limit (no burst) — an operator escape hatch for
@@ -140,15 +130,8 @@ func ServeWS(opts Options) http.HandlerFunc {
 		// Per-tenant CCU cap: tier-aware regional grants are leased from
 		// PostgreSQL and consumed from process memory on the hot path.
 		if opts.TenantCap != nil {
-			caps, limitsErr := tenantCapLimits(r.Context(), tenantID, tenantTierFromContext(r.Context()),
-				opts.EnvMaxPerTenant, opts.ConnectionLimits)
-			if limitsErr != nil {
-				logger.Warn("realtime: connection limit override lookup failed; using fallback",
-					"err", limitsErr, "tenant_id", tenantID)
-				if opts.ConnectionLimitLookupError != nil {
-					opts.ConnectionLimitLookupError()
-				}
-			}
+			key, _ := tenant.APIKeyFromContext(r.Context())
+			caps := tenantCapLimits(key, opts.EnvMaxPerTenant)
 			decision, capErr := opts.TenantCap.Acquire(r.Context(), tenantID, caps)
 			switch {
 			case capErr != nil:
@@ -369,37 +352,19 @@ func slotKeyForPlayer(tenantID, playerID int64) string {
 // before retrying, per the "try again later" semantics of the CCU cap.
 const tenantCapRetryAfter = 5 * time.Second
 
-// tenantTierFromContext reads the tenant's service class from the request's API
-// key. Behind the tenant middleware the key is always present; the Tier0
-// fallback (smallest envelope) is a fail-safe for the can't-happen case.
-func tenantTierFromContext(ctx context.Context) tenant.Tier {
-	key, ok := tenant.APIKeyFromContext(ctx)
-	if !ok {
-		return tenant.Tier0
-	}
-	return key.Tier
-}
-
 // tenantCapLimits resolves the per-tenant connection envelope. A deployment-
 // wide environment cap has highest priority for the self-hosted escape hatch;
-// otherwise a persisted tenant override wins over the compiled class default.
-func tenantCapLimits(ctx context.Context, tenantID int64, tier tenant.Tier, envOverride int64,
-	overrides ratelimit.ConnectionLimitStore,
-) (ratelimit.CapLimits, error) {
+// otherwise the override resolved with the API key wins over the compiled
+// class default. A missing key safely resolves to Tier0's smallest envelope.
+func tenantCapLimits(key tenant.APIKey, envOverride int64) ratelimit.CapLimits {
 	if envOverride > 0 {
-		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}, nil
+		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}
 	}
-	if overrides != nil {
-		limits, ok, err := overrides.ConnectionLimit(ctx, tenantID)
-		if err != nil {
-			if ok {
-				return limits, fmt.Errorf("connection limit override (using last known value): %w", err)
-			}
-			return ratelimit.ConnectionCapForClass(tier), fmt.Errorf("connection limit override (using tier default): %w", err)
-		}
-		if ok {
-			return limits, nil
+	if key.ConnectionLimits != nil {
+		return ratelimit.CapLimits{
+			Sustained: key.ConnectionLimits.Sustained,
+			Ceiling:   key.ConnectionLimits.Ceiling,
 		}
 	}
-	return ratelimit.ConnectionCapForClass(tier), nil
+	return ratelimit.ConnectionCapForClass(key.Tier)
 }

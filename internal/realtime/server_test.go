@@ -21,6 +21,7 @@ import (
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // wrap inserts tenant + player ids into the request context, standing in
@@ -196,33 +197,36 @@ func (c *trackingCap) Release(context.Context, int64) error {
 	return nil
 }
 
-type errorConnectionLimits struct{}
-
-func (errorConnectionLimits) ConnectionLimit(context.Context, int64) (ratelimit.CapLimits, bool, error) {
-	return ratelimit.CapLimits{}, false, errors.New("database unavailable")
-}
-
-func TestServeWSUsesTenantCapFallbackWhenOverrideLookupFails(t *testing.T) {
+func TestServeWSUsesConnectionLimitsResolvedWithAPIKey(t *testing.T) {
 	hub := realtime.NewHub()
 	cap := &trackingCap{decision: ratelimit.CapDecision{Allowed: true}}
-	var lookupErrors atomic.Int64
-	url, stop := newTestServer(t, hub, realtime.Options{
-		TenantCap:                  cap,
-		ConnectionLimits:           errorConnectionLimits{},
-		ConnectionLimitLookupError: func() { lookupErrors.Add(1) },
-		HeartbeatInterval:          time.Hour,
-	}, 1, 42)
-	defer stop()
+	key := tenant.APIKey{
+		TenantID: 1,
+		Tier:     tenant.Tier2,
+		ConnectionLimits: &tenant.ConnectionLimits{
+			Sustained: 250_000,
+			Ceiling:   500_000,
+		},
+	}
+	handler := wrap(1, 42, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := tenant.WithAPIKey(r.Context(), key)
+		realtime.ServeWS(realtime.Options{
+			Hub:               hub,
+			TenantCap:         cap,
+			HeartbeatInterval: time.Hour,
+		}).ServeHTTP(w, r.WithContext(ctx))
+	}))
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	conn, _, err := websocket.Dial(ctx, url, nil)
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
 	require.NoError(t, err)
 	defer conn.CloseNow()
 
 	assert.Equal(t, int64(1), cap.acquires.Load())
-	assert.Equal(t, ratelimit.ConnectionCapForClass(0), cap.limits.Load())
-	assert.Equal(t, int64(1), lookupErrors.Load())
+	assert.Equal(t, ratelimit.CapLimits{Sustained: 250_000, Ceiling: 500_000}, cap.limits.Load())
 }
 
 func TestServeWSChecksPlayerCapBeforeTenantCap(t *testing.T) {

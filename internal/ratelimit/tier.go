@@ -10,9 +10,9 @@ type Limits struct {
 
 // LimitsForTier returns the token-bucket parameters for the given tenant
 // class. Sizing rule: sustained rate = the class CCU cap / 10, so a chatty
-// game (one DB action per player per 10 s — the reference envelope in
-// docs/realtime-capacity.md) can fill its advertised connection cap without the
-// rate axis binding first. Burst capacity covers one immediate backend action
+// game (one DB action per player per 10 s) can fill its advertised connection
+// cap without the rate axis binding first. Burst capacity covers one immediate
+// backend action
 // per sustained connection, so a full key can absorb a synchronized login or
 // reconnect wave before settling to the sustained refill rate. tier_3 values
 // are the defaults an operator starts from before applying per-axis overrides.

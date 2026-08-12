@@ -215,7 +215,6 @@ func (h *Handler) setTenantConnectionOverride(ctx context.Context, actorID, tena
 	if err != nil {
 		return err
 	}
-	h.invalidateConnectionLimits(tenantID)
 	return nil
 }
 
@@ -318,12 +317,6 @@ func (h *Handler) setTenantRecipientInviteOverride(ctx context.Context, actorID,
 func (h *Handler) invalidateOverrides(tenantID int64) {
 	if inv, ok := h.overrides.(ratelimit.OverrideInvalidator); ok {
 		inv.Invalidate(tenantID)
-	}
-}
-
-func (h *Handler) invalidateConnectionLimits(tenantID int64) {
-	if h.connectionLimitInvalidator != nil {
-		h.connectionLimitInvalidator.Invalidate(tenantID)
 	}
 }
 

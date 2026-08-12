@@ -90,6 +90,17 @@ type APIKey struct {
 	// default: a key reaches a feature-gated route only when the matching
 	// scope is present. See RequireKeyScope.
 	Scopes []string
+	// ConnectionLimits is the optional platform-managed realtime admission
+	// envelope resolved atomically with this key. nil uses the tier default.
+	ConnectionLimits *ConnectionLimits
+}
+
+// ConnectionLimits is a tenant's sustained and temporary realtime connection
+// envelope. The database constrains both values and keeps ceiling at no more
+// than twice sustained.
+type ConnectionLimits struct {
+	Sustained int64
+	Ceiling   int64
 }
 
 // Feature scopes carried in api_keys.scopes. A key must hold the matching

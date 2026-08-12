@@ -1,14 +1,20 @@
 -- name: GetAPIKeyByHash :one
 -- Bootstrap query used by the tenant middleware to resolve a Bearer token
--- to its tenant_id + project_id + tenant tier + key_type. Runs without an
--- app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
+-- to its tenant_id + project_id + tenant tier + key_type + optional realtime
+-- connection envelope. Resolving them in one authoritative query prevents a
+-- second per-process cache from admitting against a stale raised or lowered
+-- envelope. Runs without an app.tenant_id GUC set; the api_keys_bootstrap
+-- policy in 0010 lets it
 -- through. Note: this query does NOT filter by tenants table RLS because
 -- tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 -- a bootstrap policy on tenants, the JOIN keeps working.
 SELECT k.id, k.tenant_id, k.project_id, k.key_type, k.scopes, k.revoked_at, t.tier,
-       (t.disabled_at IS NOT NULL)::bool AS tenant_disabled
+       (t.disabled_at IS NOT NULL)::bool AS tenant_disabled,
+       COALESCE(cl.sustained, 0)::bigint AS connection_sustained,
+       COALESCE(cl.ceiling, 0)::bigint AS connection_ceiling
 FROM api_keys k
 JOIN tenants t ON t.id = k.tenant_id
+LEFT JOIN connection_limit_overrides cl ON cl.tenant_id = k.tenant_id
 WHERE k.key_hash = $1;
 
 -- name: RevokeAPIKey :exec

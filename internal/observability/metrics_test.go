@@ -137,21 +137,5 @@ func TestMetrics_nil_is_noop(t *testing.T) {
 		m.SetMatchmakerQueueStats([]observability.MatchmakerBucketSample{{Mode: "match_only"}})
 		m.RelayCredentialIssued()
 		m.MailSend(observability.MailOK)
-		m.RealtimeConnectionLimitLookupError()
 	})
-}
-
-func TestMetrics_realtime_connection_limit_lookup_errors(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	m := observability.NewMetrics(reg)
-
-	m.RealtimeConnectionLimitLookupError()
-
-	expected := `
-# HELP ggscale_realtime_connection_limit_lookup_errors_total Connection-limit override refreshes that failed and used the last known override or tier default.
-# TYPE ggscale_realtime_connection_limit_lookup_errors_total counter
-ggscale_realtime_connection_limit_lookup_errors_total 1
-`
-	require.NoError(t, testutil.GatherAndCompare(reg, strings.NewReader(expected),
-		"ggscale_realtime_connection_limit_lookup_errors_total"))
 }

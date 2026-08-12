@@ -1,7 +1,8 @@
 -- Per-tenant realtime admission envelopes let operators prepare a breakout
 -- title or a contracted launch without lifting the compiled default for every
 -- tenant in the same billing class. This is platform configuration, not
--- tenant-owned data, so it is accessed only through BootstrapQ and has no RLS.
+-- tenant-owned data, so it has no RLS. Writes and control-panel reads use
+-- BootstrapQ; realtime reads join it into the bootstrap API-key lookup.
 -- Keep it separate from rate_limit_overrides: that table models float token
 -- buckets with optional project scope, while connection admission needs exact
 -- integer counts, one row per tenant, and envelope-specific constraints.

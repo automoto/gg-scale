@@ -313,8 +313,11 @@ type Querier interface {
 	// names are not unique) and refuse rather than friend the wrong person.
 	FindAccountIDsByDisplayName(ctx context.Context, displayName *string) ([]FindAccountIDsByDisplayNameRow, error)
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
-	// to its tenant_id + project_id + tenant tier + key_type. Runs without an
-	// app.tenant_id GUC set; the api_keys_bootstrap policy in 0010 lets it
+	// to its tenant_id + project_id + tenant tier + key_type + optional realtime
+	// connection envelope. Resolving them in one authoritative query prevents a
+	// second per-process cache from admitting against a stale raised or lowered
+	// envelope. Runs without an app.tenant_id GUC set; the api_keys_bootstrap
+	// policy in 0010 lets it
 	// through. Note: this query does NOT filter by tenants table RLS because
 	// tenants.id = current_setting GUC is unset at bootstrap; if/when we add
 	// a bootstrap policy on tenants, the JOIN keeps working.
