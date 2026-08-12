@@ -1,5 +1,6 @@
-.PHONY: help build fmt test install-test-reporter test-ci check-test-suites test-integration test-integration-ci \
-	test-e2e test-e2e-ci test-plugins e2e e2e-agones \
+.PHONY: help build fmt test install-test-reporter test-ci check-test-suites check-e2e-buckets \
+	test-integration test-integration-ci test-e2e test-e2e-a test-e2e-b test-e2e-ci \
+	test-plugins e2e e2e-agones \
 	lint check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
@@ -24,6 +25,7 @@ INTEGRATION_PARALLEL ?= 8
 INTEGRATION_TIMEOUT  ?= 5m
 END_TO_END_TIMEOUT   ?= 15m
 SQLC_VERSION ?= 1.31.1
+E2E_BUCKETS := a,b
 
 # Fast component integrations cover the common database and subprocess paths.
 # Exhaustive cross-component scenarios and live-stack probes run separately so
@@ -84,6 +86,9 @@ check-test-suites: ## Verify every tagged test package belongs to a CI lane
 		exit 1; \
 	fi
 
+check-e2e-buckets: check-test-suites ## Verify every end-to-end test belongs to exactly one lettered bucket
+	./scripts/e2e-bucket.sh check "$(E2E_BUCKETS)" -- $(END_TO_END_TEST_PACKAGES)
+
 test-integration: check-test-suites ## Fast integration tests (Postgres via Testcontainers; needs Docker)
 	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
 
@@ -93,6 +98,16 @@ test-integration-ci: check-test-suites install-test-reporter ## Fast integration
 
 test-e2e: check-test-suites ## Exhaustive and live-stack end-to-end tests; run after `make up`
 	go test -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
+
+test-e2e-a: check-e2e-buckets install-test-reporter ## End-to-end bucket A with CI-readable reports
+	mkdir -p test-results/end-to-end-a
+	pattern="$$(./scripts/e2e-bucket.sh pattern a "$(E2E_BUCKETS)" -- $(END_TO_END_TEST_PACKAGES))"; \
+		./bin/gotestsum --format github-actions --junitfile test-results/end-to-end-a/junit.xml --jsonfile test-results/end-to-end-a/go-test.json -- -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) -run="$$pattern" $(END_TO_END_TEST_PACKAGES)
+
+test-e2e-b: check-e2e-buckets install-test-reporter ## End-to-end bucket B with CI-readable reports
+	mkdir -p test-results/end-to-end-b
+	pattern="$$(./scripts/e2e-bucket.sh pattern b "$(E2E_BUCKETS)" -- $(END_TO_END_TEST_PACKAGES))"; \
+		./bin/gotestsum --format github-actions --junitfile test-results/end-to-end-b/junit.xml --jsonfile test-results/end-to-end-b/go-test.json -- -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) -run="$$pattern" $(END_TO_END_TEST_PACKAGES)
 
 test-e2e-ci: check-test-suites install-test-reporter ## End-to-end tests with CI-readable reports; run after `make up`
 	mkdir -p test-results
