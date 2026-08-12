@@ -22,13 +22,14 @@ type BurstSlotState struct {
 // one more connection is admitted under the sustained/ceiling burst model:
 //
 //   - Connections up to sustained are always admitted (the sustained cap).
-//   - Between sustained and ceiling (== 2× sustained) a connection is admitted
-//     only while burst budget remains.
+//   - Between sustained and ceiling (at most 2× sustained) a connection is
+//     admitted only while burst budget remains.
 //   - ceiling is a hard wall: never admit past it.
 //
 // While the current count is above sustained the budget drains by
 // elapsed × (count−sustained)/sustained (so camping at 2× drains 1:1 and burns
-// a full budget in burstBudget of wall time). At/below sustained it refills at
+// a full budget in burstBudget of wall time). A lower ceiling drains more
+// slowly at its wall. At/below sustained it refills at
 // burstBudget/BurstRefillWindow up to burstBudget. st is mutated in place; on
 // admission Count and Expires advance. The bool reports admission — the caller
 // infers the rejection reason by comparing st.Count to ceiling.

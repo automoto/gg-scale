@@ -30,9 +30,15 @@ const cacheConnectionCapTTL = 6 * time.Hour
 // not. The budget refills over cache.BurstRefillWindow at/below sustained.
 const ConnectionBurstBudget = 10 * time.Minute
 
+// MaxCustomConnectionLimit is the hard safety wall for a persisted tenant
+// override. Raising it requires a capacity review and a code change; an
+// operator typo must never turn admission control into an int64-sized no-op.
+const MaxCustomConnectionLimit int64 = 500_000
+
 // CapLimits is a class's connection envelope: the sustained cap that is always
-// available and the hard ceiling (2× sustained) reachable only while burst
-// budget remains.
+// available and the hard ceiling (at most 2× sustained) reachable only while
+// burst budget remains. Compiled class defaults use exactly 2×; persisted
+// overrides may choose a lower ceiling.
 type CapLimits struct {
 	Sustained int64
 	Ceiling   int64

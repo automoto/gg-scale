@@ -46,9 +46,12 @@ type Deps struct {
 	// RateLimitOverrides (may be nil) supplies per-tenant/project invite-limit
 	// overrides to the invite throttle.
 	RateLimitOverrides ratelimit.OverrideStore
-	// ConnectionLimits (may be nil) supplies platform-managed per-tenant
-	// realtime admission envelopes.
-	ConnectionLimits ratelimit.ConnectionLimitStore
+	// ConnectionLimitInvalidator (may be nil) evicts a just-updated tenant from
+	// the realtime admission cache on this process.
+	ConnectionLimitInvalidator ratelimit.ConnectionLimitInvalidator
+	// ConnectionEnvMax is REALTIME_MAX_PER_TENANT. A positive value supersedes
+	// tenant overrides, so the control panel displays it and disables writes.
+	ConnectionEnvMax int64
 	// ProxyTrust resolves the real client IP for the per-IP auth limiter when
 	// behind a trusted reverse proxy. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
@@ -103,22 +106,23 @@ type PluginSnapshot struct {
 
 // Handler owns control panel HTTP routes.
 type Handler struct {
-	pool             *db.Pool
-	cache            cache.Store
-	limiter          ratelimit.Limiter
-	overrides        ratelimit.OverrideStore
-	connectionLimits ratelimit.ConnectionLimitStore
-	inviteThrottle   *ratelimit.InviteThrottle
-	reg              prometheus.Registerer
-	cfg              Config
-	bootstrap        *Bootstrap
-	mailer           mailer.Mailer
-	fleet            *fleet.Manager
-	rbac             *rbac.Authorizer
-	pluginInfo       func() *PluginSnapshot
-	now              func() time.Time
-	proxyTrust       *ratelimit.ProxyTrust
-	metrics          *observability.Metrics
+	pool                       *db.Pool
+	cache                      cache.Store
+	limiter                    ratelimit.Limiter
+	overrides                  ratelimit.OverrideStore
+	connectionLimitInvalidator ratelimit.ConnectionLimitInvalidator
+	connectionEnvMax           int64
+	inviteThrottle             *ratelimit.InviteThrottle
+	reg                        prometheus.Registerer
+	cfg                        Config
+	bootstrap                  *Bootstrap
+	mailer                     mailer.Mailer
+	fleet                      *fleet.Manager
+	rbac                       *rbac.Authorizer
+	pluginInfo                 func() *PluginSnapshot
+	now                        func() time.Time
+	proxyTrust                 *ratelimit.ProxyTrust
+	metrics                    *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the player site.
 	verifySigningKey     []byte
@@ -343,27 +347,28 @@ func newHandler(d Deps) *Handler {
 		bootstrap = DisabledBootstrap()
 	}
 	h := &Handler{
-		pool:                 d.Pool,
-		cache:                d.Cache,
-		limiter:              d.Limiter,
-		overrides:            d.RateLimitOverrides,
-		connectionLimits:     d.ConnectionLimits,
-		reg:                  d.Registry,
-		cfg:                  d.Config,
-		bootstrap:            bootstrap,
-		mailer:               d.Mailer,
-		fleet:                d.Fleet,
-		rbac:                 d.RBAC,
-		pluginInfo:           d.PluginInfo,
-		now:                  time.Now,
-		proxyTrust:           d.ProxyTrust,
-		metrics:              d.Metrics,
-		verifySigningKey:     append([]byte(nil), d.VerifySigningKey...),
-		twoFactor:            d.TwoFactor,
-		credentialCipher:     d.CredentialCipher,
-		storageLimits:        d.StorageLimits,
-		billingHandoffKey:    append([]byte(nil), d.BillingHandoffKey...),
-		enqueuePasswordReset: d.EnqueuePasswordReset,
+		pool:                       d.Pool,
+		cache:                      d.Cache,
+		limiter:                    d.Limiter,
+		overrides:                  d.RateLimitOverrides,
+		connectionLimitInvalidator: d.ConnectionLimitInvalidator,
+		connectionEnvMax:           d.ConnectionEnvMax,
+		reg:                        d.Registry,
+		cfg:                        d.Config,
+		bootstrap:                  bootstrap,
+		mailer:                     d.Mailer,
+		fleet:                      d.Fleet,
+		rbac:                       d.RBAC,
+		pluginInfo:                 d.PluginInfo,
+		now:                        time.Now,
+		proxyTrust:                 d.ProxyTrust,
+		metrics:                    d.Metrics,
+		verifySigningKey:           append([]byte(nil), d.VerifySigningKey...),
+		twoFactor:                  d.TwoFactor,
+		credentialCipher:           d.CredentialCipher,
+		storageLimits:              d.StorageLimits,
+		billingHandoffKey:          append([]byte(nil), d.BillingHandoffKey...),
+		enqueuePasswordReset:       d.EnqueuePasswordReset,
 	}
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).

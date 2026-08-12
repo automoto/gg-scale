@@ -9,14 +9,17 @@ import (
 	"context"
 )
 
-const deleteConnectionLimitOverride = `-- name: DeleteConnectionLimitOverride :exec
+const deleteConnectionLimitOverride = `-- name: DeleteConnectionLimitOverride :execrows
 DELETE FROM connection_limit_overrides
 WHERE tenant_id = $1
 `
 
-func (q *Queries) DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) error {
-	_, err := q.db.Exec(ctx, deleteConnectionLimitOverride, tenantID)
-	return err
+func (q *Queries) DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteConnectionLimitOverride, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getConnectionLimitOverride = `-- name: GetConnectionLimitOverride :one

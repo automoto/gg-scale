@@ -52,10 +52,13 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		lifecycle = newWSLifecycle(d.Pool, heartbeat, d.Metrics)
 	}
 	base := realtime.Options{
-		Hub:               d.Hub,
-		Cache:             d.Cache,
-		TenantCap:         d.TenantConnectionCap,
-		ConnectionLimits:  d.ConnectionLimitOverrides,
+		Hub:              d.Hub,
+		Cache:            d.Cache,
+		TenantCap:        d.TenantConnectionCap,
+		ConnectionLimits: d.ConnectionLimitOverrides,
+		ConnectionLimitLookupError: func() {
+			d.Metrics.RealtimeConnectionLimitLookupError()
+		},
 		EnvMaxPerTenant:   d.RealtimeMaxPerTenant,
 		MaxPerPlayer:      d.RealtimeMaxPerPlayer,
 		HeartbeatInterval: heartbeat,

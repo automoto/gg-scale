@@ -37,6 +37,10 @@ type Options struct {
 	// envelope. It is checked on admission after EnvMaxPerTenant and before the
 	// compiled tier default. nil means tier defaults only.
 	ConnectionLimits ratelimit.ConnectionLimitStore
+	// ConnectionLimitLookupError records a failed override refresh. Admission
+	// continues with the last known override or the tenant's tier default so the
+	// leased cap can apply its bounded database-outage behavior.
+	ConnectionLimitLookupError func()
 
 	// EnvMaxPerTenant, when > 0, overrides the tier-derived per-tenant cap
 	// with a fixed hard limit (no burst) — an operator escape hatch for
@@ -139,11 +143,11 @@ func ServeWS(opts Options) http.HandlerFunc {
 			caps, limitsErr := tenantCapLimits(r.Context(), tenantID, tenantTierFromContext(r.Context()),
 				opts.EnvMaxPerTenant, opts.ConnectionLimits)
 			if limitsErr != nil {
-				logger.Error("realtime: connection limit override lookup failed",
+				logger.Warn("realtime: connection limit override lookup failed; using fallback",
 					"err", limitsErr, "tenant_id", tenantID)
-				w.Header().Set("Retry-After", strconv.Itoa(int(tenantCapRetryAfter.Seconds())))
-				http.Error(w, "connection capacity unavailable", http.StatusServiceUnavailable)
-				return
+				if opts.ConnectionLimitLookupError != nil {
+					opts.ConnectionLimitLookupError()
+				}
 			}
 			decision, capErr := opts.TenantCap.Acquire(r.Context(), tenantID, caps)
 			switch {
@@ -388,7 +392,10 @@ func tenantCapLimits(ctx context.Context, tenantID int64, tier tenant.Tier, envO
 	if overrides != nil {
 		limits, ok, err := overrides.ConnectionLimit(ctx, tenantID)
 		if err != nil {
-			return ratelimit.CapLimits{}, fmt.Errorf("connection limit override: %w", err)
+			if ok {
+				return limits, fmt.Errorf("connection limit override (using last known value): %w", err)
+			}
+			return ratelimit.ConnectionCapForClass(tier), fmt.Errorf("connection limit override (using tier default): %w", err)
 		}
 		if ok {
 			return limits, nil

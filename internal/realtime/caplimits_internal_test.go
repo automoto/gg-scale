@@ -56,9 +56,21 @@ func TestTenantCapLimits(t *testing.T) {
 		assert.Zero(t, store.calls, "deployment-wide override takes precedence without a DB lookup")
 	})
 
-	t.Run("fails closed when a configured override cannot be resolved", func(t *testing.T) {
+	t.Run("returns the tier default when an override cannot be resolved", func(t *testing.T) {
 		store := &stubConnectionLimits{err: errors.New("database unavailable")}
-		_, err := tenantCapLimits(context.Background(), 42, tenant.Tier2, 0, store)
+		got, err := tenantCapLimits(context.Background(), 42, tenant.Tier2, 0, store)
 		assert.ErrorContains(t, err, "connection limit override")
+		assert.Equal(t, ratelimit.ConnectionCapForClass(tenant.Tier2), got)
+	})
+
+	t.Run("returns a stale override with the lookup error", func(t *testing.T) {
+		store := &stubConnectionLimits{
+			limits: ratelimit.CapLimits{Sustained: 250_000, Ceiling: 500_000},
+			found:  true,
+			err:    errors.New("database unavailable"),
+		}
+		got, err := tenantCapLimits(context.Background(), 42, tenant.Tier2, 0, store)
+		assert.ErrorContains(t, err, "connection limit override")
+		assert.Equal(t, store.limits, got)
 	})
 }

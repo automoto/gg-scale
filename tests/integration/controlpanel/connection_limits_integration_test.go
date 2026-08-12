@@ -19,6 +19,17 @@ func TestPlatformAdmin_can_set_and_clear_tenant_connection_limits(t *testing.T) 
 	endpoint := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) + "/rate-limits/connections"
 
 	resp, _ := tfPostForm(t, admin, endpoint, url.Values{
+		"_csrf": {csrf}, "sustained": {""}, "ceiling": {""},
+	})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	var noOpClears int
+	require.NoError(t, raw.QueryRow(context.Background(), `
+		SELECT count(*) FROM platform_audit_log
+		WHERE target = $1 AND action = 'control_panel.connection_limit.clear'`, strconv.FormatInt(tenantID, 10),
+	).Scan(&noOpClears))
+	assert.Zero(t, noOpClears, "clearing a missing override must not create a false audit event")
+
+	resp, _ = tfPostForm(t, admin, endpoint, url.Values{
 		"_csrf": {csrf}, "sustained": {"250000"}, "ceiling": {"500000"},
 	})
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
@@ -48,4 +59,11 @@ func TestPlatformAdmin_can_set_and_clear_tenant_connection_limits(t *testing.T) 
 		SELECT count(*) FROM connection_limit_overrides WHERE tenant_id = $1`, tenantID,
 	).Scan(&remaining))
 	assert.Zero(t, remaining)
+
+	var clears int
+	require.NoError(t, raw.QueryRow(context.Background(), `
+		SELECT count(*) FROM platform_audit_log
+		WHERE target = $1 AND action = 'control_panel.connection_limit.clear'`, strconv.FormatInt(tenantID, 10),
+	).Scan(&clears))
+	assert.Equal(t, 1, clears)
 }

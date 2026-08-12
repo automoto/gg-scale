@@ -19,10 +19,13 @@ import (
 )
 
 var (
-	errInvalidLimit      = errors.New("control panel: rate and burst must be finite non-negative numbers")
-	errExceedsCap        = errors.New("control panel: per-project quota exceeds the tenant cap")
-	errIncompleteLimit   = errors.New("control panel: rate and burst must both be positive (or both blank to clear)")
-	errConnectionCeiling = errors.New("control panel: temporary connection maximum must be at least the sustained limit")
+	errInvalidLimit          = errors.New("control panel: rate and burst must be finite non-negative numbers")
+	errExceedsCap            = errors.New("control panel: per-project quota exceeds the tenant cap")
+	errIncompleteLimit       = errors.New("control panel: rate and burst must both be positive (or both blank to clear)")
+	errConnectionCeiling     = errors.New("control panel: temporary connection maximum must be at least the sustained limit")
+	errConnectionBurstRatio  = errors.New("control panel: temporary connection maximum must not exceed twice the sustained limit")
+	errConnectionAbsoluteMax = errors.New("control panel: connection limit exceeds the platform safety maximum")
+	errConnectionEnvOverride = errors.New("control panel: REALTIME_MAX_PER_TENANT supersedes tenant connection overrides")
 )
 
 // finiteNonNegative reports whether every value is a real number >= 0. It
@@ -43,6 +46,7 @@ func finiteNonNegative(vs ...float64) bool {
 func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimitsView, error) {
 	view := RateLimitsView{
 		TenantID:                     tenantID,
+		ConnectionEnvMax:             h.connectionEnvMax,
 		DefaultInviterHour:           ratelimit.DefaultInviteLimits.InviterPerHour,
 		DefaultDomainDay:             ratelimit.DefaultInviteLimits.DomainPerDay,
 		DefaultRecipientBurst:        ratelimit.DefaultInviteLimits.RecipientBurst,
@@ -167,6 +171,9 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 // for contracted launch capacity and breakout traffic without changing the
 // defaults for every tenant in the billing class.
 func (h *Handler) setTenantConnectionOverride(ctx context.Context, actorID, tenantID, sustained, ceiling int64) error {
+	if h.connectionEnvMax > 0 {
+		return errConnectionEnvOverride
+	}
 	if sustained < 0 || ceiling < 0 {
 		return errInvalidLimit
 	}
@@ -176,11 +183,21 @@ func (h *Handler) setTenantConnectionOverride(ctx context.Context, actorID, tena
 	if ceiling < sustained {
 		return errConnectionCeiling
 	}
+	if sustained > ratelimit.MaxCustomConnectionLimit || ceiling > ratelimit.MaxCustomConnectionLimit {
+		return errConnectionAbsoluteMax
+	}
+	if ceiling > 2*sustained {
+		return errConnectionBurstRatio
+	}
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		if sustained == 0 {
-			if err := q.DeleteConnectionLimitOverride(ctx, tenantID); err != nil {
+			rows, err := q.DeleteConnectionLimitOverride(ctx, tenantID)
+			if err != nil {
 				return err
+			}
+			if rows == 0 {
+				return nil
 			}
 			return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.connection_limit.clear",
 				strconv.FormatInt(tenantID, 10), map[string]any{"tenant_id": tenantID})
@@ -305,8 +322,8 @@ func (h *Handler) invalidateOverrides(tenantID int64) {
 }
 
 func (h *Handler) invalidateConnectionLimits(tenantID int64) {
-	if inv, ok := h.connectionLimits.(ratelimit.ConnectionLimitInvalidator); ok {
-		inv.Invalidate(tenantID)
+	if h.connectionLimitInvalidator != nil {
+		h.connectionLimitInvalidator.Invalidate(tenantID)
 	}
 }
 
@@ -395,6 +412,18 @@ func connectionLimitValue(n int64) string {
 		return ""
 	}
 	return strconv.FormatInt(n, 10)
+}
+
+func countNum(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	start := 0
+	if strings.HasPrefix(s, "-") {
+		start = 1
+	}
+	for i := len(s) - 3; i > start; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 const (

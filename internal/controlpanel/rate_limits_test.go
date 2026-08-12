@@ -35,7 +35,17 @@ func TestSetTenantConnectionOverride_validates_envelope_before_database_access(t
 	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 50_000, 0), errIncompleteLimit)
 	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 0, 100_000), errIncompleteLimit)
 	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 100_000, 50_000), errConnectionCeiling)
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 50_000, 100_001), errConnectionBurstRatio)
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 250_001, 500_001), errConnectionAbsoluteMax)
 	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, -1, 1), errInvalidLimit)
+}
+
+func TestSetTenantConnectionOverride_rejects_when_deployment_env_cap_wins(t *testing.T) {
+	h := &Handler{connectionEnvMax: 25_000}
+
+	err := h.setTenantConnectionOverride(context.Background(), 1, 2, 50_000, 100_000)
+
+	assert.ErrorIs(t, err, errConnectionEnvOverride)
 }
 
 func TestSetTenantRecipientInviteOverride_rejects_nonfinite(t *testing.T) {
@@ -153,4 +163,10 @@ func TestParseConnectionLimitField(t *testing.T) {
 func TestRLValue_blank_when_zero(t *testing.T) {
 	assert.Equal(t, "", rlValue(0))
 	assert.Equal(t, "10", rlValue(10))
+}
+
+func TestCountNum_adds_thousands_separators(t *testing.T) {
+	assert.Equal(t, "500", countNum(500))
+	assert.Equal(t, "50,000", countNum(50_000))
+	assert.Equal(t, "-1,000", countNum(-1_000))
 }

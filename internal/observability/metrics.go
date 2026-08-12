@@ -11,29 +11,30 @@ import "github.com/prometheus/client_golang/prometheus"
 // low-cardinality — no tenant/project/user IDs — so the series count stays
 // bounded no matter how many tenants exist.
 type Metrics struct {
-	signups                  *prometheus.CounterVec
-	verifications            *prometheus.CounterVec
-	logins                   *prometheus.CounterVec
-	invitesSent              *prometheus.CounterVec
-	friendRequests           *prometheus.CounterVec
-	bansIssued               *prometheus.CounterVec
-	playerSessions           *prometheus.CounterVec
-	matchmakerTicket         prometheus.Counter
-	matchmakerMatch          prometheus.Counter
-	matchmakerShortCommit    prometheus.Counter
-	matchmakerCapacityReturn prometheus.Counter
-	matchmakerQueryReject    prometheus.Counter
-	matchmakerTicketFailures *prometheus.CounterVec
-	matchmakerTimeToMatch    prometheus.Histogram
-	matchmakerQueueDepth     *prometheus.GaugeVec
-	matchmakerOldestTicket   *prometheus.GaugeVec
-	relayCreds               prometheus.Counter
-	relayIssueThrottled      prometheus.Counter
-	mailSends                *prometheus.CounterVec
-	quotaRejections          *prometheus.CounterVec
-	entitlementApplies       *prometheus.CounterVec
-	realtimeSweepFailures    prometheus.Counter
-	realtimeLifecycleCloses  *prometheus.CounterVec
+	signups                             *prometheus.CounterVec
+	verifications                       *prometheus.CounterVec
+	logins                              *prometheus.CounterVec
+	invitesSent                         *prometheus.CounterVec
+	friendRequests                      *prometheus.CounterVec
+	bansIssued                          *prometheus.CounterVec
+	playerSessions                      *prometheus.CounterVec
+	matchmakerTicket                    prometheus.Counter
+	matchmakerMatch                     prometheus.Counter
+	matchmakerShortCommit               prometheus.Counter
+	matchmakerCapacityReturn            prometheus.Counter
+	matchmakerQueryReject               prometheus.Counter
+	matchmakerTicketFailures            *prometheus.CounterVec
+	matchmakerTimeToMatch               prometheus.Histogram
+	matchmakerQueueDepth                *prometheus.GaugeVec
+	matchmakerOldestTicket              *prometheus.GaugeVec
+	relayCreds                          prometheus.Counter
+	relayIssueThrottled                 prometheus.Counter
+	mailSends                           *prometheus.CounterVec
+	quotaRejections                     *prometheus.CounterVec
+	entitlementApplies                  *prometheus.CounterVec
+	realtimeSweepFailures               prometheus.Counter
+	realtimeLifecycleCloses             *prometheus.CounterVec
+	realtimeConnectionLimitLookupErrors prometheus.Counter
 }
 
 // Signup kinds.
@@ -224,6 +225,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_realtime_lifecycle_closes_total",
 			Help: "WebSocket connections closed by lifecycle revalidation, by reason (revoked/unverifiable).",
 		}, []string{"reason"}),
+		realtimeConnectionLimitLookupErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_realtime_connection_limit_lookup_errors_total",
+			Help: "Connection-limit override refreshes that failed and used the last known override or tier default.",
+		}),
 	}
 	reg.MustRegister(
 		m.signups, m.verifications, m.logins, m.invitesSent, m.friendRequests,
@@ -231,7 +236,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.matchmakerShortCommit, m.matchmakerCapacityReturn, m.matchmakerQueryReject, m.matchmakerTicketFailures,
 		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
 		m.relayCreds, m.relayIssueThrottled, m.mailSends, m.quotaRejections, m.entitlementApplies,
-		m.realtimeSweepFailures, m.realtimeLifecycleCloses,
+		m.realtimeSweepFailures, m.realtimeLifecycleCloses, m.realtimeConnectionLimitLookupErrors,
 	)
 	return m
 }
@@ -424,6 +429,16 @@ func (m *Metrics) RealtimeLifecycleClose(reason string) {
 		return
 	}
 	m.realtimeLifecycleCloses.WithLabelValues(reason).Inc()
+}
+
+// RealtimeConnectionLimitLookupError counts a failed refresh of a tenant's
+// connection-limit override. The admission path continues with its safe
+// fallback and lets the leased connection cap decide whether to admit.
+func (m *Metrics) RealtimeConnectionLimitLookupError() {
+	if m == nil {
+		return
+	}
+	m.realtimeConnectionLimitLookupErrors.Inc()
 }
 
 // QuotaRejection counts a new-growth operation rejected by an enforced tenant

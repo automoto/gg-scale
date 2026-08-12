@@ -47,9 +47,16 @@ Required behavior:
 
 The service now has a persisted, auditable connection-limit override for
 controlled launches. It supports sustained and temporary limits, validates
-that the temporary limit is not below sustained, converges across nodes within
-five seconds, and appears in the control panel and audit log. Production
-operators still need to exercise the workflow before a pilot.
+that the temporary limit is between sustained and 2× sustained, enforces an
+absolute 500,000 safety wall, converges across nodes within five seconds, and
+appears in the control panel and audit log. An active
+`REALTIME_MAX_PER_TENANT` is visible and disables conflicting writes.
+Production operators still need to exercise the workflow before a pilot.
+
+Concurrent override-cache misses are singleflight-coalesced per tenant. A
+failed refresh serves the last known override or tier default with a one-second
+retry backoff, records a metric, and continues through the leased cap so its
+bounded database-outage allowance remains effective.
 
 ### 3. Region-wide API rate enforcement
 
@@ -155,6 +162,11 @@ All gates must pass before changing the compiled Studio default:
 - [ ] Implement and test region-wide API-key rate enforcement before
       horizontally scaling the web process.
 - [x] Add tenant-specific connection overrides with audit history.
+- [x] Bound overrides to 2× sustained and an absolute 500,000 safety wall.
+- [x] Preserve realtime admission fallback and coalesce override lookups during
+      database failures and reconnect waves.
+- [x] Decouple publishable-key auth abuse limits from the larger API buckets.
+- [x] Expose deployment-wide environment-cap precedence in the control panel.
 - [ ] Add capacity gauges, burst visibility, dashboards, and alerts.
 - [ ] Build and document the repeatable workload harness.
 - [ ] Verify OS, load balancer, proxy, and file-descriptor limits above 100,000

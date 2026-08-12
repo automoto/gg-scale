@@ -80,9 +80,11 @@ for the entire tenant. The advertised rate is the refill rate; the burst value
 is the maximum number of tokens the bucket can hold. A full bucket does not
 mean the platform guarantees that many simultaneous requests.
 
-Publishable-key token routes also have a per-tenant, per-source-IP guard set to
-one tenth of the tier's per-key rate and burst. Secret keys bypass that IP guard
-but remain subject to their per-key bucket. Password signup and login have a
+Publishable-key token routes also have a separate per-tenant, per-source-IP
+abuse guard. It does not grow with the general API burst bucket: Free is 25/sec
+with a 50-request burst, Pro is 100/sec with 200, Studio is 250/sec with 500,
+and Enterprise is 1,000/sec with 2,000. Secret keys bypass that IP guard but
+remain subject to their per-key bucket. Password signup and login have a
 separate guard of 10 attempts per minute per source IP.
 
 The default API refill rate is sized for one backend action per connected player
@@ -115,11 +117,21 @@ Platform admins can persist a tenant-specific sustained and temporary
 connection envelope for contracted launches or breakout traffic. The override
 is audited, cached for five seconds per application process, and applied per
 service region. It changes new admission capacity without closing established
-connections. The temporary maximum must be at least the sustained limit.
+connections. The temporary maximum must be between sustained and 2× sustained;
+neither value may exceed the 500,000 safety wall without a capacity-reviewed
+service release.
+
+Concurrent cache misses for one tenant are collapsed into one database lookup.
+If a refresh fails, the process serves the last known override (or the tier
+default when none was known), waits up to one second before retrying, records a
+metric, and still calls the leased regional cap. That keeps the cap's bounded
+local emergency allowance reachable during a short PostgreSQL failover.
 
 For self-hosted deployments, `REALTIME_MAX_PER_TENANT` may set one fixed hard
 cap for all tenants in that deployment. A positive value disables the
-tier-derived burst envelope. Zero uses the service-class defaults.
+tier-derived burst envelope and supersedes persisted tenant overrides. The
+control panel shows the active value and disables tenant-override writes while
+it is set. Zero uses tenant overrides and service-class defaults.
 
 ## Operational interpretation
 

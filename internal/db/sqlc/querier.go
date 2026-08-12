@@ -205,7 +205,7 @@ type Querier interface {
 	CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVerifiedPlayerAccountParams) (pgtype.UUID, error)
 	// Used when the host ends the session so peer rows don't linger until GC.
 	DeleteAllGameSessionPeers(ctx context.Context, sessionID string) error
-	DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) error
+	DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) (int64, error)
 	DeleteControlPanelMembership(ctx context.Context, arg DeleteControlPanelMembershipParams) error
 	// Removes a membership row but refuses to delete the actor's own row. The
 	// previous approach loaded every member to do this check client-side; this

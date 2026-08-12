@@ -131,7 +131,7 @@ type Deps struct {
 	TenantConnectionCap ratelimit.ConnectionCap
 	// ConnectionLimitOverrides supplies optional tenant-specific realtime
 	// envelopes for contracted launches and breakout traffic.
-	ConnectionLimitOverrides ratelimit.ConnectionLimitStore
+	ConnectionLimitOverrides ratelimit.ConnectionLimitOverrideStore
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
@@ -304,26 +304,27 @@ func NewRouter(d Deps) http.Handler {
 		r.Mount("/assets", webassets.Handler())
 		if d.ControlPanel.Enabled() {
 			r.Mount("/control-panel", controlpanel.New(controlpanel.Deps{
-				Pool:                 d.Pool,
-				Cache:                d.Cache,
-				Limiter:              d.Limiter,
-				RateLimitOverrides:   d.RateLimitOverrides,
-				ConnectionLimits:     d.ConnectionLimitOverrides,
-				ProxyTrust:           d.ProxyTrust,
-				Registry:             reg,
-				Metrics:              d.Metrics,
-				Config:               d.ControlPanel,
-				Bootstrap:            d.ControlPanelBootstrap,
-				Mailer:               d.Mailer,
-				Fleet:                d.Fleet,
-				RBAC:                 d.RBAC,
-				PluginInfo:           d.ControlPanelPluginInfo,
-				TwoFactor:            d.TwoFactor,
-				CredentialCipher:     d.CredentialCipher,
-				VerifySigningKey:     d.EmailVerifySigningKey,
-				StorageLimits:        d.StorageLimits,
-				BillingHandoffKey:    d.BillingHandoffKey,
-				EnqueuePasswordReset: passwordResetEnqueuer(d, jobs.PasswordResetSurfaceControlPanel),
+				Pool:                       d.Pool,
+				Cache:                      d.Cache,
+				Limiter:                    d.Limiter,
+				RateLimitOverrides:         d.RateLimitOverrides,
+				ConnectionLimitInvalidator: d.ConnectionLimitOverrides,
+				ConnectionEnvMax:           d.RealtimeMaxPerTenant,
+				ProxyTrust:                 d.ProxyTrust,
+				Registry:                   reg,
+				Metrics:                    d.Metrics,
+				Config:                     d.ControlPanel,
+				Bootstrap:                  d.ControlPanelBootstrap,
+				Mailer:                     d.Mailer,
+				Fleet:                      d.Fleet,
+				RBAC:                       d.RBAC,
+				PluginInfo:                 d.ControlPanelPluginInfo,
+				TwoFactor:                  d.TwoFactor,
+				CredentialCipher:           d.CredentialCipher,
+				VerifySigningKey:           d.EmailVerifySigningKey,
+				StorageLimits:              d.StorageLimits,
+				BillingHandoffKey:          d.BillingHandoffKey,
+				EnqueuePasswordReset:       passwordResetEnqueuer(d, jobs.PasswordResetSurfaceControlPanel),
 			}))
 		}
 		if d.Players.Enabled() && d.Pool != nil {

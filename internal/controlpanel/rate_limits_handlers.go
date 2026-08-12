@@ -183,6 +183,12 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 		h.redirectRateLimits(w, r, tenantID, "Enter both values, or clear both to restore the default.")
 	case errors.Is(err, errConnectionCeiling):
 		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum must be at least the sustained limit.")
+	case errors.Is(err, errConnectionBurstRatio):
+		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum cannot exceed twice the sustained limit.")
+	case errors.Is(err, errConnectionAbsoluteMax):
+		h.redirectRateLimits(w, r, tenantID, "Connection limits cannot exceed 500,000 without a capacity-reviewed release.")
+	case errors.Is(err, errConnectionEnvOverride):
+		h.redirectRateLimits(w, r, tenantID, "REALTIME_MAX_PER_TENANT is active; unset it before editing tenant connection limits.")
 	case errors.Is(err, errExceedsCap):
 		h.redirectRateLimits(w, r, tenantID, "Per Game Project invite quota can't exceed the Account Tenant cap.")
 	case errors.Is(err, errProjectNotInTenant):

@@ -14,6 +14,6 @@ DO UPDATE SET sustained = EXCLUDED.sustained,
               updated_by = EXCLUDED.updated_by,
               updated_at = now();
 
--- name: DeleteConnectionLimitOverride :exec
+-- name: DeleteConnectionLimitOverride :execrows
 DELETE FROM connection_limit_overrides
 WHERE tenant_id = $1;

@@ -397,6 +397,18 @@ func TestRateLimitsPage_api_form_platform_admin_only(t *testing.T) {
 	assert.Contains(t, taHTML, `/tenants/5/rate-limits/projects/7/invites"`)
 }
 
+func TestRateLimitsPage_env_connection_cap_is_visible_and_disables_override_form(t *testing.T) {
+	html := renderToString(t, RateLimitsPage(RateLimitsView{
+		TenantID: 5, CSRFToken: "tok", IsPlatformAdmin: true,
+		ConnectionEnvMax:           25_000,
+		ConnectionDefaultSustained: 50_000, ConnectionDefaultCeiling: 100_000,
+	}))
+
+	assert.Contains(t, html, "REALTIME_MAX_PER_TENANT")
+	assert.Contains(t, html, "25,000")
+	assert.NotContains(t, html, "Save connection limit")
+}
+
 func TestProjectsPage_hides_fleet_actions_when_feature_off(t *testing.T) {
 	vm := ProjectsView{
 		UserEmail:    "alice@example.com",

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
@@ -15,6 +17,8 @@ import (
 
 // ConnectionLimitStore resolves an optional persisted realtime admission
 // envelope for one tenant. No row means the tenant's compiled tier envelope.
+// A caching implementation may return its last known value together with an
+// error when a refresh fails; callers should record the error and use the value.
 type ConnectionLimitStore interface {
 	ConnectionLimit(ctx context.Context, tenantID int64) (CapLimits, bool, error)
 }
@@ -23,6 +27,13 @@ type ConnectionLimitStore interface {
 // an administrative write. The raw database store has nothing to invalidate.
 type ConnectionLimitInvalidator interface {
 	Invalidate(tenantID int64)
+}
+
+// ConnectionLimitOverrideStore is the managed-service store used by both the
+// realtime read path and the control-panel invalidation path.
+type ConnectionLimitOverrideStore interface {
+	ConnectionLimitStore
+	ConnectionLimitInvalidator
 }
 
 // DBConnectionLimitStore reads platform-managed connection overrides through
@@ -72,11 +83,13 @@ type CachedConnectionLimitStore struct {
 	ttl   time.Duration
 	now   func() time.Time
 
-	mu    sync.Mutex
-	cache map[int64]cachedConnectionLimit
+	mu         sync.Mutex
+	cache      map[int64]cachedConnectionLimit
+	generation map[int64]uint64
+	loads      singleflight.Group
 }
 
-var _ ConnectionLimitInvalidator = (*CachedConnectionLimitStore)(nil)
+var _ ConnectionLimitOverrideStore = (*CachedConnectionLimitStore)(nil)
 
 // NewCachedConnectionLimitStore wraps inner with a per-tenant TTL cache.
 func NewCachedConnectionLimitStore(inner ConnectionLimitStore, ttl time.Duration) *CachedConnectionLimitStore {
@@ -84,10 +97,11 @@ func NewCachedConnectionLimitStore(inner ConnectionLimitStore, ttl time.Duration
 		ttl = DefaultOverrideCacheTTL
 	}
 	return &CachedConnectionLimitStore{
-		inner: inner,
-		ttl:   ttl,
-		now:   time.Now,
-		cache: make(map[int64]cachedConnectionLimit),
+		inner:      inner,
+		ttl:        ttl,
+		now:        time.Now,
+		cache:      make(map[int64]cachedConnectionLimit),
+		generation: make(map[int64]uint64),
 	}
 }
 
@@ -101,20 +115,54 @@ func (c *CachedConnectionLimitStore) ConnectionLimit(ctx context.Context, tenant
 	}
 	c.mu.Unlock()
 
-	limits, found, err := c.inner.ConnectionLimit(ctx, tenantID)
-	if err != nil {
-		return CapLimits{}, false, err
-	}
+	key := strconv.FormatInt(tenantID, 10)
+	loaded, err, _ := c.loads.Do(key, func() (any, error) {
+		return c.load(ctx, tenantID)
+	})
+	entry := loaded.(cachedConnectionLimit)
+	return entry.limits, entry.found, err
+}
+
+func (c *CachedConnectionLimitStore) load(ctx context.Context, tenantID int64) (cachedConnectionLimit, error) {
+	now := c.now()
 	c.mu.Lock()
-	c.cache[tenantID] = cachedConnectionLimit{limits: limits, found: found, expiresAt: now.Add(c.ttl)}
+	entry, hadEntry := c.cache[tenantID]
+	if hadEntry && now.Before(entry.expiresAt) {
+		c.mu.Unlock()
+		return entry, nil
+	}
+	generation := c.generation[tenantID]
 	c.mu.Unlock()
-	return limits, found, nil
+
+	limits, found, err := c.inner.ConnectionLimit(ctx, tenantID)
+	now = c.now()
+	if err == nil {
+		entry = cachedConnectionLimit{limits: limits, found: found, expiresAt: now.Add(c.ttl)}
+	} else {
+		// Preserve the last known override through a short database failure. If
+		// this tenant has never been cached, the zero entry means "use its tier
+		// default." The short backoff prevents every handshake from retrying the
+		// same failed query while still converging quickly after recovery.
+		if !hadEntry {
+			entry = cachedConnectionLimit{}
+		}
+		entry.expiresAt = now.Add(min(c.ttl, time.Second))
+	}
+
+	c.mu.Lock()
+	if c.generation[tenantID] == generation {
+		c.cache[tenantID] = entry
+	}
+	c.mu.Unlock()
+	return entry, err
 }
 
 // Invalidate evicts one tenant so an administrative change takes effect on the
 // writer process immediately.
 func (c *CachedConnectionLimitStore) Invalidate(tenantID int64) {
 	c.mu.Lock()
+	c.generation[tenantID]++
 	delete(c.cache, tenantID)
 	c.mu.Unlock()
+	c.loads.Forget(strconv.FormatInt(tenantID, 10))
 }

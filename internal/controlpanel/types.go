@@ -330,6 +330,7 @@ type RateLimitsView struct {
 	ConnectionCeiling          int64
 	ConnectionDefaultSustained int64
 	ConnectionDefaultCeiling   int64
+	ConnectionEnvMax           int64
 	// Per-project invite quotas (tenant-admin editable).
 	Projects           []ProjectInviteLimitView
 	DefaultInviterHour float64

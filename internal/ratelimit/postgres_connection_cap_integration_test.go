@@ -94,6 +94,18 @@ func TestDBConnectionLimitStore_roundtrips_an_operator_override(t *testing.T) {
 	assert.Equal(t, CapLimits{Sustained: 250_000, Ceiling: 500_000}, got)
 }
 
+func TestDBConnectionLimitStore_rejects_an_unsafe_operator_override(t *testing.T) {
+	pool := startConnectionCapPostgres(t)
+
+	err := pool.BootstrapQ(context.Background(), func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).UpsertConnectionLimitOverride(context.Background(), sqlcgen.UpsertConnectionLimitOverrideParams{
+			TenantID: 7001, Sustained: 50_000, Ceiling: 500_000,
+		})
+	})
+
+	assert.Error(t, err, "the database must reject a ceiling above 2x sustained")
+}
+
 func TestPostgresGrantStore_shrinks_a_holders_existing_allocation(t *testing.T) {
 	pool := startConnectionCapPostgres(t)
 	store := newPostgresGrantStore(pool)
