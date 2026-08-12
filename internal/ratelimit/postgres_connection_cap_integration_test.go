@@ -15,6 +15,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/migrate"
 )
 
@@ -72,6 +73,18 @@ func newIntegrationLeasedCap(t *testing.T, pool *db.Pool, region, holder string)
 	})
 	t.Cleanup(func() { _ = cap.Close(context.Background()) })
 	return cap
+}
+
+func TestConnectionLimitOverride_rejects_an_unsafe_operator_override(t *testing.T) {
+	pool := startConnectionCapPostgres(t)
+
+	err := pool.BootstrapQ(context.Background(), func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).UpsertConnectionLimitOverride(context.Background(), sqlcgen.UpsertConnectionLimitOverrideParams{
+			TenantID: 7001, Sustained: 50_000, Ceiling: 500_000,
+		})
+	})
+
+	assert.Error(t, err, "the database must reject a ceiling above 2x sustained")
 }
 
 func TestPostgresGrantStore_shrinks_a_holders_existing_allocation(t *testing.T) {

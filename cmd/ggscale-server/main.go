@@ -356,8 +356,10 @@ func run() error {
 	}
 
 	// Cacheable reads and request token buckets are deliberately process-local.
-	// Shared correctness lives in PostgreSQL; no app request depends on a
-	// distributed cache service.
+	// Managed production currently runs one web process per service region, so
+	// the API-key bucket is the regional bucket. Horizontal web scaling requires
+	// a distributed API limiter (or an explicitly divided per-process quota)
+	// before the published regional API envelope remains exact.
 	store := instrument.New(memory.New(), registry)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -575,6 +577,9 @@ func run() error {
 		worker.Run(workerCtx)
 	}()
 
+	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
+		ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL)
+
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
 		Commit:                buildCommit(),
@@ -583,7 +588,7 @@ func run() error {
 		ReadPool:              readPool,
 		Lookup:                tenant.NewSQLLookup(pool),
 		Limiter:               ratelimit.NewCacheLimiter(store),
-		RateLimitOverrides:    ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
+		RateLimitOverrides:    rateLimitOverrides,
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
 		DeleteGracePeriod:     cfg.PlayerDeleteGracePeriod,
 		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),

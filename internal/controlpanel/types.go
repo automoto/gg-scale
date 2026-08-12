@@ -323,6 +323,14 @@ type RateLimitsView struct {
 	APIBurst        float64
 	APIDefaultRate  float64
 	APIDefaultBurst float64
+	// Realtime connection envelope (tenant-wide per service region,
+	// platform-admin editable).
+	ConnectionOverridden       bool
+	ConnectionSustained        int64
+	ConnectionCeiling          int64
+	ConnectionDefaultSustained int64
+	ConnectionDefaultCeiling   int64
+	ConnectionEnvMax           int64
 	// Per-project invite quotas (tenant-admin editable).
 	Projects           []ProjectInviteLimitView
 	DefaultInviterHour float64

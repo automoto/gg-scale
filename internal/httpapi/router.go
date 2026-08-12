@@ -305,6 +305,7 @@ func NewRouter(d Deps) http.Handler {
 				Cache:                d.Cache,
 				Limiter:              d.Limiter,
 				RateLimitOverrides:   d.RateLimitOverrides,
+				ConnectionEnvMax:     d.RealtimeMaxPerTenant,
 				ProxyTrust:           d.ProxyTrust,
 				Registry:             reg,
 				Metrics:              d.Metrics,

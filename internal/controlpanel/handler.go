@@ -46,6 +46,9 @@ type Deps struct {
 	// RateLimitOverrides (may be nil) supplies per-tenant/project invite-limit
 	// overrides to the invite throttle.
 	RateLimitOverrides ratelimit.OverrideStore
+	// ConnectionEnvMax is REALTIME_MAX_PER_TENANT. A positive value supersedes
+	// tenant overrides, so the control panel displays it and disables writes.
+	ConnectionEnvMax int64
 	// ProxyTrust resolves the real client IP for the per-IP auth limiter when
 	// behind a trusted reverse proxy. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
@@ -100,21 +103,22 @@ type PluginSnapshot struct {
 
 // Handler owns control panel HTTP routes.
 type Handler struct {
-	pool           *db.Pool
-	cache          cache.Store
-	limiter        ratelimit.Limiter
-	overrides      ratelimit.OverrideStore
-	inviteThrottle *ratelimit.InviteThrottle
-	reg            prometheus.Registerer
-	cfg            Config
-	bootstrap      *Bootstrap
-	mailer         mailer.Mailer
-	fleet          *fleet.Manager
-	rbac           *rbac.Authorizer
-	pluginInfo     func() *PluginSnapshot
-	now            func() time.Time
-	proxyTrust     *ratelimit.ProxyTrust
-	metrics        *observability.Metrics
+	pool             *db.Pool
+	cache            cache.Store
+	limiter          ratelimit.Limiter
+	overrides        ratelimit.OverrideStore
+	connectionEnvMax int64
+	inviteThrottle   *ratelimit.InviteThrottle
+	reg              prometheus.Registerer
+	cfg              Config
+	bootstrap        *Bootstrap
+	mailer           mailer.Mailer
+	fleet            *fleet.Manager
+	rbac             *rbac.Authorizer
+	pluginInfo       func() *PluginSnapshot
+	now              func() time.Time
+	proxyTrust       *ratelimit.ProxyTrust
+	metrics          *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the player site.
 	verifySigningKey     []byte
@@ -185,6 +189,7 @@ func New(d Deps) http.Handler {
 			r.Post("/api-keys/{apiKeyID}/features", h.updateAPIKeyFeaturesHandler)
 			r.Post("/api-keys/{apiKeyID}/revoke", h.revokeAPIKeyHandler)
 			r.Get("/rate-limits", h.rateLimitsPage)
+			r.Post("/rate-limits/connections", h.updateTenantConnectionLimitHandler)
 			r.Post("/rate-limits/api", h.updateTenantAPILimitHandler)
 			r.Post("/rate-limits/invites/recipient", h.updateTenantRecipientInviteLimitHandler)
 			r.Post("/rate-limits/projects/{projectID}/invites", h.updateProjectInviteLimitHandler)
@@ -342,6 +347,7 @@ func newHandler(d Deps) *Handler {
 		cache:                d.Cache,
 		limiter:              d.Limiter,
 		overrides:            d.RateLimitOverrides,
+		connectionEnvMax:     d.ConnectionEnvMax,
 		reg:                  d.Registry,
 		cfg:                  d.Config,
 		bootstrap:            bootstrap,

@@ -1,6 +1,9 @@
 package controlpanel
 
-import "github.com/automoto/gg-scale/internal/webassets"
+import (
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/webassets"
+)
 
 templ baseHead(title string) {
 	<head>
@@ -692,7 +695,7 @@ templ apiLimitCard(vm APILimitCardView) {
 	<section class="card">
 		<h2>HTTP API limit</h2>
 		<p class="card-subtitle">
-			Per-second rate and burst applied to this Account Tenant's API keys. Blank
+			Per-second rate and burst applied independently to each API key in this Account Tenant. Blank
 			restores the tier default ({ rlNum(vm.DefaultRate) }/s, burst { rlNum(vm.DefaultBurst) }).
 		</p>
 		if vm.IsPlatformAdmin {
@@ -735,6 +738,38 @@ templ RateLimitsPage(vm RateLimitsView) {
 		</div>
 		@flashSuccess(vm.Message)
 		@errorAlert(vm.Error)
+		<section class="card">
+			<h2>Realtime connection limit</h2>
+			<p class="card-subtitle">
+				Sustained and temporary concurrent-user admissions per service region. Blank restores the tier default
+				({ countNum(vm.ConnectionDefaultSustained) } sustained, { countNum(vm.ConnectionDefaultCeiling) } temporary).
+				The temporary maximum cannot exceed 2× sustained, and neither value can exceed { countNum(ratelimit.MaxCustomConnectionLimit) }.
+			</p>
+			if vm.ConnectionEnvMax > 0 {
+				<p role="alert"><code>REALTIME_MAX_PER_TENANT</code> is active at <strong>{ countNum(vm.ConnectionEnvMax) }</strong>. It overrides tier and saved tenant limits, so editing is disabled.</p>
+				if vm.ConnectionOverridden {
+					<p class="muted">Saved but inactive override: { countNum(vm.ConnectionSustained) } sustained, { countNum(vm.ConnectionCeiling) } temporary.</p>
+				}
+			} else if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/connections") } class="settings-form">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>Sustained concurrent users
+						<input name="sustained" type="number" step="1" min="0" max={ connectionLimitValue(ratelimit.MaxCustomConnectionLimit) } value={ connectionLimitValue(vm.ConnectionSustained) } placeholder={ stringFromInt(vm.ConnectionDefaultSustained) }/>
+					</label>
+					<label>Temporary maximum
+						<input name="ceiling" type="number" step="1" min="0" max={ connectionLimitValue(ratelimit.MaxCustomConnectionLimit) } value={ connectionLimitValue(vm.ConnectionCeiling) } placeholder={ stringFromInt(vm.ConnectionDefaultCeiling) }/>
+					</label>
+					<button type="submit" class="btn-inline">Save connection limit</button>
+				</form>
+			} else {
+				if vm.ConnectionOverridden {
+					<p>Override active: <strong>{ countNum(vm.ConnectionSustained) }</strong> sustained, <strong>{ countNum(vm.ConnectionCeiling) }</strong> temporary.</p>
+				} else {
+					<p>Using the tier default.</p>
+				}
+				<p class="muted">Only platform admins can change the connection envelope.</p>
+			}
+		</section>
 		@apiLimitCard(vm.apiLimitCardView())
 		<section class="card">
 			<h2>Invite quotas</h2>

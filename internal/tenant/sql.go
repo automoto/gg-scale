@@ -24,7 +24,7 @@ func NewSQLLookup(pool *pgxpool.Pool) Lookup {
 		if err != nil {
 			return nil, fmt.Errorf("api_keys lookup: %w", err)
 		}
-		return &APIKey{
+		key := &APIKey{
 			ID:             row.ID,
 			TenantID:       row.TenantID,
 			ProjectID:      row.ProjectID,
@@ -33,6 +33,13 @@ func NewSQLLookup(pool *pgxpool.Pool) Lookup {
 			Revoked:        row.RevokedAt.Valid,
 			TenantDisabled: row.TenantDisabled,
 			Scopes:         row.Scopes,
-		}, nil
+		}
+		if row.ConnectionSustained > 0 && row.ConnectionCeiling > 0 {
+			key.ConnectionLimits = &ConnectionLimits{
+				Sustained: row.ConnectionSustained,
+				Ceiling:   row.ConnectionCeiling,
+			}
+		}
+		return key, nil
 	}
 }

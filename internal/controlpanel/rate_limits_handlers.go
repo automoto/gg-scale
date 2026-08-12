@@ -57,6 +57,35 @@ func (h *Handler) updateTenantAPILimitHandler(w http.ResponseWriter, r *http.Req
 	h.redirectRateLimits(w, r, tenantID, "API limit updated.")
 }
 
+// updateTenantConnectionLimitHandler sets the tenant-wide regional realtime
+// admission envelope. Platform-admin only: tenants cannot lift their own
+// contracted launch capacity.
+func (h *Handler) updateTenantConnectionLimitHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := parsePathID(w, r, "tenantID")
+	if !ok {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	if !session.User.IsPlatformAdmin {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if !webutil.ParseForm(w, r) {
+		return
+	}
+	sustained, serr := parseConnectionLimitField(r.Form.Get("sustained"))
+	ceiling, cerr := parseConnectionLimitField(r.Form.Get("ceiling"))
+	if serr != nil || cerr != nil {
+		h.redirectRateLimits(w, r, tenantID, "Connection limits must be non-negative whole numbers.")
+		return
+	}
+	if err := h.setTenantConnectionOverride(r.Context(), session.User.ID, tenantID, sustained, ceiling); err != nil {
+		h.rateLimitError(w, r, tenantID, err)
+		return
+	}
+	h.redirectRateLimits(w, r, tenantID, "Connection limit updated.")
+}
+
 // updateTenantRecipientInviteLimitHandler sets the tenant-wide per-recipient
 // invite burst (back-to-back invites allowed to one address before the
 // cooldown). Platform-admin only — tenant admins can't relax their own abuse cap.
@@ -151,7 +180,15 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 	case errors.Is(err, errInvalidLimit):
 		h.redirectRateLimits(w, r, tenantID, "Values must be finite non-negative numbers.")
 	case errors.Is(err, errIncompleteLimit):
-		h.redirectRateLimits(w, r, tenantID, "Enter both rate and burst, or clear both to restore the default.")
+		h.redirectRateLimits(w, r, tenantID, "Enter both values, or clear both to restore the default.")
+	case errors.Is(err, errConnectionCeiling):
+		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum must be at least the sustained limit.")
+	case errors.Is(err, errConnectionBurstRatio):
+		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum cannot exceed twice the sustained limit.")
+	case errors.Is(err, errConnectionAbsoluteMax):
+		h.redirectRateLimits(w, r, tenantID, "Connection limits cannot exceed 500,000 without a capacity-reviewed release.")
+	case errors.Is(err, errConnectionEnvOverride):
+		h.redirectRateLimits(w, r, tenantID, "REALTIME_MAX_PER_TENANT is active; unset it before editing tenant connection limits.")
 	case errors.Is(err, errExceedsCap):
 		h.redirectRateLimits(w, r, tenantID, "Per Game Project invite quota can't exceed the Account Tenant cap.")
 	case errors.Is(err, errProjectNotInTenant):

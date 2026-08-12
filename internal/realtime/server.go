@@ -130,7 +130,8 @@ func ServeWS(opts Options) http.HandlerFunc {
 		// Per-tenant CCU cap: tier-aware regional grants are leased from
 		// PostgreSQL and consumed from process memory on the hot path.
 		if opts.TenantCap != nil {
-			caps := tenantCapLimits(tenantTierFromContext(r.Context()), opts.EnvMaxPerTenant)
+			key, _ := tenant.APIKeyFromContext(r.Context())
+			caps := tenantCapLimits(key, opts.EnvMaxPerTenant)
 			decision, capErr := opts.TenantCap.Acquire(r.Context(), tenantID, caps)
 			switch {
 			case capErr != nil:
@@ -351,23 +352,19 @@ func slotKeyForPlayer(tenantID, playerID int64) string {
 // before retrying, per the "try again later" semantics of the CCU cap.
 const tenantCapRetryAfter = 5 * time.Second
 
-// tenantTierFromContext reads the tenant's service class from the request's API
-// key. Behind the tenant middleware the key is always present; the Tier0
-// fallback (smallest envelope) is a fail-safe for the can't-happen case.
-func tenantTierFromContext(ctx context.Context) tenant.Tier {
-	key, ok := tenant.APIKeyFromContext(ctx)
-	if !ok {
-		return tenant.Tier0
-	}
-	return key.Tier
-}
-
-// tenantCapLimits resolves the per-tenant connection envelope: the tenant's
-// class limits by default, or a fixed hard cap (no burst) when an operator
-// pins EnvMaxPerTenant.
-func tenantCapLimits(tier tenant.Tier, envOverride int64) ratelimit.CapLimits {
+// tenantCapLimits resolves the per-tenant connection envelope. A deployment-
+// wide environment cap has highest priority for the self-hosted escape hatch;
+// otherwise the override resolved with the API key wins over the compiled
+// class default. A missing key safely resolves to Tier0's smallest envelope.
+func tenantCapLimits(key tenant.APIKey, envOverride int64) ratelimit.CapLimits {
 	if envOverride > 0 {
 		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}
 	}
-	return ratelimit.ConnectionCapForClass(tier)
+	if key.ConnectionLimits != nil {
+		return ratelimit.CapLimits{
+			Sustained: key.ConnectionLimits.Sustained,
+			Ceiling:   key.ConnectionLimits.Ceiling,
+		}
+	}
+	return ratelimit.ConnectionCapForClass(key.Tier)
 }

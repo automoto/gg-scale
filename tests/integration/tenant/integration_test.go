@@ -210,6 +210,44 @@ func TestSQLLookup_resolves_token_to_tenant_via_bootstrap_policy(t *testing.T) {
 	require.NotNil(t, key.ProjectID)
 	assert.Equal(t, projectA, *key.ProjectID)
 	assert.False(t, key.Revoked)
+	assert.Nil(t, key.ConnectionLimits)
+}
+
+func TestSQLLookup_tracks_connection_limit_changes_with_the_API_key(t *testing.T) {
+	bootstrap, app := startCluster(t)
+
+	tenantA, projectA := seedTenant(t, bootstrap, "connection-limit")
+	seedAPIKey(t, bootstrap, tenantA, projectA, "launch-token")
+	_, err := bootstrap.Exec(context.Background(),
+		`INSERT INTO connection_limit_overrides (tenant_id, sustained, ceiling)
+		 VALUES ($1, 250000, 500000)`, tenantA)
+	require.NoError(t, err)
+
+	lookup := tenant.NewSQLLookup(app)
+	sum := sha256.Sum256([]byte("launch-token"))
+	key, err := lookup(context.Background(), sum[:])
+
+	require.NoError(t, err)
+	require.NotNil(t, key.ConnectionLimits)
+	assert.Equal(t, tenant.ConnectionLimits{Sustained: 250_000, Ceiling: 500_000}, *key.ConnectionLimits)
+
+	_, err = bootstrap.Exec(context.Background(),
+		`UPDATE connection_limit_overrides
+		 SET sustained = 10000, ceiling = 20000
+		 WHERE tenant_id = $1`, tenantA)
+	require.NoError(t, err)
+	key, err = lookup(context.Background(), sum[:])
+	require.NoError(t, err)
+	require.NotNil(t, key.ConnectionLimits)
+	assert.Equal(t, tenant.ConnectionLimits{Sustained: 10_000, Ceiling: 20_000}, *key.ConnectionLimits,
+		"the next authenticated request must observe a reduced envelope")
+
+	_, err = bootstrap.Exec(context.Background(),
+		`DELETE FROM connection_limit_overrides WHERE tenant_id = $1`, tenantA)
+	require.NoError(t, err)
+	key, err = lookup(context.Background(), sum[:])
+	require.NoError(t, err)
+	assert.Nil(t, key.ConnectionLimits, "the next authenticated request must observe a cleared envelope")
 }
 
 func TestSQLLookup_returns_ErrUnknownKey_for_missing_token(t *testing.T) {

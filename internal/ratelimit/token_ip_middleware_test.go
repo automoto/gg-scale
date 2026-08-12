@@ -41,7 +41,7 @@ func publishableKey(tenantID int64, tier tenant.Tier) tenant.APIKey {
 	return tenant.APIKey{ID: 1, TenantID: tenantID, Tier: tier, Type: tenant.KeyTypePublishable}
 }
 
-func TestTokenIPLimitsForTier_should_divide_tier_limits_by_divisor(t *testing.T) {
+func TestTokenIPLimitsForTier_should_keep_auth_abuse_bursts_independent_of_api_buckets(t *testing.T) {
 	tests := []struct {
 		tier  tenant.Tier
 		rate  float64

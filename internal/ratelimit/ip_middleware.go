@@ -120,22 +120,21 @@ func NewIPLimiter(lim Limiter, ratePerSecond, burst float64, trust *ProxyTrust, 
 	}
 }
 
-// TokenRouteIPDivisor scales a tier's per-key limits down to the per-IP
-// ceiling on the token auth endpoints (anonymous, verify, refresh,
-// logout, custom-token): each publishable-key source IP gets 1/10 of
-// the tenant's tier rate. Sized so the worst legitimate single-IP
-// pattern (a tenant's whole CCU cap behind one NAT refreshing
-// 15-minute tokens) keeps ~9× headroom, while a single source cannot
-// fill the player quota or drain the per-key bucket at full tier speed.
-const TokenRouteIPDivisor = 10
-
-// TokenIPLimitsForTier returns the per-IP token-route bucket for a
-// tier: the tier's per-key limits divided by TokenRouteIPDivisor.
+// TokenIPLimitsForTier returns the per-IP token-route bucket for a tier.
+// These abuse ceilings are deliberately independent of the general API-key
+// bucket: adding reconnect headroom to a key must not let one attacker create
+// tens of thousands of anonymous players. The values retain the pre-launch
+// absolute ceilings while still leaving ample room for a large shared NAT.
 func TokenIPLimitsForTier(t tenant.Tier) Limits {
-	l := LimitsForTier(t)
-	return Limits{
-		RatePerSecond: l.RatePerSecond / TokenRouteIPDivisor,
-		Burst:         l.Burst / TokenRouteIPDivisor,
+	switch t {
+	case tenant.Tier1:
+		return Limits{RatePerSecond: 100, Burst: 200}
+	case tenant.Tier2:
+		return Limits{RatePerSecond: 250, Burst: 500}
+	case tenant.Tier3:
+		return Limits{RatePerSecond: 1000, Burst: 2000}
+	default:
+		return Limits{RatePerSecond: 25, Burst: 50}
 	}
 }
 

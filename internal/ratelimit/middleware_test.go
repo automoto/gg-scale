@@ -24,11 +24,15 @@ type fakeLimiter struct {
 	err      error
 	calls    int
 	keys     []string
+	rates    []float64
+	bursts   []float64
 }
 
-func (f *fakeLimiter) Allow(_ context.Context, key string, _, _ float64) (ratelimit.Decision, error) {
+func (f *fakeLimiter) Allow(_ context.Context, key string, rate, burst float64) (ratelimit.Decision, error) {
 	f.calls++
 	f.keys = append(f.keys, key)
+	f.rates = append(f.rates, rate)
+	f.bursts = append(f.bursts, burst)
 	return f.decision, f.err
 }
 
@@ -145,16 +149,37 @@ func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 	assert.Equal(t, lim.keys[0], lim.keys[2])
 }
 
+func TestMiddleware_applies_tenant_override_independently_to_each_api_key(t *testing.T) {
+	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+	overrides := &countingOverrides{
+		apiLimit: ratelimit.Limits{RatePerSecond: 25_000, Burst: 250_000},
+		apiFound: true,
+	}
+	mw := ratelimit.New(lim, overrides, prometheus.NewRegistry())
+
+	for _, id := range []int64{42, 43} {
+		rr := httptest.NewRecorder()
+		req := reqWithKey(tenant.APIKey{ID: id, TenantID: 5, Tier: tenant.Tier2})
+		mw(nopHandler()).ServeHTTP(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code)
+	}
+
+	assert.Equal(t, []float64{25_000, 25_000}, lim.rates)
+	assert.Equal(t, []float64{250_000, 250_000}, lim.bursts)
+	require.Len(t, lim.keys, 2)
+	assert.NotEqual(t, lim.keys[0], lim.keys[1], "each API key receives an independent custom bucket")
+}
+
 func TestTierLimits_ladder_values_per_class(t *testing.T) {
 	cases := []struct {
 		tier      tenant.Tier
 		wantRate  float64
 		wantBurst float64
 	}{
-		{tenant.Tier0, 250, 500},
-		{tenant.Tier1, 1000, 2000},
-		{tenant.Tier2, 2500, 5000},
-		{tenant.Tier3, 10000, 20000},
+		{tenant.Tier0, 250, 2500},
+		{tenant.Tier1, 1000, 10000},
+		{tenant.Tier2, 5000, 50000},
+		{tenant.Tier3, 10000, 100000},
 	}
 	for _, tc := range cases {
 		got := ratelimit.LimitsForTier(tc.tier)
@@ -163,10 +188,11 @@ func TestTierLimits_ladder_values_per_class(t *testing.T) {
 	}
 }
 
-func TestTierLimits_burst_is_twice_the_sustained_rate(t *testing.T) {
+func TestTierLimits_burst_covers_one_request_per_sustained_connection(t *testing.T) {
 	for _, tier := range []tenant.Tier{tenant.Tier0, tenant.Tier1, tenant.Tier2, tenant.Tier3} {
 		got := ratelimit.LimitsForTier(tier)
-		assert.Equal(t, 2*got.RatePerSecond, got.Burst, "tier=%s", tier)
+		connections := ratelimit.ConnectionCapForClass(tier)
+		assert.Equal(t, float64(connections.Sustained), got.Burst, "tier=%s", tier)
 	}
 }
 

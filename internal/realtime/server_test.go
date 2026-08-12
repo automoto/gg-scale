@@ -21,6 +21,7 @@ import (
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/realtime"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 // wrap inserts tenant + player ids into the request context, standing in
@@ -180,18 +181,52 @@ func TestServeWSTenantCapErrorRejectsWithoutAnUnboundedFailOpen(t *testing.T) {
 type trackingCap struct {
 	acquires atomic.Int64
 	releases atomic.Int64
+	limits   atomic.Value
 	decision ratelimit.CapDecision
 	err      error
 }
 
-func (c *trackingCap) Acquire(context.Context, int64, ratelimit.CapLimits) (ratelimit.CapDecision, error) {
+func (c *trackingCap) Acquire(_ context.Context, _ int64, limits ratelimit.CapLimits) (ratelimit.CapDecision, error) {
 	c.acquires.Add(1)
+	c.limits.Store(limits)
 	return c.decision, c.err
 }
 
 func (c *trackingCap) Release(context.Context, int64) error {
 	c.releases.Add(1)
 	return nil
+}
+
+func TestServeWSUsesConnectionLimitsResolvedWithAPIKey(t *testing.T) {
+	hub := realtime.NewHub()
+	cap := &trackingCap{decision: ratelimit.CapDecision{Allowed: true}}
+	key := tenant.APIKey{
+		TenantID: 1,
+		Tier:     tenant.Tier2,
+		ConnectionLimits: &tenant.ConnectionLimits{
+			Sustained: 250_000,
+			Ceiling:   500_000,
+		},
+	}
+	handler := wrap(1, 42, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := tenant.WithAPIKey(r.Context(), key)
+		realtime.ServeWS(realtime.Options{
+			Hub:               hub,
+			TenantCap:         cap,
+			HeartbeatInterval: time.Hour,
+		}).ServeHTTP(w, r.WithContext(ctx))
+	}))
+	srv := httptest.NewServer(handler)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+
+	assert.Equal(t, int64(1), cap.acquires.Load())
+	assert.Equal(t, ratelimit.CapLimits{Sustained: 250_000, Ceiling: 500_000}, cap.limits.Load())
 }
 
 func TestServeWSChecksPlayerCapBeforeTenantCap(t *testing.T) {
