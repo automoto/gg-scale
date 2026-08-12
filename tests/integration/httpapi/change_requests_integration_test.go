@@ -5,7 +5,6 @@ package httpapi_test
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -730,14 +729,6 @@ func TestBranchFollowup_audit_hygiene_and_final_database_invariants(t *testing.T
 	assert.Zero(t, duplicatePending)
 }
 
-func responseBody(t *testing.T, resp *http.Response) string {
-	t.Helper()
-	raw, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	return string(raw)
-}
-
 func containsAnySecret(body string, secrets ...string) bool {
 	for _, secret := range secrets {
 		if secret != "" && strings.Contains(body, secret) {
@@ -746,5 +737,3 @@ func containsAnySecret(body string, secrets ...string) bool {
 	}
 	return false
 }
-
-var _ = sync.WaitGroup{}

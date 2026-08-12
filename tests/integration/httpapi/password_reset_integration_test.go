@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,15 +17,9 @@ import (
 	"github.com/automoto/gg-scale/internal/mailer"
 )
 
-// waitForSentCount blocks until the recorder holds want messages (delivery
-// runs off-request) and returns the snapshot.
-func waitForSentCount(t *testing.T, rec *mailer.Recorder, want int) []mailer.Message {
+func sentMessages(t *testing.T, rec *mailer.Recorder, want int) []mailer.Message {
 	t.Helper()
-	var sent []mailer.Message
-	require.Eventually(t, func() bool {
-		sent = rec.Snapshot()
-		return len(sent) >= want
-	}, 5*time.Second, 20*time.Millisecond, "expected %d recorded emails", want)
+	sent := rec.Snapshot()
 	require.Len(t, sent, want)
 	return sent
 }
@@ -81,7 +74,7 @@ func TestForgotPassword_control_panel_full_flow(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, string(knownBody), "If an account matches")
-	sent := waitForSentCount(t, rec, 1)
+	sent := sentMessages(t, rec, 1)
 	linkOne := resetLinkFromBody(t, sent[0].Body, "/v1/control-panel/reset-password")
 
 	// Unknown email: identical response, no email.
@@ -92,7 +85,6 @@ func TestForgotPassword_control_panel_full_flow(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, string(knownBody), string(unknownBody), "responses must not reveal account existence")
-	time.Sleep(200 * time.Millisecond)
 	assert.Len(t, rec.Snapshot(), 1)
 
 	// Oversized address (past the RFC 5321 254-byte cap): same constant
@@ -105,7 +97,6 @@ func TestForgotPassword_control_panel_full_flow(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, string(knownBody), string(oversizedBody))
-	time.Sleep(200 * time.Millisecond)
 	assert.Len(t, rec.Snapshot(), 1, "an oversized address must not start delivery work")
 
 	// A second request mints a second, independent link.
@@ -113,7 +104,7 @@ func TestForgotPassword_control_panel_full_flow(t *testing.T) {
 		url.Values{"email": {"cp-reset@example.com"}})
 	require.NoError(t, err)
 	resp.Body.Close()
-	sent = waitForSentCount(t, rec, 2)
+	sent = sentMessages(t, rec, 2)
 	linkTwo := resetLinkFromBody(t, sent[1].Body, "/v1/control-panel/reset-password")
 	tokenTwo := tokenFromLink(t, linkTwo)
 
@@ -191,7 +182,7 @@ func TestControlPanelReset_revokes_trusted_devices(t *testing.T) {
 		url.Values{"email": {"cp-td@example.com"}})
 	require.NoError(t, err)
 	resp.Body.Close()
-	sent := waitForSentCount(t, rec, 1)
+	sent := sentMessages(t, rec, 1)
 	token := tokenFromLink(t, resetLinkFromBody(t, sent[0].Body, "/v1/control-panel/reset-password"))
 
 	resp, err = http.PostForm(srv.URL+"/v1/control-panel/reset-password",
@@ -230,7 +221,7 @@ func TestPlayerAccountReset_revokes_trusted_devices(t *testing.T) {
 	status, _ = postAccountForm(t, account, srv.URL+"/v1/players/account/forgot-password",
 		url.Values{"_csrf": {csrf}, "email": {"acct-td@example.com"}})
 	require.Equal(t, http.StatusOK, status)
-	sent := waitForSentCount(t, rec, 1)
+	sent := sentMessages(t, rec, 1)
 	link := resetLinkFromBody(t, sent[0].Body, "/v1/players/account/reset-password")
 	token := tokenFromLink(t, link)
 
@@ -276,7 +267,7 @@ func TestForgotPassword_player_account_full_flow(t *testing.T) {
 		url.Values{"_csrf": {csrf}, "email": {"player-reset@example.com"}})
 	require.Equal(t, http.StatusOK, status)
 	assert.Contains(t, knownBody, "If an account matches")
-	sent := waitForSentCount(t, rec, 1)
+	sent := sentMessages(t, rec, 1)
 	linkOne := resetLinkFromBody(t, sent[0].Body, "/v1/players/account/reset-password")
 
 	// Unknown email: same response, no email.
@@ -284,13 +275,12 @@ func TestForgotPassword_player_account_full_flow(t *testing.T) {
 		url.Values{"_csrf": {csrf}, "email": {"nobody@example.com"}})
 	require.Equal(t, http.StatusOK, status)
 	assert.Equal(t, knownBody, unknownBody)
-	time.Sleep(200 * time.Millisecond)
 	assert.Len(t, rec.Snapshot(), 1)
 
 	status, _ = postAccountForm(t, account, srv.URL+"/v1/players/account/forgot-password",
 		url.Values{"_csrf": {csrf}, "email": {"player-reset@example.com"}})
 	require.Equal(t, http.StatusOK, status)
-	sent = waitForSentCount(t, rec, 2)
+	sent = sentMessages(t, rec, 2)
 	linkTwo := resetLinkFromBody(t, sent[1].Body, "/v1/players/account/reset-password")
 	tokenTwo := tokenFromLink(t, linkTwo)
 

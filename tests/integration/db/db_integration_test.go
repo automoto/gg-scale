@@ -17,7 +17,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/automoto/gg-scale/internal/db"
-	"github.com/automoto/gg-scale/internal/db/sqlc"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/migrate"
 )
 

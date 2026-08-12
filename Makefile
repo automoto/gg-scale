@@ -1,4 +1,4 @@
-.PHONY: help build fmt test test-integration test-plugins e2e e2e-agones \
+.PHONY: help build fmt test check-test-suites test-integration test-e2e test-plugins e2e e2e-agones \
 	lint check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
@@ -20,7 +20,30 @@ GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # an arm64 laptop would otherwise push an amd64-incompatible image.
 PLATFORMS    ?= linux/amd64,linux/arm64
 INTEGRATION_PARALLEL ?= 8
+INTEGRATION_TIMEOUT  ?= 5m
+END_TO_END_TIMEOUT   ?= 15m
 SQLC_VERSION ?= 1.31.1
+
+# Fast component integrations cover the common database and subprocess paths.
+# Exhaustive cross-component scenarios and live-stack probes run separately so
+# CI can execute both lanes concurrently after lint and unit tests pass.
+INTEGRATION_TEST_PACKAGES := \
+	./tests/integration/auth/... \
+	./tests/integration/db/... \
+	./tests/integration/fleet/... \
+	./tests/integration/jobs/... \
+	./tests/integration/players/... \
+	./tests/integration/secretseal/... \
+	./tests/integration/tenant/... \
+	./tests/integration/twofactor/... \
+	./tests/integration/verifycode/...
+
+END_TO_END_TEST_PACKAGES := \
+	./tests/integration/controlpanel/... \
+	./tests/integration/httpapi/... \
+	./tests/integration/matchmaker/... \
+	./tests/integration/migrate/... \
+	./tests/e2e/...
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-22s %s\n", $$1, $$2}'
@@ -36,11 +59,30 @@ fmt: ## go fmt all packages
 test: ## Unit tests with -race
 	go test -race ./...
 
-test-integration: ## Integration tests (Postgres via testcontainers; needs Docker)
-	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) ./...
+check-test-suites: ## Verify every tagged test package belongs to a CI lane
+	@actual="$$(go list -tags='integration e2e' ./tests/integration/... ./tests/e2e/... | LC_ALL=C sort)"; \
+	integration="$$(go list -tags='integration e2e' $(INTEGRATION_TEST_PACKAGES) | LC_ALL=C sort)"; \
+	end_to_end="$$(go list -tags='integration e2e' $(END_TO_END_TEST_PACKAGES) | LC_ALL=C sort)"; \
+	configured="$$(printf '%s\n%s\n' "$$integration" "$$end_to_end" | LC_ALL=C sort -u)"; \
+	overlap=""; \
+	for package in $$integration; do \
+		if printf '%s\n' "$$end_to_end" | grep -Fqx "$$package"; then overlap="$$overlap $$package"; fi; \
+	done; \
+	if [ -n "$$overlap" ]; then echo "tagged test package belongs to multiple suites:$$overlap"; exit 1; fi; \
+	if [ "$$actual" != "$$configured" ]; then \
+		echo "tagged test package is missing from a Makefile suite"; \
+		echo "discovered:"; echo "$$actual"; \
+		echo "configured:"; echo "$$configured"; \
+		exit 1; \
+	fi
 
-e2e: ## End-to-end suite; run after the relevant `make up-*`
-	go test -race -tags=e2e -timeout=180s ./tests/e2e/...
+test-integration: check-test-suites ## Fast integration tests (Postgres via Testcontainers; needs Docker)
+	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
+
+test-e2e: check-test-suites ## Exhaustive and live-stack end-to-end tests; run after `make up`
+	go test -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
+
+e2e: test-e2e ## Alias for test-e2e
 
 # Needs a live k3s+Agones cluster: run the bw-ops dev/fleet-agones stack
 # first (the fleet feature is beta, not part of GA).

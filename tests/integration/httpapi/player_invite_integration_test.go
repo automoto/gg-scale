@@ -21,6 +21,7 @@ import (
 	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/httpapi"
+	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/players"
 	"github.com/automoto/gg-scale/internal/ratelimit"
@@ -69,6 +70,14 @@ func newControlPanelAndPlayerServerWithLimiter(t *testing.T, c *cluster, cfg con
 		MailFrom:              "no-reply@example.test",
 		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
 		RBAC:                  authorizer,
+		EnqueuePasswordReset: func(ctx context.Context, surface, email string) error {
+			return jobs.SendPasswordResetEmail(ctx, jobs.PasswordResetDeps{
+				Pool:     pool,
+				Mailer:   rec,
+				MailFrom: "no-reply@example.test",
+				BaseURL:  cfg.BaseURL,
+			}, surface, email)
+		},
 		ControlPanel:          cfg,
 		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),
 		Players:               players.Config{Mount: true},

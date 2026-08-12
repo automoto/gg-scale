@@ -95,18 +95,20 @@ func TestPGQueueClaimedExpiredTicketStillBlocksReQueue(t *testing.T) {
 	tenantID, projectID, playerID := seedTenantProjectPlayer(t, pool, "mm-clx", "clx-p1")
 	tctx := db.WithTenant(context.Background(), tenantID)
 
-	soon := time.Now().UTC().Add(250 * time.Millisecond)
+	soon := time.Now().UTC().Add(time.Minute)
 	first, err := queue.Enqueue(tctx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, PlayerID: playerID,
 		Mode: matchmaker.ModeMatchOnly, GameMode: "1v1", ExpiresAt: &soon,
 	})
 	require.NoError(t, err)
 
-	// Claim it while still live, then let its TTL lapse: now claimed + expired.
+	// Claim it while still live, then move its TTL into the past: now claimed + expired.
 	claim, err := queue.ClaimBucket(context.Background(), matchOnlyBucket(tenantID, projectID, "1v1"), 1, time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
-	time.Sleep(400 * time.Millisecond)
+	_, err = pool.Exec(context.Background(),
+		`UPDATE matchmaking_tickets SET expires_at = now() - interval '1 second' WHERE id = $1`, first.ID)
+	require.NoError(t, err)
 
 	_, err = queue.Enqueue(tctx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, PlayerID: playerID,
@@ -180,11 +182,14 @@ func TestPGQueueAbandonedClaimReclaimedBySweeper(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Worker claims with a short lease, then "dies" — never commits or releases.
-	claim, err := queue.ClaimBucket(context.Background(), matchOnlyBucket(tenantID, projectID, "1v1"), 1, 50*time.Millisecond)
+	// Worker claims, then "dies" — never commits or releases. Move the lease
+	// into the past directly so the test does not race the wall clock.
+	claim, err := queue.ClaimBucket(context.Background(), matchOnlyBucket(tenantID, projectID, "1v1"), 1, time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
-	time.Sleep(120 * time.Millisecond)
+	_, err = pool.Exec(context.Background(),
+		`UPDATE matchmaking_tickets SET claim_expires_at = now() - interval '1 second' WHERE id = $1`, ticket.ID)
+	require.NoError(t, err)
 
 	n, err := queue.SweepStaleClaims(context.Background(), 5)
 	require.NoError(t, err)

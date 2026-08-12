@@ -52,10 +52,10 @@ func TestFeatureEnabled_disabledGrantOverridesEnabledGrantAfterCacheRefresh(t *t
 	require.NoError(t, err)
 	assert.True(t, cached, "feature grants are cached briefly after revocation")
 
-	time.Sleep(6 * time.Second)
-	disabled, err := authorizer.FeatureEnabled(t.Context(), tenantID, projectID, rbac.FeatureP2PRelay)
-	require.NoError(t, err)
-	assert.False(t, disabled, "disabled feature_grants row must deny after cache refresh")
+	require.Eventually(t, func() bool {
+		disabled, refreshErr := authorizer.FeatureEnabled(t.Context(), tenantID, projectID, rbac.FeatureP2PRelay)
+		return refreshErr == nil && !disabled
+	}, 10*time.Second, 100*time.Millisecond, "disabled feature_grants row must deny after cache refresh")
 }
 
 func TestRelayCredentials_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testing.T) {
@@ -92,8 +92,9 @@ func TestRelayCredentials_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testi
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusOK, issue(), "feature grants are cached briefly after revocation")
-	time.Sleep(6 * time.Second)
-	assert.Equal(t, http.StatusForbidden, issue())
+	require.Eventually(t, func() bool {
+		return issue() == http.StatusForbidden
+	}, 10*time.Second, 100*time.Millisecond, "revoked relay grant did not refresh")
 }
 
 func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *testing.T) {
@@ -135,8 +136,9 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 	require.NoError(t, err)
 
 	assert.Equal(t, http.StatusCreated, createTicket(), "feature grants are cached briefly after revocation")
-	time.Sleep(6 * time.Second)
-	assert.Equal(t, http.StatusForbidden, createTicket())
+	require.Eventually(t, func() bool {
+		return createTicket() == http.StatusForbidden
+	}, 10*time.Second, 100*time.Millisecond, "revoked fleet grant did not refresh")
 
 	_, err = c.bootstrapPool.Exec(context.Background(),
 		`UPDATE feature_grants
@@ -145,8 +147,9 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 		tenantID, projectID, string(rbac.FeatureDedicatedServers))
 	require.NoError(t, err)
 
-	time.Sleep(6 * time.Second)
-	assert.Equal(t, http.StatusCreated, createTicket())
+	require.Eventually(t, func() bool {
+		return createTicket() == http.StatusCreated
+	}, 10*time.Second, 100*time.Millisecond, "restored fleet grant did not refresh")
 }
 
 func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *testing.T) {
@@ -182,8 +185,9 @@ func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *test
 		tenantID, projectID, string(rbac.FeatureMatchmaker))
 	require.NoError(t, err, "an explicit enabled=false matchmaker row must be storable")
 
-	time.Sleep(6 * time.Second)
-	assert.Equal(t, http.StatusForbidden, createTicket())
+	require.Eventually(t, func() bool {
+		return createTicket() == http.StatusForbidden
+	}, 10*time.Second, 100*time.Millisecond, "disabled matchmaker grant did not refresh")
 }
 
 func newRelayServerForCluster(t *testing.T, c *cluster) *httptest.Server {
