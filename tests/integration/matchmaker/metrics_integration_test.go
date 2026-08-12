@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket b
+
 package matchmaker_test
 
 import (
@@ -171,8 +173,9 @@ func TestPGQueueQueueDepthAndOldestAgeGauges(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Let the oldest ticket age a touch so the gauge is provably non-zero.
-	time.Sleep(1100 * time.Millisecond)
+	// Age the tickets explicitly so the assertion does not race the wall clock.
+	_, err = pool.Exec(ctx, `UPDATE matchmaking_tickets SET created_at = now() - interval '2 seconds'`)
+	require.NoError(t, err)
 
 	w := matchmaker.NewWorker(queue, nil, nil, matchmaker.WorkerConfig{QueueGauge: mmGauge{metrics}})
 	require.NoError(t, w.CollectStats(ctx))

@@ -1,5 +1,7 @@
 //go:build e2e
 
+// e2e:bucket a
+
 package e2e
 
 import (

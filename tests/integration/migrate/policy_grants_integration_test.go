@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket b
+
 package migrate_test
 
 import (

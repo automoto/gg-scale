@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket b
+
 // Regression coverage for the security follow-up round (H5, H6, H13, H14, M5).
 // Each test exercises a workflow that the original code would have failed
 // — concurrent login lockout, CSRF rejection, RLS isolation, audit emission,

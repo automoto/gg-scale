@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket b
+
 package httpapi_test
 
 import (
@@ -228,13 +230,28 @@ func seedTenantWithAPIKey(t *testing.T, pool *pgxpool.Pool, tier int16, token st
 }
 
 func newServerForCluster(t *testing.T, c *cluster) *httptest.Server {
-	return newServerWithTokenIPLimits(t, c, nil)
+	return newServerWithRateLimits(t, c, nil, nil)
 }
 
 // newServerWithTokenIPLimits builds the server with an injected token-route
 // per-IP limit table so limiter tests stay deterministic; nil uses the
 // tier-derived default.
 func newServerWithTokenIPLimits(t *testing.T, c *cluster, limits func(tenant.Tier) ratelimit.Limits) *httptest.Server {
+	return newServerWithRateLimits(t, c, nil, limits)
+}
+
+// newServerWithRateLimitOverrides builds the server with an injected API
+// limit store so limiter tests can use deterministic limits.
+func newServerWithRateLimitOverrides(t *testing.T, c *cluster, overrides ratelimit.OverrideStore) *httptest.Server {
+	return newServerWithRateLimits(t, c, overrides, nil)
+}
+
+func newServerWithRateLimits(
+	t *testing.T,
+	c *cluster,
+	overrides ratelimit.OverrideStore,
+	tokenIPLimits func(tenant.Tier) ratelimit.Limits,
+) *httptest.Server {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
@@ -244,15 +261,16 @@ func newServerWithTokenIPLimits(t *testing.T, c *cluster, limits func(tenant.Tie
 	t.Cleanup(authorizer.Close)
 
 	h := httpapi.NewRouter(httpapi.Deps{
-		Version:       "v1",
-		Commit:        "test",
-		Pool:          pool,
-		Lookup:        tenant.NewSQLLookup(c.appPool),
-		Limiter:       ratelimit.NewCacheLimiter(c.cache),
-		Signer:        signer,
-		Cache:         c.cache,
-		RBAC:          authorizer,
-		TokenIPLimits: limits,
+		Version:            "v1",
+		Commit:             "test",
+		Pool:               pool,
+		Lookup:             tenant.NewSQLLookup(c.appPool),
+		Limiter:            ratelimit.NewCacheLimiter(c.cache),
+		Signer:             signer,
+		Cache:              c.cache,
+		RBAC:               authorizer,
+		RateLimitOverrides: overrides,
+		TokenIPLimits:      tokenIPLimits,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

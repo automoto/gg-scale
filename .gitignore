@@ -8,6 +8,7 @@ bin/
 # Test/coverage
 *.out
 coverage.html
+test-results/
 
 # IDE
 .idea/

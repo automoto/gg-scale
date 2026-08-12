@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket b
+
 package matchmaker_test
 
 import (
@@ -166,6 +168,22 @@ func matchmakerDSNForDatabase(dsn, dbName string) (string, error) {
 	return u.String(), nil
 }
 
+func requireMatchmakerListenerReady(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		var ready bool
+		err := pool.QueryRow(t.Context(), `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND state = 'idle'
+				  AND query = 'LISTEN "matchmaker_ticket"'
+			)`).Scan(&ready)
+		return err == nil && ready
+	}, 5*time.Second, 20*time.Millisecond, "matchmaker LISTEN subscription did not become ready")
+}
+
 // allocatorRecorder is a fake fleet allocator that persists real
 // game_server_allocations rows, so worker-created matches exercise the real
 // matchmaker_matches_allocation_id_fkey. The previous fake minted IDs without
@@ -239,9 +257,7 @@ func TestPGQueueListenWakesWorkerOnInsert(t *testing.T) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go w.Run(runCtx)
-
-	// Give the listener a beat to subscribe before we publish.
-	time.Sleep(100 * time.Millisecond)
+	requireMatchmakerListenerReady(t, pool)
 
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
@@ -324,7 +340,7 @@ func TestPGQueueEnqueueDebounceDoesNotStrandTickets(t *testing.T) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go w.Run(runCtx)
-	time.Sleep(100 * time.Millisecond)
+	requireMatchmakerListenerReady(t, pool)
 
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	// Two players, same bucket, back to back. The second enqueue's NOTIFY
@@ -392,7 +408,7 @@ func TestPGQueueNotifyWakesWorkerForSecondSameBucketPlayer(t *testing.T) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go w.Run(runCtx)
-	time.Sleep(100 * time.Millisecond)
+	requireMatchmakerListenerReady(t, pool)
 
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	tickets := make([]*matchmaker.Ticket, 0, 2)
@@ -519,10 +535,12 @@ func TestPGQueueSweepStaleClaimsReturnsExpiredTicketsToQueued(t *testing.T) {
 	require.NoError(t, err)
 
 	bucket := matchmaker.Bucket{TenantID: tenantID, ProjectID: projectID, Mode: matchmaker.ModeFleetAllocation, FleetID: fleetID, Region: "us-east-1", GameMode: "1v1"}
-	claim, err := queue.ClaimBucket(ctx, bucket, 1, 50*time.Millisecond)
+	claim, err := queue.ClaimBucket(ctx, bucket, 1, time.Minute)
 	require.NoError(t, err)
 	require.NotNil(t, claim)
-	time.Sleep(100 * time.Millisecond)
+	_, err = pool.Exec(ctx,
+		`UPDATE matchmaking_tickets SET claim_expires_at = now() - interval '1 second' WHERE id = $1`, ticket.ID)
+	require.NoError(t, err)
 
 	n, err := queue.SweepStaleClaims(ctx, 5)
 	require.NoError(t, err)
@@ -747,7 +765,13 @@ func TestPGQueueDriftedCommitDoesNotStrandCapSlot(t *testing.T) {
 	queue := matchmaker.NewPGQueue(appPool)
 	tenantCtx := db.WithTenant(ctx, tenantID)
 	alloc := &allocatorRecorder{pool: pool, address: "10.0.0.9:7777", protocol: "udp"}
-	w := matchmaker.NewWorker(queue, &slowAllocator{inner: alloc, delay: 250 * time.Millisecond}, nil, matchmaker.WorkerConfig{})
+	allocateStarted := make(chan struct{})
+	continueAllocate := make(chan struct{})
+	w := matchmaker.NewWorker(queue, &blockingAllocator{
+		inner:   alloc,
+		started: allocateStarted,
+		resume:  continueAllocate,
+	}, nil, matchmaker.WorkerConfig{})
 
 	ticket, err := queue.Enqueue(tenantCtx, matchmaker.EnqueueRequest{
 		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
@@ -757,13 +781,20 @@ func TestPGQueueDriftedCommitDoesNotStrandCapSlot(t *testing.T) {
 
 	// Cancel while the worker is inside Allocate. Claiming leaves the ticket
 	// 'queued', so the cancel succeeds, and the later commit affects no rows.
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		_ = queue.Cancel(tenantCtx, ticket.ID, playerID)
-	}()
-
-	// The worker allocates, writes the match row, then finds nothing to commit.
-	_ = w.Tick(ctx)
+	tickDone := make(chan error, 1)
+	go func() { tickDone <- w.Tick(ctx) }()
+	select {
+	case <-allocateStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not enter Allocate")
+	}
+	require.NoError(t, queue.Cancel(tenantCtx, ticket.ID, playerID))
+	close(continueAllocate)
+	select {
+	case <-tickDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker Tick did not return after allocation resumed")
+	}
 
 	require.Eventually(t, func() bool { return alloc.deallocated.Load() >= 1 }, 5*time.Second, 20*time.Millisecond,
 		"the orphan server should be released")
@@ -834,18 +865,24 @@ func TestPGQueueFleetCapHoldsAcrossConcurrentWorkers(t *testing.T) {
 		"the player should settle exactly at the cap")
 }
 
-// slowAllocator delays Allocate so a test can land a cancel inside the window
-// between the bucket claim and the ticket commit.
-type slowAllocator struct {
-	inner *allocatorRecorder
-	delay time.Duration
+// blockingAllocator holds Allocate so a test can cancel deterministically in
+// the window between the bucket claim and the ticket commit.
+type blockingAllocator struct {
+	inner   *allocatorRecorder
+	started chan<- struct{}
+	resume  <-chan struct{}
 }
 
-func (s *slowAllocator) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
-	time.Sleep(s.delay)
-	return s.inner.Allocate(ctx, req)
+func (a *blockingAllocator) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
+	close(a.started)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-a.resume:
+		return a.inner.Allocate(ctx, req)
+	}
 }
 
-func (s *slowAllocator) Deallocate(ctx context.Context, id fleet.AllocationID) error {
-	return s.inner.Deallocate(ctx, id)
+func (a *blockingAllocator) Deallocate(ctx context.Context, id fleet.AllocationID) error {
+	return a.inner.Deallocate(ctx, id)
 }
