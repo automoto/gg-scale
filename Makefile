@@ -65,7 +65,7 @@ install-test-reporter:
 
 test-ci: install-test-reporter ## Unit tests with CI-readable JSON and JUnit reports
 	mkdir -p test-results
-	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race ./...
+	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race ./...
 
 check-test-suites: ## Verify every tagged test package belongs to a CI lane
 	@actual="$$(go list -tags='integration e2e' ./tests/integration/... ./tests/e2e/... | LC_ALL=C sort)"; \
@@ -89,14 +89,14 @@ test-integration: check-test-suites ## Fast integration tests (Postgres via Test
 
 test-integration-ci: check-test-suites install-test-reporter ## Fast integration tests with CI-readable reports
 	mkdir -p test-results
-	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
+	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
 
 test-e2e: check-test-suites ## Exhaustive and live-stack end-to-end tests; run after `make up`
 	go test -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
 
 test-e2e-ci: check-test-suites install-test-reporter ## End-to-end tests with CI-readable reports; run after `make up`
 	mkdir -p test-results
-	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
+	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
 
 e2e: test-e2e ## Alias for test-e2e
 
