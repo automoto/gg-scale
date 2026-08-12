@@ -25,8 +25,8 @@ func TestConnectionCapForClass_climbs_with_class(t *testing.T) {
 
 	assert.Equal(t, int64(2500), t0.Sustained)
 	assert.Equal(t, int64(10000), t1.Sustained)
-	assert.Equal(t, int64(25000), t2.Sustained)
-	assert.GreaterOrEqual(t, t3.Sustained, t2.Sustained)
+	assert.Equal(t, int64(50000), t2.Sustained)
+	assert.Equal(t, int64(100000), t3.Sustained)
 }
 
 func TestConnectionCapForClass_ceiling_is_double_sustained(t *testing.T) {

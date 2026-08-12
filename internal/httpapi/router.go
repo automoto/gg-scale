@@ -129,6 +129,9 @@ type Deps struct {
 	// TenantConnectionCap coordinates regional capacity through PostgreSQL
 	// leases while keeping socket admission in process memory.
 	TenantConnectionCap ratelimit.ConnectionCap
+	// ConnectionLimitOverrides supplies optional tenant-specific realtime
+	// envelopes for contracted launches and breakout traffic.
+	ConnectionLimitOverrides ratelimit.ConnectionLimitStore
 
 	// Matchmaker is the ticket queue. nil disables /v1/matchmaker/*.
 	Matchmaker matchmaker.Queue
@@ -305,6 +308,7 @@ func NewRouter(d Deps) http.Handler {
 				Cache:                d.Cache,
 				Limiter:              d.Limiter,
 				RateLimitOverrides:   d.RateLimitOverrides,
+				ConnectionLimits:     d.ConnectionLimitOverrides,
 				ProxyTrust:           d.ProxyTrust,
 				Registry:             reg,
 				Metrics:              d.Metrics,

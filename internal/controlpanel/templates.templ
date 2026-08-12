@@ -692,7 +692,7 @@ templ apiLimitCard(vm APILimitCardView) {
 	<section class="card">
 		<h2>HTTP API limit</h2>
 		<p class="card-subtitle">
-			Per-second rate and burst applied to this Account Tenant's API keys. Blank
+			Per-second rate and burst applied independently to each API key in this Account Tenant. Blank
 			restores the tier default ({ rlNum(vm.DefaultRate) }/s, burst { rlNum(vm.DefaultBurst) }).
 		</p>
 		if vm.IsPlatformAdmin {
@@ -735,6 +735,32 @@ templ RateLimitsPage(vm RateLimitsView) {
 		</div>
 		@flashSuccess(vm.Message)
 		@errorAlert(vm.Error)
+		<section class="card">
+			<h2>Realtime connection limit</h2>
+			<p class="card-subtitle">
+				Sustained and temporary concurrent-user admissions per service region. Blank restores the tier default
+				({ stringFromInt(vm.ConnectionDefaultSustained) } sustained, { stringFromInt(vm.ConnectionDefaultCeiling) } temporary).
+			</p>
+			if vm.IsPlatformAdmin {
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/connections") } class="settings-form">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label>Sustained concurrent users
+						<input name="sustained" type="number" step="1" min="0" value={ connectionLimitValue(vm.ConnectionSustained) } placeholder={ stringFromInt(vm.ConnectionDefaultSustained) }/>
+					</label>
+					<label>Temporary maximum
+						<input name="ceiling" type="number" step="1" min="0" value={ connectionLimitValue(vm.ConnectionCeiling) } placeholder={ stringFromInt(vm.ConnectionDefaultCeiling) }/>
+					</label>
+					<button type="submit" class="btn-inline">Save connection limit</button>
+				</form>
+			} else {
+				if vm.ConnectionOverridden {
+					<p>Override active: <strong>{ stringFromInt(vm.ConnectionSustained) }</strong> sustained, <strong>{ stringFromInt(vm.ConnectionCeiling) }</strong> temporary.</p>
+				} else {
+					<p>Using the tier default.</p>
+				}
+				<p class="muted">Only platform admins can change the connection envelope.</p>
+			}
+		</section>
 		@apiLimitCard(vm.apiLimitCardView())
 		<section class="card">
 			<h2>Invite quotas</h2>

@@ -29,6 +29,15 @@ func TestSetTenantAPIOverride_rejects_nonfinite(t *testing.T) {
 	assert.ErrorIs(t, err, errInvalidLimit)
 }
 
+func TestSetTenantConnectionOverride_validates_envelope_before_database_access(t *testing.T) {
+	h := &Handler{} // nil pool: validation returns before any DB access
+
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 50_000, 0), errIncompleteLimit)
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 0, 100_000), errIncompleteLimit)
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, 100_000, 50_000), errConnectionCeiling)
+	assert.ErrorIs(t, h.setTenantConnectionOverride(context.Background(), 1, 2, -1, 1), errInvalidLimit)
+}
+
 func TestSetTenantRecipientInviteOverride_rejects_nonfinite(t *testing.T) {
 	h := &Handler{} // nil pool: validation returns before any DB access
 	assert.ErrorIs(t, h.setTenantRecipientInviteOverride(context.Background(), 1, 2, math.NaN(), 600), errInvalidLimit)
@@ -110,6 +119,28 @@ func TestParseLimitField(t *testing.T) {
 	}
 	for _, c := range cases {
 		got, err := parseLimitField(c.in)
+		if c.wantErr {
+			assert.Error(t, err, "input %q", c.in)
+			continue
+		}
+		require.NoError(t, err, "input %q", c.in)
+		assert.Equal(t, c.want, got)
+	}
+}
+
+func TestParseConnectionLimitField(t *testing.T) {
+	for _, c := range []struct {
+		in      string
+		want    int64
+		wantErr bool
+	}{
+		{"", 0, false},
+		{"50000", 50_000, false},
+		{"-1", 0, true},
+		{"1.5", 0, true},
+		{"smash", 0, true},
+	} {
+		got, err := parseConnectionLimitField(c.in)
 		if c.wantErr {
 			assert.Error(t, err, "input %q", c.in)
 			continue

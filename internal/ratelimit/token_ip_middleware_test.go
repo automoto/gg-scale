@@ -47,11 +47,11 @@ func TestTokenIPLimitsForTier_should_divide_tier_limits_by_divisor(t *testing.T)
 		rate  float64
 		burst float64
 	}{
-		{tenant.Tier0, 25, 50},
-		{tenant.Tier1, 100, 200},
-		{tenant.Tier2, 250, 500},
-		{tenant.Tier3, 1000, 2000},
-		{tenant.Tier(99), 25, 50},
+		{tenant.Tier0, 25, 250},
+		{tenant.Tier1, 100, 1000},
+		{tenant.Tier2, 500, 5000},
+		{tenant.Tier3, 1000, 10000},
+		{tenant.Tier(99), 25, 250},
 	}
 	for _, tc := range tests {
 		got := ratelimit.TokenIPLimitsForTier(tc.tier)
@@ -70,7 +70,7 @@ func TestTokenIPLimiter_should_derive_limits_from_tier(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	require.Len(t, lim.rates, 1)
 	assert.Equal(t, 100.0, lim.rates[0])
-	assert.Equal(t, 200.0, lim.bursts[0])
+	assert.Equal(t, 1000.0, lim.bursts[0])
 }
 
 func TestTokenIPLimiter_should_use_custom_limits_when_provided(t *testing.T) {

@@ -205,6 +205,7 @@ type Querier interface {
 	CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVerifiedPlayerAccountParams) (pgtype.UUID, error)
 	// Used when the host ends the session so peer rows don't linger until GC.
 	DeleteAllGameSessionPeers(ctx context.Context, sessionID string) error
+	DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) error
 	DeleteControlPanelMembership(ctx context.Context, arg DeleteControlPanelMembershipParams) error
 	// Removes a membership row but refuses to delete the actor's own row. The
 	// previous approach loaded every member to do this check client-side; this
@@ -324,6 +325,9 @@ type Querier interface {
 	// rate-limit middleware; falls back to compiled tier defaults when absent.
 	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
+	// Tenant-level realtime admission envelope. The WebSocket admission path falls
+	// back to compiled tier defaults when no row exists.
+	GetConnectionLimitOverride(ctx context.Context, tenantID int64) (GetConnectionLimitOverrideRow, error)
 	GetControlPanelInvitationByCodeHash(ctx context.Context, codeHash []byte) (GetControlPanelInvitationByCodeHashRow, error)
 	GetControlPanelInvitationByID(ctx context.Context, id int64) (GetControlPanelInvitationByIDRow, error)
 	GetControlPanelMembership(ctx context.Context, arg GetControlPanelMembershipParams) (GetControlPanelMembershipRow, error)
@@ -1033,6 +1037,7 @@ type Querier interface {
 	UpdateProjectSteamAuthConfig(ctx context.Context, arg UpdateProjectSteamAuthConfigParams) (int64, error)
 	UpdateRemoteConfig(ctx context.Context, arg UpdateRemoteConfigParams) (int64, error)
 	UpdateTenantCustomTokenPublicKey(ctx context.Context, arg UpdateTenantCustomTokenPublicKeyParams) (int64, error)
+	UpsertConnectionLimitOverride(ctx context.Context, arg UpsertConnectionLimitOverrideParams) error
 	// Starts (or restarts) enrollment. The WHERE guard makes this a no-op for a
 	// confirmed credential — zero rows means "already enabled", so a stray setup
 	// POST can never silently replace a live secret.

@@ -55,6 +55,7 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		Hub:               d.Hub,
 		Cache:             d.Cache,
 		TenantCap:         d.TenantConnectionCap,
+		ConnectionLimits:  d.ConnectionLimitOverrides,
 		EnvMaxPerTenant:   d.RealtimeMaxPerTenant,
 		MaxPerPlayer:      d.RealtimeMaxPerPlayer,
 		HeartbeatInterval: heartbeat,

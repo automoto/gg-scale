@@ -11,21 +11,22 @@ import (
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
-// CloseCodeTenantConnectionCap is the WebSocket close code used when a new
-// connection would exceed the tenant's concurrency cap. 1013 ("Try Again
-// Later") is RFC 6455 §7.4.1's intended use — the SDK is expected to
-// retry with backoff.
+// CloseCodeTenantConnectionCap is reserved for post-upgrade enforcement of the
+// tenant concurrency cap. Admission is currently checked before the WebSocket
+// upgrade, so rejected handshakes receive HTTP 503 with Retry-After instead.
+// 1013 ("Try Again Later") remains the close code if enforcement moves onto an
+// established WebSocket.
 const CloseCodeTenantConnectionCap = 1013
 
-// CloseReasonTenantConnectionCap is the close-frame reason string the
-// Phase-2 WebSocket handler will send alongside CloseCodeTenantConnectionCap.
+// CloseReasonTenantConnectionCap is the reason string reserved for a future
+// post-upgrade close alongside CloseCodeTenantConnectionCap.
 const CloseReasonTenantConnectionCap = "tenant_connection_cap"
 
 const cacheConnectionCapTTL = 6 * time.Hour
 
 // ConnectionBurstBudget is how much full-2× wall time a tenant may sustain
-// above its sustained cap before the burst bucket clamps it back. Reconnect
-// storms, launch evenings, and streamer raids fit; camping at 2× all day does
+// above its sustained cap before the burst bucket clamps it back. Brief
+// reconnect storms and short traffic spikes fit; extended launch traffic does
 // not. The budget refills over cache.BurstRefillWindow at/below sustained.
 const ConnectionBurstBudget = 10 * time.Minute
 
@@ -48,9 +49,9 @@ func ConnectionCapForClass(t tenant.Tier) CapLimits {
 	case tenant.Tier1:
 		sustained = 10000
 	case tenant.Tier2:
-		sustained = 25000
-	case tenant.Tier3:
 		sustained = 50000
+	case tenant.Tier3:
+		sustained = 100000
 	default:
 		sustained = 2500
 	}

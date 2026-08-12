@@ -373,6 +373,7 @@ func TestRateLimitsPage_api_form_platform_admin_only(t *testing.T) {
 	base := RateLimitsView{
 		UserEmail: "a@example.com", TenantID: 5, CSRFToken: "tok",
 		APIDefaultRate: 60, APIDefaultBurst: 60,
+		ConnectionDefaultSustained: 50_000, ConnectionDefaultCeiling: 100_000,
 		DefaultInviterHour: 10, DefaultDomainDay: 100,
 		Projects: []ProjectInviteLimitView{{ProjectID: 7, ProjectName: "arcade"}},
 	}
@@ -381,13 +382,16 @@ func TestRateLimitsPage_api_form_platform_admin_only(t *testing.T) {
 	admin.IsPlatformAdmin = true
 	adminHTML := renderToString(t, RateLimitsPage(admin))
 	assert.Contains(t, adminHTML, `/tenants/5/rate-limits/api"`)
+	assert.Contains(t, adminHTML, `/tenants/5/rate-limits/connections"`)
 	assert.Contains(t, adminHTML, "Save API limit")
+	assert.Contains(t, adminHTML, "Save connection limit")
 	assert.Contains(t, adminHTML, `/tenants/5/rate-limits/projects/7/invites"`)
 
 	tenantAdmin := base
 	tenantAdmin.IsPlatformAdmin = false
 	taHTML := renderToString(t, RateLimitsPage(tenantAdmin))
 	assert.NotContains(t, taHTML, "Save API limit", "tenant admin can't edit the API ceiling")
+	assert.NotContains(t, taHTML, "Save connection limit", "tenant admin can't edit the connection ceiling")
 	assert.Contains(t, taHTML, "Only platform admins")
 	// Tenant admins still get the per-project invite quota forms.
 	assert.Contains(t, taHTML, `/tenants/5/rate-limits/projects/7/invites"`)

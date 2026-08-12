@@ -356,8 +356,10 @@ func run() error {
 	}
 
 	// Cacheable reads and request token buckets are deliberately process-local.
-	// Shared correctness lives in PostgreSQL; no app request depends on a
-	// distributed cache service.
+	// Managed production currently runs one web process per service region, so
+	// the API-key bucket is the regional bucket. Horizontal web scaling requires
+	// a distributed API limiter (or an explicitly divided per-process quota)
+	// before the published regional API envelope remains exact.
 	store := instrument.New(memory.New(), registry)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -575,41 +577,47 @@ func run() error {
 		worker.Run(workerCtx)
 	}()
 
+	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
+		ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL)
+	connectionLimitOverrides := ratelimit.NewCachedConnectionLimitStore(
+		ratelimit.NewDBConnectionLimitStore(appPool), ratelimit.DefaultOverrideCacheTTL)
+
 	router := httpapi.NewRouter(httpapi.Deps{
-		Version:               "v1",
-		Commit:                buildCommit(),
-		RequestTimeout:        cfg.HTTPRequestTimeout,
-		Pool:                  appPool,
-		ReadPool:              readPool,
-		Lookup:                tenant.NewSQLLookup(pool),
-		Limiter:               ratelimit.NewCacheLimiter(store),
-		RateLimitOverrides:    ratelimit.NewCachedOverrideStore(ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL),
-		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
-		DeleteGracePeriod:     cfg.PlayerDeleteGracePeriod,
-		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
-		ProxyTrust:            ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
-		Signer:                signer,
-		Mailer:                m,
-		MailFrom:              cfg.MailFrom,
-		EnqueuePasswordReset:  enqueuePasswordReset,
-		TwoFactor:             tfCipher,
-		CredentialCipher:      credCipher,
-		EmailVerifySigningKey: emailVerifySigningKey,
-		Cache:                 store,
-		Registry:              registry,
-		Metrics:               metrics,
-		RBAC:                  authorizer,
-		Fleet:                 fleetMgr,
-		Hub:                   hub,
-		RealtimeMaxPerTenant:  cfg.RealtimeMaxPerTenant,
-		RealtimeMaxPerPlayer:  cfg.RealtimeMaxPerPlayer,
-		TenantConnectionCap:   tenantCap,
-		Matchmaker:            mmQueue,
-		MatchmakerTicketTTL:   cfg.MatchmakerTicketTTL,
-		GameSessions:          gameSessions,
-		ServerList:            serverListRegistry,
-		RelayIssuer:           relayIssuer,
-		RelayMeter:            relaymeter.New(appPool, m, cfg.MailFrom),
+		Version:                  "v1",
+		Commit:                   buildCommit(),
+		RequestTimeout:           cfg.HTTPRequestTimeout,
+		Pool:                     appPool,
+		ReadPool:                 readPool,
+		Lookup:                   tenant.NewSQLLookup(pool),
+		Limiter:                  ratelimit.NewCacheLimiter(store),
+		RateLimitOverrides:       rateLimitOverrides,
+		ConnectionLimitOverrides: connectionLimitOverrides,
+		StorageMaxValueBytes:     cfg.StorageMaxValueBytes,
+		DeleteGracePeriod:        cfg.PlayerDeleteGracePeriod,
+		StorageLimits:            storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
+		ProxyTrust:               ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
+		Signer:                   signer,
+		Mailer:                   m,
+		MailFrom:                 cfg.MailFrom,
+		EnqueuePasswordReset:     enqueuePasswordReset,
+		TwoFactor:                tfCipher,
+		CredentialCipher:         credCipher,
+		EmailVerifySigningKey:    emailVerifySigningKey,
+		Cache:                    store,
+		Registry:                 registry,
+		Metrics:                  metrics,
+		RBAC:                     authorizer,
+		Fleet:                    fleetMgr,
+		Hub:                      hub,
+		RealtimeMaxPerTenant:     cfg.RealtimeMaxPerTenant,
+		RealtimeMaxPerPlayer:     cfg.RealtimeMaxPerPlayer,
+		TenantConnectionCap:      tenantCap,
+		Matchmaker:               mmQueue,
+		MatchmakerTicketTTL:      cfg.MatchmakerTicketTTL,
+		GameSessions:             gameSessions,
+		ServerList:               serverListRegistry,
+		RelayIssuer:              relayIssuer,
+		RelayMeter:               relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
 			CookieSecure:           cfg.ControlPanelCookieSecure,

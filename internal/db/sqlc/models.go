@@ -184,6 +184,14 @@ type CasbinRule struct {
 	V5    *string
 }
 
+type ConnectionLimitOverride struct {
+	TenantID  int64
+	Sustained int64
+	Ceiling   int64
+	UpdatedBy *int64
+	UpdatedAt pgtype.Timestamptz
+}
+
 type ControlPanelInvitation struct {
 	ID              int64
 	Email           string

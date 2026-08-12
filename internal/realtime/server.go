@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -31,6 +32,11 @@ type Options struct {
 	// tenant's class is read from the request's API key; the limit is the
 	// class envelope unless EnvMaxPerTenant overrides it.
 	TenantCap ratelimit.ConnectionCap
+
+	// ConnectionLimits resolves an optional tenant-specific connection
+	// envelope. It is checked on admission after EnvMaxPerTenant and before the
+	// compiled tier default. nil means tier defaults only.
+	ConnectionLimits ratelimit.ConnectionLimitStore
 
 	// EnvMaxPerTenant, when > 0, overrides the tier-derived per-tenant cap
 	// with a fixed hard limit (no burst) — an operator escape hatch for
@@ -130,7 +136,15 @@ func ServeWS(opts Options) http.HandlerFunc {
 		// Per-tenant CCU cap: tier-aware regional grants are leased from
 		// PostgreSQL and consumed from process memory on the hot path.
 		if opts.TenantCap != nil {
-			caps := tenantCapLimits(tenantTierFromContext(r.Context()), opts.EnvMaxPerTenant)
+			caps, limitsErr := tenantCapLimits(r.Context(), tenantID, tenantTierFromContext(r.Context()),
+				opts.EnvMaxPerTenant, opts.ConnectionLimits)
+			if limitsErr != nil {
+				logger.Error("realtime: connection limit override lookup failed",
+					"err", limitsErr, "tenant_id", tenantID)
+				w.Header().Set("Retry-After", strconv.Itoa(int(tenantCapRetryAfter.Seconds())))
+				http.Error(w, "connection capacity unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			decision, capErr := opts.TenantCap.Acquire(r.Context(), tenantID, caps)
 			switch {
 			case capErr != nil:
@@ -362,12 +376,23 @@ func tenantTierFromContext(ctx context.Context) tenant.Tier {
 	return key.Tier
 }
 
-// tenantCapLimits resolves the per-tenant connection envelope: the tenant's
-// class limits by default, or a fixed hard cap (no burst) when an operator
-// pins EnvMaxPerTenant.
-func tenantCapLimits(tier tenant.Tier, envOverride int64) ratelimit.CapLimits {
+// tenantCapLimits resolves the per-tenant connection envelope. A deployment-
+// wide environment cap has highest priority for the self-hosted escape hatch;
+// otherwise a persisted tenant override wins over the compiled class default.
+func tenantCapLimits(ctx context.Context, tenantID int64, tier tenant.Tier, envOverride int64,
+	overrides ratelimit.ConnectionLimitStore,
+) (ratelimit.CapLimits, error) {
 	if envOverride > 0 {
-		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}
+		return ratelimit.CapLimits{Sustained: envOverride, Ceiling: envOverride}, nil
 	}
-	return ratelimit.ConnectionCapForClass(tier)
+	if overrides != nil {
+		limits, ok, err := overrides.ConnectionLimit(ctx, tenantID)
+		if err != nil {
+			return ratelimit.CapLimits{}, fmt.Errorf("connection limit override: %w", err)
+		}
+		if ok {
+			return limits, nil
+		}
+	}
+	return ratelimit.ConnectionCapForClass(tier), nil
 }
