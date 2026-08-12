@@ -1,4 +1,5 @@
-.PHONY: help build fmt test check-test-suites test-integration test-e2e test-plugins e2e e2e-agones \
+.PHONY: help build fmt test install-test-reporter test-ci check-test-suites test-integration test-integration-ci \
+	test-e2e test-e2e-ci test-plugins e2e e2e-agones \
 	lint check sqlc-gen templ-generate openapi \
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
@@ -59,6 +60,13 @@ fmt: ## go fmt all packages
 test: ## Unit tests with -race
 	go test -race ./...
 
+install-test-reporter:
+	GOBIN="$(CURDIR)/bin" go -C tools install tool
+
+test-ci: install-test-reporter ## Unit tests with CI-readable JSON and JUnit reports
+	mkdir -p test-results
+	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race ./...
+
 check-test-suites: ## Verify every tagged test package belongs to a CI lane
 	@actual="$$(go list -tags='integration e2e' ./tests/integration/... ./tests/e2e/... | LC_ALL=C sort)"; \
 	integration="$$(go list -tags='integration e2e' $(INTEGRATION_TEST_PACKAGES) | LC_ALL=C sort)"; \
@@ -79,8 +87,16 @@ check-test-suites: ## Verify every tagged test package belongs to a CI lane
 test-integration: check-test-suites ## Fast integration tests (Postgres via Testcontainers; needs Docker)
 	go test -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
 
+test-integration-ci: check-test-suites install-test-reporter ## Fast integration tests with CI-readable reports
+	mkdir -p test-results
+	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags=integration -parallel=$(INTEGRATION_PARALLEL) -timeout=$(INTEGRATION_TIMEOUT) $(INTEGRATION_TEST_PACKAGES)
+
 test-e2e: check-test-suites ## Exhaustive and live-stack end-to-end tests; run after `make up`
 	go test -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
+
+test-e2e-ci: check-test-suites install-test-reporter ## End-to-end tests with CI-readable reports; run after `make up`
+	mkdir -p test-results
+	./bin/gotestsum --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -tags='integration e2e' -parallel=$(INTEGRATION_PARALLEL) -timeout=$(END_TO_END_TIMEOUT) $(END_TO_END_TEST_PACKAGES)
 
 e2e: test-e2e ## Alias for test-e2e
 
