@@ -137,8 +137,13 @@ check: lint test ## Local CI mirror: lint + unit tests
 sqlc-gen: ## Regenerate sqlc queries (Docker, pinned version)
 	docker run --rm -v $(PWD):/src -w /src sqlc/sqlc:$(SQLC_VERSION) generate
 
+# No version pin here: `go tool` resolves the generator from the `tool` directive
+# in go.mod, the same file that pins the templ runtime. Both come from one module,
+# so Dependabot bumps them together and they cannot drift. A `go run ...@vX.Y.Z`
+# pin is invisible to Dependabot — that is how this sat on v0.2.543. Re-run this
+# target and commit the result whenever templ is bumped.
 templ-generate: ## Regenerate *_templ.go control panel templates
-	go run github.com/a-h/templ/cmd/templ@v0.2.543 generate
+	go tool templ generate
 
 # Regenerates openapi.yaml (the /v1 JSON API spec, used for SDK generation)
 # directly from the huma-registered /v1 operations — the spec is emitted from
