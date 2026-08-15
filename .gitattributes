@@ -1,0 +1,9 @@
+# templ output only. `linguist-generated` collapses these by default in GitHub
+# diffs and drops them from the repo's language statistics. The files are still
+# committed and still reviewable — just folded, so a templ version bump does not
+# bury hand-written changes in the same pull request. Reproduce with
+# `make templ-generate`.
+#
+# sqlc (internal/db/sqlc/) and protoc (*.pb.go) output is deliberately NOT
+# marked, so those diffs stay expanded and get read.
+*_templ.go   linguist-generated=true
