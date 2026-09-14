@@ -24,12 +24,14 @@ if ! command -v docker >/dev/null 2>&1; then
     | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
   sudo apt-get update -qq
   # fuse-overlayfs backs the Docker storage driver inside the nested Cloud
-  # Agent VM (the kernel refuses nested native overlay mounts).
+  # Agent VM (the kernel refuses nested native overlay mounts). The
+  # --force-conf* dpkg options keep the fuse3 package from stopping on an
+  # interactive /etc/fuse.conf conffile prompt in the non-interactive build.
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
     docker-ce docker-ce-cli containerd.io docker-buildx-plugin \
     docker-compose-plugin fuse-overlayfs
-  # apt's fuse3 postinst prompts about /etc/fuse.conf; force the default.
-  sudo DEBIAN_FRONTEND=noninteractive dpkg --configure --force-confold -a
 else
   log "Docker already installed ($(docker --version))"
 fi
