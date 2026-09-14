@@ -5,6 +5,7 @@
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-full down-full \
+	bootstrap-token \
 	docker-image docker-push \
 	preflight clean clean-full
 
@@ -195,6 +196,9 @@ migrate-new: ## New migration pair: make migrate-new NAME=<descriptor>
 	  touch db/migrations/$${next}_$(NAME).up.sql db/migrations/$${next}_$(NAME).down.sql; \
 	  echo "created db/migrations/$${next}_$(NAME).up.sql"; \
 	  echo "created db/migrations/$${next}_$(NAME).down.sql"
+
+bootstrap-token: ## Print ./data/bootstrap.token (sudo cat only if needed)
+	@bash scripts/bootstrap-token.sh
 
 clean: ## Stop the basic stack and delete its volumes
 	docker compose down -v --remove-orphans

@@ -7,6 +7,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+SERVER_UID=65532
+SERVER_GID=65532
+
 log() { printf '\n=== %s ===\n' "$1"; }
 
 # ── Start the Docker daemon (no systemd in the Cloud Agent VM) ──────────────
@@ -29,26 +32,26 @@ else
 fi
 
 # ── Fix nested-container networking ────────────────────────────────────────
-# The base image ships a stale iptables-legacy ruleset whose FORWARD policy is
-# DROP and which lacks Docker's per-bridge accept rules. Docker 29 programs the
-# nftables backend instead, so container-to-container traffic (e.g. the server
-# reaching Postgres) is silently dropped by the legacy hook. Opening the legacy
-# FORWARD policy lets nftables govern forwarding as Docker intends.
+# Cloud Agent VMs can inherit a legacy FORWARD policy of DROP. Reconcile it on
+# every boot so Docker bridge traffic, such as the server reaching Postgres,
+# is not rejected by the outer ruleset.
 if command -v iptables-legacy >/dev/null 2>&1; then
   log "Opening iptables-legacy FORWARD policy for Docker bridges"
-  sudo iptables-legacy -P FORWARD ACCEPT || true
+  sudo iptables-legacy -P FORWARD ACCEPT
 fi
 
-# Make the socket usable this boot even before the docker group membership
-# propagates to freshly spawned shells.
-sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
+# The Dockerfile adds the Cloud Agent user to the docker group before the VM
+# starts, so the socket can retain Docker's normal root:docker permissions.
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is running, but the current user cannot access its socket" >&2
+  exit 1
+fi
 
 # ── Ensure the bind-mounted data dir is writable by the server container ────
 # docker-compose mounts ./data into the distroless (uid 65532) server, which
-# writes the control-panel bootstrap token there. A fresh, Docker-created bind
-# target is root-owned, so pre-create it world-writable before `make up`.
+# writes the control-panel bootstrap token there. Give only that uid ownership
+# instead of making the host path world-writable.
 log "Preparing ./data for the server bind mount"
-sudo mkdir -p data
-sudo chmod 0777 data
+sudo install -d -m 0755 -o "$SERVER_UID" -g "$SERVER_GID" data
 
 log "start.sh complete — run 'make up' to launch the dev stack"

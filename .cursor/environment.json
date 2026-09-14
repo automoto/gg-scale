@@ -1,7 +1,15 @@
 {
   "name": "gg-scale",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
   "user": "ubuntu",
   "install": "bash .cursor/install.sh",
   "start": "bash .cursor/start.sh",
-  "ports": [8080, 8025, 9090]
+  "ports": [
+    {"name": "ggscale", "port": 8080},
+    {"name": "mailpit", "port": 8025},
+    {"name": "prometheus", "port": 9090}
+  ]
 }
