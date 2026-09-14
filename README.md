@@ -35,7 +35,7 @@ Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
 ## Onboarding (Control Panel Setup)
 
-1. Read the one-time token: `cat ./data/bootstrap.token`. Server logs report the token file path but never the token value.
+1. Read the one-time token: `sudo cat ./data/bootstrap.token`. Server logs report the token file path but never the token value.
 2. Open `http://localhost:3001/v1/control-panel/setup`, create the first platform admin, then sign in.
 3. Create a **tenant**, a **project**, and a **secret API key**. Every player-facing `/v1/*` call authenticates with `Authorization: Bearer <api_key>`.
 
