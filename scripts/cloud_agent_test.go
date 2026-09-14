@@ -77,6 +77,25 @@ func TestCloudAgentDockerfileProvidesSystemToolchain(t *testing.T) {
 	}
 }
 
+func TestCloudAgentDockerfileExposesGoOnDefaultPath(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, ".cursor", "Dockerfile"))
+	require.NoError(t, err)
+
+	found := false
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if !strings.Contains(line, "/usr/local/bin/go") {
+			continue
+		}
+		if strings.Contains(line, "golangci-lint") {
+			continue
+		}
+		found = true
+		break
+	}
+
+	assert.True(t, found, "Dockerfile must put go on /usr/local/bin; Cloud Agent install does not inherit image ENV PATH")
+}
+
 func TestCloudAgentDockerfileDoesNotCopyRepository(t *testing.T) {
 	data, err := os.ReadFile(repoPath(t, ".cursor", "Dockerfile"))
 	require.NoError(t, err)

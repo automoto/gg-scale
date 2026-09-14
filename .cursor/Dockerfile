@@ -70,6 +70,11 @@ RUN if ! id -u ubuntu >/dev/null 2>&1; then useradd -m -s /bin/bash ubuntu; fi &
 COPY --from=go-toolchain /usr/local/go /usr/local/go
 COPY --from=lint-toolchain /usr/bin/golangci-lint /usr/local/bin/golangci-lint
 
+# Cloud Agent install/start do not inherit image ENV PATH, so expose the
+# toolchain on the default PATH used by bash .cursor/install.sh.
+RUN ln -sf /usr/local/go/bin/go /usr/local/bin/go && \
+    ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+
 ENV HOME=/home/ubuntu
 ENV GOPATH=/home/ubuntu/go
 ENV GOTOOLCHAIN=local
