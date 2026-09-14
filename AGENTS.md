@@ -29,4 +29,4 @@
 
 - `.cursor/install.sh` and `.cursor/start.sh` provision the dev stack. `install.sh` installs Docker (fuse-overlayfs storage driver for the nested VM), the pinned `golangci-lint`, and warms Go caches; `start.sh` boots `dockerd` (there is no systemd), opens the legacy iptables `FORWARD` policy so container-to-container traffic works, and makes `./data` writable for the server bind mount.
 - The Docker daemon is already running on boot — just use `make up`, `make test-integration`, `make e2e`, etc.
-- The server container runs as the distroless `nonroot` uid, so the control-panel bootstrap token is written `0600`; read it with `sudo cat ./data/bootstrap.token` (it is also in `docker compose logs ggscale-server`).
+- The server container runs as the distroless `nonroot` uid, so the control-panel bootstrap token is written `0600`; read it with `sudo cat ./data/bootstrap.token`. Server logs report the token file path but never the token value.
