@@ -1,0 +1,5 @@
+# Default owner for the entire repository.
+* @automoto
+
+# Protect the ownership rules themselves.
+/.github/CODEOWNERS @automoto
