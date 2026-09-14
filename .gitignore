@@ -39,6 +39,10 @@ archive/
 work/
 
 .cursor/*
+# Keep the Cloud Agent environment definition tracked.
+!.cursor/environment.json
+!.cursor/install.sh
+!.cursor/start.sh
 .claude/*
 ggscale-seed
 sdk-go
