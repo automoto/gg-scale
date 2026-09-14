@@ -139,15 +139,117 @@ func TestCloudAgentInstallIsIdempotent(t *testing.T) {
 }
 
 func TestCloudAgentStartAvoidsWorldWritablePaths(t *testing.T) {
+	for _, name := range []string{
+		filepath.Join(".cursor", "start.sh"),
+		filepath.Join("scripts", "bootstrap-token.sh"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(repoPath(t, name))
+			require.NoError(t, err)
+			script := string(data)
+
+			for _, forbidden := range []string{"chmod 666", "chmod 0777"} {
+				assert.NotContains(t, script, forbidden)
+			}
+		})
+	}
+}
+
+func TestBootstrapTokenDocsUsePlainCat(t *testing.T) {
+	for _, name := range []string{"README.md", "AGENTS.md", "docker-compose.yml"} {
+		t.Run(name, func(t *testing.T) {
+			data, err := os.ReadFile(repoPath(t, name))
+			require.NoError(t, err)
+			text := string(data)
+
+			assert.NotContains(t, text, "sudo cat")
+			assert.Contains(t, text, "cat ./data/bootstrap.token")
+		})
+	}
+}
+
+func TestBootstrapTokenScriptChownsExistingFile(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+	tokenFile := filepath.Join(repoDir, "data", "bootstrap.token")
+	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "data"), 0o755))
+	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o640))
+
+	output := runBootstrapTokenScript(t, repoDir, nil)
+
+	assert.Contains(t, output, "bootstrap.token")
+	info, err := os.Stat(tokenFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	sudoCalls, err := os.ReadFile(filepath.Join(repoDir, "sudo.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(sudoCalls), "chown")
+	assert.Contains(t, string(sudoCalls), "chmod 0600")
+}
+
+func TestBootstrapTokenScriptReportsMissingFile(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+
+	output, err := runBootstrapTokenScriptResult(t, repoDir, map[string]string{
+		"BOOTSTRAP_TOKEN_WAIT": "0",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, output, "make up")
+}
+
+func TestBootstrapTokenScriptIfPresentSkipsMissingFile(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+
+	output, err := runBootstrapTokenScriptResult(t, repoDir, map[string]string{
+		"BOOTSTRAP_TOKEN_WAIT": "0",
+	}, "--if-present")
+
+	require.NoError(t, err, output)
+	assert.Contains(t, output, "make up")
+}
+
+func TestCloudAgentStartClaimsExistingBootstrapToken(t *testing.T) {
 	data, err := os.ReadFile(repoPath(t, ".cursor", "start.sh"))
 	require.NoError(t, err)
 	script := string(data)
 
-	for _, forbidden := range []string{"chmod 666", "chmod 0777"} {
-		t.Run(forbidden, func(t *testing.T) {
-			assert.NotContains(t, script, forbidden)
-		})
-	}
+	assert.Contains(t, script, `install -d -m 0755 -o "$SERVER_UID" -g "$SERVER_GID" data`)
+	assert.Contains(t, script, "scripts/bootstrap-token.sh --if-present")
+}
+
+func TestBootstrapTokenScriptPrepareRestoresServerOwner(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+	tokenFile := filepath.Join(repoDir, "data", "bootstrap.token")
+	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "data"), 0o755))
+	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o600))
+
+	output, err := runBootstrapTokenScriptResult(t, repoDir, nil, "--prepare")
+
+	require.NoError(t, err, output)
+	sudoCalls, err := os.ReadFile(filepath.Join(repoDir, "sudo.log"))
+	require.NoError(t, err)
+	assert.Contains(t, string(sudoCalls), "chown 65532:65532")
+	assert.Contains(t, string(sudoCalls), "chmod 0600")
+}
+
+func TestBootstrapTokenScriptPrepareIsNoopWhenMissing(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+
+	output, err := runBootstrapTokenScriptResult(t, repoDir, nil, "--prepare")
+
+	require.NoError(t, err, output)
+	_, statErr := os.Stat(filepath.Join(repoDir, "sudo.log"))
+	assert.Error(t, statErr)
+}
+
+func TestMakefileExposesBootstrapTokenTarget(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, "Makefile"))
+	require.NoError(t, err)
+	text := string(data)
+
+	assert.Contains(t, text, "bootstrap-token")
+	assert.Contains(t, text, "scripts/bootstrap-token.sh")
 }
 
 func repoPath(t *testing.T, elements ...string) string {
@@ -167,4 +269,45 @@ func copyFile(t *testing.T, source, destination string, mode os.FileMode) {
 func writeExecutable(t *testing.T, path, contents string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, []byte(contents), 0o755))
+}
+
+func setupBootstrapTokenRepo(t *testing.T) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "scripts"), 0o755))
+	copyFile(t, repoPath(t, "scripts", "bootstrap-token.sh"), filepath.Join(repoDir, "scripts", "bootstrap-token.sh"), 0o755)
+	writeExecutable(t, filepath.Join(repoDir, "sudo"), `#!/bin/sh
+printf '%s\n' "$*" >> "$SUDO_LOG"
+if [ "$1" = "chown" ]; then
+  case "$2" in
+    65532:65532) exit 0 ;;
+  esac
+fi
+exec "$@"
+`)
+	return repoDir
+}
+
+func runBootstrapTokenScript(t *testing.T, repoDir string, extraEnv map[string]string, args ...string) string {
+	t.Helper()
+	output, err := runBootstrapTokenScriptResult(t, repoDir, extraEnv, args...)
+	require.NoError(t, err, output)
+	return output
+}
+
+func runBootstrapTokenScriptResult(t *testing.T, repoDir string, extraEnv map[string]string, args ...string) (string, error) {
+	t.Helper()
+	cmdArgs := append([]string{filepath.Join(repoDir, "scripts", "bootstrap-token.sh")}, args...)
+	cmd := exec.Command("/bin/bash", cmdArgs...)
+	cmd.Dir = repoDir
+	env := append(os.Environ(),
+		"PATH="+repoDir+":"+os.Getenv("PATH"),
+		"SUDO_LOG="+filepath.Join(repoDir, "sudo.log"),
+	)
+	for key, value := range extraEnv {
+		env = append(env, key+"="+value)
+	}
+	cmd.Env = env
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }

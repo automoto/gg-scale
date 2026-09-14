@@ -53,5 +53,11 @@ fi
 # instead of making the host path world-writable.
 log "Preparing ./data for the server bind mount"
 sudo install -d -m 0755 -o "$SERVER_UID" -g "$SERVER_GID" data
+# If a previous boot already wrote the token, chown it so the host user can
+# `cat` it without sudo. `make up` restores server ownership first so the
+# container can rewrite the file.
+if [ -f data/bootstrap.token ]; then
+  BOOTSTRAP_TOKEN_WAIT=0 bash scripts/bootstrap-token.sh --if-present
+fi
 
 log "start.sh complete — run 'make up' to launch the dev stack"

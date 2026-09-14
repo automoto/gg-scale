@@ -5,6 +5,7 @@
 	proto build-example-plugin seed \
 	up down logs psql migrate migrate-new \
 	up-full down-full \
+	bootstrap-token \
 	docker-image docker-push \
 	preflight clean clean-full
 
@@ -174,7 +175,9 @@ seed: ## Seed dev data (destructive: -force)
 # ─── Simple stack (self-hosting) ────────────────────────────────────────
 
 up: preflight ## Basic stack: server + Postgres + Mailpit
+	@bash scripts/bootstrap-token.sh --prepare
 	docker compose up -d --build --wait
+	@BOOTSTRAP_TOKEN_WAIT=10 bash scripts/bootstrap-token.sh --if-present
 
 down: ## Stop the basic stack
 	docker compose down --remove-orphans
@@ -196,6 +199,9 @@ migrate-new: ## New migration pair: make migrate-new NAME=<descriptor>
 	  echo "created db/migrations/$${next}_$(NAME).up.sql"; \
 	  echo "created db/migrations/$${next}_$(NAME).down.sql"
 
+bootstrap-token: ## Chown ./data/bootstrap.token so the current user can cat it
+	@bash scripts/bootstrap-token.sh
+
 clean: ## Stop the basic stack and delete its volumes
 	docker compose down -v --remove-orphans
 
@@ -206,7 +212,9 @@ clean: ## Stop the basic stack and delete its volumes
 # ─── Full dev stack (base + prometheus) ─────────────────────────────────
 
 up-full: preflight ## Contributor stack: base + Prometheus
+	@bash scripts/bootstrap-token.sh --prepare
 	$(FULL_STACK) up -d --wait
+	@BOOTSTRAP_TOKEN_WAIT=10 bash scripts/bootstrap-token.sh --if-present
 
 down-full: ## Stop the full stack
 	$(FULL_STACK) down --remove-orphans

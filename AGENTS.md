@@ -30,4 +30,4 @@
 - `.cursor/Dockerfile` provides pinned Go, Docker Engine/CLI, and `golangci-lint` versions plus Compose. It configures the `fuse-overlayfs` storage driver and Docker access for the Cloud Agent user.
 - `.cursor/install.sh` creates `.env` and warms Go caches during environment builds. `.cursor/start.sh` boots `dockerd` (there is no systemd), opens the legacy iptables `FORWARD` policy so container-to-container traffic works, and prepares `./data` for the server bind mount.
 - The start hook leaves the Docker daemon ready — just use `make up`, `make test-integration`, `make e2e`, etc.
-- The server container runs as the distroless `nonroot` uid, so the control-panel bootstrap token is written `0600`; read it with `sudo cat ./data/bootstrap.token`. Server logs report the token file path but never the token value.
+- The server container runs as the distroless `nonroot` uid, so the control-panel bootstrap token is written `0600`. `make up` and `make bootstrap-token` chown it to the current user; read it with `cat ./data/bootstrap.token`. Server logs report the token file path but never the token value.
