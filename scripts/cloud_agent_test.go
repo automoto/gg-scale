@@ -155,7 +155,7 @@ func TestCloudAgentStartAvoidsWorldWritablePaths(t *testing.T) {
 	}
 }
 
-func TestBootstrapTokenDocsUsePlainCat(t *testing.T) {
+func TestBootstrapTokenDocsAvoidSudoCat(t *testing.T) {
 	for _, name := range []string{"README.md", "AGENTS.md", "docker-compose.yml"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile(repoPath(t, name))
@@ -163,28 +163,55 @@ func TestBootstrapTokenDocsUsePlainCat(t *testing.T) {
 			text := string(data)
 
 			assert.NotContains(t, text, "sudo cat")
-			assert.Contains(t, text, "cat ./data/bootstrap.token")
+			assert.Contains(t, text, "make bootstrap-token")
 		})
 	}
 }
 
-func TestBootstrapTokenScriptChownsExistingFile(t *testing.T) {
+func TestBootstrapTokenScriptDoesNotChangeOwnership(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, "scripts", "bootstrap-token.sh"))
+	require.NoError(t, err)
+	script := string(data)
+
+	assert.NotContains(t, script, "chown")
+	assert.Contains(t, script, "sudo cat")
+}
+
+func TestBootstrapTokenScriptPrintsReadableFile(t *testing.T) {
 	repoDir := setupBootstrapTokenRepo(t)
 	tokenFile := filepath.Join(repoDir, "data", "bootstrap.token")
 	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "data"), 0o755))
-	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o640))
+	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o600))
 
 	output := runBootstrapTokenScript(t, repoDir, nil)
 
-	assert.Contains(t, output, "bootstrap.token")
+	assert.Equal(t, "secret\n", output)
 	info, err := os.Stat(tokenFile)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	_, statErr := os.Stat(filepath.Join(repoDir, "sudo.log"))
+	assert.Error(t, statErr)
+}
 
+func TestBootstrapTokenScriptUsesSudoCatWhenUnreadable(t *testing.T) {
+	repoDir := setupBootstrapTokenRepo(t)
+	tokenFile := filepath.Join(repoDir, "data", "bootstrap.token")
+	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "data"), 0o755))
+	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o000))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "sudo-cat-source"), []byte("secret\n"), 0o600))
+
+	output := runBootstrapTokenScript(t, repoDir, map[string]string{
+		"SUDO_CAT_SOURCE": filepath.Join(repoDir, "sudo-cat-source"),
+	})
+
+	assert.Equal(t, "secret\n", output)
+	info, err := os.Stat(tokenFile)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o000), info.Mode().Perm())
 	sudoCalls, err := os.ReadFile(filepath.Join(repoDir, "sudo.log"))
 	require.NoError(t, err)
-	assert.Contains(t, string(sudoCalls), "chown")
-	assert.Contains(t, string(sudoCalls), "chmod 0600")
+	assert.Contains(t, string(sudoCalls), "cat ./data/bootstrap.token")
+	assert.NotContains(t, string(sudoCalls), "chown")
 }
 
 func TestBootstrapTokenScriptReportsMissingFile(t *testing.T) {
@@ -198,49 +225,13 @@ func TestBootstrapTokenScriptReportsMissingFile(t *testing.T) {
 	assert.Contains(t, output, "make up")
 }
 
-func TestBootstrapTokenScriptIfPresentSkipsMissingFile(t *testing.T) {
-	repoDir := setupBootstrapTokenRepo(t)
-
-	output, err := runBootstrapTokenScriptResult(t, repoDir, map[string]string{
-		"BOOTSTRAP_TOKEN_WAIT": "0",
-	}, "--if-present")
-
-	require.NoError(t, err, output)
-	assert.Contains(t, output, "make up")
-}
-
-func TestCloudAgentStartClaimsExistingBootstrapToken(t *testing.T) {
+func TestCloudAgentStartLeavesTokenOwnedByServer(t *testing.T) {
 	data, err := os.ReadFile(repoPath(t, ".cursor", "start.sh"))
 	require.NoError(t, err)
 	script := string(data)
 
 	assert.Contains(t, script, `install -d -m 0755 -o "$SERVER_UID" -g "$SERVER_GID" data`)
-	assert.Contains(t, script, "scripts/bootstrap-token.sh --if-present")
-}
-
-func TestBootstrapTokenScriptPrepareRestoresServerOwner(t *testing.T) {
-	repoDir := setupBootstrapTokenRepo(t)
-	tokenFile := filepath.Join(repoDir, "data", "bootstrap.token")
-	require.NoError(t, os.Mkdir(filepath.Join(repoDir, "data"), 0o755))
-	require.NoError(t, os.WriteFile(tokenFile, []byte("secret\n"), 0o600))
-
-	output, err := runBootstrapTokenScriptResult(t, repoDir, nil, "--prepare")
-
-	require.NoError(t, err, output)
-	sudoCalls, err := os.ReadFile(filepath.Join(repoDir, "sudo.log"))
-	require.NoError(t, err)
-	assert.Contains(t, string(sudoCalls), "chown 65532:65532")
-	assert.Contains(t, string(sudoCalls), "chmod 0600")
-}
-
-func TestBootstrapTokenScriptPrepareIsNoopWhenMissing(t *testing.T) {
-	repoDir := setupBootstrapTokenRepo(t)
-
-	output, err := runBootstrapTokenScriptResult(t, repoDir, nil, "--prepare")
-
-	require.NoError(t, err, output)
-	_, statErr := os.Stat(filepath.Join(repoDir, "sudo.log"))
-	assert.Error(t, statErr)
+	assert.NotContains(t, script, "bootstrap-token.sh")
 }
 
 func TestMakefileExposesBootstrapTokenTarget(t *testing.T) {
@@ -250,6 +241,8 @@ func TestMakefileExposesBootstrapTokenTarget(t *testing.T) {
 
 	assert.Contains(t, text, "bootstrap-token")
 	assert.Contains(t, text, "scripts/bootstrap-token.sh")
+	assert.NotContains(t, text, "--prepare")
+	assert.NotContains(t, text, "--if-present")
 }
 
 func repoPath(t *testing.T, elements ...string) string {
@@ -278,10 +271,9 @@ func setupBootstrapTokenRepo(t *testing.T) string {
 	copyFile(t, repoPath(t, "scripts", "bootstrap-token.sh"), filepath.Join(repoDir, "scripts", "bootstrap-token.sh"), 0o755)
 	writeExecutable(t, filepath.Join(repoDir, "sudo"), `#!/bin/sh
 printf '%s\n' "$*" >> "$SUDO_LOG"
-if [ "$1" = "chown" ]; then
-  case "$2" in
-    65532:65532) exit 0 ;;
-  esac
+if [ "$1" = "cat" ] && [ -n "$SUDO_CAT_SOURCE" ]; then
+  cat "$SUDO_CAT_SOURCE"
+  exit $?
 fi
 exec "$@"
 `)

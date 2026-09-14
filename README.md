@@ -35,7 +35,7 @@ Expected: `{"status":"ok"}` with header `X-API-Version: v1`.
 
 ## Onboarding (Control Panel Setup)
 
-1. Read the one-time token: `cat ./data/bootstrap.token`. `make up` chowns the file to the current user (`make bootstrap-token` retries if it is not ready yet). Server logs report the token file path but never the token value.
+1. Read the one-time token: `make bootstrap-token`. Server logs report the token file path (`./data/bootstrap.token`) but never the token value.
 2. Open `http://localhost:3001/v1/control-panel/setup`, create the first platform admin, then sign in.
 3. Create a **tenant**, a **project**, and a **secret API key**. Every player-facing `/v1/*` call authenticates with `Authorization: Bearer <api_key>`.
 
@@ -48,7 +48,7 @@ Run `make help` for the full list.
 | Target | What it does |
 |---|---|
 | `make up` / `make down` / `make clean` | Basic dev stack (server + Postgres + SMTP). |
-| `make bootstrap-token` | Chown `./data/bootstrap.token` so `cat` works without sudo. |
+| `make bootstrap-token` | Print the control-panel bootstrap token from `./data/bootstrap.token`. |
 | `make test` | Unit tests with `-race`. |
 | `make test-integration` | Integration tests (Postgres via testcontainers). |
 | `make e2e` | End-to-end suite against the running `make up` stack. |
