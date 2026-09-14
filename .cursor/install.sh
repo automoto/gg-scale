@@ -2,97 +2,18 @@
 # Cloud Agent install phase: prepare durable, source-derived state for the
 # gg-scale dev stack. Idempotent — safe to re-run against a warm snapshot.
 #
-# What lives here (vs. start.sh): everything that is stable and can be baked
-# into the environment build snapshot — system packages, pinned tools, Go
-# module cache, and a compiled package cache. Per-boot work (starting the
-# Docker daemon, fixing nested-container networking) lives in start.sh.
+# The pinned system toolchain lives in Dockerfile. This script runs after the
+# repository is checked out, so it only prepares repository-derived state.
+# Per-boot work (starting Docker and preparing runtime paths) lives in start.sh.
 set -euo pipefail
 
-DOCKER_ENGINE_VERSION="29.8.0"
-GOLANGCI_LINT_VERSION="v2.11.4" # keep in sync with .github/workflows/ci.yml
-
 log() { printf '\n=== %s ===\n' "$1"; }
-
-docker_toolchain_ready() {
-  local client_version
-
-  command -v docker >/dev/null 2>&1 || return 1
-  command -v dockerd >/dev/null 2>&1 || return 1
-  command -v fuse-overlayfs >/dev/null 2>&1 || return 1
-  command -v iptables-legacy >/dev/null 2>&1 || return 1
-  client_version="$(docker --version 2>/dev/null)" || return 1
-  [[ "$client_version" == "Docker version ${DOCKER_ENGINE_VERSION},"* ]] || return 1
-  docker compose version >/dev/null 2>&1
-}
-
-install_docker() {
-  local VERSION_CODENAME VERSION_ID docker_package_version
-  # shellcheck disable=SC1091 -- provided by every supported Ubuntu image.
-  . /etc/os-release
-  docker_package_version="5:${DOCKER_ENGINE_VERSION}-1~ubuntu.${VERSION_ID}~${VERSION_CODENAME}"
-
-  log "Installing Docker Engine ${DOCKER_ENGINE_VERSION} + Compose plugin"
-  sudo install -m 0755 -d /etc/apt/keyrings
-  sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  sudo chmod a+r /etc/apt/keyrings/docker.asc
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
-    | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
-  sudo apt-get update -qq
-  # fuse-overlayfs backs the Docker storage driver inside the nested Cloud
-  # Agent VM (the kernel refuses nested native overlay mounts). The
-  # --force-conf* dpkg options keep the fuse3 package from stopping on an
-  # interactive /etc/fuse.conf conffile prompt in the non-interactive build.
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --allow-downgrades \
-    -o Dpkg::Options::=--force-confdef \
-    -o Dpkg::Options::=--force-confold \
-    "docker-ce=${docker_package_version}" "docker-ce-cli=${docker_package_version}" \
-    containerd.io docker-buildx-plugin \
-    docker-compose-plugin fuse-overlayfs iptables
-}
 
 main() {
   local repo_root
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   cd "$repo_root"
 
-  # ── Docker Engine + Compose (needed by make up / integration / e2e) ──────
-  if docker_toolchain_ready; then
-    log "Docker toolchain already installed ($(docker --version))"
-  else
-    install_docker
-    if ! docker_toolchain_ready; then
-      echo "Docker installation incomplete" >&2
-      return 1
-    fi
-  fi
-
-  # ── Docker daemon config for the nested VM ───────────────────────────────
-  # Native overlay mounts fail in the nested VM, so use the fuse-overlayfs
-  # graph driver with the classic (non-containerd) snapshotter.
-  log "Writing /etc/docker/daemon.json"
-  sudo mkdir -p /etc/docker
-  sudo tee /etc/docker/daemon.json >/dev/null <<'JSON'
-{
-  "storage-driver": "fuse-overlayfs",
-  "features": { "containerd-snapshotter": false }
-}
-JSON
-
-  # ── Let the dev user talk to Docker without sudo ─────────────────────────
-  sudo groupadd -f docker
-  sudo usermod -aG docker "$(id -un)"
-
-  # ── golangci-lint (pinned to the version CI enforces) ────────────────────
-  if ! command -v golangci-lint >/dev/null 2>&1 || \
-     ! golangci-lint version 2>/dev/null | grep -q "${GOLANGCI_LINT_VERSION#v}"; then
-    log "Installing golangci-lint ${GOLANGCI_LINT_VERSION}"
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
-      | sudo sh -s -- -b /usr/local/bin "${GOLANGCI_LINT_VERSION}"
-  else
-    log "golangci-lint already installed ($(golangci-lint version 2>/dev/null | head -1))"
-  fi
-
-  # ── Repo bootstrap ───────────────────────────────────────────────────────
   if [ ! -f .env ]; then
     log "Creating .env from .env.example"
     cp .env.example .env

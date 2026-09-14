@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,6 +16,23 @@ import (
 type cursorPort struct {
 	Name string `json:"name"`
 	Port int    `json:"port"`
+}
+
+type cursorBuild struct {
+	Dockerfile string `json:"dockerfile"`
+	Context    string `json:"context"`
+}
+
+func TestCursorEnvironmentUsesRepositoryDockerfile(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, ".cursor", "environment.json"))
+	require.NoError(t, err)
+
+	var environment struct {
+		Build cursorBuild `json:"build"`
+	}
+	require.NoError(t, json.Unmarshal(data, &environment))
+
+	assert.Equal(t, cursorBuild{Dockerfile: "Dockerfile", Context: ".."}, environment.Build)
 }
 
 func TestCursorEnvironmentPortsUseSchemaObjects(t *testing.T) {
@@ -33,40 +51,82 @@ func TestCursorEnvironmentPortsUseSchemaObjects(t *testing.T) {
 	}, environment.Ports)
 }
 
-func TestDockerToolchainReadyRequiresEveryCapability(t *testing.T) {
-	script := repoPath(t, ".cursor", "install.sh")
+func TestCloudAgentDockerfileProvidesSystemToolchain(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, ".cursor", "Dockerfile"))
+	require.NoError(t, err)
+	dockerfile := string(data)
 
 	tests := []struct {
-		name          string
-		missing       string
-		composeWorks  bool
-		dockerVersion string
-		want          bool
+		name string
+		want string
 	}{
-		{name: "complete toolchain", composeWorks: true, dockerVersion: "29.8.0", want: true},
-		{name: "missing client", missing: "docker", composeWorks: true, dockerVersion: "29.8.0"},
-		{name: "missing daemon", missing: "dockerd", composeWorks: true, dockerVersion: "29.8.0"},
-		{name: "missing storage driver", missing: "fuse-overlayfs", composeWorks: true, dockerVersion: "29.8.0"},
-		{name: "missing legacy iptables", missing: "iptables-legacy", composeWorks: true, dockerVersion: "29.8.0"},
-		{name: "missing compose plugin", dockerVersion: "29.8.0"},
-		{name: "different Docker version", composeWorks: true, dockerVersion: "29.7.2"},
+		{name: "Ubuntu base", want: "FROM ubuntu:24.04"},
+		{name: "Go version", want: "ARG GO_VERSION=1.26.5"},
+		{name: "Docker version", want: "ARG DOCKER_ENGINE_VERSION=29.8.0"},
+		{name: "lint version", want: "ARG GOLANGCI_LINT_VERSION=v2.11.4"},
+		{name: "Compose plugin", want: "docker-compose-plugin"},
+		{name: "nested storage driver", want: `"storage-driver": "fuse-overlayfs"`},
+		{name: "legacy firewall", want: "iptables-legacy"},
+		{name: "Docker access", want: "usermod -aG docker ubuntu"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			binDir := t.TempDir()
-			for _, tool := range []string{"docker", "dockerd", "fuse-overlayfs", "iptables-legacy"} {
-				if tool == tt.missing {
-					continue
-				}
-				writeFakeTool(t, binDir, tool, tool != "docker" || tt.composeWorks, tt.dockerVersion)
-			}
+			assert.Contains(t, dockerfile, tt.want)
+		})
+	}
+}
 
-			cmd := exec.Command("/bin/bash", "-c", `source "$1"; docker_toolchain_ready`, "cloud-agent-test", script)
-			cmd.Env = []string{"PATH=" + binDir}
-			output, err := cmd.CombinedOutput()
+func TestCloudAgentDockerfileDoesNotCopyRepository(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, ".cursor", "Dockerfile"))
+	require.NoError(t, err)
 
-			assert.Equal(t, tt.want, err == nil, string(output))
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "COPY ") {
+			continue
+		}
+		assert.Contains(t, line, "--from=", line)
+	}
+}
+
+func TestCloudAgentInstallIsIdempotent(t *testing.T) {
+	repoDir := t.TempDir()
+	cursorDir := filepath.Join(repoDir, ".cursor")
+	require.NoError(t, os.Mkdir(cursorDir, 0o755))
+	copyFile(t, repoPath(t, ".cursor", "install.sh"), filepath.Join(cursorDir, "install.sh"), 0o755)
+	copyFile(t, repoPath(t, ".env.example"), filepath.Join(repoDir, ".env.example"), 0o644)
+
+	binDir := t.TempDir()
+	goLog := filepath.Join(repoDir, "go.log")
+	writeExecutable(t, filepath.Join(binDir, "go"), "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CLOUD_AGENT_GO_LOG\"\n")
+
+	for range 2 {
+		cmd := exec.Command("/bin/bash", filepath.Join(cursorDir, "install.sh"))
+		cmd.Env = append(os.Environ(), "PATH="+binDir+":"+os.Getenv("PATH"), "CLOUD_AGENT_GO_LOG="+goLog)
+		output, err := cmd.CombinedOutput()
+		require.NoError(t, err, string(output))
+	}
+
+	environment, err := os.ReadFile(filepath.Join(repoDir, ".env"))
+	require.NoError(t, err)
+	environmentExample, err := os.ReadFile(filepath.Join(repoDir, ".env.example"))
+	require.NoError(t, err)
+	assert.Equal(t, environmentExample, environment)
+
+	goCalls, err := os.ReadFile(goLog)
+	require.NoError(t, err)
+	assert.Equal(t, "mod download\nbuild ./...\nmod download\nbuild ./...\n", string(goCalls))
+}
+
+func TestCloudAgentStartAvoidsWorldWritablePaths(t *testing.T) {
+	data, err := os.ReadFile(repoPath(t, ".cursor", "start.sh"))
+	require.NoError(t, err)
+	script := string(data)
+
+	for _, forbidden := range []string{"chmod 666", "chmod 0777"} {
+		t.Run(forbidden, func(t *testing.T) {
+			assert.NotContains(t, script, forbidden)
 		})
 	}
 }
@@ -78,20 +138,14 @@ func repoPath(t *testing.T, elements ...string) string {
 	return filepath.Join(append([]string{filepath.Dir(filename), ".."}, elements...)...)
 }
 
-func writeFakeTool(t *testing.T, dir, name string, succeeds bool, dockerVersion string) {
+func copyFile(t *testing.T, source, destination string, mode os.FileMode) {
 	t.Helper()
-	exitCode := "1"
-	if succeeds {
-		exitCode = "0"
-	}
-	contents := []byte("#!/bin/sh\nexit " + exitCode + "\n")
-	if name == "docker" {
-		contents = []byte("#!/bin/sh\n" +
-			"if [ \"$1\" = \"--version\" ]; then\n" +
-			"  echo \"Docker version " + dockerVersion + ", build test\"\n" +
-			"  exit 0\n" +
-			"fi\n" +
-			"exit " + exitCode + "\n")
-	}
-	require.NoError(t, os.WriteFile(filepath.Join(dir, name), contents, 0o755))
+	contents, err := os.ReadFile(source)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(destination, contents, mode))
+}
+
+func writeExecutable(t *testing.T, path, contents string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(path, []byte(contents), 0o755))
 }
