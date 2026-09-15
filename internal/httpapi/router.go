@@ -55,8 +55,10 @@ import (
 // /v1/healthz + /metrics routes are mounted — useful for unit tests that
 // don't need authenticated paths.
 type Deps struct {
-	Version string
-	Commit  string
+	// PartyEnqueueEnabled opens party queue after the one-time entry cutover.
+	PartyEnqueueEnabled bool
+	Version             string
+	Commit              string
 
 	// RequestTimeout bounds non-streaming requests; 0 disables the deadline
 	// middleware (used by unit-test fixtures). WebSocket paths are exempt.
@@ -421,6 +423,7 @@ func NewRouter(d Deps) http.Handler {
 						r.Group(func(r chi.Router) {
 							r.Use(tenant.RequireKeyScope(tenant.ScopeMatchmaker))
 							registerMatchmakerRoutes(groupAPI(r, humaCfg), d)
+							registerPartyRoutes(groupAPI(r, humaCfg), d)
 						})
 					}
 

@@ -66,3 +66,9 @@ func (b *noopBackend) Ping(_ context.Context) error {
 	}
 	return nil
 }
+
+// CleanupResolution is idempotent. A real backend deletes resources with the
+// ggscale.dev/resolution-id label; this example owns no external resources.
+func (b *noopBackend) CleanupResolution(_ context.Context, _ string, _ map[string]string) error {
+	return nil
+}

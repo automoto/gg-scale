@@ -114,6 +114,7 @@ type Config struct {
 	MatchmakerSweepInterval time.Duration `env:"MATCHMAKER_SWEEP_INTERVAL" envDefault:"60s"`
 	// MatchmakerTicketTTL is how long a queued ticket lives before the
 	// sweeper fails it. 0 disables expiry. Default 10m.
+	PartyEnqueueEnabled bool          `env:"PARTY_ENQUEUE_ENABLED" envDefault:"false"`
 	MatchmakerTicketTTL time.Duration `env:"MATCHMAKER_TICKET_TTL" envDefault:"10m"`
 
 	// TURN relay tunables. The relay is disabled unless RelayPublicIP and

@@ -39,29 +39,39 @@ func (q *Queries) CancelMatchmakingTicket(ctx context.Context, arg CancelMatchma
 }
 
 const claimMatchmakerBucket = `-- name: ClaimMatchmakerBucket :many
-WITH candidates AS (
-    SELECT mt.id
-    FROM matchmaking_tickets mt
-    WHERE mt.status = 'queued'
-      AND mt.claim_id IS NULL
-      AND (mt.expires_at IS NULL OR mt.expires_at > now())
-      AND mt.tenant_id  = $3
-      AND mt.project_id = $4
-      AND mt.mode       = $5
-      AND mt.fleet_id IS NOT DISTINCT FROM $6::bigint
-      AND (mt.mode <> 'fleet_allocation' OR mt.region = $7)
-      AND mt.game_mode  = $8
-    ORDER BY mt.created_at, mt.id
-    LIMIT $9::int
+WITH candidates AS MATERIALIZED (
+    SELECT e.id,e.created_at,
+           (SELECT count(*) FROM matchmaking_tickets mt WHERE mt.entry_id=e.id) AS players
+    FROM matchmaking_entries e
+    WHERE e.status='queued'
+      AND e.tenant_id=$4 AND e.project_id=$5
+      AND EXISTS (
+        SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
+         AND mt.status='queued' AND mt.claim_id IS NULL
+         AND (mt.expires_at IS NULL OR mt.expires_at>now())
+         AND mt.mode=$6
+         AND mt.fleet_id IS NOT DISTINCT FROM $7::bigint
+         AND (mt.mode<>'fleet_allocation' OR mt.region=$8)
+         AND mt.game_mode=$9
+      )
+      AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
+        AND (mt.status<>'queued' OR mt.claim_id IS NOT NULL OR mt.expires_at<=now()))
+    ORDER BY e.created_at,e.id
+    LIMIT $3::int
     FOR UPDATE SKIP LOCKED
+), budgeted AS (
+    SELECT id, sum(players) OVER (ORDER BY created_at,id) AS player_count,
+           row_number() OVER (ORDER BY created_at,id) AS position
+    FROM candidates
 )
 UPDATE matchmaking_tickets t
 SET claim_id         = $1::uuid,
     claimed_at       = now(),
     claim_expires_at = now() + $2::interval
-FROM candidates c
-WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
+FROM budgeted c
+WHERE t.entry_id = c.id
+  AND (c.player_count <= $3::int OR c.position = 1)
+RETURNING t.id, t.entry_id, t.party_id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.mode, t.min_count, t.max_count,
           t.count_multiple, t.allow_cross_region, t.query,
@@ -71,17 +81,19 @@ RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
 type ClaimMatchmakerBucketParams struct {
 	ClaimID   pgtype.UUID
 	Ttl       pgtype.Interval
+	Limit     int32
 	TenantID  int64
 	ProjectID int64
 	Mode      string
 	FleetID   *int64
 	Region    string
 	GameMode  string
-	Limit     int32
 }
 
 type ClaimMatchmakerBucketRow struct {
 	ID                int64
+	EntryID           int64
+	PartyID           *int64
 	TenantID          int64
 	ProjectID         int64
 	FleetID           *int64
@@ -104,10 +116,11 @@ type ClaimMatchmakerBucketRow struct {
 	MatchedAt         pgtype.Timestamptz
 }
 
-// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+// Bound the player count without splitting entries. The oldest entry can
+// exceed a small budget so it is never starved. Their tickets
 // stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 // subsequent ClaimBucket (different worker) skips them. The caller commits
-// via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+// via CommitMatchmakerTickets (success) or ReleaseMatchmakerTickets (failure);
 // a crashed caller's claim is released by the sweeper once
 // claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
 // IS NOT DISTINCT FROM.
@@ -115,13 +128,13 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 	rows, err := q.db.Query(ctx, claimMatchmakerBucket,
 		arg.ClaimID,
 		arg.Ttl,
+		arg.Limit,
 		arg.TenantID,
 		arg.ProjectID,
 		arg.Mode,
 		arg.FleetID,
 		arg.Region,
 		arg.GameMode,
-		arg.Limit,
 	)
 	if err != nil {
 		return nil, err
@@ -132,6 +145,8 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 		var i ClaimMatchmakerBucketRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.EntryID,
+			&i.PartyID,
 			&i.TenantID,
 			&i.ProjectID,
 			&i.FleetID,
@@ -211,7 +226,7 @@ SET status           = 'matched',
     claim_expires_at = NULL
 WHERE claim_id = $4::uuid
   AND id = ANY ($5::bigint[])
-  AND status = 'queued'
+  AND status = 'queued' AND claim_expires_at>now() AND (expires_at IS NULL OR expires_at>now())
 `
 
 type CommitMatchmakerTicketsParams struct {
@@ -298,6 +313,25 @@ func (q *Queries) CountPlayerLiveFleetAllocations(ctx context.Context, playerID 
 	return live, err
 }
 
+const deleteClosedParties = `-- name: DeleteClosedParties :execrows
+DELETE FROM parties p
+WHERE p.state='closed'
+  AND p.closed_at < now() - $1::interval
+  AND p.current_queue_entry_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM party_members m WHERE m.party_id=p.id)
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_entries e WHERE e.party_id=p.id)
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets t WHERE t.party_id=p.id)
+`
+
+// Invite rows cascade only after all roster and matchmaking references are gone.
+func (q *Queries) DeleteClosedParties(ctx context.Context, retention pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteClosedParties, retention)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
 DELETE FROM matchmaker_matches
 WHERE expires_at < now()
@@ -346,6 +380,23 @@ WHERE status <> 'queued'
 // match is still recoverable.
 func (q *Queries) DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteTerminalMatchmakerTickets, retention)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteTerminalMatchmakingEntries = `-- name: DeleteTerminalMatchmakingEntries :execrows
+DELETE FROM matchmaking_entries e
+WHERE e.status <> 'queued'
+  AND e.created_at < now() - $1::interval
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets t WHERE t.entry_id=e.id)
+  AND NOT EXISTS (SELECT 1 FROM parties p WHERE p.current_queue_entry_id=e.id)
+`
+
+// Keep entries while a retained ticket or current party still references them.
+func (q *Queries) DeleteTerminalMatchmakingEntries(ctx context.Context, retention pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTerminalMatchmakingEntries, retention)
 	if err != nil {
 		return 0, err
 	}
@@ -457,7 +508,7 @@ func (q *Queries) GetMatchmakerMatch(ctx context.Context, id string) (Matchmaker
 }
 
 const getMatchmakingTicket = `-- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
+SELECT id, entry_id, party_id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        mode, match_id, min_count, max_count, count_multiple,
        allow_cross_region, query, string_properties, numeric_properties,
@@ -475,6 +526,8 @@ type GetMatchmakingTicketParams struct {
 
 type GetMatchmakingTicketRow struct {
 	ID                int64
+	EntryID           int64
+	PartyID           *int64
 	TenantID          int64
 	ProjectID         int64
 	FleetID           *int64
@@ -505,6 +558,8 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 	var i GetMatchmakingTicketRow
 	err := row.Scan(
 		&i.ID,
+		&i.EntryID,
+		&i.PartyID,
 		&i.TenantID,
 		&i.ProjectID,
 		&i.FleetID,
@@ -619,7 +674,7 @@ VALUES (
     current_setting('app.tenant_id', true)::bigint,
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, status::text AS status, created_at
+RETURNING id, entry_id, status::text AS status, created_at
 `
 
 type InsertMatchmakingTicketParams struct {
@@ -642,6 +697,7 @@ type InsertMatchmakingTicketParams struct {
 
 type InsertMatchmakingTicketRow struct {
 	ID        int64
+	EntryID   int64
 	Status    string
 	CreatedAt pgtype.Timestamptz
 }
@@ -665,7 +721,12 @@ func (q *Queries) InsertMatchmakingTicket(ctx context.Context, arg InsertMatchma
 		arg.ExpiresAt,
 	)
 	var i InsertMatchmakingTicketRow
-	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.EntryID,
+		&i.Status,
+		&i.CreatedAt,
+	)
 	return i, err
 }
 

@@ -309,3 +309,39 @@ func drainStatuses(t *testing.T, ch <-chan fleet.StatusUpdate) []fleet.Status {
 		}
 	}
 }
+
+func TestAllocateLabelsResourceWithDurableResolution(t *testing.T) {
+	api := &fakeAPI{createResult: allocatedResult("server", "127.0.0.1", 7777)}
+	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games"})
+	if !assert.NoError(t, err) {
+		return
+	}
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_recovery"}
+	_, err = backend.Allocate(context.Background(), req)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Equal(t, "mm_recovery", api.lastSpec.MetaPatch.Labels["ggscale.dev/resolution-id"])
+}
+
+type recoveringAPI struct {
+	fakeAPI
+	selector string
+}
+
+func (a *recoveringAPI) ListGameServers(_ context.Context, _, selector string) (*agonesv1.GameServerList, error) {
+	a.selector = selector
+	return &agonesv1.GameServerList{Items: []agonesv1.GameServer{{ObjectMeta: metav1.ObjectMeta{Name: "orphan"}}}}, nil
+}
+
+func TestCleanupResolutionFindsResourceWithoutSavedReference(t *testing.T) {
+	api := &recoveringAPI{}
+	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games"})
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.NoError(t, backend.CleanupResolution(context.Background(), "mm_recovery", nil))
+	assert.Equal(t, "ggscale.dev/resolution-id=mm_recovery", api.selector)
+	assert.Equal(t, "orphan", api.lastDeletedName)
+}

@@ -169,6 +169,7 @@ func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*f
 	namespace := b.resolveNamespace(tmpl.Namespace)
 	gsa := &allocationv1.GameServerAllocation{
 		Spec: allocationv1.GameServerAllocationSpec{
+			MetaPatch: allocationv1.MetaPatch{Labels: req.Labels},
 			Selectors: []allocationv1.GameServerSelector{
 				{
 					LabelSelector: metav1.LabelSelector{MatchLabels: selectorWithRegion(tmpl.SelectorLabels, req.Region)},
@@ -412,4 +413,29 @@ func (a clientsetAdapter) Ping(ctx context.Context) error {
 	}
 	_ = ctx
 	return nil
+}
+
+// CleanupResolution removes all servers tagged by an interrupted allocation.
+func (b *Backend) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+	api, ok := b.cfg.API.(interface {
+		ListGameServers(context.Context, string, string) (*agonesv1.GameServerList, error)
+	})
+	if !ok {
+		return fleet.ErrUnsupported
+	}
+	namespace := b.resolveNamespace(TemplateFromConfig(config).Namespace)
+	servers, err := api.ListGameServers(ctx, namespace, "ggscale.dev/resolution-id="+id)
+	if err != nil {
+		return err
+	}
+	for _, server := range servers.Items {
+		if err := b.cfg.API.DeleteGameServer(ctx, namespace, server.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a clientsetAdapter) ListGameServers(ctx context.Context, namespace, selector string) (*agonesv1.GameServerList, error) {
+	return a.cs.AgonesV1().GameServers(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 }

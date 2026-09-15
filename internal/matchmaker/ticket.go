@@ -66,6 +66,8 @@ func ValidMode(m Mode) bool {
 
 // Ticket is one in-flight matchmaking request.
 type Ticket struct {
+	EntryID           int64
+	PartyID           int64
 	ID                int64
 	TenantID          int64
 	ProjectID         int64
@@ -161,6 +163,8 @@ type Bucket struct {
 // RosterEntry is one matched player in a match roster, including the
 // criteria they matched with so peers can reason about the group.
 type RosterEntry struct {
+	PartyID           int64              `json:"party_id,omitempty"`
+	QueueEntryID      int64              `json:"queue_entry_id"`
 	PlayerID          int64              `json:"player_id" example:"42"`
 	Region            string             `json:"region,omitempty" example:"us-east-1"`
 	StringProperties  map[string]string  `json:"string_properties,omitempty" example:"{\"map\":\"arena-2\"}"`
@@ -356,3 +360,9 @@ type BucketStat struct {
 type StatsLister interface {
 	QueueStats(ctx context.Context) ([]BucketStat, error)
 }
+
+// ErrPartyMember requires a player to leave their party before solo enqueue.
+var ErrPartyMember = errors.New("party_member_must_leave")
+
+// ErrPartyTicket requires leader whole-entry cancellation.
+var ErrPartyTicket = errors.New("party_ticket_requires_leader_cancel")
