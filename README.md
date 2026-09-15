@@ -65,6 +65,5 @@ The game-server **fleet** feature is beta and not yet ready for production.
 
 ## Party queues
 
-Friends can queue as one party and rematch with the same party ID. See the
-[party guide](docs/parties.md) for the player flow and required operator cutover.
-Party enqueue defaults to disabled until that cutover is complete.
+Friends can queue as one party and rematch with the same party ID.
+Party enqueue defaults to disabled until the operator completes the database cutover.

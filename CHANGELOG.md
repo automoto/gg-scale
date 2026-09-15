@@ -13,7 +13,7 @@ released in lockstep.
 - Match whole queue entries and keep party IDs across rematches. Solo fill
   remains outside the party; polling recovers missed match events.
 - Add atomic match persistence and durable backend resolution cleanup.
-- Add the party API, generated OpenAPI, and the one-time queue cutover guide.
+- Add the party API and generated OpenAPI.
   Party enqueue defaults to disabled.
 
 
