@@ -21,11 +21,11 @@ need the `fleet` scope and the dedicated-server entitlement.
    `expected_version`. Friend invites also include `player_id`; code requests
    include `max_uses` (1–7).
 3. Friends list their pending invites with `GET /v1/party-invites`, then accept
-   with `POST /v1/party-invites/{id}/accept`. A code recipient sends `code` and
-   `expected_version` to `POST /v1/parties/join`. Share the party version with
-   the code; the create-code response contains `party_version`. After another
-   mutation, the leader must supply the current version. Codes ignore case and
-   display hyphens. Invites and codes expire after five minutes.
+   with `POST /v1/party-invites/{id}/accept` and the `party_version` from the
+   invite list as `expected_version`. A code recipient sends only
+   `{"code":"<invite code>"}` to `POST /v1/parties/join`. Code joins do not need
+   the party version. Codes ignore case and display hyphens. Invites and codes
+   expire after five minutes.
 4. Every member, including the leader, sends their own readiness:
 
    ```http
@@ -58,8 +58,9 @@ Only the leader can change idle settings, kick members, create or revoke
 invites/codes, start/cancel a queue, request a rematch, or disband the party.
 `DELETE /v1/party-invites/{id}` also lets the recipient decline an invite.
 Members can only set their own readiness. Membership and setting changes clear
-all readiness and increment `roster_version`. Mutations require the current
-party version; stale requests receive `409 stale_version`.
+all readiness and increment `roster_version`. Mutations of an existing party,
+except code joins, require the current party version; stale requests receive
+`409 stale_version`.
 
 Use `DELETE /v1/parties/{id}/queue` to cancel the entire entry. Individual
 party-ticket cancellation is rejected. Active party members must leave before

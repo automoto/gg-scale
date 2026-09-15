@@ -22,3 +22,12 @@ func TestPartyMutationSchemasRequireExpectedVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestPartyCodeJoinSchemaRequiresOnlyCode(t *testing.T) {
+	schema := OpenAPIDoc("test").Components.Schemas.Map()["PartyJoinInputBody"]
+	if !assert.NotNil(t, schema) {
+		return
+	}
+	assert.Equal(t, []string{"code"}, schema.Required)
+	assert.NotContains(t, schema.Properties, "expected_version")
+}

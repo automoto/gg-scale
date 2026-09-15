@@ -26,3 +26,11 @@ branch. Party enqueue stays disabled until the operator completes the
 Tests were added before the final fixes for expired presence at commit and
 allocation cleanup on backends without the optional resolution-cleanup method.
 The full Linux CI lanes also cover Docker-based integration and end-to-end tests.
+
+## PR review follow-up
+
+- [x] Code joins require only the invite code. Party locking, capacity checks,
+  code-use limits, and membership insertion remain transactional. Friend invite
+  acceptance still uses the version returned by the invite list.
+- [x] Regression coverage checks the join schema and joins without a version
+  after another party mutation. The capacity race still admits one last member.

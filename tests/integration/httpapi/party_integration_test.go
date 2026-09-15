@@ -88,7 +88,10 @@ func TestPartyAPIQueueAndRematchExcludeSoloFill(t *testing.T) {
 	if !request("POST", path+"/invite-codes", leader, "", map[string]any{"expected_version": p.Version, "max_uses": 1}, &code) {
 		return
 	}
-	if !request("POST", "/v1/parties/join", friend, "", map[string]any{"code": code.Code, "expected_version": code.PartyVersion}, &p) {
+	if !request("PUT", path+"/members/me/ready", leader, "", map[string]any{"expected_version": code.PartyVersion, "ready": true, "properties": map[string]any{}}, &p) {
+		return
+	}
+	if !request("POST", "/v1/parties/join", friend, "", map[string]any{"code": code.Code}, &p) {
 		return
 	}
 	for _, token := range []string{leader, friend} {

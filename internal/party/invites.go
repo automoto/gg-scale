@@ -82,7 +82,7 @@ func join(ctx context.Context, tx pgx.Tx, p *Party, player int64) error {
 }
 
 // JoinCode checks durable player and IP failure windows before redemption.
-func (s *Store) JoinCode(ctx context.Context, project, player, version int64, code, ip string) (*Party, error) {
+func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip string) (*Party, error) {
 	var out *Party
 	var verdict error
 	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
@@ -131,9 +131,6 @@ func (s *Store) JoinCode(ctx context.Context, project, player, version int64, co
 		out, err = load(ctx, tx, project, id)
 		if err != nil {
 			return err
-		}
-		if out.Version != version {
-			return ErrStale
 		}
 		result, err := tx.Exec(ctx, `UPDATE party_invite_codes SET uses=uses+1 WHERE id=$1 AND revoked_at IS NULL AND expires_at>now() AND uses<max_uses`, codeID)
 		if err != nil {

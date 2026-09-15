@@ -60,8 +60,7 @@ type partyCodeBody struct {
 }
 type partyJoinInput struct {
 	Body struct {
-		ExpectedVersion int64  `json:"expected_version" minimum:"1"`
-		Code            string `json:"code" minLength:"16" maxLength:"64"`
+		Code string `json:"code" minLength:"16" maxLength:"64"`
 	}
 }
 type partyQueueInput struct {
@@ -211,7 +210,7 @@ func registerPartyRoutes(api huma.API, d Deps) {
 	})
 	registerPartyOperation(api, d, "joinPartyCode", http.MethodPost, "/v1/parties/join", "Join a party by invite code", func(ctx context.Context, s *party.Store, mc matchmakerContext, in *partyJoinInput) (*party.Party, error) {
 		ip, _ := ctx.Value(partyIPKey{}).(string)
-		return s.JoinCode(ctx, mc.projectID, mc.playerID, in.Body.ExpectedVersion, in.Body.Code, ip)
+		return s.JoinCode(ctx, mc.projectID, mc.playerID, in.Body.Code, ip)
 	})
 	registerPartyOperation(api, d, "queueParty", http.MethodPost, "/v1/parties/{id}/queue", "Queue the ready party", func(ctx context.Context, s *party.Store, mc matchmakerContext, in *partyQueueInput) (*party.Party, error) {
 		if !d.PartyEnqueueEnabled {

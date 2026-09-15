@@ -36,7 +36,7 @@ func TestPartyCodeReadyQueueRematch(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	p, err = store.JoinCode(ctx, projectID, friend, code.PartyVersion, code.Code, "127.0.0.1")
+	p, err = store.JoinCode(ctx, projectID, friend, code.Code, "127.0.0.1")
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -122,7 +122,7 @@ func TestPartyDisconnectCancelsEntryAndPromotesLeader(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	p, err = store.JoinCode(ctx, projectID, friend, code.PartyVersion, code.Code, "127.0.0.1")
+	p, err = store.JoinCode(ctx, projectID, friend, code.Code, "127.0.0.1")
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -157,10 +157,10 @@ func TestPartyCodesBlockAfterTenFailures(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 	store := party.NewStore(db.NewPool(pool))
 	for range 10 {
-		_, err := store.JoinCode(ctx, projectID, player, 1, "0000000000000000", "127.0.0.1")
+		_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.1")
 		assert.ErrorIs(t, err, party.ErrInvite)
 	}
-	_, err := store.JoinCode(ctx, projectID, player, 1, "0000000000000000", "127.0.0.2")
+	_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.2")
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 
@@ -178,7 +178,7 @@ func TestPartyMutationsRequireVersionAndLeader(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	p, err = store.JoinCode(ctx, projectID, friend, code.PartyVersion, code.Code, "127.0.0.1")
+	p, err = store.JoinCode(ctx, projectID, friend, code.Code, "127.0.0.1")
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -278,15 +278,15 @@ func TestPartyCapacityRaceAdmitsOnlyOneLastMember(t *testing.T) {
 	results := make(chan error, 2)
 	for _, player := range []int64{a, b} {
 		go func() {
-			_, err := store.JoinCode(ctx, projectID, player, code.PartyVersion, code.Code, "127.0.0.1")
+			_, err := store.JoinCode(ctx, projectID, player, code.Code, "127.0.0.1")
 			results <- err
 		}()
 	}
 	first, second := <-results, <-results
 	if first == nil {
-		assert.True(t, errors.Is(second, party.ErrFull) || errors.Is(second, party.ErrStale))
+		assert.ErrorIs(t, second, party.ErrFull)
 	} else {
-		assert.True(t, errors.Is(first, party.ErrFull) || errors.Is(first, party.ErrStale))
+		assert.ErrorIs(t, first, party.ErrFull)
 		assert.NoError(t, second)
 	}
 }
@@ -353,7 +353,7 @@ func TestPartyResolvesGameSessionAndFleetModes(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			p, err = store.JoinCode(ctx, projectID, friend, code.PartyVersion, code.Code, "127.0.0.1")
+			p, err = store.JoinCode(ctx, projectID, friend, code.Code, "127.0.0.1")
 			if !assert.NoError(t, err) {
 				return
 			}
@@ -436,14 +436,14 @@ func TestPartyCodeIPBudgetAppliesAcrossProjects(t *testing.T) {
 	for i := range 10 {
 		_, _, player := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, fmt.Sprintf("attempt-%d", i))
 		for range 10 {
-			_, err := store.JoinCode(ctx, projectID, player, 1, "0000000000000000", "127.0.0.8")
+			_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.8")
 			if !assert.ErrorIs(t, err, party.ErrInvite) {
 				return
 			}
 		}
 	}
 	otherTenant, otherProject, otherPlayer := seedTenantProjectPlayer(t, pool, "other-project", "player")
-	_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, 1, "0000000000000000", "127.0.0.8")
+	_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, "0000000000000000", "127.0.0.8")
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 
@@ -564,7 +564,7 @@ func TestPartyMemberRemovalAndCommitStayConsistent(t *testing.T) {
 			if !assert.NoError(t, err) {
 				return
 			}
-			p, err = store.JoinCode(ctx, projectID, friend, code.PartyVersion, code.Code, "127.0.0.1")
+			p, err = store.JoinCode(ctx, projectID, friend, code.Code, "127.0.0.1")
 			if !assert.NoError(t, err) {
 				return
 			}

@@ -1279,12 +1279,7 @@ components:
           maxLength: 64
           minLength: 16
           type: string
-        expected_version:
-          format: int64
-          minimum: 1
-          type: integer
       required:
-        - expected_version
         - code
       type: object
     PartyProperties:
