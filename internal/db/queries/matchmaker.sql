@@ -8,10 +8,10 @@ VALUES (
     current_setting('app.tenant_id', true)::bigint,
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 )
-RETURNING id, status::text AS status, created_at;
+RETURNING id, entry_id, status::text AS status, created_at;
 
 -- name: GetMatchmakingTicket :one
-SELECT id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
+SELECT id, entry_id, party_id, tenant_id, project_id, fleet_id, player_id, region, game_mode,
        attributes, status::text AS status, match_address, match_protocol,
        mode, match_id, min_count, max_count, count_multiple,
        allow_cross_region, query, string_properties, numeric_properties,
@@ -83,26 +83,30 @@ GROUP BY tenant_id, project_id, mode, fleet_id,
 ORDER BY tenant_id, project_id, mode, fleet_id, region, game_mode;
 
 -- name: ClaimMatchmakerBucket :many
--- Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+-- Stake a claim on up to N complete entries in the bucket. Their tickets
 -- stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 -- subsequent ClaimBucket (different worker) skips them. The caller commits
--- via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+-- via CommitMatchmakerTickets (success) or ReleaseMatchmakerTickets (failure);
 -- a crashed caller's claim is released by the sweeper once
 -- claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
 -- IS NOT DISTINCT FROM.
 WITH candidates AS (
-    SELECT mt.id
-    FROM matchmaking_tickets mt
-    WHERE mt.status = 'queued'
-      AND mt.claim_id IS NULL
-      AND (mt.expires_at IS NULL OR mt.expires_at > now())
-      AND mt.tenant_id  = sqlc.arg(tenant_id)
-      AND mt.project_id = sqlc.arg(project_id)
-      AND mt.mode       = sqlc.arg(mode)
-      AND mt.fleet_id IS NOT DISTINCT FROM sqlc.narg(fleet_id)::bigint
-      AND (mt.mode <> 'fleet_allocation' OR mt.region = sqlc.arg(region))
-      AND mt.game_mode  = sqlc.arg(game_mode)
-    ORDER BY mt.created_at, mt.id
+    SELECT e.id
+    FROM matchmaking_entries e
+    WHERE e.status='queued'
+      AND e.tenant_id=sqlc.arg(tenant_id) AND e.project_id=sqlc.arg(project_id)
+      AND EXISTS (
+        SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
+         AND mt.status='queued' AND mt.claim_id IS NULL
+         AND (mt.expires_at IS NULL OR mt.expires_at>now())
+         AND mt.mode=sqlc.arg(mode)
+         AND mt.fleet_id IS NOT DISTINCT FROM sqlc.narg(fleet_id)::bigint
+         AND (mt.mode<>'fleet_allocation' OR mt.region=sqlc.arg(region))
+         AND mt.game_mode=sqlc.arg(game_mode)
+      )
+      AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
+        AND (mt.status<>'queued' OR mt.claim_id IS NOT NULL OR mt.expires_at<=now()))
+    ORDER BY e.created_at,e.id
     LIMIT sqlc.arg('limit')::int
     FOR UPDATE SKIP LOCKED
 )
@@ -111,8 +115,8 @@ SET claim_id         = sqlc.arg('claim_id')::uuid,
     claimed_at       = now(),
     claim_expires_at = now() + sqlc.arg('ttl')::interval
 FROM candidates c
-WHERE t.id = c.id
-RETURNING t.id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
+WHERE t.entry_id = c.id
+RETURNING t.id, t.entry_id, t.party_id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.mode, t.min_count, t.max_count,
           t.count_multiple, t.allow_cross_region, t.query,
@@ -134,7 +138,7 @@ SET status           = 'matched',
     claim_expires_at = NULL
 WHERE claim_id = sqlc.arg('claim_id')::uuid
   AND id = ANY (sqlc.arg(ticket_ids)::bigint[])
-  AND status = 'queued';
+  AND status = 'queued' AND claim_expires_at>now() AND (expires_at IS NULL OR expires_at>now());
 
 -- name: ReleaseMatchmakerTickets :one
 -- Worker-driven release of one failed group: the resolver (allocator,

@@ -344,3 +344,19 @@ func (c *grpcClient) Ping(ctx context.Context) error {
 	_, err := c.client.Ping(ctx, &fleetpb.PingRequest{})
 	return errFromStatus(err)
 }
+
+func (s *grpcServer) CleanupResolution(ctx context.Context, req *fleetpb.CleanupResolutionRequest) (*fleetpb.CleanupResolutionResponse, error) {
+	cleaner, ok := s.impl.(fleet.ResolutionCleaner)
+	if !ok {
+		return nil, errToStatus(fleet.ErrUnsupported)
+	}
+	if err := cleaner.CleanupResolution(ctx, req.GetResolutionId(), req.GetConfig()); err != nil {
+		return nil, errToStatus(err)
+	}
+	return &fleetpb.CleanupResolutionResponse{}, nil
+}
+
+func (c *grpcClient) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+	_, err := c.client.CleanupResolution(ctx, &fleetpb.CleanupResolutionRequest{ResolutionId: id, Config: config})
+	return errFromStatus(err)
+}

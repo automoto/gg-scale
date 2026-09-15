@@ -23,6 +23,8 @@ service FleetBackend {
   rpc Watch(WatchRequest) returns (stream StatusUpdate);
   rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
   rpc Ping(PingRequest) returns (PingResponse);
+  // Optional recovery for allocations interrupted before their reference was saved.
+  rpc CleanupResolution(CleanupResolutionRequest) returns (CleanupResolutionResponse);
 }
 
 // AllocationStatus mirrors fleet.Status. The zero value is UNSPECIFIED so a
@@ -113,3 +115,9 @@ message HealthCheckResponse {}
 
 message PingRequest {}
 message PingResponse {}
+
+message CleanupResolutionRequest {
+ string resolution_id = 1;
+ map<string,string> config = 2;
+}
+message CleanupResolutionResponse {}

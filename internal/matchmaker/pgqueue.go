@@ -11,11 +11,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -170,6 +172,7 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		}
 		ticket = &Ticket{
 			ID:                row.ID,
+			EntryID:           row.EntryID,
 			TenantID:          req.TenantID,
 			ProjectID:         req.ProjectID,
 			FleetID:           req.FleetID,
@@ -191,6 +194,10 @@ func (q *PGQueue) Enqueue(ctx context.Context, req EnqueueRequest) (*Ticket, err
 		}
 		return nil
 	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Message == "party_member_must_leave" {
+		return nil, ErrPartyMember
+	}
 	if webutil.IsUniqueViolation(err) {
 		return nil, q.activeTicketError(ctx, req)
 	}
@@ -311,6 +318,8 @@ func (q *PGQueue) Get(ctx context.Context, id, playerID int64) (*Ticket, error) 
 		}
 		t = &Ticket{
 			ID:                row.ID,
+			EntryID:           row.EntryID,
+			PartyID:           derefFleetID(row.PartyID),
 			TenantID:          row.TenantID,
 			ProjectID:         row.ProjectID,
 			FleetID:           derefFleetID(row.FleetID),
@@ -364,6 +373,19 @@ func derefString(p *string) string {
 // Returns ErrAlreadyTerminal when the ticket is past 'queued'.
 func (q *PGQueue) Cancel(ctx context.Context, id, playerID int64) error {
 	return q.pool.Q(ctx, func(tx pgx.Tx) error {
+		var partyID *int64
+		if err := tx.QueryRow(ctx, `SELECT party_id FROM matchmaking_tickets WHERE id=$1 AND player_id=$2`, id, playerID).Scan(&partyID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if partyID != nil {
+			return ErrPartyTicket
+		}
+		if err := lockPartyEntries(ctx, tx, []int64{id}); err != nil {
+			return err
+		}
 		arg := sqlcgen.CancelMatchmakingTicketParams{
 			ID:       id,
 			PlayerID: playerID,
@@ -382,13 +404,19 @@ func (q *PGQueue) Cancel(ctx context.Context, id, playerID int64) error {
 			}
 			return ErrNotFound
 		}
-		return qerr
+		if qerr != nil {
+			return qerr
+		}
+		return settleEntries(ctx, tx, []int64{id}, "")
 	})
 }
 
 // ListReadyBuckets is privileged: it scans across all tenants for buckets
 // holding unclaimed queued tickets.
 func (q *PGQueue) ListReadyBuckets(ctx context.Context) ([]Bucket, error) {
+	if err := party.NewStore(q.pool).Sweep(ctx); err != nil {
+		return nil, err
+	}
 	var out []Bucket
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		rows, qerr := sqlcgen.New(tx).ListReadyMatchmakerBuckets(ctx)
@@ -463,7 +491,8 @@ func (q *PGQueue) ClaimBucket(ctx context.Context, bucket Bucket, max int, ttl t
 			return nil, perr
 		}
 		tickets = append(tickets, &Ticket{
-			ID:                r.ID,
+			ID:      r.ID,
+			EntryID: r.EntryID, PartyID: derefFleetID(r.PartyID),
 			TenantID:          r.TenantID,
 			ProjectID:         r.ProjectID,
 			FleetID:           derefFleetID(r.FleetID),
@@ -501,27 +530,11 @@ func (q *PGQueue) CommitTickets(ctx context.Context, claim *Claim, ticketIDs []i
 	if err != nil {
 		return 0, err
 	}
-	want := int64(len(ticketIDs))
 	var n int64
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		var qerr error
-		n, qerr = sqlcgen.New(tx).CommitMatchmakerTickets(ctx, sqlcgen.CommitMatchmakerTicketsParams{
-			MatchID:       matchID,
-			MatchAddress:  matchAddress,
-			MatchProtocol: matchProtocol,
-			ClaimID:       pgUUID,
-			TicketIds:     ticketIDs,
-		})
-		if qerr != nil {
-			return qerr
-		}
-		if n != 0 && n != want {
-			// Some members drifted after the claim. Roll the flip back so no
-			// partial roster is ever committed; the caller returns the
-			// survivors and (fleet) deallocates.
-			return ErrShortCommit
-		}
-		return nil
+		var err error
+		n, err = commitTicketsTx(ctx, tx, pgUUID, ticketIDs, matchID, matchAddress, matchProtocol)
+		return err
 	})
 	if errors.Is(err, ErrShortCommit) {
 		return n, ErrShortCommit
@@ -540,6 +553,12 @@ func (q *PGQueue) ReturnTickets(ctx context.Context, claim *Claim, ticketIDs []i
 		return err
 	}
 	return q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if err := lockPartyEntries(ctx, tx, ticketIDs); err != nil {
+			return err
+		}
+		if err := requireWholeEntries(ctx, tx, ticketIDs); err != nil {
+			return err
+		}
 		_, qerr := sqlcgen.New(tx).ReturnMatchmakerTicketsByID(ctx, sqlcgen.ReturnMatchmakerTicketsByIDParams{
 			ClaimID:   pgUUID,
 			TicketIds: ticketIDs,
@@ -560,13 +579,22 @@ func (q *PGQueue) ReleaseTickets(ctx context.Context, claim *Claim, ticketIDs []
 	}
 	var failed int64
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if err := lockPartyEntries(ctx, tx, ticketIDs); err != nil {
+			return err
+		}
+		if err := requireWholeEntries(ctx, tx, ticketIDs); err != nil {
+			return err
+		}
 		var qerr error
 		failed, qerr = sqlcgen.New(tx).ReleaseMatchmakerTickets(ctx, sqlcgen.ReleaseMatchmakerTicketsParams{
 			MaxAttempts: int32(maxAttempts), //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
 			ClaimID:     pgUUID,
 			TicketIds:   ticketIDs,
 		})
-		return qerr
+		if qerr != nil {
+			return qerr
+		}
+		return settleEntries(ctx, tx, ticketIDs, "")
 	})
 	if err != nil {
 		return err
@@ -598,6 +626,9 @@ func (q *PGQueue) ReturnUnmatched(ctx context.Context, claim *Claim) error {
 func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64, error) {
 	var n, attemptsFailed, expired int64
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		if err := lockPartyEntries(ctx, tx, nil); err != nil {
+			return err
+		}
 		gen := sqlcgen.New(tx)
 		swept, qerr := gen.SweepStaleMatchmakerClaims(ctx, int32(maxAttempts)) //nolint:gosec // operator config (MaxAttempts), validated > 0 by NewWorker
 		if qerr != nil {
@@ -606,7 +637,10 @@ func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64,
 		attemptsFailed = swept.Failed
 		expired, qerr = gen.ExpireMatchmakerTickets(ctx)
 		n = swept.Released + expired
-		return qerr
+		if qerr != nil {
+			return qerr
+		}
+		return settleEntries(ctx, tx, nil, "")
 	})
 	if err != nil {
 		return 0, err
@@ -642,6 +676,10 @@ func (q *PGQueue) QueueStats(ctx context.Context) ([]BucketStat, error) {
 
 // CreateMatch persists a committed match result under the tenant on ctx.
 func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
+	return q.pool.Q(ctx, func(tx pgx.Tx) error { return q.createMatchTx(ctx, tx, m) })
+}
+
+func (q *PGQueue) createMatchTx(ctx context.Context, tx pgx.Tx, m *Match) error {
 	roster, err := json.Marshal(m.Roster)
 	if err != nil {
 		return fmt.Errorf("matchmaker: marshal roster: %w", err)
@@ -665,26 +703,25 @@ func (q *PGQueue) CreateMatch(ctx context.Context, m *Match) error {
 	if !m.ClaimedAt.IsZero() {
 		claimedAt = pgtype.Timestamptz{Time: m.ClaimedAt, Valid: true}
 	}
-	return q.pool.Q(ctx, func(tx pgx.Tx) error {
-		gen := sqlcgen.New(tx)
-		if err := q.reserveFleetCap(ctx, gen, m); err != nil {
-			return err
-		}
-		return gen.InsertMatchmakerMatch(ctx, sqlcgen.InsertMatchmakerMatchParams{
-			ID:           m.ID,
-			ProjectID:    m.ProjectID,
-			Mode:         string(m.Mode),
-			FleetID:      fleetID,
-			Address:      m.Address,
-			Protocol:     m.Protocol,
-			SessionID:    m.SessionID,
-			JoinCode:     m.JoinCode,
-			AllocationID: allocationID,
-			ClaimedAt:    claimedAt,
-			Roster:       roster,
-			ExpiresAt:    pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
-			HostPlayerID: hostPlayerID,
-		})
+
+	gen := sqlcgen.New(tx)
+	if err := q.reserveFleetCap(ctx, gen, m); err != nil {
+		return err
+	}
+	return gen.InsertMatchmakerMatch(ctx, sqlcgen.InsertMatchmakerMatchParams{
+		ID:           m.ID,
+		ProjectID:    m.ProjectID,
+		Mode:         string(m.Mode),
+		FleetID:      fleetID,
+		Address:      m.Address,
+		Protocol:     m.Protocol,
+		SessionID:    m.SessionID,
+		JoinCode:     m.JoinCode,
+		AllocationID: allocationID,
+		ClaimedAt:    claimedAt,
+		Roster:       roster,
+		ExpiresAt:    pgtype.Timestamptz{Time: m.ExpiresAt, Valid: true},
+		HostPlayerID: hostPlayerID,
 	})
 }
 
@@ -825,4 +862,82 @@ func parseClaimID(s string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, fmt.Errorf("matchmaker: parse claim id %q: %w", s, err)
 	}
 	return pgtype.UUID{Bytes: u, Valid: true}, nil
+}
+
+func commitTicketsTx(ctx context.Context, tx pgx.Tx, claimID pgtype.UUID, ids []int64, matchID, address, protocol string) (int64, error) {
+	if err := lockPartyEntries(ctx, tx, ids); err != nil {
+		return 0, err
+	}
+	if err := requireWholeEntries(ctx, tx, ids); err != nil {
+		return 0, err
+	}
+	// The presence sweep may not have run since the backend call began.
+	// Check deadlines under the party lock before committing its snapshot.
+	var disconnected bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (
+ SELECT 1 FROM matchmaking_tickets t
+ LEFT JOIN party_members m ON m.party_id=t.party_id AND m.player_id=t.player_id
+ WHERE t.id=ANY($1::bigint[]) AND t.party_id IS NOT NULL AND t.status='queued'
+ AND (m.player_id IS NULL OR m.disconnect_deadline<=clock_timestamp()))`, ids).Scan(&disconnected)
+	if err != nil {
+		return 0, err
+	}
+	if disconnected {
+		return 0, ErrShortCommit
+	}
+	n, err := sqlcgen.New(tx).CommitMatchmakerTickets(ctx, sqlcgen.CommitMatchmakerTicketsParams{MatchID: matchID, MatchAddress: address, MatchProtocol: protocol, ClaimID: claimID, TicketIds: ids})
+	if err != nil {
+		return n, err
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	if n != int64(len(ids)) {
+		return n, ErrShortCommit
+	}
+	return n, settleEntries(ctx, tx, ids, matchID)
+}
+
+// CommitMatch persists the result and settles every entry in one transaction.
+func (q *PGQueue) CommitMatch(ctx context.Context, claim *Claim, ids []int64, m *Match) (int64, error) {
+	if claim == nil || len(ids) == 0 {
+		return 0, nil
+	}
+	claimID, err := parseClaimID(claim.ID)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	drift := errors.New("claim drifted")
+	err = q.pool.Q(ctx, func(tx pgx.Tx) error {
+		if err := lockPartyEntries(ctx, tx, ids); err != nil {
+			return err
+		}
+		if err := q.createMatchTx(ctx, tx, m); err != nil {
+			return err
+		}
+		var err error
+		n, err = commitTicketsTx(ctx, tx, claimID, ids, m.ID, m.Address, m.Protocol)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return drift
+		}
+		_, err = tx.Exec(ctx, `DELETE FROM matchmaking_resolutions WHERE id=$1`, m.ID)
+		return err
+	})
+	if errors.Is(err, drift) {
+		return 0, nil
+	}
+	return n, err
+}
+
+// BeginResolution makes backend work discoverable if the worker crashes before
+// the match transaction. Allocations carry this ID in their persisted labels.
+func (q *PGQueue) BeginResolution(ctx context.Context, m *Match) error {
+	return q.pool.Q(ctx, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO matchmaking_resolutions(id,tenant_id,project_id,expires_at) VALUES($1,$2,$3,$4)`, m.ID, m.TenantID, m.ProjectID, m.ExpiresAt)
+		return err
+	})
 }

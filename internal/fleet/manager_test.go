@@ -547,3 +547,42 @@ func drainStatuses(t *testing.T, ch <-chan fleet.StatusUpdate) []fleet.Status {
 		}
 	}
 }
+
+func TestManagerDeallocatesKnownResolutionWithoutOptionalCleaner(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{name: "fake", allocateImpl: func(int) (*fleet.Allocation, error) {
+		return &fleet.Allocation{BackendRef: "ref-1", Address: "10.0.0.1:7777"}, nil
+	}}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_known"}
+	a, err := mgr.Allocate(t.Context(), req)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = mgr.Deallocate(t.Context(), a.ID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"ref-1"}, backend.deallocateRefs)
+}
+
+func TestManagerRetainsUnknownResolutionWithoutOptionalCleaner(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{name: "fake"}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_unknown"}
+	id, err := store.InsertPending(t.Context(), req, backend.name)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = mgr.Deallocate(t.Context(), id)
+
+	assert.ErrorIs(t, err, fleet.ErrUnsupported)
+	a, err := store.Get(t.Context(), id)
+	if assert.NoError(t, err) {
+		assert.Equal(t, fleet.StatusPending, a.Status)
+	}
+}

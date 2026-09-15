@@ -191,8 +191,26 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	if err != nil {
 		return err
 	}
-	if a.Status.IsTerminal() {
+	if a.Status == StatusShutdown || (a.Status == StatusFailed && a.Metadata["ggscale.dev/resolution-id"] == "") {
 		return nil
+	}
+	if a.Metadata["ggscale.dev/resolution-id"] != "" {
+		cleaner, ok := m.backend.(ResolutionCleaner)
+		cleanupErr := ErrUnsupported
+		if ok {
+			f, err := m.fleets.GetByID(ctx, a.FleetID)
+			if err != nil {
+				return err
+			}
+			cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
+		}
+		if cleanupErr == nil {
+			return m.store.Release(ctx, id)
+		}
+		if !errors.Is(cleanupErr, ErrUnsupported) || a.BackendRef == "" {
+			return fmt.Errorf("allocation %d requires resolution cleanup: %w", id, cleanupErr)
+		}
+		// Older backends can still release resources with a persisted reference.
 	}
 	if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
 		return fmt.Errorf("fleet: backend deallocate: %w", err)

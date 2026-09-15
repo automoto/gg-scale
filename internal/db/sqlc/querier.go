@@ -60,10 +60,10 @@ type Querier interface {
 	// it (disabled_at = delete_requested_at), so a suspension that predates the
 	// request survives the cancel. 0 rows = no pending request (or purged).
 	CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error)
-	// Stake a claim on up to N unclaimed queued tickets in the bucket. The rows
+	// Stake a claim on up to N complete entries in the bucket. Their tickets
 	// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 	// subsequent ClaimBucket (different worker) skips them. The caller commits
-	// via CommitMatchmakerClaim (success) or ReleaseMatchmakerClaim (failure);
+	// via CommitMatchmakerTickets (success) or ReleaseMatchmakerTickets (failure);
 	// a crashed caller's claim is released by the sweeper once
 	// claim_expires_at < now(). fleet_id is NULL for non-fleet modes, hence
 	// IS NOT DISTINCT FROM.

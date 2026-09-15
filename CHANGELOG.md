@@ -5,6 +5,18 @@ All notable changes to ggscale are recorded here. The format is based on
 pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
+
+## Unreleased
+
+- Add project-scoped parties, friend and code invites, readiness, and disconnect
+  grace with leader promotion.
+- Match whole queue entries and keep party IDs across rematches. Solo fill
+  remains outside the party; polling recovers missed match events.
+- Add atomic match persistence and durable backend resolution cleanup.
+- Add the party API, generated OpenAPI, and the one-time queue cutover guide.
+  Party enqueue defaults to disabled.
+
+
 ## [v0.9.6]
 
 ### Added

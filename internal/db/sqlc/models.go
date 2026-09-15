@@ -457,6 +457,25 @@ type MatchmakerMatch struct {
 	HostPlayerID *int64
 }
 
+type MatchmakingEntry struct {
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	PartyID         *int64
+	Status          TicketStatus
+	IdempotencyKey  *string
+	PreviousMatchID string
+	CreatedAt       pgtype.Timestamptz
+}
+
+type MatchmakingResolution struct {
+	ID            string
+	TenantID      int64
+	ProjectID     int64
+	ExpiresAt     pgtype.Timestamptz
+	NextAttemptAt pgtype.Timestamptz
+}
+
 type MatchmakingTicket struct {
 	ID                 int64
 	TenantID           int64
@@ -486,6 +505,77 @@ type MatchmakingTicket struct {
 	NumericProperties  []byte
 	ExpiresAt          pgtype.Timestamptz
 	FailureReason      *string
+	EntryID            int64
+	PartyID            *int64
+}
+
+type Party struct {
+	ID                  int64
+	TenantID            int64
+	ProjectID           int64
+	LeaderID            *int64
+	State               string
+	Version             int64
+	RosterVersion       int64
+	Settings            []byte
+	MaxMembers          int32
+	CurrentQueueEntryID *int64
+	LastMatchID         string
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+	ClosedAt            pgtype.Timestamptz
+}
+
+type PartyCodeAttempt struct {
+	TenantID     int64
+	ProjectID    int64
+	Subject      string
+	Failures     int32
+	WindowStart  pgtype.Timestamptz
+	BlockedUntil pgtype.Timestamptz
+}
+
+type PartyCodeIpAttempt struct {
+	Ip           string
+	Failures     int32
+	WindowStart  pgtype.Timestamptz
+	BlockedUntil pgtype.Timestamptz
+}
+
+type PartyInvite struct {
+	ID        int64
+	TenantID  int64
+	ProjectID int64
+	PartyID   int64
+	TargetID  int64
+	ExpiresAt pgtype.Timestamptz
+	Status    string
+}
+
+type PartyInviteCode struct {
+	ID        int64
+	TenantID  int64
+	ProjectID int64
+	PartyID   int64
+	CodeHash  []byte
+	MaxUses   int32
+	Uses      int32
+	ExpiresAt pgtype.Timestamptz
+	RevokedAt pgtype.Timestamptz
+}
+
+type PartyMember struct {
+	TenantID           int64
+	ProjectID          int64
+	PartyID            int64
+	PlayerID           int64
+	ReadyVersion       int64
+	StringProperties   []byte
+	NumericProperties  []byte
+	Attributes         []byte
+	JoinedAt           pgtype.Timestamptz
+	LastSeenAt         pgtype.Timestamptz
+	DisconnectDeadline pgtype.Timestamptz
 }
 
 type PlatformAuditLog struct {

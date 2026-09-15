@@ -70,6 +70,9 @@ func SweepMatchmakerRecords(ctx context.Context, pool *db.Pool, releaser Matchma
 	}
 
 	var sweepErrors []error
+	if err := sweepMatchmakerResolutions(ctx, pool, releaser); err != nil {
+		sweepErrors = append(sweepErrors, err)
+	}
 	released := int64(0)
 	if releaser == nil && len(candidates) > 0 {
 		sweepErrors = append(sweepErrors, fmt.Errorf("matchmaker GC: no allocation releaser for %d expired match(es)", len(candidates)))

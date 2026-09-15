@@ -9,6 +9,7 @@ import (
 
 // groupConfig tunes group formation for one bucket pass.
 type groupConfig struct {
+	entries map[int64][]*Ticket
 	// relaxAfter is how long the oldest member of a below-max group must
 	// have waited before the group commits at a smaller (still valid)
 	// size. Groups at their joint max commit immediately.
@@ -102,6 +103,12 @@ func formGroups(tickets []*Ticket, now time.Time, cfg groupConfig) [][]*Ticket {
 		return int(a.ID - b.ID)
 	})
 
+	cfg.entries = make(map[int64][]*Ticket)
+	for _, t := range pool {
+		if t.EntryID != 0 {
+			cfg.entries[t.EntryID] = append(cfg.entries[t.EntryID], t)
+		}
+	}
 	widened := bucketWidened(pool, now, cfg.regionRelaxAfter)
 	used := make(map[int64]bool, len(pool))
 	var groups [][]*Ticket
@@ -147,28 +154,26 @@ func bucketWidened(pool []*Ticket, now time.Time, window time.Duration) bool {
 // fillGroup pulls candidates into seed's group, same-region first, without
 // exceeding any member's max_count.
 func fillGroup(seed *Ticket, pool []*Ticket, used map[int64]bool, widened bool, cfg groupConfig) []*Ticket {
-	group := []*Ticket{seed}
+	group := cfg.entryMembers(seed)
+	if !entryCompatible(nil, group, widened, cfg) {
+		return nil
+	}
 	sameRegionFirst := func(preferSame bool) {
 		for _, c := range pool {
 			if used[c.ID] || c.ID == seed.ID || slices.Contains(group, c) {
 				continue
 			}
-			// A player may hold at most one ticket, but enforce uniqueness
-			// here too so a lone player can never self-match even if the
-			// one-active index is bypassed.
-			if playerInGroup(group, c.PlayerID) {
-				continue
-			}
 			if preferSame != (c.Region == seed.Region) {
 				continue
 			}
-			if len(group)+1 > min(jointMax(group), c.MaxCount) {
+			entry := cfg.entryMembers(c)
+			if len(group)+len(entry) > min(jointMax(group), jointMax(entry)) {
 				continue
 			}
-			if !compatibleWithAll(group, c, widened, cfg) {
+			if !entryCompatible(group, entry, widened, cfg) {
 				continue
 			}
-			group = append(group, c)
+			group = append(group, entry...)
 			if len(group) == jointMax(group) {
 				return
 			}
@@ -227,7 +232,7 @@ func jointMax(group []*Ticket) int {
 // Returns 0 when no prefix works.
 func largestValidSize(group []*Ticket) int {
 	for size := len(group); size >= 1; size-- {
-		if validSize(group[:size], size) {
+		if wholeEntryPrefix(group, size) && validSize(group[:size], size) {
 			return size
 		}
 	}
@@ -238,6 +243,42 @@ func validSize(members []*Ticket, size int) bool {
 	for _, t := range members {
 		if size < t.MinCount || size > t.MaxCount || size%t.CountMultiple != 0 {
 			return false
+		}
+	}
+	return true
+}
+
+// Zero entry IDs denote legacy test fixtures; production tickets always have an entry.
+func (cfg groupConfig) entryMembers(seed *Ticket) []*Ticket {
+	if seed.EntryID == 0 {
+		return []*Ticket{seed}
+	}
+	return cfg.entries[seed.EntryID]
+}
+
+func entryCompatible(group, entry []*Ticket, widened bool, cfg groupConfig) bool {
+	if len(entry) == 0 || len(group)+len(entry) > jointMax(entry) {
+		return false
+	}
+	combined := slices.Clone(group)
+	for _, t := range entry {
+		if playerInGroup(combined, t.PlayerID) || !compatibleWithAll(combined, t, widened, cfg) {
+			return false
+		}
+		combined = append(combined, t)
+	}
+	return true
+}
+
+func wholeEntryPrefix(group []*Ticket, size int) bool {
+	for _, kept := range group[:size] {
+		if kept.EntryID == 0 {
+			continue
+		}
+		for _, dropped := range group[size:] {
+			if kept.EntryID == dropped.EntryID {
+				return false
+			}
 		}
 	}
 	return true
