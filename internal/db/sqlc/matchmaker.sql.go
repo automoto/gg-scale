@@ -39,32 +39,38 @@ func (q *Queries) CancelMatchmakingTicket(ctx context.Context, arg CancelMatchma
 }
 
 const claimMatchmakerBucket = `-- name: ClaimMatchmakerBucket :many
-WITH candidates AS (
-    SELECT e.id
+WITH candidates AS MATERIALIZED (
+    SELECT e.id,e.created_at,
+           (SELECT count(*) FROM matchmaking_tickets mt WHERE mt.entry_id=e.id) AS players
     FROM matchmaking_entries e
     WHERE e.status='queued'
-      AND e.tenant_id=$3 AND e.project_id=$4
+      AND e.tenant_id=$4 AND e.project_id=$5
       AND EXISTS (
         SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
          AND mt.status='queued' AND mt.claim_id IS NULL
          AND (mt.expires_at IS NULL OR mt.expires_at>now())
-         AND mt.mode=$5
-         AND mt.fleet_id IS NOT DISTINCT FROM $6::bigint
-         AND (mt.mode<>'fleet_allocation' OR mt.region=$7)
-         AND mt.game_mode=$8
+         AND mt.mode=$6
+         AND mt.fleet_id IS NOT DISTINCT FROM $7::bigint
+         AND (mt.mode<>'fleet_allocation' OR mt.region=$8)
+         AND mt.game_mode=$9
       )
       AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets mt WHERE mt.entry_id=e.id
         AND (mt.status<>'queued' OR mt.claim_id IS NOT NULL OR mt.expires_at<=now()))
     ORDER BY e.created_at,e.id
-    LIMIT $9::int
+    LIMIT $3::int
     FOR UPDATE SKIP LOCKED
+), budgeted AS (
+    SELECT id, sum(players) OVER (ORDER BY created_at,id) AS player_count,
+           row_number() OVER (ORDER BY created_at,id) AS position
+    FROM candidates
 )
 UPDATE matchmaking_tickets t
 SET claim_id         = $1::uuid,
     claimed_at       = now(),
     claim_expires_at = now() + $2::interval
-FROM candidates c
+FROM budgeted c
 WHERE t.entry_id = c.id
+  AND (c.player_count <= $3::int OR c.position = 1)
 RETURNING t.id, t.entry_id, t.party_id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.mode, t.min_count, t.max_count,
@@ -75,13 +81,13 @@ RETURNING t.id, t.entry_id, t.party_id, t.tenant_id, t.project_id, t.fleet_id, t
 type ClaimMatchmakerBucketParams struct {
 	ClaimID   pgtype.UUID
 	Ttl       pgtype.Interval
+	Limit     int32
 	TenantID  int64
 	ProjectID int64
 	Mode      string
 	FleetID   *int64
 	Region    string
 	GameMode  string
-	Limit     int32
 }
 
 type ClaimMatchmakerBucketRow struct {
@@ -110,7 +116,8 @@ type ClaimMatchmakerBucketRow struct {
 	MatchedAt         pgtype.Timestamptz
 }
 
-// Stake a claim on up to N complete entries in the bucket. Their tickets
+// Bound the player count without splitting entries. The oldest entry can
+// exceed a small budget so it is never starved. Their tickets
 // stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 // subsequent ClaimBucket (different worker) skips them. The caller commits
 // via CommitMatchmakerTickets (success) or ReleaseMatchmakerTickets (failure);
@@ -121,13 +128,13 @@ func (q *Queries) ClaimMatchmakerBucket(ctx context.Context, arg ClaimMatchmaker
 	rows, err := q.db.Query(ctx, claimMatchmakerBucket,
 		arg.ClaimID,
 		arg.Ttl,
+		arg.Limit,
 		arg.TenantID,
 		arg.ProjectID,
 		arg.Mode,
 		arg.FleetID,
 		arg.Region,
 		arg.GameMode,
-		arg.Limit,
 	)
 	if err != nil {
 		return nil, err
@@ -306,6 +313,25 @@ func (q *Queries) CountPlayerLiveFleetAllocations(ctx context.Context, playerID 
 	return live, err
 }
 
+const deleteClosedParties = `-- name: DeleteClosedParties :execrows
+DELETE FROM parties p
+WHERE p.state='closed'
+  AND p.closed_at < now() - $1::interval
+  AND p.current_queue_entry_id IS NULL
+  AND NOT EXISTS (SELECT 1 FROM party_members m WHERE m.party_id=p.id)
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_entries e WHERE e.party_id=p.id)
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets t WHERE t.party_id=p.id)
+`
+
+// Invite rows cascade only after all roster and matchmaking references are gone.
+func (q *Queries) DeleteClosedParties(ctx context.Context, retention pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteClosedParties, retention)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteExpiredMatchmakerMatches = `-- name: DeleteExpiredMatchmakerMatches :execrows
 DELETE FROM matchmaker_matches
 WHERE expires_at < now()
@@ -354,6 +380,23 @@ WHERE status <> 'queued'
 // match is still recoverable.
 func (q *Queries) DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteTerminalMatchmakerTickets, retention)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteTerminalMatchmakingEntries = `-- name: DeleteTerminalMatchmakingEntries :execrows
+DELETE FROM matchmaking_entries e
+WHERE e.status <> 'queued'
+  AND e.created_at < now() - $1::interval
+  AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets t WHERE t.entry_id=e.id)
+  AND NOT EXISTS (SELECT 1 FROM parties p WHERE p.current_queue_entry_id=e.id)
+`
+
+// Keep entries while a retained ticket or current party still references them.
+func (q *Queries) DeleteTerminalMatchmakingEntries(ctx context.Context, retention pgtype.Interval) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteTerminalMatchmakingEntries, retention)
 	if err != nil {
 		return 0, err
 	}

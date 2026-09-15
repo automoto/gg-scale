@@ -229,6 +229,17 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
+	_, err = pool.Exec(ctx, `UPDATE party_invites SET expires_at=now()+interval '30 seconds' WHERE id=$1`, invite.ID)
+	if !assert.NoError(t, err) {
+		return
+	}
+	reinvited, err := store.InviteFriend(ctx, projectID, p.ID, leader, invite.PartyVersion, friend)
+	if !assert.NoError(t, err) {
+		return
+	}
+	assert.Equal(t, invite.ID, reinvited.ID)
+	assert.Equal(t, invite.PartyVersion, reinvited.PartyVersion)
+	assert.WithinDuration(t, time.Now().Add(5*time.Minute), reinvited.ExpiresAt, 5*time.Second)
 	invites, err := store.Invites(ctx, projectID, friend)
 	if !assert.NoError(t, err) {
 		return

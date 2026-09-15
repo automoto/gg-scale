@@ -199,13 +199,22 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 		cleanupErr := ErrUnsupported
 		if ok {
 			f, err := m.fleets.GetByID(ctx, a.FleetID)
-			if err != nil {
+			switch {
+			case err == nil:
+				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
+			case errors.Is(err, ErrFleetNotFound) && a.BackendRef != "":
+				// A deleted template must not strand a known backend resource.
+				cleanupErr = ErrUnsupported
+			default:
 				return err
 			}
-			cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
 		}
 		if cleanupErr == nil {
-			return m.store.Release(ctx, id)
+			if err := m.store.Release(ctx, id); err != nil {
+				return err
+			}
+			m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
+			return nil
 		}
 		if !errors.Is(cleanupErr, ErrUnsupported) || a.BackendRef == "" {
 			return fmt.Errorf("allocation %d requires resolution cleanup: %w", id, cleanupErr)

@@ -415,7 +415,7 @@ func (q *PGQueue) Cancel(ctx context.Context, id, playerID int64) error {
 // holding unclaimed queued tickets.
 func (q *PGQueue) ListReadyBuckets(ctx context.Context) ([]Bucket, error) {
 	if err := party.NewStore(q.pool).Sweep(ctx); err != nil {
-		return nil, err
+		slog.ErrorContext(ctx, "party sweep failed", "error", err)
 	}
 	var out []Bucket
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {

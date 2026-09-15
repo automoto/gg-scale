@@ -60,7 +60,8 @@ type Querier interface {
 	// it (disabled_at = delete_requested_at), so a suspension that predates the
 	// request survives the cancel. 0 rows = no pending request (or purged).
 	CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error)
-	// Stake a claim on up to N complete entries in the bucket. Their tickets
+	// Bound the player count without splitting entries. The oldest entry can
+	// exceed a small budget so it is never starved. Their tickets
 	// stay 'queued'; only claim_id/claimed_at/claim_expires_at are set, so a
 	// subsequent ClaimBucket (different worker) skips them. The caller commits
 	// via CommitMatchmakerTickets (success) or ReleaseMatchmakerTickets (failure);
@@ -205,6 +206,8 @@ type Querier interface {
 	CreateVerifiedPlayerAccount(ctx context.Context, arg CreateVerifiedPlayerAccountParams) (pgtype.UUID, error)
 	// Used when the host ends the session so peer rows don't linger until GC.
 	DeleteAllGameSessionPeers(ctx context.Context, sessionID string) error
+	// Invite rows cascade only after all roster and matchmaking references are gone.
+	DeleteClosedParties(ctx context.Context, retention pgtype.Interval) (int64, error)
 	DeleteConnectionLimitOverride(ctx context.Context, tenantID int64) (int64, error)
 	DeleteControlPanelMembership(ctx context.Context, arg DeleteControlPanelMembershipParams) error
 	// Removes a membership row but refuses to delete the actor's own row. The
@@ -268,6 +271,8 @@ type Querier interface {
 	// paired match row's retention window — otherwise a poll would 404 while the
 	// match is still recoverable.
 	DeleteTerminalMatchmakerTickets(ctx context.Context, retention pgtype.Interval) (int64, error)
+	// Keep entries while a retained ticket or current party still references them.
+	DeleteTerminalMatchmakingEntries(ctx context.Context, retention pgtype.Interval) (int64, error)
 	// Drop a match whose tickets never committed, once its backend server has been
 	// released. Same guards as the GC delete above minus the expiry, because this
 	// runs immediately rather than waiting out the match TTL: until the row is

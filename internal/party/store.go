@@ -237,6 +237,9 @@ func (s *Store) Heartbeat(ctx context.Context, project, id, player, version int6
 
 func cancel(ctx context.Context, tx pgx.Tx, p *Party) error {
 	if p.CurrentQueueEntryID == nil {
+		if p.State == "matched" {
+			p.State = "idle"
+		}
 		return nil
 	}
 	if _, err := tx.Exec(ctx, `UPDATE matchmaking_entries SET status='cancelled' WHERE id=$1 AND status='queued'`, *p.CurrentQueueEntryID); err != nil {
@@ -276,10 +279,10 @@ func (s *Store) Remove(ctx context.Context, project, id, player, version, target
 	})
 }
 
-// Cancel stops all tickets in the party's active entry.
+// Cancel stops queued tickets or returns a matched party to idle.
 func (s *Store) Cancel(ctx context.Context, project, id, player, version int64) (*Party, error) {
 	return s.mutate(ctx, project, id, player, version, true, func(tx pgx.Tx, p *Party) error {
-		if p.State != "queued" {
+		if p.State != "queued" && p.State != "matched" {
 			return ErrBusy
 		}
 		if err := cancel(ctx, tx, p); err != nil {

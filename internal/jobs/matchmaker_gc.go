@@ -111,9 +111,19 @@ func SweepMatchmakerRecords(ctx context.Context, pool *db.Pool, releaser Matchma
 		if err != nil {
 			return err
 		}
-		if released > 0 || matches > 0 || tickets > 0 {
+		retention := pgtype.Interval{Microseconds: matchmakerTicketRetention.Microseconds(), Valid: true}
+		entries, err := q.DeleteTerminalMatchmakingEntries(ctx, retention)
+		if err != nil {
+			return err
+		}
+		parties, err := q.DeleteClosedParties(ctx, retention)
+		if err != nil {
+			return err
+		}
+		if released > 0 || matches > 0 || tickets > 0 || entries > 0 || parties > 0 {
 			slog.InfoContext(ctx, "matchmaker GC", "allocations_released", released,
-				"matches_deleted", matches, "tickets_deleted", tickets)
+				"matches_deleted", matches, "tickets_deleted", tickets,
+				"entries_deleted", entries, "parties_deleted", parties)
 		}
 		return nil
 	})

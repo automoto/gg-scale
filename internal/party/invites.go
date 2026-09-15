@@ -139,7 +139,11 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 		if result.RowsAffected() != 1 {
 			return ErrInvite
 		}
-		return join(ctx, tx, out, player)
+		if err := join(ctx, tx, out, player); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `UPDATE party_code_attempts SET failures=0,window_start=now(),blocked_until=NULL WHERE project_id=$1 AND subject=$2`, project, subjects[0])
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -165,9 +169,17 @@ func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, 
 		if _, err = tx.Exec(ctx, `UPDATE party_invites SET status='expired' WHERE party_id=$1 AND target_id=$2 AND status='pending' AND expires_at<=now()`, id, target); err != nil {
 			return err
 		}
+		out.PartyVersion = p.Version
+		err = tx.QueryRow(ctx, `UPDATE party_invites SET expires_at=now()+interval '5 minutes' WHERE party_id=$1 AND target_id=$2 AND status='pending' RETURNING id,expires_at`, id, target).Scan(&out.ID, &out.ExpiresAt)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
 		p.Version++
 		out.PartyVersion = p.Version
-		return tx.QueryRow(ctx, `INSERT INTO party_invites(tenant_id,project_id,party_id,target_id) VALUES(current_setting('app.tenant_id')::bigint,$1,$2,$3) ON CONFLICT(party_id,target_id) WHERE status='pending' DO UPDATE SET expires_at=party_invites.expires_at RETURNING id,expires_at`, project, id, target).Scan(&out.ID, &out.ExpiresAt)
+		return tx.QueryRow(ctx, `INSERT INTO party_invites(tenant_id,project_id,party_id,target_id) VALUES(current_setting('app.tenant_id')::bigint,$1,$2,$3) ON CONFLICT(party_id,target_id) WHERE status='pending' DO UPDATE SET expires_at=EXCLUDED.expires_at RETURNING id,expires_at`, project, id, target).Scan(&out.ID, &out.ExpiresAt)
 	})
 	return out, err
 }

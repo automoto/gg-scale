@@ -89,6 +89,7 @@ func (s *fakeStore) InsertPending(_ context.Context, req fleet.AllocationRequest
 		ID:        s.next,
 		TenantID:  req.TenantID,
 		ProjectID: req.ProjectID,
+		FleetID:   req.FleetID,
 		Backend:   backend,
 		Region:    req.Region,
 		Status:    fleet.StatusPending,
@@ -584,5 +585,45 @@ func TestManagerRetainsUnknownResolutionWithoutOptionalCleaner(t *testing.T) {
 	a, err := store.Get(t.Context(), id)
 	if assert.NoError(t, err) {
 		assert.Equal(t, fleet.StatusPending, a.Status)
+	}
+}
+
+type cleanupBackend struct {
+	*fakeBackend
+	cleanupErr error
+}
+
+func (b *cleanupBackend) CleanupResolution(context.Context, string, map[string]string) error {
+	return b.cleanupErr
+}
+
+func TestManagerResolutionCleanupHandlesMissingFleetAndAuditsShutdown(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "existing fleet", true: "missing fleet"}[missing], func(t *testing.T) {
+			store := newFakeStore()
+			backend := &cleanupBackend{fakeBackend: &fakeBackend{name: "fake", allocateImpl: func(int) (*fleet.Allocation, error) {
+				return &fleet.Allocation{BackendRef: "ref-1", Address: "10.0.0.1:7777"}, nil
+			}}}
+			fleets := newFakeFleetStoreSeed(backend.name)
+			mgr := fleet.NewManager(store, fleets, backend, fleet.ManagerOptions{Clock: zeroClock})
+			req := sampleReq()
+			req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_cleanup"}
+			a, err := mgr.Allocate(t.Context(), req)
+			if !assert.NoError(t, err) {
+				return
+			}
+			if missing {
+				clear(fleets.byID)
+			}
+
+			err = mgr.Deallocate(t.Context(), a.ID)
+			if !assert.NoError(t, err) {
+				return
+			}
+			if missing {
+				assert.Equal(t, []string{"ref-1"}, backend.deallocateRefs)
+			}
+			assert.Equal(t, fleet.StatusShutdown, store.events[len(store.events)-1].Status)
+		})
 	}
 }

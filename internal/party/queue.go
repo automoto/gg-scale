@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Queue snapshots a ready roster. A repeated key returns the same entry even after commit.
+// Queue snapshots a ready roster. A repeated key returns the same entry only while it is queued.
 // previousMatch is required for rematch and must name the party's last match.
 func (s *Store) Queue(ctx context.Context, project, id, player, version int64, key, previousMatch string, ttl time.Duration) (*Party, error) {
 	if key == "" || len(key) > 128 {
@@ -29,10 +29,10 @@ func (s *Store) Queue(ctx context.Context, project, id, player, version int64, k
 			return ErrNotLeader
 		}
 		var entry int64
-		var previous string
-		err = tx.QueryRow(ctx, `SELECT id,previous_match_id FROM matchmaking_entries WHERE party_id=$1 AND idempotency_key=$2`, id, key).Scan(&entry, &previous)
+		var previous, status string
+		err = tx.QueryRow(ctx, `SELECT id,previous_match_id,status::text FROM matchmaking_entries WHERE party_id=$1 AND idempotency_key=$2`, id, key).Scan(&entry, &previous, &status)
 		if err == nil {
-			if previous != previousMatch {
+			if status != "queued" || out.State != "queued" || out.CurrentQueueEntryID == nil || *out.CurrentQueueEntryID != entry || previous != previousMatch {
 				return ErrStale
 			}
 			out.CurrentQueueEntryID = &entry
