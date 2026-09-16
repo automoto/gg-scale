@@ -18,7 +18,7 @@
 - Name tests for behavior, for example `should_return_empty_when_no_items`.
 - Use `github.com/stretchr/testify/assert` for test assertions.
 - Use table-driven tests where they keep coverage concise.
-- Test lanes (see `docs/testing.md`): `make test` for unit tests, `make test-integration` for the fast Testcontainers suite, `make test-e2e` for the full suite against `make up`.
+- Testing: `make test` for unit tests, `make test-integration` for the fast Testcontainers suite, `make test-e2e` for the full suite against `make up`. End to end tests take longer to run so dont run them as frequently as unit tests.
 
 ## Repository Rules
 
