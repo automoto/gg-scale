@@ -555,18 +555,18 @@ func sendEvenPortAllocate(t *testing.T, turnAddr string, creds *relay.Credential
 	require.NoError(t, nonce.GetFrom(challenge))
 	var realm stun.Realm
 	require.NoError(t, realm.GetFrom(challenge))
-	integrity := stun.NewLongTermIntegrity(creds.Username, realm.String(), creds.Password)
 
-	return transactSTUN(t, conn, dst, stun.MustBuild(
-		stun.TransactionID,
-		stun.NewType(stun.MethodAllocate, stun.ClassRequest),
+	// RFC 8489 §9: MESSAGE-INTEGRITY must follow every attribute it
+	// protects. Receivers ignore ordinary attributes after it, so EVEN-PORT
+	// has to precede integrity or pion/turn v5.1 (stun/v4) treats this as a
+	// normal allocation and bills the player limiter.
+	return transactSTUN(t, conn, dst, authenticatedRequest(
+		stun.MethodAllocate,
+		creds,
+		realm,
+		nonce,
 		requestedUDPTransport{},
-		stun.NewUsername(creds.Username),
-		&realm,
-		&nonce,
-		&integrity,
 		reserveEvenPort{},
-		stun.Fingerprint,
 	))
 }
 
