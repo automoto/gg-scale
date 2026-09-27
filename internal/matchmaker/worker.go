@@ -569,10 +569,7 @@ func (w *Worker) returnOnCapacity(ctx context.Context, claim *Claim, group []*Ti
 // failure branch) rather than un-claiming it penalty-free, so a persistently
 // failing group eventually flips to 'failed' instead of looping forever.
 func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, group []*Ticket, match *Match) error {
-	if err := w.queue.CreateMatch(tenantCtx, match); err != nil {
-		return w.releaseOnError(ctx, claim, group, fmt.Errorf("create match: %w", err))
-	}
-	committed, err := w.queue.CommitTickets(ctx, claim, ticketIDs(group), match.ID, match.Address, match.Protocol)
+	committed, err := w.commitResult(ctx, tenantCtx, claim, group, match)
 	switch {
 	case errors.Is(err, ErrShortCommit):
 		// A member drifted after the claim. The commit rolled back; return
@@ -582,8 +579,8 @@ func (w *Worker) finalizeMatch(ctx, tenantCtx context.Context, claim *Claim, gro
 	case err != nil:
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("commit tickets: %w", err))
 	case committed == 0:
-		// Claim drifted (cancel/sweep race). The orphan match row is
-		// harmless and GC'd by retention.
+		// Claim drifted in a cancel/sweep race. PostgreSQL rolls back
+		// the match row with the tickets.
 		return nil
 	}
 	if w.cfg.MatchCounter != nil {
@@ -636,6 +633,9 @@ func (w *Worker) commitGameSession(ctx, tenantCtx context.Context, b Bucket, cla
 	for _, t := range group {
 		players = append(players, t.PlayerID)
 	}
+	if err := w.beginResolution(tenantCtx, match); err != nil {
+		return w.releaseOnError(ctx, claim, group, err)
+	}
 	sessionID, joinCode, err := w.cfg.Sessions.CreateMatchSession(tenantCtx, b.ProjectID, b.GameMode, players)
 	if errors.Is(err, ErrCapacity) {
 		return w.returnOnCapacity(ctx, claim, group, err)
@@ -655,6 +655,13 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 	if w.alloc == nil {
 		return w.releaseOnError(ctx, claim, group, errors.New("no fleet allocator configured"))
 	}
+	match, err := w.newMatch(b, group)
+	if err != nil {
+		return w.releaseOnError(ctx, claim, group, err)
+	}
+	if err = w.beginResolution(tenantCtx, match); err != nil {
+		return w.releaseOnError(ctx, claim, group, err)
+	}
 	alloc, err := w.alloc.Allocate(tenantCtx, fleet.AllocationRequest{
 		TenantID:  b.TenantID,
 		ProjectID: b.ProjectID,
@@ -662,32 +669,21 @@ func (w *Worker) commitFleetAllocation(ctx, tenantCtx context.Context, b Bucket,
 		Region:    b.Region,
 		GameMode:  b.GameMode,
 		Capacity:  len(group),
+		Labels:    map[string]string{"ggscale.dev/resolution-id": match.ID},
 	})
 	if err != nil {
 		return w.releaseOnError(ctx, claim, group, fmt.Errorf("allocate: %w", err))
 	}
 
-	match, err := w.newMatch(b, group)
-	if err != nil {
-		w.deallocateOrphan(tenantCtx, alloc, "match setup failed")
-		return w.releaseOnError(ctx, claim, group, err)
-	}
 	match.Address = alloc.Address
 	match.Protocol = alloc.Protocol
 	match.AllocationID = alloc.ID
-	if err := w.queue.CreateMatch(tenantCtx, match); err != nil {
-		w.deallocateOrphan(tenantCtx, alloc, "match setup failed")
-		// The insert re-checks the per-player allocation cap, which Enqueue
-		// could only check against a stale count. Hitting it here is a
-		// transient "already holding enough servers", not a broken ticket, so
-		// return the group penalty-free instead of spending an attempt.
-		if errors.Is(err, ErrTooManyUnclaimedAllocations) {
-			return w.returnOnCapacity(ctx, claim, group, err)
-		}
-		return w.releaseOnError(ctx, claim, group, fmt.Errorf("create match: %w", err))
+	committed, err := w.commitResult(ctx, tenantCtx, claim, group, match)
+	if errors.Is(err, ErrTooManyUnclaimedAllocations) {
+		w.deallocateOrphan(tenantCtx, alloc, "allocation cap")
+		return w.returnOnCapacity(ctx, claim, group, err)
 	}
 
-	committed, err := w.queue.CommitTickets(ctx, claim, ticketIDs(group), match.ID, alloc.Address, alloc.Protocol)
 	switch {
 	case errors.Is(err, ErrShortCommit):
 		// A member drifted after the claim. Reclaim the orphan server and
@@ -726,6 +722,8 @@ func (w *Worker) newMatch(b Bucket, tickets []*Ticket) (*Match, error) {
 	for _, t := range tickets {
 		roster = append(roster, RosterEntry{
 			PlayerID:          t.PlayerID,
+			PartyID:           t.PartyID,
+			QueueEntryID:      t.EntryID,
 			Region:            t.Region,
 			StringProperties:  t.StringProperties,
 			NumericProperties: t.NumericProperties,
@@ -857,4 +855,27 @@ func (w *Worker) dropEvent(b Bucket, source string) {
 	w.log.Warn("matchmaker: bucket event dropped (consumer pool saturated)",
 		"source", source, "tenant_id", b.TenantID, "project_id", b.ProjectID,
 		"region", b.Region, "game_mode", b.GameMode)
+}
+
+type atomicMatchCommitter interface {
+	CommitMatch(context.Context, *Claim, []int64, *Match) (int64, error)
+}
+
+func (w *Worker) commitResult(ctx, tenantCtx context.Context, claim *Claim, group []*Ticket, m *Match) (int64, error) {
+	if q, ok := w.queue.(atomicMatchCommitter); ok {
+		return q.CommitMatch(tenantCtx, claim, ticketIDs(group), m)
+	}
+	if err := w.queue.CreateMatch(tenantCtx, m); err != nil {
+		return 0, err
+	}
+	return w.queue.CommitTickets(ctx, claim, ticketIDs(group), m.ID, m.Address, m.Protocol)
+}
+
+func (w *Worker) beginResolution(ctx context.Context, m *Match) error {
+	if q, ok := w.queue.(interface {
+		BeginResolution(context.Context, *Match) error
+	}); ok {
+		return q.BeginResolution(ctx, m)
+	}
+	return nil
 }

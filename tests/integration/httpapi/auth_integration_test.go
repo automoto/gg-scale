@@ -124,21 +124,26 @@ func sharedHTTPAPIPostgres(t *testing.T) *httpapiPostgresFixture {
 }
 
 func (p *httpapiPostgresFixture) start(ctx context.Context) error {
-	ctr, err := tcpostgres.Run(ctx,
-		"postgres:17",
-		tcpostgres.WithDatabase(httpapiTemplateDB),
-		tcpostgres.WithUsername("ggscale"),
-		tcpostgres.WithPassword("ggscale"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	if err != nil {
-		return err
-	}
-	p.ctr = ctr
+	dsn := os.Getenv("HTTPAPI_TEST_DATABASE_URL")
+	var err error
+	if dsn == "" {
+		ctr, err := tcpostgres.Run(ctx,
+			"postgres:17",
+			tcpostgres.WithDatabase(httpapiTemplateDB),
+			tcpostgres.WithUsername("ggscale"),
+			tcpostgres.WithPassword("ggscale"),
+			tcpostgres.BasicWaitStrategies(),
+		)
+		if err != nil {
+			return err
+		}
+		p.ctr = ctr
 
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return err
+		dsn, err = ctr.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			return err
+		}
+
 	}
 	p.templateDSN = dsn
 

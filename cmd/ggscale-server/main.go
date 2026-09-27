@@ -611,6 +611,7 @@ func run() error {
 		TenantConnectionCap:   tenantCap,
 		Matchmaker:            mmQueue,
 		MatchmakerTicketTTL:   cfg.MatchmakerTicketTTL,
+		PartyEnqueueEnabled:   cfg.PartyEnqueueEnabled,
 		GameSessions:          gameSessions,
 		ServerList:            serverListRegistry,
 		RelayIssuer:           relayIssuer,

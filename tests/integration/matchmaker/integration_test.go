@@ -79,21 +79,26 @@ func sharedMatchmakerPostgres(t *testing.T) *matchmakerPostgresFixture {
 }
 
 func (p *matchmakerPostgresFixture) start(ctx context.Context) error {
-	ctr, err := tcpostgres.Run(ctx,
-		"postgres:17",
-		tcpostgres.WithDatabase(matchmakerTemplateDB),
-		tcpostgres.WithUsername("ggscale"),
-		tcpostgres.WithPassword("ggscale"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	if err != nil {
-		return err
-	}
-	p.ctr = ctr
+	dsn := os.Getenv("MATCHMAKER_TEST_DATABASE_URL")
+	var err error
+	if dsn == "" {
+		ctr, err := tcpostgres.Run(ctx,
+			"postgres:17",
+			tcpostgres.WithDatabase(matchmakerTemplateDB),
+			tcpostgres.WithUsername("ggscale"),
+			tcpostgres.WithPassword("ggscale"),
+			tcpostgres.BasicWaitStrategies(),
+		)
+		if err != nil {
+			return err
+		}
+		p.ctr = ctr
 
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		return err
+		dsn, err = ctr.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			return err
+		}
+
 	}
 	p.templateDSN = dsn
 

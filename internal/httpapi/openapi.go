@@ -48,6 +48,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerRemoteAddrRoutes(api, d)
 	registerGameSessionRoutes(api, d)
 	registerMatchmakerRoutes(api, d)
+	registerPartyRoutes(api, d)
 
 	doc := cfg.OpenAPI
 	enrichVerifyOp(doc)

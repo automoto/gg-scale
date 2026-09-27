@@ -50,6 +50,8 @@ type matchmakerTicketRequest struct {
 }
 
 type matchmakerTicketResponse struct {
+	EntryID           int64              `json:"entry_id"`
+	PartyID           int64              `json:"party_id,omitempty"`
 	ID                int64              `json:"id" example:"9001"`
 	Status            string             `json:"status" example:"matched"`
 	Mode              string             `json:"mode" example:"game_session"`
@@ -398,6 +400,9 @@ func matchmakerCreateTicket(d Deps) func(context.Context, *matchmakerCreateInput
 				Value:    active.ActiveTicketID,
 			})
 		}
+		if errors.Is(err, matchmaker.ErrPartyMember) {
+			return nil, huma.Error409Conflict(err.Error())
+		}
 		if errors.Is(err, matchmaker.ErrTooManyUnclaimedAllocations) {
 			return nil, huma.Error429TooManyRequests(
 				"too many unclaimed dedicated-server allocations; claim or let existing matches expire before requesting more")
@@ -456,6 +461,8 @@ func matchmakerCancelTicket(d Deps) func(context.Context, *matchmakerTicketIDInp
 			return nil, aerr
 		}
 		switch err = d.Matchmaker.Cancel(ctx, in.ID, playerID); {
+		case errors.Is(err, matchmaker.ErrPartyTicket):
+			return nil, huma.Error409Conflict(err.Error())
 		case errors.Is(err, matchmaker.ErrNotFound):
 			return nil, huma.Error404NotFound("not found")
 		case errors.Is(err, matchmaker.ErrAlreadyTerminal):
@@ -499,7 +506,8 @@ func allowRateAction(ctx context.Context, d Deps, key string, rate, burst float6
 
 func ticketResponse(t *matchmaker.Ticket, m *matchmaker.Match) matchmakerTicketResponse {
 	resp := matchmakerTicketResponse{
-		ID:                t.ID,
+		ID:      t.ID,
+		EntryID: t.EntryID, PartyID: t.PartyID,
 		Status:            string(t.Status),
 		Mode:              string(t.Mode),
 		Region:            t.Region,

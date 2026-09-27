@@ -108,9 +108,17 @@ func cloneMatch(m *Match) *Match {
 // (queued) ticket per player per project is enforced under the queue lock,
 // mirroring the Postgres partial unique index.
 func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, error) {
-	req.normalize()
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	for _, t := range q.tickets {
+		if t.PartyID != 0 && t.Status == StatusQueued && t.TenantID == req.TenantID && t.ProjectID == req.ProjectID && t.PlayerID == req.PlayerID {
+			return nil, ErrPartyMember
+		}
+	}
+	return q.enqueue(req)
+}
+func (q *MemQueue) enqueue(req EnqueueRequest) (*Ticket, error) {
+	req.normalize()
 	for _, t := range q.tickets {
 		if t.Status != StatusQueued || t.TenantID != req.TenantID || t.ProjectID != req.ProjectID || t.PlayerID != req.PlayerID {
 			continue
@@ -130,6 +138,7 @@ func (q *MemQueue) Enqueue(_ context.Context, req EnqueueRequest) (*Ticket, erro
 	t := &memTicket{
 		Ticket: Ticket{
 			ID:                q.nextID,
+			EntryID:           q.nextID,
 			TenantID:          req.TenantID,
 			ProjectID:         req.ProjectID,
 			FleetID:           req.FleetID,
@@ -190,6 +199,9 @@ func (q *MemQueue) Cancel(ctx context.Context, id, playerID int64) error {
 	if !ok || t.TenantID != tenantID || t.PlayerID != playerID {
 		return ErrNotFound
 	}
+	if t.PartyID != 0 {
+		return ErrPartyTicket
+	}
 	if t.Status != StatusQueued {
 		return ErrAlreadyTerminal
 	}
@@ -248,8 +260,7 @@ func bucketKey(t *Ticket) Bucket {
 	return Bucket{TenantID: t.TenantID, ProjectID: t.ProjectID, Mode: t.Mode, FleetID: t.FleetID, Region: region, GameMode: t.GameMode}
 }
 
-// ClaimBucket stakes a claim on up to max unclaimed queued tickets, oldest
-// first. Returns nil when nothing was claimable.
+// ClaimBucket stakes a claim on up to max complete entries, oldest first. Returns nil when nothing was claimable.
 func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, max int, ttl time.Duration) (*Claim, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -272,7 +283,28 @@ func (q *MemQueue) ClaimBucket(_ context.Context, bucket Bucket, max int, ttl ti
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	taken := candidates[:min(max, len(candidates))]
+	var taken []*memTicket
+	entries := map[int64]bool{}
+	for _, t := range candidates {
+		if !entries[t.EntryID] && len(entries) >= max {
+			continue
+		}
+		complete := true
+		for _, m := range q.tickets {
+			if m.EntryID == t.EntryID && (m.Status != StatusQueued || m.claimID != "" || expired(&m.Ticket)) {
+				complete = false
+				break
+			}
+		}
+		if !complete {
+			continue
+		}
+		entries[t.EntryID] = true
+		taken = append(taken, t)
+	}
+	if len(taken) == 0 {
+		return nil, nil
+	}
 	claimID := uuid.NewString()
 	expires := time.Now().UTC().Add(ttl)
 	out := make([]*Ticket, 0, len(taken))
@@ -294,9 +326,12 @@ func (q *MemQueue) CommitTickets(_ context.Context, claim *Claim, ticketIDs []in
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if !q.wholeEntries(ticketIDs) {
+		return 0, ErrShortCommit
+	}
 	var committable int64
 	for _, id := range ticketIDs {
-		if t, ok := q.tickets[id]; ok && t.claimID == claim.ID && t.Status == StatusQueued {
+		if t, ok := q.tickets[id]; ok && t.claimID == claim.ID && t.Status == StatusQueued && t.claimExpiresAt.After(time.Now()) && !expired(&t.Ticket) {
 			committable++
 		}
 	}
@@ -328,6 +363,9 @@ func (q *MemQueue) ReleaseTickets(_ context.Context, claim *Claim, ticketIDs []i
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if !q.wholeEntries(ticketIDs) {
+		return ErrShortCommit
+	}
 	var failed int
 	for _, id := range ticketIDs {
 		t, ok := q.tickets[id]
@@ -372,6 +410,9 @@ func (q *MemQueue) ReturnTickets(_ context.Context, claim *Claim, ticketIDs []in
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if !q.wholeEntries(ticketIDs) {
+		return ErrShortCommit
+	}
 	for _, id := range ticketIDs {
 		t, ok := q.tickets[id]
 		if !ok || t.claimID != claim.ID || t.Status != StatusQueued {
@@ -488,4 +529,72 @@ func cloneTicket(t *Ticket) *Ticket {
 		dup.ExpiresAt = &v
 	}
 	return &dup
+}
+
+// EnqueueEntry inserts an indivisible party snapshot for in-memory workers.
+func (q *MemQueue) EnqueueEntry(_ context.Context, partyID int64, requests []EnqueueRequest) ([]*Ticket, error) {
+	if partyID <= 0 || len(requests) == 0 || len(requests) > 8 {
+		return nil, ErrShortCommit
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	var out []*Ticket
+	for i := range requests {
+		requests[i].normalize()
+	}
+	for _, req := range requests {
+		if !sameEntrySettings(req, requests[0]) {
+			return nil, ErrShortCommit
+		}
+		if req.TenantID != requests[0].TenantID || req.ProjectID != requests[0].ProjectID {
+			return nil, ErrNotFound
+		}
+	}
+	for _, req := range requests {
+		ticket, err := q.enqueue(req)
+		if err != nil {
+			for _, t := range out {
+				delete(q.tickets, t.ID)
+			}
+			return nil, err
+		}
+		out = append(out, ticket)
+	}
+	for _, t := range out {
+		t.EntryID = out[0].ID
+		t.PartyID = partyID
+		q.tickets[t.ID].EntryID = t.EntryID
+		q.tickets[t.ID].PartyID = partyID
+	}
+	return out, nil
+}
+
+func (q *MemQueue) wholeEntries(ids []int64) bool {
+	selected := map[int64]bool{}
+	entries := map[int64]bool{}
+	for _, id := range ids {
+		if selected[id] {
+			return false
+		}
+		selected[id] = true
+		if t := q.tickets[id]; t != nil {
+			entries[t.EntryID] = true
+		}
+	}
+	for _, t := range q.tickets {
+		if t.EntryID != 0 && entries[t.EntryID] && !selected[t.ID] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameEntrySettings(a, b EnqueueRequest) bool {
+	if (a.ExpiresAt == nil) != (b.ExpiresAt == nil) {
+		return false
+	}
+	if a.ExpiresAt != nil && !a.ExpiresAt.Equal(*b.ExpiresAt) {
+		return false
+	}
+	return a.Mode == b.Mode && a.FleetID == b.FleetID && a.Region == b.Region && a.GameMode == b.GameMode && a.MinCount == b.MinCount && a.MaxCount == b.MaxCount && a.CountMultiple == b.CountMultiple && a.AllowCrossRegion == b.AllowCrossRegion && a.Query == b.Query
 }

@@ -355,3 +355,16 @@ func (s *Supervisor) HealthCheck(ctx context.Context) error {
 	}
 	return b.HealthCheck(ctx)
 }
+
+// CleanupResolution forwards durable orphan recovery to capable plugins.
+func (s *Supervisor) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+	backend, err := s.backend()
+	if err != nil {
+		return err
+	}
+	cleaner, ok := backend.(fleet.ResolutionCleaner)
+	if !ok {
+		return fleet.ErrUnsupported
+	}
+	return cleaner.CleanupResolution(ctx, id, config)
+}

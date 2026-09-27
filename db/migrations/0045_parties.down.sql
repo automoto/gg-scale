@@ -1,0 +1,11 @@
+DROP INDEX allocation_resolution;
+DROP TABLE matchmaking_resolutions;
+DROP TRIGGER party_member_leader ON party_members;
+DROP TRIGGER party_live_leader ON parties;
+DROP FUNCTION party_live_leader();
+ALTER TABLE matchmaking_tickets DROP COLUMN party_id, DROP COLUMN entry_id;
+DROP TABLE matchmaking_entries,party_code_attempts,party_invite_codes,party_invites,party_members,parties;
+ALTER TABLE project_players DROP CONSTRAINT party_player_scope;
+ALTER TABLE projects DROP CONSTRAINT party_project_scope;
+DROP FUNCTION party_code_ip_limit(text,boolean);
+DROP TABLE party_code_ip_attempts;

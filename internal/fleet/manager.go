@@ -191,8 +191,35 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	if err != nil {
 		return err
 	}
-	if a.Status.IsTerminal() {
+	if a.Status == StatusShutdown || (a.Status == StatusFailed && a.Metadata["ggscale.dev/resolution-id"] == "") {
 		return nil
+	}
+	if a.Metadata["ggscale.dev/resolution-id"] != "" {
+		cleaner, ok := m.backend.(ResolutionCleaner)
+		cleanupErr := ErrUnsupported
+		if ok {
+			f, err := m.fleets.GetByID(ctx, a.FleetID)
+			switch {
+			case err == nil:
+				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
+			case errors.Is(err, ErrFleetNotFound) && a.BackendRef != "":
+				// A deleted template must not strand a known backend resource.
+				cleanupErr = ErrUnsupported
+			default:
+				return err
+			}
+		}
+		if cleanupErr == nil {
+			if err := m.store.Release(ctx, id); err != nil {
+				return err
+			}
+			m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
+			return nil
+		}
+		if !errors.Is(cleanupErr, ErrUnsupported) || a.BackendRef == "" {
+			return fmt.Errorf("allocation %d requires resolution cleanup: %w", id, cleanupErr)
+		}
+		// Older backends can still release resources with a persisted reference.
 	}
 	if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
 		return fmt.Errorf("fleet: backend deallocate: %w", err)

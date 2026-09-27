@@ -176,3 +176,9 @@ var ErrNotFound = errors.New("fleet: allocation not found")
 // ErrUnsupported is returned by a Backend when asked to perform an operation
 // it does not implement (e.g. Watch on a backend that only supports polling).
 var ErrUnsupported = errors.New("fleet: operation not supported by backend")
+
+// ResolutionCleaner removes resources created before the backend reference was
+// saved. Backends use the durable ggscale.dev/resolution-id allocation label.
+type ResolutionCleaner interface {
+	CleanupResolution(context.Context, string, map[string]string) error
+}
