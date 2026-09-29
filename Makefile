@@ -13,10 +13,14 @@
 
 FULL_STACK := docker compose -f compose/full.yml
 
-# Docker Hub: buildwrangler/ggscale — use `make docker-push TAG=1.2.3` (requires `docker login`).
-DOCKER_IMAGE ?= buildwrangler/ggscale
-TAG          ?= latest
-GIT_COMMIT   ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# GHCR: ghcr.io/automoto/gg-scale. CI publishes every stable vX.Y.Z tag after the
+# full test suite passes. `make docker-push TAG=vX.Y.Z` is a maintainer fallback and
+# needs `docker login ghcr.io` with a GitHub token that has write:packages. No
+# floating tags (`latest`) are published; deployments pin an explicit tag or digest.
+DOCKER_IMAGE ?= ghcr.io/automoto/gg-scale
+TAG          ?= dev
+GIT_COMMIT   ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+RELEASE_TAG_PATTERN := ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$$
 # Platforms baked into the pushed manifest. amd64 is required — the relay VMs
 # (and other x86 hosts) exec the binary directly; arm64 keeps local Apple-Silicon
 # pulls working. A plain `docker build` only emits the builder's native arch, so
@@ -218,15 +222,17 @@ down-full: ## Stop the full stack
 clean-full: ## Stop the full stack and delete its volumes
 	$(FULL_STACK) down -v --remove-orphans
 
-# ─── Docker Hub image (ggscale-server) ──────────────────────────────────
+# ─── Container image (ggscale-server) ────────────────────────────────────
 
-docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally (host arch only)
+docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally (host arch only; TAG defaults to dev)
 	docker build \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(DOCKER_IMAGE):$(TAG) \
 		.
 
-docker-push: ## Build and push a multi-arch ($(PLATFORMS)) manifest to Docker Hub
+docker-push: ## Push a multi-arch ($(PLATFORMS)) manifest to GHCR; requires TAG=vX.Y.Z
+	@printf '%s\n' '$(TAG)' | grep -Eq '$(RELEASE_TAG_PATTERN)' \
+		|| (echo "usage: make docker-push TAG=vX.Y.Z -- TAG='$(TAG)' is not a stable release tag; nothing pushed" && exit 1)
 	docker buildx inspect ggscale-builder >/dev/null 2>&1 \
 		|| docker buildx create --name ggscale-builder --driver docker-container --use
 	docker buildx build \
