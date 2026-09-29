@@ -1,4 +1,6 @@
-FROM golang:1.26.5-bookworm AS builder
+# Build on the host platform and cross-compile; the final stage only copies
+# files, so no emulation is needed for the arm64 image.
+FROM --platform=$BUILDPLATFORM golang:1.26.5-bookworm AS builder
 
 WORKDIR /src
 
@@ -11,7 +13,8 @@ COPY . .
 # automatically by Dokku on git-push deploys. Either one stamps the binary.
 ARG GIT_COMMIT=
 ARG GIT_REV=
-RUN CGO_ENABLED=0 go build \
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
     -ldflags="-s -w -X main.commit=${GIT_COMMIT:-${GIT_REV:-unknown}}" \
     -o /out/ggscale-server \
     ./cmd/ggscale-server
