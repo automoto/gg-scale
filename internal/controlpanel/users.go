@@ -39,6 +39,8 @@ type controlPanelSession struct {
 	User      controlPanelUser
 	CSRFToken string
 	ExpiresAt time.Time
+	// HasPassword is false for a user who signs in only through a provider.
+	HasPassword bool
 }
 
 func contextWithSession(ctx context.Context, session controlPanelSession) context.Context {

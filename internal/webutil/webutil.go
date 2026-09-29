@@ -51,6 +51,30 @@ func PlayerSecurityHeaders(next http.Handler) http.Handler {
 	return securityHeadersWithCSP(playerCSP, next)
 }
 
+// SecurityHeadersWithFormActions is SecurityHeaders with extra origins that a
+// form POST can redirect to. Chromium applies form-action to the redirects
+// that follow a form submission, so a sign-in form that ends at an identity
+// provider needs the provider's origin here. No other directive changes.
+func SecurityHeadersWithFormActions(origins ...string) func(http.Handler) http.Handler {
+	csp := withFormActions(controlPanelCSP, origins)
+	return func(next http.Handler) http.Handler { return securityHeadersWithCSP(csp, next) }
+}
+
+// PlayerSecurityHeadersWithFormActions is the player-site variant of
+// SecurityHeadersWithFormActions.
+func PlayerSecurityHeadersWithFormActions(origins ...string) func(http.Handler) http.Handler {
+	csp := withFormActions(playerCSP, origins)
+	return func(next http.Handler) http.Handler { return securityHeadersWithCSP(csp, next) }
+}
+
+func withFormActions(csp string, origins []string) string {
+	if len(origins) == 0 {
+		return csp
+	}
+	const self = "form-action 'self'"
+	return strings.Replace(csp, self, self+" "+strings.Join(origins, " "), 1)
+}
+
 func securityHeadersWithCSP(csp string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Frame-Options", "DENY")

@@ -40,7 +40,6 @@ See `docs/ARCHITECTURE.md` for what's actually running.
   `should_return_empty_when_no_items`.
 - Code must be `go fmt` clean and pass `make lint` (`golangci-lint`);
   `make check` runs lint + unit tests together, the same gate CI applies.
-- See `docs/testing.md` for the suite boundary and reliability guidelines.
 - Open a PR; CI runs lint and unit tests first, then runs integration and
   end-to-end tests concurrently on separate Linux runners.
 

@@ -200,7 +200,8 @@ SELECT
     a.email::text      AS email,
     a.display_name,
     a.disabled_at,
-    a.session_epoch    AS account_epoch
+    a.session_epoch    AS account_epoch,
+    (a.password_hash IS NOT NULL)::boolean AS has_password
 FROM player_account_sessions s
 JOIN player_accounts a ON a.id = s.player_account_id
 WHERE s.refresh_hash = sqlc.arg(refresh_hash);

@@ -290,3 +290,69 @@ func TestValidateAllowsDevWithoutCORS(t *testing.T) {
 	}
 	assert.NoError(t, c.Validate())
 }
+
+func TestValidateSSO(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(c *config.Config)
+		wantErr string
+	}{
+		{
+			name: "player Google client ID without secret",
+			mutate: func(c *config.Config) {
+				c.PlayerSSOGoogleClientID = "id"
+			},
+			wantErr: "PLAYER_SSO_GOOGLE_CLIENT_ID and PLAYER_SSO_GOOGLE_CLIENT_SECRET must be set together",
+		},
+		{
+			name: "control panel Google secret without client ID",
+			mutate: func(c *config.Config) {
+				c.ControlPanelSSOGoogleClientSecret = "secret"
+			},
+			wantErr: "CONTROL_PANEL_SSO_GOOGLE_CLIENT_ID and CONTROL_PANEL_SSO_GOOGLE_CLIENT_SECRET must be set together",
+		},
+		{
+			name: "provider on without base URL",
+			mutate: func(c *config.Config) {
+				c.Env = "dev"
+				c.ControlPanelBaseURL = ""
+				c.PlayerSSOGoogleClientID = "id"
+				c.PlayerSSOGoogleClientSecret = "secret"
+			},
+			wantErr: "CONTROL_PANEL_BASE_URL must be set",
+		},
+		{
+			name: "provider on with relative base URL",
+			mutate: func(c *config.Config) {
+				c.Env = "dev"
+				c.ControlPanelBaseURL = "/control-panel"
+				c.PlayerSSOGoogleClientID = "id"
+				c.PlayerSSOGoogleClientSecret = "secret"
+			},
+			wantErr: "must be an absolute http(s) URL",
+		},
+		{
+			name: "both surfaces on",
+			mutate: func(c *config.Config) {
+				c.PlayerSSOGoogleClientID = "id"
+				c.PlayerSSOGoogleClientSecret = "secret"
+				c.ControlPanelSSOGoogleClientID = "id2"
+				c.ControlPanelSSOGoogleClientSecret = "secret2"
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := baseProd()
+			tc.mutate(c)
+
+			err := c.Validate()
+
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}

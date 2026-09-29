@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -53,6 +54,7 @@ import (
 	"github.com/automoto/gg-scale/internal/relaymeter"
 	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/serverlist"
+	"github.com/automoto/gg-scale/internal/sso"
 	"github.com/automoto/gg-scale/internal/storagelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
 	"github.com/automoto/gg-scale/internal/twofactor"
@@ -630,6 +632,8 @@ func run() error {
 			BillingPortalURL:       cfg.BillingPortalURL,
 			BillingUpgradeURL:      cfg.BillingUpgradeURL,
 			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
+			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/control-panel/sso",
+				cfg.ControlPanelSSOGoogleClientID, cfg.ControlPanelSSOGoogleClientSecret),
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
 			// cross into the control panel package.
@@ -649,6 +653,8 @@ func run() error {
 			CookieSecure:      cfg.ControlPanelCookieSecure,
 			BaseURL:           cfg.ControlPanelBaseURL,
 			DeleteGracePeriod: cfg.PlayerDeleteGracePeriod,
+			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/players/account/sso",
+				cfg.PlayerSSOGoogleClientID, cfg.PlayerSSOGoogleClientSecret),
 		},
 		ControlPanelBootstrap:  controlPanelBootstrap,
 		ControlPanelPluginInfo: pluginInfo,
@@ -914,4 +920,18 @@ func newLogger(level string) *slog.Logger {
 	}
 	base := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: lvl})
 	return slog.New(middleware.NewContextHandler(base))
+}
+
+// ssoProviders builds the sign-in providers of one surface. A provider with
+// no client ID is off. The callback URL is fixed: it is the URL registered
+// on the provider app.
+func ssoProviders(baseURL, ssoPath, googleClientID, googleClientSecret string) map[string]sso.Provider {
+	providers := map[string]sso.Provider{}
+	callback := func(name string) string {
+		return strings.TrimRight(baseURL, "/") + ssoPath + "/" + name + "/callback"
+	}
+	if googleClientID != "" {
+		providers["google"] = sso.Google(googleClientID, googleClientSecret, callback("google"))
+	}
+	return providers
 }

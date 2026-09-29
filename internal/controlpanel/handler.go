@@ -25,6 +25,7 @@ import (
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/secretseal"
+	"github.com/automoto/gg-scale/internal/sso"
 	"github.com/automoto/gg-scale/internal/storagelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
 	"github.com/automoto/gg-scale/internal/twofactor"
@@ -127,6 +128,7 @@ type Handler struct {
 	storageLimits        storagelimit.LimitStore
 	billingHandoffKey    []byte
 	enqueuePasswordReset func(ctx context.Context, email string) error
+	sso                  *sso.Flow
 }
 
 // New builds the control panel router. Callers should only mount it when
@@ -135,12 +137,14 @@ func New(d Deps) http.Handler {
 	h := newHandler(d)
 
 	r := chi.NewRouter()
-	r.Use(webutil.SecurityHeaders)
+	r.Use(webutil.SecurityHeadersWithFormActions(h.sso.Origins()...))
 	r.Get("/assets/*", h.assetHandler)
 	r.Group(func(r chi.Router) {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
+		r.Post("/login/sso/{provider}/start", h.ssoLoginStart)
+		r.Get("/sso/{provider}/callback", h.ssoCallback)
 		r.Get("/setup", h.setupTokenPage)
 		r.Post("/setup/token", h.verifySetupToken)
 		r.Post("/setup", h.completeSetup)
@@ -176,6 +180,8 @@ func New(d Deps) http.Handler {
 		r.Post("/account/2fa/confirm", h.twoFactorConfirm)
 		r.Post("/account/2fa/disable", h.twoFactorDisable)
 		r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
+		r.Post("/account/sso/{provider}/link", h.ssoLinkStart)
+		r.Post("/account/sso/{provider}/unlink", h.ssoUnlink)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
 			r.Use(h.requireTenantAccess(roleAdmin))
 			r.Get("/projects", h.projectsPage)
@@ -310,6 +316,14 @@ func New(d Deps) http.Handler {
 		r.Use(webutil.RequireCSRF)
 		r.Get("/invite/accept", h.acceptInvitePage)
 		r.Post("/invite/accept", h.acceptInviteHandler)
+		// The provider round trip is new public work, so it sits behind the
+		// per-IP cap like the login routes.
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/invite/accept/sso/{provider}/start", h.ssoInviteStart)
+		})
 	})
 
 	// Public tenant sign-up: unauthenticated request form + approved-invite
@@ -329,6 +343,7 @@ func New(d Deps) http.Handler {
 		r.Post("/request-access", h.tenantSignupHandler)
 		r.Get("/request-access/accept", h.tenantSignupAcceptPage)
 		r.Post("/request-access/accept", h.tenantSignupAcceptHandler)
+		r.Post("/request-access/accept/sso/{provider}/start", h.ssoSignupAcceptStart)
 	})
 
 	return r
@@ -365,6 +380,7 @@ func newHandler(d Deps) *Handler {
 		billingHandoffKey:    append([]byte(nil), d.BillingHandoffKey...),
 		enqueuePasswordReset: d.EnqueuePasswordReset,
 	}
+	h.sso = newSSOFlow(h, d.Config.SSOProviders)
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
 			WithOverrides(d.RateLimitOverrides)

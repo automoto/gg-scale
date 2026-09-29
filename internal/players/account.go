@@ -53,16 +53,19 @@ type accountSession struct {
 	AccountID   uuid.UUID
 	Email       string
 	DisplayName string
+	// HasPassword is false for an account that signs in only through a
+	// provider.
+	HasPassword bool
 }
 
 // --- page handlers ---------------------------------------------------------
 
 func (h *Handler) accountLoginPage(w http.ResponseWriter, r *http.Request) {
-	webutil.Render(r, w, AccountLoginPage(AccountLoginView{CSRFToken: h.csrf(r)}))
+	h.renderAccountLogin(w, r, http.StatusOK, "", "")
 }
 
 func (h *Handler) accountSignupPage(w http.ResponseWriter, r *http.Request) {
-	webutil.Render(r, w, AccountSignupPage(AccountSignupView{CSRFToken: h.csrf(r)}))
+	webutil.Render(r, w, AccountSignupPage(AccountSignupView{CSRFToken: h.csrf(r), Providers: h.ssoButtons()}))
 }
 
 func (h *Handler) accountVerifyPage(w http.ResponseWriter, r *http.Request) {
@@ -94,14 +97,27 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account home: remote addrs", err)
 		return
 	}
+	methods, err := h.signInMethods(r.Context(), toPgUUID(sess.AccountID))
+	if err != nil {
+		webutil.InternalError(w, "account home: sign-in methods", err)
+		return
+	}
+	totp, totpFound, err := h.getAccountTOTP(r.Context(), toPgUUID(sess.AccountID))
+	if err != nil {
+		webutil.InternalError(w, "account home: two-factor lookup", err)
+		return
+	}
 	view := AccountHomeView{
-		Email:           sess.Email,
-		DisplayName:     sess.DisplayName,
-		Projects:        projects,
-		CSRFToken:       h.csrf(r),
-		Flash:           r.URL.Query().Get("flash"),
-		FlashError:      r.URL.Query().Get("error"),
-		RemoteAddrCount: remoteAddrCount(addrs),
+		Email:            sess.Email,
+		DisplayName:      sess.DisplayName,
+		Projects:         projects,
+		CSRFToken:        h.csrf(r),
+		Flash:            r.URL.Query().Get("flash"),
+		FlashError:       r.URL.Query().Get("error"),
+		RemoteAddrCount:  remoteAddrCount(addrs),
+		HasPassword:      sess.HasPassword,
+		TwoFactorEnabled: totpFound && totp.ConfirmedAt.Valid,
+		SignInMethods:    methods,
 	}
 	webutil.Render(r, w, AccountHomePage(view))
 }
@@ -537,7 +553,7 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 	email := strings.ToLower(strings.TrimSpace(r.Form.Get("email")))
 	password := r.Form.Get("password")
 	displayName := strings.TrimSpace(r.Form.Get("display_name"))
-	view := AccountSignupView{Email: email, DisplayName: displayName, CSRFToken: h.csrf(r)}
+	view := AccountSignupView{Email: email, DisplayName: displayName, CSRFToken: h.csrf(r), Providers: h.ssoButtons()}
 	if !validEmail(email) {
 		view.FieldErrors = map[string]string{"email": "Enter a valid email."}
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -650,14 +666,13 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account login: lookup", err)
 		return
 	}
-	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) != nil {
+	if !webutil.PasswordMatches(row.PasswordHash, dummyPlayerBcryptHash, password) {
 		h.renderAccountLoginError(w, r, email)
 		return
 	}
 	if row.DisabledAt.Valid {
 		h.metrics.Login(observability.SurfacePlayer, observability.LoginLocked)
-		w.WriteHeader(http.StatusForbidden)
-		webutil.Render(r, w, AccountLoginPage(AccountLoginView{Email: email, Error: "This account has been disabled.", CSRFToken: h.csrf(r)}))
+		h.renderAccountLogin(w, r, http.StatusForbidden, email, "This account has been disabled.")
 		return
 	}
 	if !row.EmailVerifiedAt.Valid {
@@ -684,8 +699,7 @@ func (h *Handler) accountLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) renderAccountLoginError(w http.ResponseWriter, r *http.Request, email string) {
 	h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
-	w.WriteHeader(http.StatusUnauthorized)
-	webutil.Render(r, w, AccountLoginPage(AccountLoginView{Email: email, Error: "Invalid email or password.", CSRFToken: h.csrf(r)}))
+	h.renderAccountLogin(w, r, http.StatusUnauthorized, email, "Invalid email or password.")
 }
 
 func (h *Handler) accountVerify(w http.ResponseWriter, r *http.Request) {
@@ -1027,7 +1041,7 @@ func (h *Handler) accountSessionFromRequest(r *http.Request) (accountSession, bo
 	if row.SnapshotEpoch != row.AccountEpoch {
 		return accountSession{}, false
 	}
-	out := accountSession{AccountID: fromPgUUID(row.PlayerAccountID), Email: row.Email}
+	out := accountSession{AccountID: fromPgUUID(row.PlayerAccountID), Email: row.Email, HasPassword: row.HasPassword}
 	if row.DisplayName != nil {
 		out.DisplayName = *row.DisplayName
 	}

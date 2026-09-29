@@ -107,8 +107,9 @@ func (h *Handler) lookupSession(ctx context.Context, cookieValue string) (contro
 				Email:           row.Email,
 				IsPlatformAdmin: row.IsPlatformAdmin,
 			},
-			CSRFToken: base64.RawURLEncoding.EncodeToString(row.CsrfSecret),
-			ExpiresAt: row.ExpiresAt.Time,
+			CSRFToken:   base64.RawURLEncoding.EncodeToString(row.CsrfSecret),
+			ExpiresAt:   row.ExpiresAt.Time,
+			HasPassword: row.HasPassword,
 		}
 		if row.ExpiresAt.Time.Sub(now) > sessionSlideAfter {
 			return nil

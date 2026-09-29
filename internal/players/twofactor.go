@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pquerna/otp"
-	"golang.org/x/crypto/bcrypt"
 
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/observability"
@@ -59,8 +58,7 @@ func (h *Handler) finishAccountLogin(w http.ResponseWriter, r *http.Request, acc
 		if h.twoFactor == nil {
 			// Fail closed: an enrolled account never logs in without its
 			// second factor, even when the operator removed the key.
-			w.WriteHeader(http.StatusServiceUnavailable)
-			webutil.Render(r, w, AccountLoginPage(AccountLoginView{Email: email, Error: "Two-factor authentication is unavailable on this server. Contact support.", CSRFToken: h.csrf(r)}))
+			h.renderAccountLogin(w, r, http.StatusServiceUnavailable, email, "Two-factor authentication is unavailable on this server. Contact support.")
 			return
 		}
 		h.setAccountTwoFactorCookie(w, fromPgUUID(accountID), email)
@@ -350,6 +348,7 @@ func (h *Handler) accountTwoFactorView(r *http.Request, sess accountSession) (Ac
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
 		Available:    h.twoFactor != nil,
+		HasPassword:  sess.HasPassword,
 	}
 	accountID := toPgUUID(sess.AccountID)
 	row, found, err := h.getAccountTOTP(r.Context(), accountID)
@@ -575,7 +574,29 @@ func (h *Handler) checkAccountCurrentPassword(ctx context.Context, email, passwo
 		// not a wrong password — surface it as such rather than a 401.
 		return false, err
 	}
-	return bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) == nil, nil
+	return webutil.PasswordMatches(row.PasswordHash, dummyPlayerBcryptHash, password), nil
+}
+
+// accountPasswordConfirmed checks the current password for the two-factor
+// management actions. An account with no password skips it: the
+// authenticator code that these actions also need is then the only check.
+// It returns false when it has written the response.
+func (h *Handler) accountPasswordConfirmed(w http.ResponseWriter, r *http.Request, sess accountSession, field string) bool {
+	if !sess.HasPassword {
+		return true
+	}
+	passwordOK, err := h.checkAccountCurrentPassword(r.Context(), sess.Email, r.Form.Get("current_password"))
+	if err != nil {
+		webutil.InternalError(w, "account 2fa password check", err)
+		return false
+	}
+	if !passwordOK {
+		h.renderAccountTwoFactor(w, r, sess, http.StatusUnauthorized, func(vm *AccountTwoFactorView) {
+			vm.FieldErrors = map[string]string{field: "Current password is incorrect"}
+		})
+		return false
+	}
+	return true
 }
 
 func (h *Handler) accountTwoFactorDisable(w http.ResponseWriter, r *http.Request) {
@@ -587,19 +608,11 @@ func (h *Handler) accountTwoFactorDisable(w http.ResponseWriter, r *http.Request
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	passwordOK, err := h.checkAccountCurrentPassword(r.Context(), sess.Email, r.Form.Get("current_password"))
-	if err != nil {
-		webutil.InternalError(w, "account 2fa disable", err)
-		return
-	}
-	if !passwordOK {
-		h.renderAccountTwoFactor(w, r, sess, http.StatusUnauthorized, func(vm *AccountTwoFactorView) {
-			vm.FieldErrors = map[string]string{"disable_password": "Current password is incorrect"}
-		})
+	if !h.accountPasswordConfirmed(w, r, sess, "disable_password") {
 		return
 	}
 	accountID := toPgUUID(sess.AccountID)
-	err = h.verifyAccountTwoFactorCode(r.Context(), accountID, r.Form.Get("code"), true)
+	err := h.verifyAccountTwoFactorCode(r.Context(), accountID, r.Form.Get("code"), true)
 	if handled := h.renderAccountTwoFactorCodeError(w, r, sess, err, "disable_code"); handled {
 		return
 	}
@@ -631,21 +644,13 @@ func (h *Handler) accountTwoFactorBackupCodes(w http.ResponseWriter, r *http.Req
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	passwordOK, err := h.checkAccountCurrentPassword(r.Context(), sess.Email, r.Form.Get("current_password"))
-	if err != nil {
-		webutil.InternalError(w, "account 2fa backup codes", err)
-		return
-	}
-	if !passwordOK {
-		h.renderAccountTwoFactor(w, r, sess, http.StatusUnauthorized, func(vm *AccountTwoFactorView) {
-			vm.FieldErrors = map[string]string{"regenerate_password": "Current password is incorrect"}
-		})
+	if !h.accountPasswordConfirmed(w, r, sess, "regenerate_password") {
 		return
 	}
 	accountID := toPgUUID(sess.AccountID)
 	// Authenticator code only: someone left with nothing but backup codes
 	// should disable and re-enroll, not spend their last code minting more.
-	err = h.verifyAccountTwoFactorCode(r.Context(), accountID, r.Form.Get("code"), false)
+	err := h.verifyAccountTwoFactorCode(r.Context(), accountID, r.Form.Get("code"), false)
 	if handled := h.renderAccountTwoFactorCodeError(w, r, sess, err, "regenerate_code"); handled {
 		return
 	}

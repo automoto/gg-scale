@@ -265,6 +265,15 @@ type ControlPanelUser struct {
 	EmailVerificationLockedUntil      pgtype.Timestamptz
 }
 
+type ControlPanelUserConnection struct {
+	ID                 int64
+	ControlPanelUserID int64
+	Provider           string
+	Subject            string
+	CreatedAt          pgtype.Timestamptz
+	LastUsedAt         pgtype.Timestamptz
+}
+
 type ControlPanelUserTotp struct {
 	ControlPanelUserID int64
 	SecretEnc          []byte
@@ -616,6 +625,15 @@ type PlayerAccount struct {
 	RemoteAddrIpPublic                *string
 	RemoteAddrDns                     *string
 	RemoteAddrIroh                    *string
+}
+
+type PlayerAccountConnection struct {
+	ID              int64
+	PlayerAccountID pgtype.UUID
+	Provider        string
+	Subject         string
+	CreatedAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
 }
 
 type PlayerAccountPasswordReset struct {

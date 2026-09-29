@@ -49,6 +49,7 @@ func (c *Config) Validate() error {
 		c.checkDBPool,
 		c.checkMailProvider,
 		c.checkBilling,
+		c.checkSSO,
 		c.checkProductionPosture,
 		c.checkAgonesAuth,
 	}
@@ -209,10 +210,10 @@ func (c *Config) checkMailProvider() error {
 // handoff key — a 32-byte hex HMAC key — only makes sense alongside the
 // upgrade URL it signs tokens for.
 func (c *Config) checkBilling() error {
-	if err := c.checkBillingURL("BILLING_PORTAL_URL", c.BillingPortalURL); err != nil {
+	if err := c.checkAbsoluteURL("BILLING_PORTAL_URL", c.BillingPortalURL); err != nil {
 		return err
 	}
-	if err := c.checkBillingURL("BILLING_UPGRADE_URL", c.BillingUpgradeURL); err != nil {
+	if err := c.checkAbsoluteURL("BILLING_UPGRADE_URL", c.BillingUpgradeURL); err != nil {
 		return err
 	}
 	if c.BillingHandoffKey != "" && c.BillingUpgradeURL == "" {
@@ -221,7 +222,7 @@ func (c *Config) checkBilling() error {
 	return checkExactHexKey("BILLING_HANDOFF_KEY", c.BillingHandoffKey, 32)
 }
 
-func (c *Config) checkBillingURL(name, value string) error {
+func (c *Config) checkAbsoluteURL(name, value string) error {
 	if value == "" {
 		return nil
 	}
@@ -234,6 +235,31 @@ func (c *Config) checkBillingURL(name, value string) error {
 	}
 	if c.IsProduction() && u.Scheme != "https" {
 		return fmt.Errorf("%s %q: must use HTTPS in production", name, value)
+	}
+	return nil
+}
+
+// checkSSO rejects a half-configured provider app. A provider that is on
+// also needs the public origin, because the redirect URL registered at the
+// provider must be absolute.
+func (c *Config) checkSSO() error {
+	apps := []struct{ prefix, clientID, secret string }{
+		{"PLAYER_SSO_GOOGLE", c.PlayerSSOGoogleClientID, c.PlayerSSOGoogleClientSecret},
+		{"CONTROL_PANEL_SSO_GOOGLE", c.ControlPanelSSOGoogleClientID, c.ControlPanelSSOGoogleClientSecret},
+	}
+	for _, app := range apps {
+		if app.clientID == "" && app.secret == "" {
+			continue
+		}
+		if app.clientID == "" || app.secret == "" {
+			return fmt.Errorf("%s_CLIENT_ID and %s_CLIENT_SECRET must be set together", app.prefix, app.prefix)
+		}
+		if c.ControlPanelBaseURL == "" {
+			return fmt.Errorf("CONTROL_PANEL_BASE_URL must be set when %s sign-in is on", app.prefix)
+		}
+		if err := c.checkAbsoluteURL("CONTROL_PANEL_BASE_URL", c.ControlPanelBaseURL); err != nil {
+			return err
+		}
 	}
 	return nil
 }

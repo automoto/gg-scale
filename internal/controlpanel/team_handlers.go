@@ -317,6 +317,7 @@ func (h *Handler) acceptInvitePage(w http.ResponseWriter, r *http.Request) {
 		h.renderInviteLookupError(w, r, err)
 		return
 	}
+	notice, _ := ssoNoticeFromRequest(r)
 	webutil.Render(r, w, AcceptInvitePage(AcceptInviteView{
 		Code:       code,
 		Email:      res.Email,
@@ -326,6 +327,8 @@ func (h *Handler) acceptInvitePage(w http.ResponseWriter, r *http.Request) {
 		NewUser:    !res.IsExisting,
 		ExpiresAt:  res.ExpiresAt,
 		CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
+		Providers:  h.ssoButtons(),
+		Notice:     notice,
 	}))
 
 }
@@ -354,6 +357,7 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 			NewUser:    !lookup.IsExisting,
 			ExpiresAt:  lookup.ExpiresAt,
 			CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
+			Providers:  h.ssoButtons(),
 		}
 		status := http.StatusInternalServerError
 		switch {

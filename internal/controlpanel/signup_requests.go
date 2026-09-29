@@ -26,6 +26,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/sso"
 	"github.com/automoto/gg-scale/internal/verifycode"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -81,6 +82,9 @@ type TenantSignupAcceptView struct {
 	CSRFToken   string
 	Error       string
 	FieldErrors map[string]string
+	Providers   []SSOProviderView
+	// Notice is a message from a provider round trip, shown with the form.
+	Notice string
 }
 
 // --- validation (pure, unit-testable) --------------------------------------
@@ -550,6 +554,9 @@ func signupTenantName(requested string, final *string) string {
 type signupAcceptInput struct {
 	Code     string
 	Password string
+	// Identity is set in place of Password when the person accepts through
+	// a sign-in provider.
+	Identity *sso.Identity
 }
 
 type signupAcceptResult struct {
@@ -583,7 +590,7 @@ func (h *Handler) acceptTenantSignup(ctx context.Context, in signupAcceptInput) 
 		}
 		name := signupTenantName(req.RequestedTenantName, req.FinalTenantName)
 
-		userID, email, isNew, uerr := h.resolveSignupUser(ctx, q, req.Email, in.Password)
+		userID, email, isNew, uerr := h.resolveSignupUser(ctx, tx, req.Email, in)
 		if uerr != nil {
 			return uerr
 		}
@@ -631,7 +638,13 @@ func (h *Handler) acceptTenantSignup(ctx context.Context, in signupAcceptInput) 
 // creating a verified account for a new email (enforcing the password floor),
 // or verifying the CURRENT password for an existing one so mere possession of
 // the magic link can't hijack the account.
-func (h *Handler) resolveSignupUser(ctx context.Context, q *sqlcgen.Queries, email, password string) (int64, string, bool, error) {
+func (h *Handler) resolveSignupUser(ctx context.Context, tx pgx.Tx, email string, in signupAcceptInput) (int64, string, bool, error) {
+	if in.Identity != nil {
+		user, err := h.resolveSSOAcceptUser(ctx, tx, email, false, *in.Identity)
+		return user.ID, user.Email, user.IsNew, err
+	}
+	q := sqlcgen.New(tx)
+	password := in.Password
 	user, gerr := q.GetControlPanelUserAnyStatusByEmail(ctx, email)
 	switch {
 	case errors.Is(gerr, pgx.ErrNoRows):
@@ -656,7 +669,7 @@ func (h *Handler) resolveSignupUser(ctx context.Context, q *sqlcgen.Queries, ema
 	case user.DisabledAt.Valid:
 		return 0, "", false, errInviteForDisabledAccount
 	}
-	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(password)) != nil {
+	if !webutil.PasswordMatches(user.PasswordHash, dummyControlPanelBcryptHash, password) {
 		return 0, "", false, errInvalidCredentials
 	}
 	return user.ID, user.Email, false, nil
@@ -669,6 +682,7 @@ func (h *Handler) tenantSignupAcceptPage(w http.ResponseWriter, r *http.Request)
 		h.renderSignupAcceptError(w, r, err)
 		return
 	}
+	notice, _ := ssoNoticeFromRequest(r)
 	webutil.Render(r, w, TenantSignupAcceptPage(TenantSignupAcceptView{
 		Code:       code,
 		Email:      res.Email,
@@ -676,6 +690,8 @@ func (h *Handler) tenantSignupAcceptPage(w http.ResponseWriter, r *http.Request)
 		NewUser:    !res.IsExisting,
 		ExpiresAt:  res.ExpiresAt,
 		CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
+		Providers:  h.ssoButtons(),
+		Notice:     notice,
 	}))
 }
 
@@ -700,6 +716,7 @@ func (h *Handler) tenantSignupAcceptHandler(w http.ResponseWriter, r *http.Reque
 			NewUser:    !lookup.IsExisting,
 			ExpiresAt:  lookup.ExpiresAt,
 			CSRFToken:  webutil.CSRFTokenFromContext(r.Context()),
+			Providers:  h.ssoButtons(),
 		}
 		status := http.StatusInternalServerError
 		switch {

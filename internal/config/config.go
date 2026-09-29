@@ -209,6 +209,17 @@ type Config struct {
 	// deletion stays cancellable before the purge sweep hard-deletes the data.
 	PlayerDeleteGracePeriod time.Duration `env:"PLAYER_DELETE_GRACE_PERIOD" envDefault:"720h"`
 
+	// Single sign-on. Each surface has its own OAuth app for each provider.
+	// An empty client ID turns the provider off for that surface and its
+	// button does not render. The redirect URLs to register on the app are
+	// {CONTROL_PANEL_BASE_URL}/v1/players/account/sso/google/callback and
+	// {CONTROL_PANEL_BASE_URL}/v1/control-panel/sso/google/callback. The
+	// secrets support the _FILE convention.
+	PlayerSSOGoogleClientID           string `env:"PLAYER_SSO_GOOGLE_CLIENT_ID"`
+	PlayerSSOGoogleClientSecret       string `env:"PLAYER_SSO_GOOGLE_CLIENT_SECRET" envFile:"true"`
+	ControlPanelSSOGoogleClientID     string `env:"CONTROL_PANEL_SSO_GOOGLE_CLIENT_ID"`
+	ControlPanelSSOGoogleClientSecret string `env:"CONTROL_PANEL_SSO_GOOGLE_CLIENT_SECRET" envFile:"true"`
+
 	// BillingPortalURL, when set, renders an "Upgrade / Manage billing" link on
 	// the tenant settings page pointing at an external billing portal (e.g. a
 	// Stripe-hosted Checkout / Customer Portal entry). Empty (default) renders

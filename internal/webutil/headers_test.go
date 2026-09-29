@@ -59,6 +59,50 @@ func TestPlayerSecurityHeadersAllowFirstPartyStylesBlockScripts(t *testing.T) {
 	assert.NotContains(t, csp, "unsafe-inline")
 }
 
+func TestSecurityHeadersWithFormActions_should_extend_only_form_action(t *testing.T) {
+	tests := []struct {
+		name       string
+		middleware func(http.Handler) http.Handler
+		base       func(http.Handler) http.Handler
+	}{
+		{"control panel", webutil.SecurityHeadersWithFormActions("https://accounts.google.com", "https://github.com"), webutil.SecurityHeaders},
+		{"player", webutil.PlayerSecurityHeadersWithFormActions("https://accounts.google.com", "https://github.com"), webutil.PlayerSecurityHeaders},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})
+			got := httptest.NewRecorder()
+			base := httptest.NewRecorder()
+
+			tc.middleware(next).ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/", nil))
+			tc.base(next).ServeHTTP(base, httptest.NewRequest(http.MethodGet, "/", nil))
+
+			csp := got.Header().Get("Content-Security-Policy")
+			// Assert the literal. Re-deriving want with the same
+			// strings.Replace the code uses makes both sides no-op
+			// together if the base policy stops spelling
+			// "form-action 'self'" verbatim: the origins drop out, the
+			// browser blocks the provider redirect, and the test stays green.
+			const origins = " https://accounts.google.com https://github.com"
+			assert.Contains(t, csp, "form-action 'self'"+origins)
+			// Nothing else moved: strip the origins back out and the base
+			// policy must come back byte for byte.
+			assert.Equal(t, base.Header().Get("Content-Security-Policy"), strings.Replace(csp, origins, "", 1))
+		})
+	}
+}
+
+func TestSecurityHeadersWithFormActions_without_origins_is_the_base_policy(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})
+	got := httptest.NewRecorder()
+	base := httptest.NewRecorder()
+
+	webutil.PlayerSecurityHeadersWithFormActions()(next).ServeHTTP(got, httptest.NewRequest(http.MethodGet, "/", nil))
+	webutil.PlayerSecurityHeaders(next).ServeHTTP(base, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	assert.Equal(t, base.Header().Get("Content-Security-Policy"), got.Header().Get("Content-Security-Policy"))
+}
+
 func TestSanitizeHeaderAcceptsPlainText(t *testing.T) {
 	tests := []struct {
 		name string
