@@ -9,10 +9,31 @@ import (
 // Global player-account pages (project-agnostic). Kept deliberately minimal,
 // mirroring the per-project player templates in templates.templ.
 
+// SSOProviderView is one enabled sign-in provider, for a button on the auth
+// pages or a row in the sign-in methods section.
+type SSOProviderView struct {
+	Name     string
+	Label    string
+	Linked   bool
+	LinkedAt time.Time
+}
+
 type AccountLoginView struct {
 	Email     string
 	Error     string
 	CSRFToken string
+	Providers []SSOProviderView
+}
+
+// ssoButtons renders one plain form for each provider. The forms stay outside
+// the password form, because HTML forms cannot nest.
+templ ssoButtons(providers []SSOProviderView, csrfToken, verb string) {
+	for _, p := range providers {
+		<form method="post" action={ templ.URL("/v1/players/account/sso/" + p.Name + "/start") }>
+			<input type="hidden" name="_csrf" value={ csrfToken }/>
+			<button type="submit" class="secondary outline">{ verb } with { p.Label }</button>
+		</form>
+	}
 }
 
 templ AccountLoginPage(vm AccountLoginView) {
@@ -32,6 +53,7 @@ templ AccountLoginPage(vm AccountLoginView) {
 			</label>
 			<button type="submit">Sign in</button>
 		</form>
+		@ssoButtons(vm.Providers, vm.CSRFToken, "Sign in")
 		<p><a href={ templ.URL("/v1/players/account/signup") }>Create an account</a></p>
 		<p><a href={ templ.URL("/v1/players/account/forgot-password") }>Forgot password?</a></p>
 	}
@@ -108,6 +130,7 @@ type AccountSignupView struct {
 	Error       string
 	FieldErrors map[string]string
 	CSRFToken   string
+	Providers   []SSOProviderView
 }
 
 templ AccountSignupPage(vm AccountSignupView) {
@@ -136,6 +159,7 @@ templ AccountSignupPage(vm AccountSignupView) {
 			</label>
 			<button type="submit">Create account</button>
 		</form>
+		@ssoButtons(vm.Providers, vm.CSRFToken, "Sign up")
 		<p><a href={ templ.URL("/v1/players/account/login") }>I already have an account</a></p>
 	}
 }
@@ -199,9 +223,12 @@ type AccountTwoFactorView struct {
 	Available            bool
 	Enabled              bool
 	BackupCodesRemaining int
-	Message              string
-	Error                string
-	FieldErrors          map[string]string
+	// HasPassword is false for an account that signs in only through a
+	// provider; the forms then ask for the authenticator code alone.
+	HasPassword bool
+	Message     string
+	Error       string
+	FieldErrors map[string]string
 }
 
 templ AccountTwoFactorPage(vm AccountTwoFactorView) {
@@ -227,12 +254,14 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 			<p class="subtitle">Replaces all remaining backup codes with a fresh set.</p>
 			<form method="post" action={ templ.URL("/v1/players/account/2fa/backup-codes") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label>Current password
-					<input name="current_password" type="password" autocomplete="current-password" required/>
-					if msg, ok := vm.FieldErrors["regenerate_password"]; ok {
-						<small class="field-error">{ msg }</small>
-					}
-				</label>
+				if vm.HasPassword {
+					<label>Current password
+						<input name="current_password" type="password" autocomplete="current-password" required/>
+						if msg, ok := vm.FieldErrors["regenerate_password"]; ok {
+							<small class="field-error">{ msg }</small>
+						}
+					</label>
+				}
 				<label>Authenticator code
 					<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
 					if msg, ok := vm.FieldErrors["regenerate_code"]; ok {
@@ -245,12 +274,14 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 			<p class="subtitle">All other sessions and remembered devices will be signed out.</p>
 			<form method="post" action={ templ.URL("/v1/players/account/2fa/disable") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label>Current password
-					<input name="current_password" type="password" autocomplete="current-password" required/>
-					if msg, ok := vm.FieldErrors["disable_password"]; ok {
-						<small class="field-error">{ msg }</small>
-					}
-				</label>
+				if vm.HasPassword {
+					<label>Current password
+						<input name="current_password" type="password" autocomplete="current-password" required/>
+						if msg, ok := vm.FieldErrors["disable_password"]; ok {
+							<small class="field-error">{ msg }</small>
+						}
+					</label>
+				}
 				<label>Authenticator or backup code
 					<input name="code" type="text" autocomplete="one-time-code" required/>
 					if msg, ok := vm.FieldErrors["disable_code"]; ok {
@@ -357,6 +388,56 @@ type AccountHomeView struct {
 	Flash           string
 	FlashError      string
 	RemoteAddrCount int
+	// HasPassword and TwoFactorEnabled select the identity check that the
+	// link and unlink forms ask for.
+	HasPassword      bool
+	TwoFactorEnabled bool
+	SignInMethods    []SSOProviderView
+}
+
+// signInMethodConfirm renders the identity check for a change to the sign-in
+// methods: the current password when the account has one, else a two-factor
+// code when two-factor authentication is on, else nothing.
+templ signInMethodConfirm(vm AccountHomeView) {
+	if vm.HasPassword {
+		<label>Current password
+			<input name="current_password" type="password" autocomplete="current-password" required/>
+		</label>
+	} else if vm.TwoFactorEnabled {
+		<label>Authenticator or backup code
+			<input name="code" type="text" autocomplete="one-time-code" required/>
+		</label>
+	}
+}
+
+templ signInMethodsCard(vm AccountHomeView) {
+	<section class="card">
+		<h2>Sign-in methods</h2>
+		<h3>Password</h3>
+		if vm.HasPassword {
+			<p>A password is set. <a href={ templ.URL("/v1/players/account/forgot-password") }>Change it with a reset link</a>.</p>
+		} else {
+			<p>No password is set. <a href={ templ.URL("/v1/players/account/forgot-password") }>Set a password</a> with a reset link sent to your email.</p>
+		}
+		for _, p := range vm.SignInMethods {
+			<h3>{ p.Label }</h3>
+			if p.Linked {
+				<p>Linked on { p.LinkedAt.Format("2006-01-02") }.</p>
+				<form method="post" action={ templ.URL("/v1/players/account/sso/" + p.Name + "/unlink") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					@signInMethodConfirm(vm)
+					<button type="submit" class="secondary outline btn-inline">Unlink { p.Label }</button>
+				</form>
+			} else {
+				<p>Not linked.</p>
+				<form method="post" action={ templ.URL("/v1/players/account/sso/" + p.Name + "/link") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					@signInMethodConfirm(vm)
+					<button type="submit" class="btn-inline">Link { p.Label }</button>
+				</form>
+			}
+		}
+	</section>
 }
 
 type ConnectionAddressView struct {
@@ -448,6 +529,9 @@ templ AccountHomePage(vm AccountHomeView) {
 				</table>
 			}
 		</section>
+		if len(vm.SignInMethods) > 0 || !vm.HasPassword {
+			@signInMethodsCard(vm)
+		}
 		<section class="card">
 			<h2>Connection addresses</h2>
 			if vm.RemoteAddrCount == 0 {

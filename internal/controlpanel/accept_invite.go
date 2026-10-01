@@ -10,7 +10,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/sso"
 	"github.com/automoto/gg-scale/internal/verifycode"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // lookupInviteResult is the public view of an invitation while it is being
@@ -87,9 +89,13 @@ func (h *Handler) lookupInvite(ctx context.Context, code string) (lookupInviteRe
 // EXISTING invitees `Password` is their CURRENT password — required so
 // that mere possession of the magic link is not enough to take over the
 // account.
+//
+// Identity is set in place of Password when the person accepts through a
+// sign-in provider.
 type acceptInviteInput struct {
 	Code     string
 	Password string
+	Identity *sso.Identity
 }
 
 type acceptInviteResult struct {
@@ -121,7 +127,13 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 			return errInviteExpired
 		}
 
-		resolved, rerr := h.resolveInviteUser(ctx, q, row, in)
+		var resolved acceptInviteResult
+		var rerr error
+		if in.Identity != nil {
+			resolved, rerr = h.resolveInviteUserSSO(ctx, tx, row, *in.Identity)
+		} else {
+			resolved, rerr = h.resolveInviteUser(ctx, q, row, in)
+		}
 		if rerr != nil {
 			return rerr
 		}
@@ -158,7 +170,7 @@ func (h *Handler) resolveInviteUser(ctx context.Context, q *sqlcgen.Queries, row
 	// Existing user: require the CURRENT password before granting a session
 	// or escalating roles. Mere possession of the magic link is otherwise a
 	// full account takeover for anyone with inbox / mail-server access.
-	if bcrypt.CompareHashAndPassword(user.PasswordHash, []byte(in.Password)) != nil {
+	if !webutil.PasswordMatches(user.PasswordHash, dummyControlPanelBcryptHash, in.Password) {
 		return acceptInviteResult{}, errInvalidCredentials
 	}
 	if row.Role == roleInvitePlatformAdmin && !user.IsPlatformAdmin {
@@ -167,6 +179,22 @@ func (h *Handler) resolveInviteUser(ctx context.Context, q *sqlcgen.Queries, row
 		}
 	}
 	return acceptInviteResult{UserID: user.ID, Email: user.Email}, nil
+}
+
+// resolveInviteUserSSO is resolveInviteUser for a person who accepts through
+// a sign-in provider.
+func (h *Handler) resolveInviteUserSSO(ctx context.Context, tx pgx.Tx, row sqlcgen.GetControlPanelInvitationByCodeHashRow, id sso.Identity) (acceptInviteResult, error) {
+	platformAdmin := row.Role == roleInvitePlatformAdmin
+	user, err := h.resolveSSOAcceptUser(ctx, tx, row.Email, platformAdmin, id)
+	if err != nil {
+		return acceptInviteResult{}, err
+	}
+	if platformAdmin && !user.IsPlatformAdmin {
+		if err := sqlcgen.New(tx).PromoteControlPanelUserToPlatformAdmin(ctx, user.ID); err != nil {
+			return acceptInviteResult{}, fmt.Errorf("invite promote: %w", err)
+		}
+	}
+	return acceptInviteResult{UserID: user.ID, Email: user.Email, IsNewUser: user.IsNew}, nil
 }
 
 // createInviteUser provisions a verified control_panel_user for a first-time

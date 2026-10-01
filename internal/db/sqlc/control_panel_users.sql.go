@@ -325,7 +325,8 @@ SELECT
     s.revoked_at,
     s.created_at,
     u.email::text AS email,
-    u.is_platform_admin
+    u.is_platform_admin,
+    (u.password_hash IS NOT NULL)::boolean AS has_password
 FROM control_panel_sessions s
 JOIN control_panel_users u ON u.id = s.control_panel_user_id
 WHERE s.refresh_hash = $1
@@ -341,6 +342,7 @@ type GetControlPanelSessionByRefreshHashRow struct {
 	CreatedAt          pgtype.Timestamptz
 	Email              string
 	IsPlatformAdmin    bool
+	HasPassword        bool
 }
 
 // Joined to control_panel_users so the session dies as soon as a platform
@@ -359,6 +361,7 @@ func (q *Queries) GetControlPanelSessionByRefreshHash(ctx context.Context, refre
 		&i.CreatedAt,
 		&i.Email,
 		&i.IsPlatformAdmin,
+		&i.HasPassword,
 	)
 	return i, err
 }

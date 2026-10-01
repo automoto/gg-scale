@@ -130,6 +130,7 @@ templ TenantSignupAcceptPage(vm TenantSignupAcceptView) {
 		} else {
 			<p class="subtitle">Your request for <strong>{ vm.TenantName }</strong> was approved. Finish setting up your account to create it.</p>
 			<p>Email: <code>{ vm.Email }</code></p>
+			@errorAlert(vm.Notice)
 			<form method="post" action="/v1/control-panel/request-access/accept">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<input type="hidden" name="code" value={ vm.Code }/>
@@ -151,6 +152,7 @@ templ TenantSignupAcceptPage(vm TenantSignupAcceptView) {
 					<button type="submit" class="btn-inline">Create Account Tenant</button>
 				</div>
 			</form>
+			@ssoButtons(vm.Providers, "/v1/control-panel/request-access/accept", vm.CSRFToken, vm.Code, "Continue")
 		}
 	}
 }

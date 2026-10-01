@@ -233,7 +233,8 @@ SELECT
     s.revoked_at,
     s.created_at,
     u.email::text AS email,
-    u.is_platform_admin
+    u.is_platform_admin,
+    (u.password_hash IS NOT NULL)::boolean AS has_password
 FROM control_panel_sessions s
 JOIN control_panel_users u ON u.id = s.control_panel_user_id
 WHERE s.refresh_hash = sqlc.arg(refresh_hash)

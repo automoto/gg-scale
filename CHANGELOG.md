@@ -5,8 +5,15 @@ All notable changes to ggscale are recorded here. The format is based on
 pre-1.0, so breaking changes may land in minor releases. Server and SDK (Go + C#) wire types are
 released in lockstep.
 
+There is no Unreleased section. A section is written when the release is
+tagged. Work that is merged but not tagged yet is recorded in the pull request
+and in the planning document for that work. Sections older than `v0.9.6`
+predate this rule, and not all of them match a tag.
 
-## Unreleased
+
+## [v0.9.64] - 2026-09-28
+
+### Added
 
 - Add project-scoped parties, friend and code invites, readiness, and disconnect
   grace with leader promotion.
@@ -15,6 +22,14 @@ released in lockstep.
 - Add atomic match persistence and durable backend resolution cleanup.
 - Add the party API and generated OpenAPI.
   Party enqueue defaults to disabled.
+
+### Build
+
+- Publish the server image to `ghcr.io/automoto/gg-scale`. CI builds
+  `linux/amd64` and `linux/arm64` and pushes the exact release tag after every
+  suite passes; a stable `vMAJOR.MINOR.PATCH` tag is the only trigger, and no
+  `latest`, major, or minor alias is published. `make docker-push TAG=vX.Y.Z`
+  stays as the maintainer fallback.
 
 
 ## [v0.9.6]

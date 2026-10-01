@@ -48,12 +48,19 @@ var postRouteGuards = map[string]guardTier{
 	"/request-access/accept": tierPublic,
 	"/invite/accept":         tierPublic,
 
+	"/login/sso/{provider}/start":                 tierPublic,
+	"/invite/accept/sso/{provider}/start":         tierPublic,
+	"/request-access/accept/sso/{provider}/start": tierPublic,
+
 	"/account/password":         tierSession,
 	"/account/2fa/setup":        tierSession,
 	"/account/2fa/confirm":      tierSession,
 	"/account/2fa/disable":      tierSession,
 	"/account/2fa/backup-codes": tierSession,
-	"/logout":                   tierSession,
+
+	"/account/sso/{provider}/link":   tierSession,
+	"/account/sso/{provider}/unlink": tierSession,
+	"/logout":                        tierSession,
 
 	"/tenants":                                   tierPlatformAdmin,
 	"/admin/team/invite":                         tierPlatformAdmin,

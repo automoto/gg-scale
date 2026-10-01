@@ -13,7 +13,10 @@ import (
 
 func (h *Handler) accountPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
-	h.renderAccount(w, r, session, http.StatusOK, nil)
+	errMsg, okMsg := ssoNoticeFromRequest(r)
+	h.renderAccount(w, r, session, http.StatusOK, func(vm *AccountView) {
+		vm.Error, vm.Message = errMsg, okMsg
+	})
 }
 
 func (h *Handler) updatePassword(w http.ResponseWriter, r *http.Request) {

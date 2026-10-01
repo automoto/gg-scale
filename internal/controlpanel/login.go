@@ -115,7 +115,25 @@ func (h *Handler) completeSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
-	webutil.Render(r, w, LoginPage(LoginView{}))
+	errMsg, _ := ssoNoticeFromRequest(r)
+	webutil.Render(r, w, LoginPage(LoginView{Error: errMsg, Providers: h.ssoButtons()}))
+}
+
+// requireVerification mints a fresh code and sends a user with an
+// unverified email to the verify page in place of a session.
+func (h *Handler) requireVerification(w http.ResponseWriter, r *http.Request, user controlPanelUser) {
+	h.metrics.Login(observability.SurfaceControlPanel, observability.LoginUnverified)
+	if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
+		if errors.Is(startErr, errVerificationDelivery) {
+			slog.ErrorContext(r.Context(), "control panel login verification delivery", "err", startErr)
+			verificationDeliveryUnavailable(w)
+			return
+		}
+		http.Error(w, "verification start failed", http.StatusInternalServerError)
+		return
+	}
+	h.setVerifyPendingCookie(w, verifyPendingPayload{UserID: user.ID, Email: user.Email})
+	htmxRedirect(w, r, "/v1/control-panel/verify")
 }
 
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
@@ -128,18 +146,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, errVerifyRequired) {
 		// Password is correct but email isn't verified: mint a fresh code
 		// and bounce them to the verify page instead of failing.
-		h.metrics.Login(observability.SurfaceControlPanel, observability.LoginUnverified)
-		if startErr := h.startVerification(r.Context(), user.ID, user.Email); startErr != nil && !errors.Is(startErr, errVerifyResendTooSoon) {
-			if errors.Is(startErr, errVerificationDelivery) {
-				slog.ErrorContext(r.Context(), "control panel login verification delivery", "err", startErr)
-				verificationDeliveryUnavailable(w)
-				return
-			}
-			http.Error(w, "verification start failed", http.StatusInternalServerError)
-			return
-		}
-		h.setVerifyPendingCookie(w, verifyPendingPayload{UserID: user.ID, Email: user.Email})
-		htmxRedirect(w, r, "/v1/control-panel/verify")
+		h.requireVerification(w, r, user)
 		return
 	}
 	if err != nil {
@@ -153,7 +160,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		}
 		h.metrics.Login(observability.SurfaceControlPanel, result)
 		w.WriteHeader(status)
-		webutil.Render(r, w, LoginPage(LoginView{Email: email, Error: msg}))
+		webutil.Render(r, w, LoginPage(LoginView{Email: email, Error: msg, Providers: h.ssoButtons()}))
 		return
 	}
 	h.finishLogin(w, r, user)
@@ -237,7 +244,7 @@ func (h *Handler) authenticate(r *http.Request, email, password string) (control
 	if row.LockedUntil.Valid && h.now().Before(row.LockedUntil.Time) {
 		return controlPanelUser{}, errLockedAccount
 	}
-	if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) != nil {
+	if !webutil.PasswordMatches(row.PasswordHash, dummyControlPanelBcryptHash, password) {
 		return controlPanelUser{}, h.recordLoginFailure(r, row)
 	}
 	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {

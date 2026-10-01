@@ -24,6 +24,7 @@ import (
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/signedcookie"
+	"github.com/automoto/gg-scale/internal/sso"
 	"github.com/automoto/gg-scale/internal/twofactor"
 	"github.com/automoto/gg-scale/internal/verifycode"
 	"github.com/automoto/gg-scale/internal/webutil"
@@ -54,6 +55,9 @@ type Config struct {
 	// cancellable before the purge sweep hard-deletes the data; 0 uses the
 	// compiled fallback (30 days).
 	DeleteGracePeriod time.Duration
+	// SSOProviders are the sign-in providers that are on, by name. Empty
+	// means single sign-on is off and no provider button renders.
+	SSOProviders map[string]sso.Provider
 }
 
 // Enabled reports whether the player site should be mounted.
@@ -99,6 +103,7 @@ type Handler struct {
 	verifySigningKey     []byte
 	twoFactor            *twofactor.Cipher
 	enqueuePasswordReset func(ctx context.Context, email string) error
+	sso                  *sso.Flow
 }
 
 // New builds the player UI router.
@@ -106,7 +111,7 @@ func New(d Deps) http.Handler {
 	h := newHandler(d)
 
 	r := chi.NewRouter()
-	r.Use(webutil.PlayerSecurityHeaders)
+	r.Use(webutil.PlayerSecurityHeadersWithFormActions(h.sso.Origins()...))
 
 	// Global player-account routes (project-agnostic) — the platform-wide
 	// account identity: signup / login / verify / friends / account home.
@@ -143,6 +148,10 @@ func New(d Deps) http.Handler {
 		r.Post("/friends/{accountID}/unblock", h.friendAction("unblock"))
 		r.Get("/login", h.accountLoginPage)
 		r.Post("/login", h.accountLogin)
+		r.Post("/sso/{provider}/start", h.accountSSOStart)
+		r.Post("/sso/{provider}/link", h.accountSSOLink)
+		r.Get("/sso/{provider}/callback", h.accountSSOCallback)
+		r.Post("/sso/{provider}/unlink", h.accountSSOUnlink)
 		r.Get("/forgot-password", h.accountForgotPasswordPage)
 		r.Post("/forgot-password", h.accountForgotPassword)
 		r.Get("/reset-password", h.accountResetPasswordPage)
@@ -192,7 +201,7 @@ func newHandler(d Deps) *Handler {
 	if len(d.VerifySigningKey) != verifycode.SigningKeySize {
 		panic(fmt.Sprintf("players: email verify signing key has %d bytes, want %d", len(d.VerifySigningKey), verifycode.SigningKeySize))
 	}
-	return &Handler{
+	h := &Handler{
 		pool:                 d.Pool,
 		mailer:               d.Mailer,
 		mailFrom:             d.MailFrom,
@@ -203,6 +212,8 @@ func newHandler(d Deps) *Handler {
 		twoFactor:            d.TwoFactor,
 		enqueuePasswordReset: d.EnqueuePasswordReset,
 	}
+	h.sso = newAccountSSOFlow(h, d.Config.SSOProviders)
+	return h
 }
 
 // csrf is shorthand for the CSRF token pulled off the request context by

@@ -136,6 +136,23 @@ templ fieldError(errs map[string]string, name string) {
 	}
 }
 
+// ssoButtons renders one plain form for each provider. The forms stay outside
+// the password form, because HTML forms cannot nest, and they carry no hx-
+// attribute: the browser itself must follow the redirect to the provider.
+templ ssoButtons(providers []SSOProviderView, basePath, csrfToken, code, verb string) {
+	for _, p := range providers {
+		<form method="post" action={ templ.URL(basePath + "/sso/" + p.Name + "/start") }>
+			if csrfToken != "" {
+				<input type="hidden" name="_csrf" value={ csrfToken }/>
+			}
+			if code != "" {
+				<input type="hidden" name="code" value={ code }/>
+			}
+			<button type="submit" class="secondary outline">{ verb } with { p.Label }</button>
+		</form>
+	}
+}
+
 templ LoginPage(vm LoginView) {
 	@authLayout("Sign in — ggscale") {
 		<h1>ggscale Control panel</h1>
@@ -150,6 +167,7 @@ templ LoginPage(vm LoginView) {
 			@fieldError(vm.FieldErrors, "password")
 			<button type="submit">Sign in</button>
 		</form>
+		@ssoButtons(vm.Providers, "/v1/control-panel/login", "", "", "Sign in")
 		<p><a href="/v1/control-panel/forgot-password">Forgot password?</a></p>
 	}
 }
@@ -966,24 +984,77 @@ templ AccountPage(vm AccountView) {
 		</div>
 		@flashSuccess(vm.Message)
 		@errorAlert(vm.Error)
-		<section class="card">
-			<h2>Change password</h2>
-			<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
-			<form method="post" action="/v1/control-panel/account/password">
-				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label for="current_password">Current password</label>
-				<input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error"/>
-				@fieldError(vm.FieldErrors, "current_password")
-				<label for="new_password">New password</label>
-				<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="new_password-error"/>
-				@fieldError(vm.FieldErrors, "new_password")
-				<div class="form-actions">
-					<button type="submit" class="btn-inline">Update password</button>
-				</div>
-			</form>
-		</section>
+		if vm.HasPassword {
+			<section class="card">
+				<h2>Change password</h2>
+				<p class="card-subtitle">All other sessions will be signed out after a successful change.</p>
+				<form method="post" action="/v1/control-panel/account/password">
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					<label for="current_password">Current password</label>
+					<input id="current_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="current_password-error"/>
+					@fieldError(vm.FieldErrors, "current_password")
+					<label for="new_password">New password</label>
+					<input id="new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required placeholder="At least 12 characters" aria-describedby="new_password-error"/>
+					@fieldError(vm.FieldErrors, "new_password")
+					<div class="form-actions">
+						<button type="submit" class="btn-inline">Update password</button>
+					</div>
+				</form>
+			</section>
+		} else {
+			<section class="card">
+				<h2>Password</h2>
+				<p class="card-subtitle">No password is set. You sign in through a provider.</p>
+				<p><a href="/v1/control-panel/forgot-password">Set a password</a> with a reset link sent to your email.</p>
+			</section>
+		}
+		if len(vm.SignInMethods) > 0 {
+			@signInMethodsCard(vm)
+		}
 		@twoFactorCard(vm)
 	}
+}
+
+// signInMethodConfirm renders the identity check for a change to the sign-in
+// methods: the current password when the user has one, else a two-factor
+// code when two-factor authentication is on, else nothing.
+templ signInMethodConfirm(vm AccountView, provider string) {
+	if vm.HasPassword {
+		<label for={ "sso_password_" + provider }>Current password</label>
+		<input id={ "sso_password_" + provider } name="current_password" type="password" autocomplete="current-password" required/>
+	} else if vm.TwoFactorEnabled {
+		<label for={ "sso_code_" + provider }>Authenticator or backup code</label>
+		<input id={ "sso_code_" + provider } name="code" type="text" autocomplete="one-time-code" required/>
+	}
+}
+
+templ signInMethodsCard(vm AccountView) {
+	<section class="card">
+		<h2>Sign-in methods</h2>
+		@fieldError(vm.FieldErrors, "sign_in_methods")
+		for _, p := range vm.SignInMethods {
+			<h3>{ p.Label }</h3>
+			if p.Linked {
+				<p class="card-subtitle">Linked on { p.LinkedAt.Format("2006-01-02") }.</p>
+				<form method="post" action={ templ.URL("/v1/control-panel/account/sso/" + p.Name + "/unlink") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					@signInMethodConfirm(vm, p.Name)
+					<div class="form-actions">
+						<button type="submit" class="secondary btn-inline">Unlink { p.Label }</button>
+					</div>
+				</form>
+			} else {
+				<p class="card-subtitle">Not linked.</p>
+				<form method="post" action={ templ.URL("/v1/control-panel/account/sso/" + p.Name + "/link") }>
+					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+					@signInMethodConfirm(vm, p.Name)
+					<div class="form-actions">
+						<button type="submit" class="btn-inline">Link { p.Label }</button>
+					</div>
+				</form>
+			}
+		}
+	</section>
 }
 
 templ twoFactorCard(vm AccountView) {
@@ -1005,9 +1076,11 @@ templ twoFactorCard(vm AccountView) {
 			<p class="card-subtitle">Replaces all remaining backup codes with a fresh set.</p>
 			<form method="post" action="/v1/control-panel/account/2fa/backup-codes">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label for="regenerate_password">Current password</label>
-				<input id="regenerate_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="regenerate_password-error"/>
-				@fieldError(vm.FieldErrors, "regenerate_password")
+				if vm.HasPassword {
+					<label for="regenerate_password">Current password</label>
+					<input id="regenerate_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="regenerate_password-error"/>
+					@fieldError(vm.FieldErrors, "regenerate_password")
+				}
 				<label for="regenerate_code">Authenticator code</label>
 				<input id="regenerate_code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required aria-describedby="regenerate_code-error"/>
 				@fieldError(vm.FieldErrors, "regenerate_code")
@@ -1019,9 +1092,11 @@ templ twoFactorCard(vm AccountView) {
 			<p class="card-subtitle">All other sessions and remembered devices will be signed out.</p>
 			<form method="post" action="/v1/control-panel/account/2fa/disable">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label for="disable_password">Current password</label>
-				<input id="disable_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="disable_password-error"/>
-				@fieldError(vm.FieldErrors, "disable_password")
+				if vm.HasPassword {
+					<label for="disable_password">Current password</label>
+					<input id="disable_password" name="current_password" type="password" autocomplete="current-password" required aria-describedby="disable_password-error"/>
+					@fieldError(vm.FieldErrors, "disable_password")
+				}
 				<label for="disable_code">Authenticator or backup code</label>
 				<input id="disable_code" name="code" type="text" autocomplete="one-time-code" required aria-describedby="disable_code-error"/>
 				@fieldError(vm.FieldErrors, "disable_code")
@@ -1589,6 +1664,7 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 				<p class="subtitle">You've been invited to <strong>{ vm.TenantName }</strong> as <strong>{ vm.Role }</strong>.</p>
 			}
 			<p>Email: <code>{ vm.Email }</code></p>
+			@errorAlert(vm.Notice)
 			<form method="post" action="/v1/control-panel/invite/accept">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<input type="hidden" name="code" value={ vm.Code }/>
@@ -1610,6 +1686,7 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 					<button type="submit" class="btn-inline">Accept invite</button>
 				</div>
 			</form>
+			@ssoButtons(vm.Providers, "/v1/control-panel/invite/accept", vm.CSRFToken, vm.Code, "Accept")
 		}
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/automoto/gg-scale/internal/sso"
 )
 
 // Config controls control panel mounting and cookie behavior.
@@ -40,6 +42,9 @@ type Config struct {
 	// cancellable before the purge sweep hard-deletes the data; 0 uses the
 	// compiled fallback (30 days).
 	DeleteGracePeriod time.Duration
+	// SSOProviders are the sign-in providers that are on, by name. Empty
+	// means single sign-on is off and no provider button renders.
+	SSOProviders map[string]sso.Provider
 	// BillingPortalURL mirrors BILLING_PORTAL_URL: the static Stripe Customer
 	// Portal link rendered as "Manage billing" on tenant settings. Empty
 	// renders nothing (self-host default).
@@ -86,6 +91,16 @@ type LoginView struct {
 	Email       string
 	Error       string
 	FieldErrors map[string]string
+	Providers   []SSOProviderView
+}
+
+// SSOProviderView is one enabled sign-in provider, for a button on the auth
+// pages or a row in the sign-in methods card.
+type SSOProviderView struct {
+	Name     string
+	Label    string
+	Linked   bool
+	LinkedAt time.Time
 }
 
 // ForgotPasswordView is the data for the forgot-password request page.
@@ -549,6 +564,10 @@ type AccountView struct {
 	TwoFactorAvailable   bool
 	TwoFactorEnabled     bool
 	BackupCodesRemaining int
+	// HasPassword is false for a user who signs in only through a provider.
+	// The forms then do not ask for a current password.
+	HasPassword   bool
+	SignInMethods []SSOProviderView
 }
 
 // TwoFactorChallengeView is the data rendered by the login TOTP challenge.
@@ -737,6 +756,9 @@ type AcceptInviteView struct {
 	ExpiresAt   time.Time
 	AcceptedAt  time.Time
 	CSRFToken   string
+	Providers   []SSOProviderView
+	// Notice is a message from a provider round trip, shown with the form.
+	Notice string
 }
 
 // AllocationView is one row in the fleet list and the snapshot on the

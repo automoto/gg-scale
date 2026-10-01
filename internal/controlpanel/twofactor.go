@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pquerna/otp"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
@@ -51,6 +50,17 @@ var (
 // email-verify POST land here, so the TOTP challenge cannot be bypassed by
 // finishing a login through the verify path.
 func (h *Handler) finishLogin(w http.ResponseWriter, r *http.Request, user controlPanelUser) {
+	h.finishLoginWith(w, r, user, nil)
+}
+
+// finishLoginVia is finishLogin for a provider sign-in. The login audit row
+// names the provider. When a two-factor challenge follows, the audit row
+// names the second factor only, as it does after a password.
+func (h *Handler) finishLoginVia(w http.ResponseWriter, r *http.Request, user controlPanelUser, provider string) {
+	h.finishLoginWith(w, r, user, map[string]string{"method": provider})
+}
+
+func (h *Handler) finishLoginWith(w http.ResponseWriter, r *http.Request, user controlPanelUser, auditPayload any) {
 	row, found, err := h.getTOTP(r.Context(), user.ID)
 	if err != nil {
 		http.Error(w, "two-factor lookup failed", http.StatusInternalServerError)
@@ -61,7 +71,7 @@ func (h *Handler) finishLogin(w http.ResponseWriter, r *http.Request, user contr
 			// Fail closed: an enrolled account never logs in without its
 			// second factor, even when the operator removed the key.
 			w.WriteHeader(http.StatusServiceUnavailable)
-			webutil.Render(r, w, LoginPage(LoginView{Email: user.Email, Error: "Two-factor authentication is unavailable on this server. Contact your operator."}))
+			webutil.Render(r, w, LoginPage(LoginView{Email: user.Email, Error: "Two-factor authentication is unavailable on this server. Contact your operator.", Providers: h.ssoButtons()}))
 			return
 		}
 		h.setTwoFactorPendingCookie(w, user)
@@ -69,7 +79,7 @@ func (h *Handler) finishLogin(w http.ResponseWriter, r *http.Request, user contr
 		htmxRedirect(w, r, pathControlPanelLogin2FA)
 		return
 	}
-	h.completeLogin(w, r, user, nil)
+	h.completeLogin(w, r, user, auditPayload)
 }
 
 // completeLogin writes the login audit row, mints the session, and lands
@@ -366,7 +376,13 @@ func (h *Handler) accountView(ctx context.Context, session controlPanelSession) 
 		UserEmail:          session.User.Email,
 		CSRFToken:          session.CSRFToken,
 		TwoFactorAvailable: h.twoFactor != nil,
+		HasPassword:        session.HasPassword,
 	}
+	methods, err := h.signInMethods(ctx, session.User.ID)
+	if err != nil {
+		return vm, err
+	}
+	vm.SignInMethods = methods
 	row, found, err := h.getTOTP(ctx, session.User.ID)
 	if err != nil {
 		return vm, err
@@ -566,7 +582,29 @@ func (h *Handler) checkAccountPassword(ctx context.Context, email, password stri
 		// not a wrong password — surface it as such rather than a 401.
 		return false, err
 	}
-	return bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(password)) == nil, nil
+	return webutil.PasswordMatches(row.PasswordHash, dummyControlPanelBcryptHash, password), nil
+}
+
+// passwordConfirmed checks the current password for the two-factor
+// management actions. A user with no password skips it: the authenticator
+// code that these actions also need is then the only check. It returns
+// false when it has written the response.
+func (h *Handler) passwordConfirmed(w http.ResponseWriter, r *http.Request, session controlPanelSession, field string) bool {
+	if !session.HasPassword {
+		return true
+	}
+	passwordOK, err := h.checkAccountPassword(r.Context(), session.User.Email, r.Form.Get("current_password"))
+	if err != nil {
+		http.Error(w, "account lookup failed", http.StatusInternalServerError)
+		return false
+	}
+	if !passwordOK {
+		h.renderAccount(w, r, session, http.StatusUnauthorized, func(vm *AccountView) {
+			vm.FieldErrors = map[string]string{field: "Current password is incorrect"}
+		})
+		return false
+	}
+	return true
 }
 
 func (h *Handler) twoFactorDisable(w http.ResponseWriter, r *http.Request) {
@@ -574,15 +612,7 @@ func (h *Handler) twoFactorDisable(w http.ResponseWriter, r *http.Request) {
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	passwordOK, err := h.checkAccountPassword(r.Context(), session.User.Email, r.Form.Get("current_password"))
-	if err != nil {
-		http.Error(w, "account lookup failed", http.StatusInternalServerError)
-		return
-	}
-	if !passwordOK {
-		h.renderAccount(w, r, session, http.StatusUnauthorized, func(vm *AccountView) {
-			vm.FieldErrors = map[string]string{"disable_password": "Current password is incorrect"}
-		})
+	if !h.passwordConfirmed(w, r, session, "disable_password") {
 		return
 	}
 	method, err := h.verifyTwoFactorCode(r.Context(), session.User.ID, r.Form.Get("code"), true)
@@ -619,20 +649,12 @@ func (h *Handler) twoFactorRegenerateBackupCodes(w http.ResponseWriter, r *http.
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	passwordOK, err := h.checkAccountPassword(r.Context(), session.User.Email, r.Form.Get("current_password"))
-	if err != nil {
-		http.Error(w, "account lookup failed", http.StatusInternalServerError)
-		return
-	}
-	if !passwordOK {
-		h.renderAccount(w, r, session, http.StatusUnauthorized, func(vm *AccountView) {
-			vm.FieldErrors = map[string]string{"regenerate_password": "Current password is incorrect"}
-		})
+	if !h.passwordConfirmed(w, r, session, "regenerate_password") {
 		return
 	}
 	// Authenticator code only: someone left with nothing but backup codes
 	// should disable and re-enroll, not spend their last code minting more.
-	_, err = h.verifyTwoFactorCode(r.Context(), session.User.ID, r.Form.Get("code"), false)
+	_, err := h.verifyTwoFactorCode(r.Context(), session.User.ID, r.Form.Get("code"), false)
 	if handled := h.renderTwoFactorCodeError(w, r, session, err, "regenerate_code"); handled {
 		return
 	}
