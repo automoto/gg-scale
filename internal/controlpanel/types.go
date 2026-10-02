@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/sso"
 )
 
@@ -538,6 +539,8 @@ type ProjectSettingsView struct {
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
 	RemoteConfig       string
+	// RemoteConfigRevisions are the kept revisions, newest first.
+	RemoteConfigRevisions []RevisionView
 	// Steam sign-in credentials. The Web API key is write-only: the view
 	// carries only whether one is stored, never its value.
 	SteamAppID         string
@@ -1019,6 +1022,7 @@ type LeaderboardsListView struct {
 	TenantID     int64
 	ProjectID    int64
 	Leaderboards []LeaderboardRowView
+	Deleted      []projectadmin.DeletedLeaderboard
 	Message      string
 }
 
@@ -1050,6 +1054,8 @@ type LeaderboardFormView struct {
 	AttemptCap        string
 	Metadata          string
 	CurrentPeriod     int32
+	Revisions         []RevisionView
+	Message           string
 	Error             string
 	FieldErrors       map[string]string
 }

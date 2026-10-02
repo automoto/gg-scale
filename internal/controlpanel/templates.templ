@@ -2565,6 +2565,35 @@ templ LeaderboardsListPage(vm LeaderboardsListView) {
 				</table>
 			}
 		</section>
+		if len(vm.Deleted) > 0 {
+			<section class="card">
+				<h2>Deleted leaderboards</h2>
+				<p class="card-subtitle">Restore puts a leaderboard back with its scores. It fails if a live leaderboard uses the same name.</p>
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Deleted</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, lb := range vm.Deleted {
+							<tr>
+								<td>{ lb.Name }</td>
+								<td>{ timeString(lb.DeletedAt) }</td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(lb.ID) + "/restore") }>
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="secondary outline btn-inline">Restore</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</section>
+		}
 	}
 }
 
@@ -2672,6 +2701,7 @@ templ EditLeaderboardPage(vm LeaderboardFormView) {
 				<h1>Edit leaderboard</h1>
 			</div>
 		</div>
+		@flashSuccess(vm.Message)
 		<section class="card">
 			@errorAlert(vm.Error)
 			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID)) }>
@@ -2689,9 +2719,14 @@ templ EditLeaderboardPage(vm LeaderboardFormView) {
 				</div>
 			</form>
 		</section>
+		if len(vm.Revisions) > 0 {
+			<section class="card">
+				@revisionHistory(vm.CSRFToken, leaderboardsBasePath(vm.TenantID, vm.ProjectID)+"/"+stringFromInt(vm.LeaderboardID)+"/rollback", vm.Revisions, "A rollback restores the settings only. It does not restore scores.")
+			</section>
+		}
 		<section class="card">
 			<h2>Delete leaderboard</h2>
-			<p class="muted">Soft-deletes the leaderboard. Existing score entries are retained but the leaderboard is hidden from players and the API.</p>
+			<p class="muted">Soft-deletes the leaderboard. Existing score entries are retained but the leaderboard is hidden from players and the API. You can restore it from the leaderboard list.</p>
 			<form method="post" action={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.LeaderboardID) + "/delete") } data-confirm="Delete this leaderboard?">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<button type="submit" class="btn-inline contrast outline">Delete</button>
@@ -2965,6 +3000,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 				@fieldError(vm.FieldErrors, "config")
 				<button type="submit" class="btn-inline">Save remote config</button>
 			</form>
+			@revisionHistory(vm.CSRFToken, "/v1/control-panel/tenants/"+stringFromInt(vm.TenantID)+"/projects/"+stringFromInt(vm.ProjectID)+"/config/rollback", vm.RemoteConfigRevisions, "")
 		</section>
 		<section class="card">
 			<h2>Steam sign-in</h2>
@@ -3066,5 +3102,58 @@ templ boolBadge(on bool) {
 		<span class="badge badge-active">on</span>
 	} else {
 		<span class="badge badge-revoked">off</span>
+	}
+}
+
+// revisionHistory lists kept settings revisions, newest first, with a
+// rollback button on each older revision. expected_revision carries the
+// newest revision the page showed, so a stale rollback is refused.
+templ revisionHistory(csrf, action string, revs []RevisionView, note string) {
+	<h3>History</h3>
+	<p class="muted">The newest 3 revisions are kept. A rollback applies an older revision as a new revision.</p>
+	if note != "" {
+		<p class="muted">{ note }</p>
+	}
+	if len(revs) == 0 {
+		<p class="muted">No revisions yet. The first save records one.</p>
+	} else {
+		<table class="data-table">
+			<thead>
+				<tr>
+					<th>Revision</th>
+					<th>Source</th>
+					<th>Changed by</th>
+					<th>Time</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				for i, rev := range revs {
+					<tr>
+						<td>
+							<details>
+								<summary>{ stringFromInt(rev.Revision) }</summary>
+								<pre>{ rev.Snapshot }</pre>
+							</details>
+						</td>
+						<td>{ rev.Source }</td>
+						<td>{ rev.Actor }</td>
+						<td>{ timeString(rev.CreatedAt) }</td>
+						<td class="actions-cell">
+							if i == 0 {
+								<span class="badge badge-active">Current</span>
+							} else {
+								<form method="post" action={ templ.URL(action) } data-confirm="Roll back to this revision?">
+									<input type="hidden" name="_csrf" value={ csrf }/>
+									<input type="hidden" name="revision" value={ stringFromInt(rev.Revision) }/>
+									<input type="hidden" name="expected_revision" value={ stringFromInt(revs[0].Revision) }/>
+									<button type="submit" class="secondary outline btn-inline">Roll back</button>
+								</form>
+							}
+						</td>
+					</tr>
+				}
+			</tbody>
+		</table>
 	}
 }

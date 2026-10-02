@@ -16,6 +16,7 @@ import (
 	"github.com/automoto/gg-scale/internal/billing"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
@@ -408,6 +409,11 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 	if err != nil {
 		return ProjectSettingsView{}, err
 	}
+	revs, err := projectadmin.ListRevisions(ctx, h.pool, tenantID, projectID, projectadmin.KindRemoteConfig, projectID)
+	if err != nil {
+		return ProjectSettingsView{}, err
+	}
+	view.RemoteConfigRevisions = revisionViews(revs)
 	return view, nil
 }
 

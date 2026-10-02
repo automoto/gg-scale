@@ -2,22 +2,16 @@ package controlpanel
 
 import (
 	"bytes"
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/automoto/gg-scale/internal/db"
-	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -48,23 +42,16 @@ func (h *Handler) updateRemoteConfigHandler(w http.ResponseWriter, r *http.Reque
 		h.renderRemoteConfigError(w, r, tenantID, projectID, raw)
 		return
 	}
-	if err := h.updateRemoteConfig(r.Context(), tenantID, projectID, config); errors.Is(err, pgx.ErrNoRows) {
+	session, _ := sessionFromContext(r.Context())
+	_, err = projectadmin.SetRemoteConfig(r.Context(), h.pool, tenantID, projectID, config, nil,
+		projectadmin.Actor{UserID: session.User.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return
-	} else if err != nil {
+	}
+	if err != nil {
 		webutil.InternalError(w, "remote config: update", err)
 		return
-	}
-
-	session, _ := sessionFromContext(r.Context())
-	hash := sha256.Sum256(config)
-	if err := h.writePlatformAudit(r.Context(), tenantID, session.User.ID,
-		"control_panel.remote_config.update", strconv.FormatInt(projectID, 10), map[string]any{
-			"project_id":   projectID,
-			"config_bytes": len(config),
-			"config_hash":  hex.EncodeToString(hash[:]),
-		}); err != nil {
-		slog.WarnContext(r.Context(), "audit log: remote config update", "err", err)
 	}
 
 	http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
@@ -130,21 +117,4 @@ func formatRemoteConfig(config []byte) string {
 		return string(config)
 	}
 	return out.String()
-}
-
-func (h *Handler) updateRemoteConfig(ctx context.Context, tenantID, projectID int64, config []byte) error {
-	ctx = db.WithTenant(ctx, tenantID)
-	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		rows, err := sqlcgen.New(tx).UpdateRemoteConfig(ctx, sqlcgen.UpdateRemoteConfigParams{
-			RemoteConfig: config,
-			ProjectID:    projectID,
-		})
-		if err != nil {
-			return err
-		}
-		if rows == 0 {
-			return pgx.ErrNoRows
-		}
-		return nil
-	})
 }

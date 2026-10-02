@@ -273,3 +273,32 @@ SET current_period = current_period + 1,
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = sqlc.arg(id)
   AND deleted_at IS NULL;
+
+-- name: GetLeaderboardForUpdate :one
+-- Locks the board so concurrent writers take revision numbers in order.
+SELECT id, name, sort_order, score_operator, metadata, client_submissions,
+       score_min, score_max, reset_schedule, attempt_cap, period_started_at,
+       next_reset_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NULL
+FOR UPDATE;
+
+-- name: ListDeletedLeaderboardsForProject :many
+SELECT id, name, deleted_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC
+LIMIT 50;
+
+-- name: RestoreLeaderboard :execrows
+UPDATE leaderboards
+SET deleted_at = NULL
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id)
+  AND deleted_at IS NOT NULL;

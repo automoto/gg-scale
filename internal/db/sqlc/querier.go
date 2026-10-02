@@ -400,6 +400,8 @@ type Querier interface {
 	// on an in-flight reset and re-reads the advanced period instead of writing
 	// into the just-archived one. Concurrent submissions do not block each other.
 	GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboardForSubmitParams) (GetLeaderboardForSubmitRow, error)
+	// Locks the board so concurrent writers take revision numbers in order.
+	GetLeaderboardForUpdate(ctx context.Context, arg GetLeaderboardForUpdateParams) (GetLeaderboardForUpdateRow, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	// Single sign-on connections. Both tables are platform-global (no tenant
@@ -502,11 +504,14 @@ type Querier interface {
 	GetRelaySessionUsage(ctx context.Context, month pgtype.Date) (int64, error)
 	GetRemoteConfig(ctx context.Context, projectID int64) ([]byte, error)
 	GetRemoteConfigForControlPanel(ctx context.Context, arg GetRemoteConfigForControlPanelParams) ([]byte, error)
+	// Locks the project row so concurrent writers take revision numbers in order.
+	GetRemoteConfigForUpdate(ctx context.Context, projectID int64) ([]byte, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid. revoked_reason lets the
 	// refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
+	GetSettingsRevision(ctx context.Context, arg GetSettingsRevisionParams) ([]byte, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
 	GetTenantCustomTokenPublicKey(ctx context.Context) (string, error)
@@ -563,6 +568,7 @@ type Querier interface {
 	// ON CONFLICT DO NOTHING makes first-boot generation race-safe: concurrent
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
+	InsertSettingsRevision(ctx context.Context, arg InsertSettingsRevisionParams) error
 	// Race-safe half of find-or-create for a proven email (the caller re-reads
 	// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
 	// NOTHING never aborts the surrounding transaction.
@@ -585,6 +591,7 @@ type Querier interface {
 	// the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
 	// Returns pgx.ErrNoRows when not banned (or the player is unlinked).
 	IsPlayerBannedByTenant(ctx context.Context, playerID int64) (int64, error)
+	LatestSettingsRevision(ctx context.Context, arg LatestSettingsRevisionParams) (int64, error)
 	// Friends view: current-period entries for an explicit player set, in rank
 	// order. The caller re-ranks 0-based within the returned set.
 	LeaderboardEntriesForPlayers(ctx context.Context, arg LeaderboardEntriesForPlayersParams) ([]LeaderboardEntriesForPlayersRow, error)
@@ -634,6 +641,7 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
+	ListDeletedLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListDeletedLeaderboardsForProjectRow, error)
 	// Boards whose scheduled reset boundary has passed, locked for the reset
 	// transaction so two job runs can never double-archive a period. as_of is the
 	// job's clock — the same instant it computes the next boundary from, so the
@@ -715,6 +723,7 @@ type Querier interface {
 	// be placed in a concrete region); non-fleet modes mix regions inside one
 	// bucket and the worker applies the soft-region grouping rules in Go.
 	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
+	ListSettingsRevisions(ctx context.Context, arg ListSettingsRevisionsParams) ([]ListSettingsRevisionsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Verified emails of a tenant's owner/admin members, for operational notices
 	// (e.g. storage-quota warnings). Read cross-tenant by background jobs.
@@ -804,6 +813,7 @@ type Querier interface {
 	// conflict when BindPlayerLinkedEmail affects 0 rows.
 	PlayerLinkTargetExists(ctx context.Context, id int64) (bool, error)
 	PromoteControlPanelUserToPlatformAdmin(ctx context.Context, id int64) error
+	PruneSettingsRevisions(ctx context.Context, arg PruneSettingsRevisionsParams) error
 	PruneStaleGameSessionPeers(ctx context.Context, sessionID string) (int64, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
@@ -890,6 +900,7 @@ type Querier interface {
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestoreControlPanelUserVerificationCode(ctx context.Context, arg RestoreControlPanelUserVerificationCodeParams) error
+	RestoreLeaderboard(ctx context.Context, arg RestoreLeaderboardParams) (int64, error)
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error

@@ -41,6 +41,7 @@ INTEGRATION_TEST_PACKAGES := \
 	./tests/integration/fleet/... \
 	./tests/integration/jobs/... \
 	./tests/integration/players/... \
+	./tests/integration/projectadmin/... \
 	./tests/integration/secretseal/... \
 	./tests/integration/tenant/... \
 	./tests/integration/twofactor/... \

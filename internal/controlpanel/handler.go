@@ -226,6 +226,8 @@ func New(d Deps) http.Handler {
 			r.Get("/projects/{projectID}/leaderboards/{leaderboardID}", h.leaderboardsEditPage)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}", h.leaderboardsUpdateHandler)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/delete", h.leaderboardsDeleteHandler)
+			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/restore", h.leaderboardRestoreHandler)
+			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/rollback", h.leaderboardRollbackHandler)
 			// Consolidated settings pages (writes reuse the handlers above via
 			// a sanitized redirect_to).
 			r.Get("/settings", h.tenantSettingsPage)
@@ -237,6 +239,7 @@ func New(d Deps) http.Handler {
 			r.Post("/settings/enable", h.enableTenantHandler)
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			r.Post("/projects/{projectID}/config", h.updateRemoteConfigHandler)
+			r.Post("/projects/{projectID}/config/rollback", h.remoteConfigRollbackHandler)
 			r.Post("/projects/{projectID}/steam-auth", h.updateSteamAuthHandler)
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill

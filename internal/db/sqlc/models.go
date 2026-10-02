@@ -861,6 +861,20 @@ type Session struct {
 	RevokedReason *string
 }
 
+type SettingsRevision struct {
+	ID           int64
+	TenantID     int64
+	ProjectID    int64
+	ResourceKind string
+	ResourceID   int64
+	Revision     int64
+	Snapshot     []byte
+	ActorUserID  *int64
+	McpTokenID   *int64
+	Source       string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type StorageLimit struct {
 	ID            int64
 	TenantID      int64

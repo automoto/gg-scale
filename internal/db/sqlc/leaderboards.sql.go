@@ -279,6 +279,59 @@ func (q *Queries) GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboar
 	return i, err
 }
 
+const getLeaderboardForUpdate = `-- name: GetLeaderboardForUpdate :one
+SELECT id, name, sort_order, score_operator, metadata, client_submissions,
+       score_min, score_max, reset_schedule, attempt_cap, period_started_at,
+       next_reset_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetLeaderboardForUpdateParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+type GetLeaderboardForUpdateRow struct {
+	ID                int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+}
+
+// Locks the board so concurrent writers take revision numbers in order.
+func (q *Queries) GetLeaderboardForUpdate(ctx context.Context, arg GetLeaderboardForUpdateParams) (GetLeaderboardForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getLeaderboardForUpdate, arg.ProjectID, arg.ID)
+	var i GetLeaderboardForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.SortOrder,
+		&i.ScoreOperator,
+		&i.Metadata,
+		&i.ClientSubmissions,
+		&i.ScoreMin,
+		&i.ScoreMax,
+		&i.ResetSchedule,
+		&i.AttemptCap,
+		&i.PeriodStartedAt,
+		&i.NextResetAt,
+	)
+	return i, err
+}
+
 const leaderboardEntriesForPlayers = `-- name: LeaderboardEntriesForPlayers :many
 SELECT le.player_id, le.score, le.metadata, a.display_name
 FROM leaderboard_entries le
@@ -477,6 +530,42 @@ func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRa
 	return rank, err
 }
 
+const listDeletedLeaderboardsForProject = `-- name: ListDeletedLeaderboardsForProject :many
+SELECT id, name, deleted_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC
+LIMIT 50
+`
+
+type ListDeletedLeaderboardsForProjectRow struct {
+	ID        int64
+	Name      string
+	DeletedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListDeletedLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListDeletedLeaderboardsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listDeletedLeaderboardsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeletedLeaderboardsForProjectRow
+	for rows.Next() {
+		var i ListDeletedLeaderboardsForProjectRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.DeletedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDueLeaderboardResets = `-- name: ListDueLeaderboardResets :many
 SELECT id, current_period, period_started_at, next_reset_at, reset_schedule, created_at
 FROM leaderboards
@@ -641,6 +730,28 @@ func (q *Queries) ListLeaderboardsForProject(ctx context.Context, projectID int6
 		return nil, err
 	}
 	return items, nil
+}
+
+const restoreLeaderboard = `-- name: RestoreLeaderboard :execrows
+UPDATE leaderboards
+SET deleted_at = NULL
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+  AND deleted_at IS NOT NULL
+`
+
+type RestoreLeaderboardParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+func (q *Queries) RestoreLeaderboard(ctx context.Context, arg RestoreLeaderboardParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreLeaderboard, arg.ProjectID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const softDeleteLeaderboard = `-- name: SoftDeleteLeaderboard :execrows
