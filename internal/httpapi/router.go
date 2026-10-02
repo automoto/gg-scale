@@ -35,6 +35,7 @@ import (
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/players"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/realtime"
@@ -187,6 +188,10 @@ type Deps struct {
 	// outside /v1, so it never enters openapi.yaml or the SDKs. Empty (the
 	// default) leaves the surface unmounted entirely.
 	EntitlementAPIToken string
+
+	// origins is built by NewRouter from CORSAllowedOrigins and the project
+	// origin lists; it serves the CORS handler and the WebSocket upgrade.
+	origins *originSet
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -280,8 +285,16 @@ func NewRouter(d Deps) http.Handler {
 		// Dev fallback: wildcard. config.Validate rejects this in prod.
 		allowedOrigins = []string{"*"}
 	}
+	d.origins = newOriginSet(allowedOrigins, func(ctx context.Context) ([]string, error) {
+		if d.Pool == nil {
+			return nil, nil
+		}
+		return projectadmin.AllProjectOrigins(ctx, d.Pool)
+	})
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
+		// AllowOriginFunc replaces AllowedOrigins: it covers the env list
+		// and the project lists.
+		AllowOriginFunc:  d.origins.allowOrigin,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Session-Token", "X-Request-Id", "If-Match", "If-None-Match"},
 		ExposedHeaders:   []string{"X-Request-Id", "X-API-Version", "Retry-After", "ETag"},

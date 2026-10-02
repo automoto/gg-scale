@@ -444,3 +444,36 @@ func TestRemoteConfig_settings_page_shows_history_after_save(t *testing.T) {
 
 	assert.Contains(t, body, `name="expected_revision" value="2"`)
 }
+
+func storedOrigins(t *testing.T, raw *pgxpool.Pool, projectID int64) []string {
+	t.Helper()
+	var out []string
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`SELECT allowed_origins FROM projects WHERE id = $1`, projectID).Scan(&out))
+	return out
+}
+
+func TestAllowedOrigins_form_saves_normalized_list(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	path := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/allowed-origins"
+
+	resp, _ := tfPostForm(t, admin, path, url.Values{"_csrf": {csrf}, "origins": {"HTTPS://Game.Example/\r\nhttp://localhost:5173\n"}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	assert.Equal(t, []string{"https://game.example", "http://localhost:5173"}, storedOrigins(t, raw, projectA))
+}
+
+func TestAllowedOrigins_form_refuses_wildcard(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	path := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/allowed-origins"
+
+	resp, body := tfPostForm(t, admin, path, url.Values{"_csrf": {csrf}, "origins": {"https://*.example"}})
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Contains(t, body, "must not contain a wildcard")
+	assert.Empty(t, storedOrigins(t, raw, projectA))
+}

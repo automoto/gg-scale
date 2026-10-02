@@ -267,6 +267,9 @@ type Config struct {
 	// the API router. Empty in dev allows "*"; in production an empty list
 	// is rejected by Validate.
 	CORSAllowedOrigins []string `env:"CORS_ALLOWED_ORIGINS"`
+	// CORSMaxProjectOrigins caps the browser origins a Game Project can list
+	// in its own allowed-origins setting. Default 20.
+	CORSMaxProjectOrigins int `env:"CORS_MAX_PROJECT_ORIGINS" envDefault:"20"`
 
 	// DBMaxConns / DBMinConns size the pgx pool. Defaults: 25 / 2. The
 	// LISTEN connection holds one slot for the process lifetime, so

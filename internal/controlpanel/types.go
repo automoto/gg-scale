@@ -65,6 +65,8 @@ type Config struct {
 	MCPMaxExpiryDays int
 	// MCPMaxProjectTokens mirrors MCP_MAX_PROJECT_TOKENS; 0 uses 20.
 	MCPMaxProjectTokens int
+	// CORSMaxProjectOrigins mirrors CORS_MAX_PROJECT_ORIGINS; 0 uses 20.
+	CORSMaxProjectOrigins int
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this
@@ -90,6 +92,9 @@ type ServerSettingsSnapshot struct {
 	MCPTokenRatePerSecond int
 	MCPTokenRateBurst     int
 	MCPMaxProjectTokens   int
+
+	CORSAllowedOrigins    []string
+	CORSMaxProjectOrigins int
 
 	FleetBackend string
 	FleetRegion  string
@@ -559,7 +564,12 @@ type ProjectSettingsView struct {
 	SteamAppID         string
 	SteamKeyConfigured bool
 	// MCPEnabled shows the link to the MCP token page.
-	MCPEnabled  bool
+	MCPEnabled bool
+	// AllowedOrigins is the project's browser origin list, one per line.
+	AllowedOrigins    string
+	MaxAllowedOrigins int
+	// OriginDelay is how long a saved list takes to reach each server.
+	OriginDelay string
 	FieldErrors map[string]string
 }
 

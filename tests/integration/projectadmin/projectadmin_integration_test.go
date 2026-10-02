@@ -4,6 +4,8 @@ package projectadmin_test
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -16,6 +18,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/migrate"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 )
@@ -312,4 +315,94 @@ func TestLeaderboard_restore_should_not_find_board_of_other_project(t *testing.T
 	err := projectadmin.RestoreLeaderboard(ctx, f.pool, f.tenantID, f.other, id, f.user)
 
 	assert.ErrorIs(t, err, pgx.ErrNoRows)
+}
+
+func TestAllowedOrigins_set_should_return_old_list(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	_, err := projectadmin.SetAllowedOrigins(ctx, f.pool, f.tenantID, f.project, []string{"https://a.example"}, 20, f.user)
+	require.NoError(t, err)
+
+	old, err := projectadmin.SetAllowedOrigins(ctx, f.pool, f.tenantID, f.project, []string{"http://localhost:5173"}, 20, f.user)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"https://a.example"}, old)
+}
+
+func TestAllowedOrigins_set_should_refuse_invalid_origin_and_keep_list(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	_, err := projectadmin.SetAllowedOrigins(ctx, f.pool, f.tenantID, f.project, []string{"https://a.example"}, 20, f.user)
+	require.NoError(t, err)
+
+	_, err = projectadmin.SetAllowedOrigins(ctx, f.pool, f.tenantID, f.project, []string{"https://*.example"}, 20, f.user)
+
+	assert.ErrorIs(t, err, projectadmin.ErrInvalidOrigins)
+	got, err := projectadmin.AllowedOrigins(ctx, f.pool, f.tenantID, f.project)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"https://a.example"}, got)
+}
+
+func TestAllowedOrigins_set_should_refuse_list_above_maximum(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := projectadmin.SetAllowedOrigins(context.Background(), f.pool, f.tenantID, f.project,
+		[]string{"https://a.example", "https://b.example"}, 1, f.user)
+
+	assert.ErrorIs(t, err, projectadmin.ErrInvalidOrigins)
+}
+
+func TestAllowedOrigins_set_should_write_audit_row(t *testing.T) {
+	f := newFixture(t)
+
+	_, err := projectadmin.SetAllowedOrigins(context.Background(), f.pool, f.tenantID, f.project, []string{"https://a.example"}, 20, f.user)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, f.auditCount(t, "project.allowed_origins.update"))
+}
+
+func TestAllowedOrigins_all_should_read_every_tenant_and_skip_deleted_projects(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	var otherTenant, otherProject int64
+	require.NoError(t, f.owner.QueryRow(ctx, `INSERT INTO tenants (name) VALUES ('other') RETURNING id`).Scan(&otherTenant))
+	require.NoError(t, f.owner.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name, allowed_origins) VALUES ($1, 'o', '{https://other.example}') RETURNING id`,
+		otherTenant).Scan(&otherProject))
+	_, err := f.owner.Exec(ctx,
+		`INSERT INTO projects (tenant_id, name, allowed_origins, deleted_at) VALUES ($1, 'gone', '{https://gone.example}', now())`, f.tenantID)
+	require.NoError(t, err)
+	_, err = projectadmin.SetAllowedOrigins(ctx, f.pool, f.tenantID, f.project, []string{"https://a.example"}, 20, f.user)
+	require.NoError(t, err)
+
+	got, err := projectadmin.AllProjectOrigins(ctx, f.pool)
+	require.NoError(t, err)
+
+	assert.ElementsMatch(t, []string{"https://a.example", "https://other.example"}, got)
+}
+
+func preflight(t *testing.T, handler http.Handler, origin string) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodOptions, "/v1/healthz", nil)
+	req.Header.Set("Origin", origin)
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec.Header().Get("Access-Control-Allow-Origin")
+}
+
+func TestCORS_router_should_accept_project_origin_and_env_origin_but_not_others(t *testing.T) {
+	f := newFixture(t)
+	_, err := projectadmin.SetAllowedOrigins(context.Background(), f.pool, f.tenantID, f.project,
+		[]string{"https://html-classic.itch.zone"}, 20, f.user)
+	require.NoError(t, err)
+	router := httpapi.NewRouter(httpapi.Deps{Pool: f.pool, CORSAllowedOrigins: []string{"https://app.ggscale.com"}})
+
+	got := []string{
+		preflight(t, router, "https://html-classic.itch.zone"),
+		preflight(t, router, "https://app.ggscale.com"),
+		preflight(t, router, "https://evil.example"),
+	}
+
+	assert.Equal(t, []string{"https://html-classic.itch.zone", "https://app.ggscale.com", ""}, got)
 }

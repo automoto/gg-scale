@@ -240,6 +240,7 @@ func New(d Deps) http.Handler {
 			r.Get("/projects/{projectID}/settings", h.projectSettingsPage)
 			r.Post("/projects/{projectID}/config", h.updateRemoteConfigHandler)
 			r.Post("/projects/{projectID}/config/rollback", h.remoteConfigRollbackHandler)
+			r.Post("/projects/{projectID}/allowed-origins", h.updateAllowedOriginsHandler)
 			r.Post("/projects/{projectID}/steam-auth", h.updateSteamAuthHandler)
 			// MCP tokens. FEATURE_MCP_ENABLED off hides these routes (404).
 			r.Group(func(r chi.Router) {

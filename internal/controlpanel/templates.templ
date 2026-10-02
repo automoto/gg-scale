@@ -3002,6 +3002,18 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 			</form>
 			@revisionHistory(vm.CSRFToken, "/v1/control-panel/tenants/"+stringFromInt(vm.TenantID)+"/projects/"+stringFromInt(vm.ProjectID)+"/config/rollback", vm.RemoteConfigRevisions, "")
 		</section>
+		<section class="card">
+			<h2>Allowed browser origins</h2>
+			<p class="card-subtitle">Origins of web builds of your game (for example <code>https://html-classic.itch.zone</code> or <code>http://localhost:5173</code>) that may call the API from a browser. The API key is still required.</p>
+			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/allowed-origins") } class="settings-form">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label for="allowed-origins">Origins, one per line</label>
+				<textarea id="allowed-origins" name="origins" rows="5" spellcheck="false" aria-describedby="origins-help origins-error">{ vm.AllowedOrigins }</textarea>
+				<small id="origins-help">Use scheme://host or scheme://host:port, with no path and no wildcard. At most { stringFromInt(int64(vm.MaxAllowedOrigins)) } origins. Each server uses a new list within { vm.OriginDelay }.</small>
+				@fieldError(vm.FieldErrors, "origins")
+				<button type="submit" class="btn-inline">Save origins</button>
+			</form>
+		</section>
 		if vm.MCPEnabled {
 			<section class="card">
 				<h2>MCP tokens</h2>
@@ -3092,6 +3104,23 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>@boolBadge(vm.Snapshot.FeatureP2PRelayEnabled)</dd>
 				<dt>MCP server</dt>
 				<dd>@boolBadge(vm.Snapshot.FeatureMCPEnabled)</dd>
+			</dl>
+		</section>
+		<section class="card">
+			<h2>CORS</h2>
+			<dl class="kv">
+				<dt>CORS_ALLOWED_ORIGINS</dt>
+				if len(vm.Snapshot.CORSAllowedOrigins) == 0 {
+					<dd>* (dev fallback)</dd>
+				} else {
+					<dd>
+						for _, o := range vm.Snapshot.CORSAllowedOrigins {
+							<code>{ o }</code>
+						}
+					</dd>
+				}
+				<dt>Origins per Game Project</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.CORSMaxProjectOrigins)) }</dd>
 			</dl>
 		</section>
 		if vm.Snapshot.FeatureMCPEnabled {

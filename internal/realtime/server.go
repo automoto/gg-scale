@@ -53,6 +53,11 @@ type Options struct {
 	// handshake instead of only the next connect.
 	Revalidate func(ctx context.Context) error
 
+	// AllowOrigin, when non-nil, accepts a browser Origin from another host
+	// (the same check as CORS). Without it, or when it refuses, the WebSocket
+	// library accepts only an Origin of the request's own host.
+	AllowOrigin func(r *http.Request, origin string) bool
+
 	// SlotTTL bounds how long a per-player slot survives without
 	// refresh. Defaults to HeartbeatInterval*3 (so two missed refreshes
 	// before reap).
@@ -156,7 +161,12 @@ func ServeWS(opts Options) http.HandlerFunc {
 			}
 		}
 
-		conn, err := websocket.Accept(w, r, nil)
+		var acceptOpts websocket.AcceptOptions
+		if origin := r.Header.Get("Origin"); origin != "" && opts.AllowOrigin != nil && opts.AllowOrigin(r, origin) {
+			// Already approved; skip the library's same-host check.
+			acceptOpts.InsecureSkipVerify = true
+		}
+		conn, err := websocket.Accept(w, r, &acceptOpts)
 		if err != nil {
 			logger.Warn("realtime: ws upgrade failed", "err", err)
 			return

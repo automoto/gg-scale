@@ -430,21 +430,30 @@ func projectHealthCheck(ctx context.Context, h *handler, p Principal, _ noInput)
 	if steam.SteamAppID != "" && !steamConfigured {
 		problems = append(problems, "Steam sign-in has an App ID but no Web API key, so it is off.")
 	}
-	origins := h.d.CORSAllowedOrigins
-	if len(origins) == 0 {
-		origins = []string{"*"}
+	serverOrigins := h.d.CORSAllowedOrigins
+	if len(serverOrigins) == 0 {
+		serverOrigins = []string{"*"}
+	}
+	projectOrigins, err := projectadmin.AllowedOrigins(ctx, h.d.Pool, p.TenantID, p.ProjectID)
+	if err != nil {
+		return nil, err
 	}
 	sort.Strings(problems)
 	return map[string]any{
 		"problems": problems,
 		"checks": map[string]any{
-			"api_keys":             keys[:min(len(keys), maxListRows)],
-			"feature_grants":       grants,
-			"server_switches":      map[string]bool{"fleet": h.d.FleetEnabled, "p2p_relay": h.d.RelayEnabled, "relay_configured": h.d.RelayConfigured},
-			"cors_allowed_origins": origins,
-			"steam_sign_in":        steamConfigured,
-			"remote_config_bytes":  configBytes,
-			"quotas":               quotas,
+			"api_keys":        keys[:min(len(keys), maxListRows)],
+			"feature_grants":  grants,
+			"server_switches": map[string]bool{"fleet": h.d.FleetEnabled, "p2p_relay": h.d.RelayEnabled, "relay_configured": h.d.RelayConfigured},
+			"cors_allowed_origins": map[string]any{
+				"server":  serverOrigins,
+				"project": projectOrigins,
+				"note": "A browser origin is accepted if the server list or the list of any Game Project has it. " +
+					"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
+			},
+			"steam_sign_in":       steamConfigured,
+			"remote_config_bytes": configBytes,
+			"quotas":              quotas,
 		},
 	}, nil
 }

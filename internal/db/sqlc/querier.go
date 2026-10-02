@@ -342,6 +342,8 @@ type Querier interface {
 	// rate-limit middleware; falls back to compiled tier defaults when absent.
 	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
+	GetAllowedOrigins(ctx context.Context, projectID int64) ([]string, error)
+	GetAllowedOriginsForUpdate(ctx context.Context, projectID int64) ([]string, error)
 	// Tenant-level realtime admission envelope. The WebSocket admission path falls
 	// back to compiled tier defaults when no row exists.
 	GetConnectionLimitOverride(ctx context.Context, tenantID int64) (GetConnectionLimitOverrideRow, error)
@@ -632,6 +634,8 @@ type Querier interface {
 	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
 	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
+	// Runs with no tenant set; see all_project_allowed_origins().
+	ListAllProjectAllowedOrigins(ctx context.Context) ([]string, error)
 	// Every override for a tenant — tenant-wide (project_id NULL) and per-project —
 	// in one query. The rate-limits page groups these in Go rather than issuing one
 	// ListRateLimitOverridesForProject per project (an N+1 over the project list).
@@ -965,6 +969,7 @@ type Querier interface {
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
 	SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
+	SetAllowedOrigins(ctx context.Context, arg SetAllowedOriginsParams) error
 	// The monotonic guard in the WHERE makes replay detection atomic: 0 rows
 	// means another request already consumed this timestep.
 	SetControlPanelTOTPLastUsedStep(ctx context.Context, arg SetControlPanelTOTPLastUsedStepParams) (int64, error)

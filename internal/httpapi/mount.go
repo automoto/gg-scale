@@ -58,6 +58,7 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		EnvMaxPerTenant:   d.RealtimeMaxPerTenant,
 		MaxPerPlayer:      d.RealtimeMaxPerPlayer,
 		HeartbeatInterval: heartbeat,
+		AllowOrigin:       d.origins.allowOrigin,
 	}
 	r.Get("/ws", func(w http.ResponseWriter, req *http.Request) {
 		opts := base

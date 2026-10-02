@@ -728,6 +728,7 @@ type Project struct {
 	RemoteConfig         []byte
 	SteamAppID           string
 	SteamWebAPIKey       []byte
+	AllowedOrigins       []string
 }
 
 type ProjectPlayer struct {
