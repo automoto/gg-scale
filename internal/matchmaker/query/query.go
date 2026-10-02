@@ -19,6 +19,7 @@ package query
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -351,4 +352,40 @@ func ValidKey(s string) bool {
 		return false
 	}
 	return true
+}
+
+// Format writes e back as query text that Parse accepts and that evaluates
+// the same. Each string literal goes through str first, so a caller can
+// replace text it does not want to show. Binary operators are wrapped in
+// parentheses so precedence never changes.
+func Format(e Expr, str func(string) string) string {
+	switch e := e.(type) {
+	case matchAll:
+		return "*"
+	case notExpr:
+		return "NOT " + Format(e.inner, str)
+	case andExpr:
+		return "(" + Format(e.left, str) + " AND " + Format(e.right, str) + ")"
+	case orExpr:
+		return "(" + Format(e.left, str) + " OR " + Format(e.right, str) + ")"
+	case strTerm:
+		return e.key + `:"` + strings.ReplaceAll(str(e.value), `"`, "") + `"`
+	case numTerm:
+		return e.key + " " + e.op + " " + formatNumber(e.value)
+	}
+	return "*"
+}
+
+// formatNumber writes v so the lexer reads it back as one number token: no
+// exponent and no "+" sign.
+func formatNumber(v float64) string {
+	switch {
+	case math.IsNaN(v):
+		return "nan"
+	case math.IsInf(v, 1):
+		return "inf"
+	case math.IsInf(v, -1):
+		return "-inf"
+	}
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }

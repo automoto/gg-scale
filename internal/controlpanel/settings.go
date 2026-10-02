@@ -414,6 +414,7 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 		return ProjectSettingsView{}, err
 	}
 	view.RemoteConfigRevisions = revisionViews(revs)
+	view.MCPEnabled = h.cfg.MCPEnabled
 	return view, nil
 }
 

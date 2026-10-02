@@ -40,6 +40,7 @@ INTEGRATION_TEST_PACKAGES := \
 	./tests/integration/db/... \
 	./tests/integration/fleet/... \
 	./tests/integration/jobs/... \
+	./tests/integration/mcp/... \
 	./tests/integration/players/... \
 	./tests/integration/projectadmin/... \
 	./tests/integration/secretseal/... \

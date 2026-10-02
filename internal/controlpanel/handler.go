@@ -241,6 +241,13 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/config", h.updateRemoteConfigHandler)
 			r.Post("/projects/{projectID}/config/rollback", h.remoteConfigRollbackHandler)
 			r.Post("/projects/{projectID}/steam-auth", h.updateSteamAuthHandler)
+			// MCP tokens. FEATURE_MCP_ENABLED off hides these routes (404).
+			r.Group(func(r chi.Router) {
+				r.Use(h.requireMCPFeature)
+				r.Get("/projects/{projectID}/mcp-tokens", h.mcpTokensPage)
+				r.Post("/projects/{projectID}/mcp-tokens", h.mcpTokenCreateHandler)
+				r.Post("/projects/{projectID}/mcp-tokens/{tokenID}/revoke", h.mcpTokenRevokeHandler)
+			})
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill
 			// switch hides these routes entirely (404) when off, so operators
@@ -248,8 +255,9 @@ func New(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(h.requireFleetFeature)
 				// Read-only views require the per-object read capability
-				// (project:*:matchmaker / :allocation / :fleet), which
-				// tenant_admin lacks. Mutations keep their own stronger checks
+				// (project:*:matchmaker / :allocation / :fleet). tenant_admin
+				// has matchmaker read only; it lacks allocation and fleet read.
+				// Mutations keep their own stronger checks
 				// in-handler and stay outside the read gate because in this
 				// RBAC `manage` does not imply `read`.
 				r.Group(func(r chi.Router) {

@@ -518,6 +518,21 @@ type MatchmakingTicket struct {
 	PartyID            *int64
 }
 
+type McpToken struct {
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	CreatedByUserID int64
+	Label           string
+	TokenHash       []byte
+	TokenHint       string
+	Scopes          []string
+	ExpiresAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+}
+
 type Party struct {
 	ID                  int64
 	TenantID            int64

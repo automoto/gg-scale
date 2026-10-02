@@ -109,6 +109,7 @@ type Querier interface {
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
+	CountActiveMCPTokens(ctx context.Context, projectID int64) (int64, error)
 	// Counts how many of the given players are ACTIVE members (last_seen within
 	// 30 s, matching ListGameSessionPeers/CountActiveGameSessionPeers) of an
 	// open, unexpired session in this project. The signal handlers pass both
@@ -141,6 +142,9 @@ type Querier interface {
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
+	// Queued, unclaimed, unexpired tickets in the same bucket as a ticket. Uses
+	// matchmaking_tickets_queued_idx.
+	CountQueuedTicketsLike(ctx context.Context, arg CountQueuedTicketsLikeParams) (int64, error)
 	// Signals this player has sent into this session in the trailing minute; the
 	// handler rejects once it reaches the per-minute cap.
 	CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error)
@@ -172,6 +176,7 @@ type Querier interface {
 	// account (public-join / invite-accept). The account's email ownership is
 	// already proven, so email_verified_at is set.
 	CreateLinkedPlayer(ctx context.Context, arg CreateLinkedPlayerParams) (int64, error)
+	CreateMCPToken(ctx context.Context, arg CreateMCPTokenParams) (int64, error)
 	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
 	// Used by the player UI signup flow; takes project_id explicitly because
 	// the player site doesn't have an api_key bearer.
@@ -402,8 +407,15 @@ type Querier interface {
 	GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboardForSubmitParams) (GetLeaderboardForSubmitRow, error)
 	// Locks the board so concurrent writers take revision numbers in order.
 	GetLeaderboardForUpdate(ctx context.Context, arg GetLeaderboardForUpdateParams) (GetLeaderboardForUpdateRow, error)
+	// Runs with no tenant set (mcp_tokens_bootstrap and tenants_bootstrap allow
+	// it). projects has no bootstrap policy, so the project check is a second
+	// query in the tenant scope.
+	GetMCPTokenByHash(ctx context.Context, tokenHash []byte) (GetMCPTokenByHashRow, error)
+	GetMCPTokenCreator(ctx context.Context, arg GetMCPTokenCreatorParams) (int64, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
+	// Diagnostic read by primary key, scoped to one project.
+	GetMatchmakingTicketForTrace(ctx context.Context, arg GetMatchmakingTicketForTraceParams) (GetMatchmakingTicketForTraceRow, error)
 	// Single sign-on connections. Both tables are platform-global (no tenant
 	// RLS): every query here runs through db.Pool.BootstrapQ. The subject always
 	// comes from a verified provider round trip, never from client input.
@@ -672,6 +684,7 @@ type Querier interface {
 	// Finished periods, newest first, keyset-paginated on the period number.
 	ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
+	ListMCPTokensForProject(ctx context.Context, projectID int64) ([]ListMCPTokensForProjectRow, error)
 	// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 	// bucket for the current tenant's project, plus oldest queued ticket and
 	// the min/max count spread so operators can spot stuck buckets at a glance.
@@ -760,6 +773,7 @@ type Querier interface {
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
+	LockProjectForMCPTokenCreate(ctx context.Context, projectID int64) (int64, error)
 	// Serializes a player's concurrent signal sends within the transaction so the
 	// per-minute count+insert below can't be raced past the cap under READ
 	// COMMITTED. player_id (project_players.id) is globally unique, so the lock
@@ -812,6 +826,7 @@ type Querier interface {
 	// vanished/soft-deleted target row (the invite is dead) apart from a genuine
 	// conflict when BindPlayerLinkedEmail affects 0 rows.
 	PlayerLinkTargetExists(ctx context.Context, id int64) (bool, error)
+	ProjectIsLive(ctx context.Context, projectID int64) (bool, error)
 	PromoteControlPanelUserToPlatformAdmin(ctx context.Context, id int64) error
 	PruneSettingsRevisions(ctx context.Context, arg PruneSettingsRevisionsParams) error
 	PruneStaleGameSessionPeers(ctx context.Context, sessionID string) (int64, error)
@@ -922,6 +937,7 @@ type Querier interface {
 	// rather than relying solely on the caller's precheck.
 	RevokeControlPanelInvitation(ctx context.Context, arg RevokeControlPanelInvitationParams) error
 	RevokeControlPanelSession(ctx context.Context, id int64) error
+	RevokeMCPToken(ctx context.Context, arg RevokeMCPTokenParams) (int64, error)
 	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
 	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
 	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
@@ -1050,6 +1066,8 @@ type Querier interface {
 	// so the heartbeat handler can reject non-members instead of leaking the
 	// roster.
 	TouchGameSessionPeer(ctx context.Context, arg TouchGameSessionPeerParams) (int64, error)
+	// At most one write per minute for each token.
+	TouchMCPTokenLastUsed(ctx context.Context, id int64) error
 	TouchPlayerAccountConnection(ctx context.Context, arg TouchPlayerAccountConnectionParams) error
 	// Player-initiated, non-destructive unlink. The row and its game data stay;
 	// the account link goes inactive and player-credential auth is blocked

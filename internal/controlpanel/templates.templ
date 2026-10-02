@@ -3002,6 +3002,13 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 			</form>
 			@revisionHistory(vm.CSRFToken, "/v1/control-panel/tenants/"+stringFromInt(vm.TenantID)+"/projects/"+stringFromInt(vm.ProjectID)+"/config/rollback", vm.RemoteConfigRevisions, "")
 		</section>
+		if vm.MCPEnabled {
+			<section class="card">
+				<h2>MCP tokens</h2>
+				<p class="card-subtitle">Tokens that let a coding agent read this Game Project and find setup problems.</p>
+				<a href={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Manage MCP tokens</a>
+			</section>
+		}
 		<section class="card">
 			<h2>Steam sign-in</h2>
 			<p class="card-subtitle">Lets game clients exchange a Steam session ticket for a session via <code>POST /v1/auth/steam</code>. Off until both fields are set.</p>
@@ -3083,8 +3090,25 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>@boolBadge(vm.Snapshot.FeatureFleetEnabled)</dd>
 				<dt>P2P relay</dt>
 				<dd>@boolBadge(vm.Snapshot.FeatureP2PRelayEnabled)</dd>
+				<dt>MCP server</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureMCPEnabled)</dd>
 			</dl>
 		</section>
+		if vm.Snapshot.FeatureMCPEnabled {
+			<section class="card">
+				<h2>MCP</h2>
+				<dl class="kv">
+					<dt>Token maximum expiry (days)</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenMaxExpiryDays)) }</dd>
+					<dt>Token rate (requests/second)</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenRatePerSecond)) }</dd>
+					<dt>Token burst</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenRateBurst)) }</dd>
+					<dt>Active tokens per Game Project</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.MCPMaxProjectTokens)) }</dd>
+				</dl>
+			</section>
+		}
 		<section class="card">
 			<h2>Fleet</h2>
 			<dl class="kv">
@@ -3155,5 +3179,131 @@ templ revisionHistory(csrf, action string, revs []RevisionView, note string) {
 				}
 			</tbody>
 		</table>
+	}
+}
+
+templ MCPTokensPage(vm MCPTokensView) {
+	@appLayout("MCP tokens — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
+		<div class="breadcrumb">
+			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Game Project settings</a> / MCP tokens
+		</div>
+		<div class="page-header">
+			<div>
+				<p class="eyebrow">Game Project #{ stringFromInt(vm.ProjectID) }</p>
+				<h1>MCP tokens</h1>
+				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) read this Game Project and find setup problems. A token works for this Game Project only, and never has more rights than the person who created it.</p>
+			</div>
+		</div>
+		@flashSuccess(vm.Message)
+		if vm.NewToken != "" {
+			<section class="color-block color-block--lime">
+				<p class="reveal-warning">Store this token now. It will not be shown again.</p>
+				<dl class="kv">
+					<dt>Token</dt>
+					<dd><code>{ vm.NewToken }</code></dd>
+				</dl>
+				<p>Example for Claude Code:</p>
+				<pre>claude mcp add --transport http ggscale https://&lt;your-host&gt;/mcp --header "Authorization: Bearer { vm.NewToken }"</pre>
+			</section>
+		}
+		<section class="card">
+			<h2>New token</h2>
+			@errorAlert(vm.Error)
+			<form method="post" action={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID)) } class="settings-form">
+				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+				<label>
+					Label
+					<input name="label" value={ vm.Label } maxlength="64" required aria-describedby="label-error"/>
+					@fieldError(vm.FieldErrors, "label")
+				</label>
+				<label>
+					Expires after (days)
+					<input name="days" type="number" min="1" max={ stringFromInt(int64(vm.MaxDays)) } value={ vm.Days } aria-describedby="days-help days-error"/>
+					<small id="days-help">From 1 to { stringFromInt(int64(vm.MaxDays)) }.</small>
+					@fieldError(vm.FieldErrors, "days")
+				</label>
+				<fieldset>
+					<legend>Access</legend>
+					<label><input type="radio" name="preset" value="read_only" checked/> Read only</label>
+					if len(vm.GrantableScopes) > 0 {
+						<label><input type="radio" name="preset" value="read_write"/> Read and write (all scopes below)</label>
+					}
+				</fieldset>
+				if len(vm.GrantableScopes) > 0 {
+					<fieldset>
+						<legend>Write scopes</legend>
+						for _, s := range vm.GrantableScopes {
+							<label><input type="checkbox" name="scopes" value={ s }/> <code>{ s }</code></label>
+						}
+						<small>Only scopes that you have permission for are shown. Each write can be undone with a rollback or a restore.</small>
+					</fieldset>
+				}
+				<button type="submit" class="btn-inline">Create token</button>
+			</form>
+		</section>
+		<section class="card">
+			<h2>Active tokens</h2>
+			if len(vm.Tokens) == 0 {
+				<p class="muted">No tokens.</p>
+			} else {
+				<table class="data-table">
+					<thead>
+						<tr>
+							<th>Label</th>
+							<th>Token</th>
+							<th>Scopes</th>
+							<th>Created by</th>
+							<th>Expires</th>
+							<th>Last used</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, t := range vm.Tokens {
+							<tr>
+								<td>
+									{ t.Label }
+									if t.Inactive {
+										<span class="badge badge-revoked">inactive</span>
+									}
+								</td>
+								<td><code>…{ t.Hint }</code></td>
+								<td>
+									if len(t.Scopes) == 0 {
+										read only
+									} else {
+										for _, s := range t.Scopes {
+											<code>{ s }</code>
+										}
+									}
+								</td>
+								<td>{ t.CreatorEmail }</td>
+								<td>
+									{ timeString(t.ExpiresAt) }
+									if t.Expired {
+										<span class="badge badge-revoked">expired</span>
+									} else if t.ExpiresSoon {
+										<span class="badge">expires soon</span>
+									}
+								</td>
+								<td>
+									if t.LastUsedAt != nil {
+										{ timeString(*t.LastUsedAt) }
+									} else {
+										never
+									}
+								</td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="btn-inline contrast outline">Revoke</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</section>
 	}
 }

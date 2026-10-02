@@ -91,6 +91,8 @@ var postRouteGuards = map[string]guardTier{
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards/{leaderboardID}/rollback": tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/config":                                tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/config/rollback":                       tierTenantAdmin,
+	"/tenants/{tenantID}/projects/{projectID}/mcp-tokens":                            tierTenantAdmin,
+	"/tenants/{tenantID}/projects/{projectID}/mcp-tokens/{tokenID}/revoke":           tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/steam-auth":                            tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/players/invite":                        tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/players/{playerID}/ban":                tierTenantAdmin,

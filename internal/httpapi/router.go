@@ -30,6 +30,7 @@ import (
 	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/mcp"
 	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/playerauth"
@@ -175,6 +176,12 @@ type Deps struct {
 	// Empty leaves /metrics open (dev / explicitly-unauthenticated deployments).
 	MetricsAuthToken string
 
+	// MCPEnabled mounts POST /mcp for coding agents (FEATURE_MCP_ENABLED).
+	// MCPTokenRatePerSecond / MCPTokenBurst set the per-token bucket.
+	MCPEnabled            bool
+	MCPTokenRatePerSecond float64
+	MCPTokenBurst         float64
+
 	// EntitlementAPIToken, when non-empty, mounts the internal declarative
 	// entitlement API at /internal/entitlements behind this bearer token —
 	// outside /v1, so it never enters openapi.yaml or the SDKs. Empty (the
@@ -289,10 +296,37 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/favicon.ico", webassets.FaviconHandler())
 	mountInternalAPI(r, d)
 
+	// One observability middleware for /v1 and /mcp: it registers its
+	// collectors on reg, so it can be built only once.
+	observe := middleware.NewObservability(reg)
+	if d.MCPEnabled && d.Pool != nil && d.Limiter != nil && d.RBAC != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.NewRequestID())
+			r.Use(observe)
+			if d.RequestTimeout > 0 {
+				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
+			}
+			r.Handle("/mcp", mcp.New(mcp.Deps{
+				Pool:               d.Pool,
+				RBAC:               d.RBAC,
+				Limiter:            d.Limiter,
+				ProxyTrust:         d.ProxyTrust,
+				Version:            d.Version,
+				TokenRatePerSecond: d.MCPTokenRatePerSecond,
+				TokenBurst:         d.MCPTokenBurst,
+				FleetEnabled:       d.ControlPanel.FleetEnabled,
+				RelayEnabled:       d.ControlPanel.RelayEnabled,
+				RelayConfigured:    d.RelayIssuer != nil,
+				CORSAllowedOrigins: d.CORSAllowedOrigins,
+				Now:                d.Now,
+			}))
+		})
+	}
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.NewRequestID())
 		r.Use(middleware.NewVersion(d.Version, reg))
-		r.Use(middleware.NewObservability(reg))
+		r.Use(observe)
 		if d.RequestTimeout > 0 {
 			r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 		}

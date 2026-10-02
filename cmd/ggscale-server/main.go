@@ -632,6 +632,9 @@ func run() error {
 			BillingPortalURL:       cfg.BillingPortalURL,
 			BillingUpgradeURL:      cfg.BillingUpgradeURL,
 			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
+			MCPEnabled:             cfg.FeatureMCPEnabled,
+			MCPMaxExpiryDays:       cfg.MCPTokenMaxExpiryDays,
+			MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/control-panel/sso",
 				cfg.ControlPanelSSOGoogleClientID, cfg.ControlPanelSSOGoogleClientSecret),
 			// Redacted read-only snapshot for the server settings page.
@@ -644,6 +647,11 @@ func run() error {
 				PlayersEnabled:         cfg.PlayersEnabled,
 				FeatureFleetEnabled:    cfg.FeatureFleetEnabled,
 				FeatureP2PRelayEnabled: cfg.FeatureP2PRelayEnabled,
+				FeatureMCPEnabled:      cfg.FeatureMCPEnabled,
+				MCPTokenMaxExpiryDays:  cfg.MCPTokenMaxExpiryDays,
+				MCPTokenRatePerSecond:  cfg.MCPTokenRatePerSecond,
+				MCPTokenRateBurst:      cfg.MCPTokenRateBurst,
+				MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
 				FleetBackend:           cfg.FleetBackend,
 				FleetRegion:            cfg.FleetRegion,
 			},
@@ -661,6 +669,9 @@ func run() error {
 		CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
 		MetricsAuthToken:       cfg.MetricsAuthToken,
 		EntitlementAPIToken:    entitlementToken,
+		MCPEnabled:             cfg.FeatureMCPEnabled,
+		MCPTokenRatePerSecond:  float64(cfg.MCPTokenRatePerSecond),
+		MCPTokenBurst:          float64(cfg.MCPTokenRateBurst),
 		BillingHandoffKey:      billingHandoffKey,
 	})
 

@@ -44,6 +44,20 @@ type Config struct {
 	// Defaults false: no relay issuer or UDP listener is built and relay entry
 	// points refuse regardless of RelaySharedSecret.
 	FeatureP2PRelayEnabled bool `env:"FEATURE_P2P_RELAY_ENABLED" envDefault:"false"`
+	// FeatureMCPEnabled mounts POST /mcp and the dashboard MCP token page.
+	// Defaults false.
+	FeatureMCPEnabled bool `env:"FEATURE_MCP_ENABLED" envDefault:"false"`
+	// MCPTokenMaxExpiryDays is the longest lifetime a person can give an MCP
+	// token. Default 365.
+	MCPTokenMaxExpiryDays int `env:"MCP_TOKEN_MAX_EXPIRY_DAYS" envDefault:"365"`
+	// MCPTokenRatePerSecond / MCPTokenRateBurst set the per-token request
+	// bucket on /mcp. Process-local, so with N app hosts the effective limit
+	// can be N times the value. Defaults 5 / 20.
+	MCPTokenRatePerSecond int `env:"MCP_TOKEN_RATE_PER_SECOND" envDefault:"5"`
+	MCPTokenRateBurst     int `env:"MCP_TOKEN_RATE_BURST" envDefault:"20"`
+	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
+	// for each project. Default 20.
+	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`
 
 	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
 	// by default so fleets stay off until an operator opts in; only consulted

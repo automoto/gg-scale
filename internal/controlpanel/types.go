@@ -58,6 +58,13 @@ type Config struct {
 	// tenant provisioning sets enforce_quotas=true on the new tenant so the
 	// class ladder is enforced from creation.
 	EnforceNewTenantQuotas bool
+	// MCPEnabled mirrors FEATURE_MCP_ENABLED. When false the MCP token page is
+	// hidden and its routes 404.
+	MCPEnabled bool
+	// MCPMaxExpiryDays mirrors MCP_TOKEN_MAX_EXPIRY_DAYS; 0 uses 365.
+	MCPMaxExpiryDays int
+	// MCPMaxProjectTokens mirrors MCP_MAX_PROJECT_TOKENS; 0 uses 20.
+	MCPMaxProjectTokens int
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this
@@ -77,6 +84,12 @@ type ServerSettingsSnapshot struct {
 	PlayersEnabled         bool
 	FeatureFleetEnabled    bool
 	FeatureP2PRelayEnabled bool
+	FeatureMCPEnabled      bool
+
+	MCPTokenMaxExpiryDays int
+	MCPTokenRatePerSecond int
+	MCPTokenRateBurst     int
+	MCPMaxProjectTokens   int
 
 	FleetBackend string
 	FleetRegion  string
@@ -545,7 +558,9 @@ type ProjectSettingsView struct {
 	// carries only whether one is stored, never its value.
 	SteamAppID         string
 	SteamKeyConfigured bool
-	FieldErrors        map[string]string
+	// MCPEnabled shows the link to the MCP token page.
+	MCPEnabled  bool
+	FieldErrors map[string]string
 }
 
 // ServerSettingsView renders the read-only server settings page.

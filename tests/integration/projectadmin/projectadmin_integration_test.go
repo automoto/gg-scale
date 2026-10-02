@@ -5,6 +5,7 @@ package projectadmin_test
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -207,7 +208,12 @@ func TestRemoteConfig_rollback_should_refuse_pruned_revision(t *testing.T) {
 
 func TestRemoteConfig_token_write_should_record_token_as_actor(t *testing.T) {
 	f := newFixture(t)
-	token := projectadmin.Actor{TokenID: 77, TokenCreatorID: f.user.UserID}
+	var tokenID int64
+	require.NoError(t, f.owner.QueryRow(context.Background(),
+		`INSERT INTO mcp_tokens (tenant_id, project_id, created_by_user_id, label, token_hash, token_hint, expires_at)
+		 VALUES ($1, $2, $3, 't', '\x01'::bytea, 'hint', now() + interval '1 day') RETURNING id`,
+		f.tenantID, f.project, f.user.UserID).Scan(&tokenID))
+	token := projectadmin.Actor{TokenID: tokenID, TokenCreatorID: f.user.UserID}
 
 	_, err := projectadmin.SetRemoteConfig(context.Background(), f.pool, f.tenantID, f.project, []byte(`{"a":1}`), nil, token)
 	require.NoError(t, err)
@@ -215,9 +221,9 @@ func TestRemoteConfig_token_write_should_record_token_as_actor(t *testing.T) {
 	var service string
 	require.NoError(t, f.owner.QueryRow(context.Background(),
 		`SELECT actor_service FROM platform_audit_log WHERE action = 'control_panel.remote_config.update'`).Scan(&service))
-	assert.Equal(t, "mcp_token:77", service)
+	assert.Equal(t, "mcp_token:"+strconv.FormatInt(tokenID, 10), service)
 	newest := f.revisions(t, projectadmin.KindRemoteConfig, f.project)[0]
-	assert.Equal(t, []any{"mcp", int64(77)}, []any{newest.Source, *newest.TokenID})
+	assert.Equal(t, []any{"mcp", tokenID}, []any{newest.Source, *newest.TokenID})
 }
 
 func TestLeaderboard_create_should_record_revision_one_without_base_row(t *testing.T) {

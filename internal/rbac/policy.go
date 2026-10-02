@@ -43,6 +43,7 @@ p, role:tenant_admin, *, project, manage
 p, role:tenant_admin, *, project:*:players, manage
 p, role:tenant_admin, *, project:*:leaderboard, manage
 p, role:tenant_admin, *, project:*:config, update
+p, role:tenant_admin, *, project:*:matchmaker, read
 p, role:tenant_admin, *, api_key:publishable, manage
 p, role:tenant_admin, *, api_key:secret, manage
 p, role:tenant_admin, *, custom_token, manage
