@@ -30,10 +30,16 @@ operations and are intentionally absent — only the JSON API is specified.
   adapter).
 - `cmd/openapi-dump` — thin `main` that calls `OpenAPIDoc` and writes the YAML.
   Its `specVersion` constant stamps `info.version`.
-- Schemas, request/response bodies, status codes, and `ApiKeyAuth` /
-  `PlayerSession` security all come straight from each operation's Go types and
-  `huma.Operation` metadata. No conventions to keep extraction happy — the
-  types *are* the spec.
+- Schemas, request/response bodies, status codes, and the `PublishableKey` /
+  `SecretKey` / `PlayerSession` security all come straight from each
+  operation's Go types and `huma.Operation` metadata. No conventions to keep
+  extraction happy — the types *are* the spec.
+- Key schemes: an operation that refuses a publishable key lists only
+  `SecretKey` (`secretKeySecurity` in `humaapi.go`); every other operation
+  lists `PublishableKey`, whose description says a secret key also works;
+  score submit lists both (the leaderboard decides). The integration test
+  `TestAPIKeyType_spec_matches_router` sends a publishable key to every
+  operation and checks the 403s against the spec.
 
 ## Guard tests
 

@@ -130,9 +130,12 @@ type Config struct {
 	// MatchmakerSweepInterval is how often the cleanup goroutine releases
 	// claims whose lease has expired. Default 60s.
 	MatchmakerSweepInterval time.Duration `env:"MATCHMAKER_SWEEP_INTERVAL" envDefault:"60s"`
+	// PartyEnqueueEnabled lets party leaders queue and rematch. Set it to
+	// false to stop new party queue entries; other party operations keep
+	// working. Default true.
+	PartyEnqueueEnabled bool `env:"PARTY_ENQUEUE_ENABLED" envDefault:"true"`
 	// MatchmakerTicketTTL is how long a queued ticket lives before the
 	// sweeper fails it. 0 disables expiry. Default 10m.
-	PartyEnqueueEnabled bool          `env:"PARTY_ENQUEUE_ENABLED" envDefault:"false"`
 	MatchmakerTicketTTL time.Duration `env:"MATCHMAKER_TICKET_TTL" envDefault:"10m"`
 
 	// TURN relay tunables. The relay is disabled unless RelayPublicIP and

@@ -170,6 +170,27 @@ func TestLoad_accepts_valid_two_factor_key(t *testing.T) {
 	assert.Equal(t, key, cfg.TwoFactorEncKey)
 }
 
+func TestLoad_enables_party_queue_by_default(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.PartyEnqueueEnabled)
+}
+
+func TestLoad_party_queue_can_be_turned_off(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("PARTY_ENQUEUE_ENABLED", "false")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.PartyEnqueueEnabled)
+}
+
 func TestLoad_defaults_two_factor_key_to_empty(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
@@ -386,6 +407,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
 		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "APP_REGION", "LOG_LEVEL", "ENV",
+		"PARTY_ENQUEUE_ENABLED",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
 		"EMAIL_VERIFY_SIGNING_KEY", "EMAIL_VERIFY_SIGNING_KEY_FILE",
 		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",
