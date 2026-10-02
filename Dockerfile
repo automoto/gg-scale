@@ -1,6 +1,6 @@
 # Build on the host platform and cross-compile; the final stage only copies
 # files, so no emulation is needed for the arm64 image.
-FROM --platform=$BUILDPLATFORM golang:1.26.6-bookworm AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm AS builder
 
 WORKDIR /src
 
