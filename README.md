@@ -14,7 +14,7 @@ If you prefer a managed service, run your game on ggscale Cloud and leave the ho
 
 Full documentation is in the [ggscale wiki](https://github.com/automoto/gg-scale/wiki): architecture, features, API routes, and onboarding guides.
 
-The [HTTP API reference](https://automoto.github.io/ggscale-api-docs/) lists every `/v1` operation, with request and response schemas and which API key each one takes. It is generated from [`openapi.yaml`](openapi.yaml).
+The [HTTP API reference doc](https://automoto.github.io/ggscale-api-docs/)
 
 For more technical detail, ask DeepWiki:
 
