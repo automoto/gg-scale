@@ -32,7 +32,7 @@ func registerRemoteConfig(api huma.API, d Deps) {
 		Method:      http.MethodGet,
 		Path:        "/v1/config",
 		Summary:     "Get the project's remote config",
-		Description: "Returns the project-defined JSON object using only a project-pinned tenant API key. " +
+		Description: "Returns the project-defined JSON object using only an API key that is limited to one Game Project, with no player session. " +
 			"Send If-None-Match with a previous ETag to receive 304 when unchanged.",
 		Tags:     []string{"Remote Config"},
 		Security: apiKeySecurity,

@@ -76,9 +76,7 @@ func registerPresence(api huma.API, d Deps) {
 				"session_id": in.Body.SessionID,
 			})
 			msg := realtime.Message{Type: "presence", Payload: json.RawMessage(payload)}
-			for _, friendID := range acceptedFriendPlayersInProject(ctx, d, callerID, projectID) {
-				_ = d.Hub.Push(ctx, tenantID, friendID, msg)
-			}
+			_ = d.Hub.PushMany(ctx, tenantID, acceptedFriendPlayersInProject(ctx, d, callerID, projectID), msg)
 		}
 
 		out := &presenceUpdateOutput{}

@@ -70,7 +70,7 @@ func registerPlayerSessionVerify(api huma.API, d Deps) {
 		Path:        "/v1/server/player-sessions/verify",
 		Summary:     "Server-tier: verify a player session token",
 		Tags:        []string{"Session Verification"},
-		Security:    apiKeySecurity,
+		Security:    secretKeySecurity,
 	}, func(_ context.Context, _ *struct{}) (*playerSessionVerifyOutput, error) {
 		return &playerSessionVerifyOutput{Body: func(hctx huma.Context) {
 			r, w := humachi.Unwrap(hctx)

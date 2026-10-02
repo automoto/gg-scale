@@ -228,7 +228,7 @@ func registerServerRemoteAddr(api huma.API, d Deps) {
 		Path:        "/v1/server/players/{player_id}/remote-addrs",
 		Summary:     "Server-tier: read a player's remote addresses",
 		Tags:        []string{"Remote Addresses"},
-		Security:    apiKeySecurity,
+		Security:    secretKeySecurity,
 	}, serverRemoteAddrGet(d))
 }
 

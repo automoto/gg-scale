@@ -182,7 +182,7 @@ func TestOpenAPIDoc_remote_config_documents_example_and_revalidation(t *testing.
 	require.NotNil(t, item.Get)
 
 	require.Len(t, item.Get.Security, 1)
-	_, hasAPIKey := item.Get.Security[0]["ApiKeyAuth"]
+	_, hasAPIKey := item.Get.Security[0]["PublishableKey"]
 	_, hasPlayer := item.Get.Security[0]["PlayerSession"]
 	assert.True(t, hasAPIKey)
 	assert.False(t, hasPlayer, "remote config must work before player login")
@@ -214,9 +214,9 @@ func TestOpenAPIDoc_storage_put_body_documents_example(t *testing.T) {
 }
 
 // TestOpenAPIDoc_server_tier_ops_are_api_key_only guards the trust boundary of
-// the /v1/server/ subtree: every operation authenticates with the API key alone
-// (the caller is a game-server workload, not a player) and must never document
-// a player-session requirement.
+// the /v1/server/ subtree: every operation authenticates with the secret key
+// alone (the caller is a game-server workload, not a player) and must never
+// document a player-session requirement.
 func TestOpenAPIDoc_server_tier_ops_are_api_key_only(t *testing.T) {
 	doc := OpenAPIDoc("1.0.0")
 
@@ -233,9 +233,9 @@ func TestOpenAPIDoc_server_tier_ops_are_api_key_only(t *testing.T) {
 				continue
 			}
 			require.Len(t, op.Security, 1, "%s %s", method, p)
-			_, hasAPIKey := op.Security[0]["ApiKeyAuth"]
+			_, hasAPIKey := op.Security[0]["SecretKey"]
 			_, hasPlayer := op.Security[0]["PlayerSession"]
-			assert.True(t, hasAPIKey, "%s %s must require the API key", method, p)
+			assert.True(t, hasAPIKey, "%s %s must require the secret key", method, p)
 			assert.False(t, hasPlayer, "%s %s must not require a player session", method, p)
 		}
 	}
@@ -250,7 +250,7 @@ func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {
 	// Opaque-401 endpoint: api-key auth only, and the body-callback op is
 	// enriched with request + 200/401 response schemas.
 	require.Len(t, item.Post.Security, 1)
-	_, hasAPIKey := item.Post.Security[0]["ApiKeyAuth"]
+	_, hasAPIKey := item.Post.Security[0]["SecretKey"]
 	_, hasPlayer := item.Post.Security[0]["PlayerSession"]
 	assert.True(t, hasAPIKey)
 	assert.False(t, hasPlayer, "verify must not require a player session")

@@ -3,6 +3,7 @@ package realtime_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -90,7 +91,7 @@ func TestHubPush_should_reach_player_on_other_host(t *testing.T) {
 	err := a.Push(context.Background(), 1, 42, realtime.Message{Type: "presence", Payload: json.RawMessage(`{"status":"online"}`)})
 
 	require.NoError(t, err)
-	require.Len(t, w.Writes(), 1)
+	require.Eventually(t, func() bool { return len(w.Writes()) == 1 }, time.Second, time.Millisecond)
 	assert.JSONEq(t, `{"type":"presence","payload":{"status":"online"}}`, string(w.Writes()[0]))
 }
 
@@ -101,7 +102,7 @@ func TestHubPush_should_not_cross_tenants(t *testing.T) {
 
 	_ = a.Push(context.Background(), 1, 42, realtime.Message{Type: "presence"})
 
-	assert.Empty(t, w.Writes())
+	assert.Never(t, func() bool { return len(w.Writes()) > 0 }, 50*time.Millisecond, time.Millisecond)
 }
 
 func TestHubPush_should_refuse_payload_over_notify_limit(t *testing.T) {
@@ -120,4 +121,98 @@ func TestHubPush_should_report_not_connected_without_relay(t *testing.T) {
 	err := h.Push(context.Background(), 1, 42, realtime.Message{Type: "presence"})
 
 	assert.ErrorIs(t, err, realtime.ErrNotConnected)
+}
+
+func TestHubPushMany_should_relay_remote_players_in_one_notify(t *testing.T) {
+	a, b, relay := twoHosts(t)
+	writers := []*fakeWriter{{}, {}, {}}
+	for i, w := range writers {
+		defer b.Register(1, int64(10+i), w)()
+	}
+
+	err := a.PushMany(context.Background(), 1, []int64{10, 11, 12}, realtime.Message{Type: "presence"})
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, relay.count())
+}
+
+func TestHubPushMany_should_reach_each_remote_player(t *testing.T) {
+	a, b, _ := twoHosts(t)
+	writers := []*fakeWriter{{}, {}, {}}
+	for i, w := range writers {
+		defer b.Register(1, int64(10+i), w)()
+	}
+
+	_ = a.PushMany(context.Background(), 1, []int64{10, 11, 12}, realtime.Message{Type: "presence"})
+
+	for _, w := range writers {
+		assert.Eventually(t, func() bool { return len(w.Writes()) == 1 }, time.Second, time.Millisecond)
+	}
+}
+
+func TestHubPushMany_should_split_large_player_lists(t *testing.T) {
+	a, _, relay := twoHosts(t)
+	players := make([]int64, 2000)
+	for i := range players {
+		players[i] = int64(1_000_000_000 + i)
+	}
+
+	err := a.PushMany(context.Background(), 1, players, realtime.Message{Type: "presence"})
+
+	require.NoError(t, err)
+	assert.Greater(t, relay.count(), 1)
+}
+
+// blockingWriter never finishes a write until released.
+type blockingWriter struct{ release chan struct{} }
+
+func (w *blockingWriter) Write(ctx context.Context, _ []byte) error {
+	select {
+	case <-w.release:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+func (w *blockingWriter) Close() error { return nil }
+
+func TestHubRelay_should_not_let_a_stuck_socket_block_other_players(t *testing.T) {
+	a, b, _ := twoHosts(t)
+	stuck := &blockingWriter{release: make(chan struct{})}
+	defer close(stuck.release)
+	defer b.Register(1, 41, stuck)()
+	w := &fakeWriter{}
+	defer b.Register(1, 42, w)()
+
+	_ = a.Push(context.Background(), 1, 41, realtime.Message{Type: "presence"})
+	_ = a.Push(context.Background(), 1, 42, realtime.Message{Type: "presence"})
+
+	assert.Eventually(t, func() bool { return len(w.Writes()) == 1 }, time.Second, time.Millisecond)
+}
+
+func TestHubRelay_should_keep_order_per_player(t *testing.T) {
+	a, b, _ := twoHosts(t)
+	w := &fakeWriter{}
+	defer b.Register(1, 42, w)()
+	const n = 50
+
+	for i := range n {
+		_ = a.Push(context.Background(), 1, 42, realtime.Message{Type: "presence", Payload: json.RawMessage(strconv.Itoa(i))})
+	}
+
+	require.Eventually(t, func() bool { return len(w.Writes()) == n }, time.Second, time.Millisecond)
+	for i, got := range w.Writes() {
+		assert.JSONEq(t, `{"type":"presence","payload":`+strconv.Itoa(i)+`}`, string(got))
+	}
+}
+
+func TestHubPushMany_should_send_once_per_player(t *testing.T) {
+	h := realtime.NewHub()
+	w := &fakeWriter{}
+	defer h.Register(1, 42, w)()
+
+	err := h.PushMany(context.Background(), 1, []int64{42, 42}, realtime.Message{Type: "presence"})
+
+	require.NoError(t, err)
+	assert.Len(t, w.Writes(), 1)
 }

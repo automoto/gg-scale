@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"slices"
 
 	"github.com/jackc/pgx/v5"
 
@@ -19,9 +18,9 @@ const (
 	EventInvite  = "party_invite"
 )
 
-// Pusher sends a realtime event to one player. *realtime.Hub implements it.
+// Pusher sends a realtime event to players. *realtime.Hub implements it.
 type Pusher interface {
-	Push(ctx context.Context, tenantID, playerID int64, msg realtime.Message) error
+	PushMany(ctx context.Context, tenantID int64, playerIDs []int64, msg realtime.Message) error
 }
 
 // Change is one committed party write. Players are the members after the
@@ -70,13 +69,11 @@ func (s *Store) write(ctx context.Context, bootstrap bool, fn func(pgx.Tx, *writ
 func PushChanges(ctx context.Context, p Pusher, changes []Change) {
 	for _, c := range changes {
 		payload := map[string]any{"party_id": c.PartyID, "version": c.Version, "state": c.State}
-		for _, player := range slices.Compact(slices.Sorted(slices.Values(c.Players))) {
-			push(ctx, p, c.TenantID, player, EventChanged, payload)
-		}
+		push(ctx, p, c.TenantID, c.Players, EventChanged, payload)
 	}
 }
 
-func push(ctx context.Context, p Pusher, tenantID, playerID int64, typ string, payload any) {
+func push(ctx context.Context, p Pusher, tenantID int64, playerIDs []int64, typ string, payload any) {
 	if p == nil {
 		return
 	}
@@ -84,8 +81,8 @@ func push(ctx context.Context, p Pusher, tenantID, playerID int64, typ string, p
 	if err != nil {
 		return
 	}
-	err = p.Push(ctx, tenantID, playerID, realtime.Message{Type: typ, Payload: raw})
+	err = p.PushMany(ctx, tenantID, playerIDs, realtime.Message{Type: typ, Payload: raw})
 	if err != nil && !errors.Is(err, realtime.ErrNotConnected) {
-		slog.WarnContext(ctx, "party event push failed", "type", typ, "player_id", playerID, "err", err)
+		slog.WarnContext(ctx, "party event push failed", "type", typ, "err", err)
 	}
 }

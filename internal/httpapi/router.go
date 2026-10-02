@@ -436,19 +436,19 @@ func NewRouter(d Deps) http.Handler {
 					registerAuthTokenRoutes(groupAPI(r, humaCfg), d)
 				})
 
-				// /v1/server/player-sessions/verify — server-tier endpoint used by
-				// game-server workloads to verify a player's session
-				// token (the request body) under their own API-key auth
-				// (the Authorization header). Gated by RBAC permission so
-				// publishable keys (embedded in shipped game binaries) can't
-				// be used as a session-validity oracle.
-				r.Group(func(r chi.Router) {
-					r.Use(requireAPIKeyPermission(d, rbac.ObjectPlayer, rbac.ActionVerify))
-					registerPlayerSessionVerify(groupAPI(r, humaCfg), d)
-				})
-
 				r.Group(func(r chi.Router) {
 					r.Use(tenant.RequireKeyType(tenant.KeyTypeSecret))
+					// /v1/server/player-sessions/verify — server-tier endpoint
+					// used by game-server workloads to verify a player's session
+					// token (the request body) under their own API-key auth
+					// (the Authorization header). Secret key AND the RBAC
+					// permission, so a publishable key (embedded in shipped game
+					// binaries) can't be used as a session-validity oracle, even
+					// with a per-key grant.
+					r.Group(func(r chi.Router) {
+						r.Use(requireAPIKeyPermission(d, rbac.ObjectPlayer, rbac.ActionVerify))
+						registerPlayerSessionVerify(groupAPI(r, humaCfg), d)
+					})
 					// Server-tier remote-address read: a game server reads a
 					// linked player's opaque endpoint for that project. Secret
 					// keys only — publishable keys never reach this group.

@@ -184,7 +184,7 @@ func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, 
 	if err != nil {
 		return out, err
 	}
-	push(ctx, s.pusher, p.TenantID, target, EventInvite, map[string]int64{"invite_id": out.ID, "party_id": id, "from_player_id": player})
+	push(ctx, s.pusher, p.TenantID, []int64{target}, EventInvite, map[string]int64{"invite_id": out.ID, "party_id": id, "from_player_id": player})
 	return out, nil
 }
 

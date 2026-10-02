@@ -32,10 +32,12 @@ type recordingPusher struct {
 	sent []pushed
 }
 
-func (r *recordingPusher) Push(_ context.Context, tenantID, playerID int64, msg realtime.Message) error {
+func (r *recordingPusher) PushMany(_ context.Context, tenantID int64, playerIDs []int64, msg realtime.Message) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.sent = append(r.sent, pushed{tenantID, playerID, msg})
+	for _, id := range playerIDs {
+		r.sent = append(r.sent, pushed{tenantID, id, msg})
+	}
 	return nil
 }
 
