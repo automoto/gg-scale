@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -15,8 +13,6 @@ import (
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
-
-const maxRemoteConfigBytes = 64 << 10
 
 var errInvalidRemoteConfig = errors.New("control panel: remote config must be a JSON object up to 64 KiB")
 
@@ -80,33 +76,9 @@ func (h *Handler) renderRemoteConfigError(w http.ResponseWriter, r *http.Request
 }
 
 func normalizeRemoteConfig(raw string) ([]byte, error) {
-	encoded, err := normalizeJSONObjectBlob(raw, maxRemoteConfigBytes)
+	encoded, err := projectadmin.NormalizeJSONObject(raw, projectadmin.RemoteConfigMaxBytes)
 	if err != nil {
 		return nil, errInvalidRemoteConfig
-	}
-	return encoded, nil
-}
-
-// normalizeJSONObjectBlob validates a single top-level JSON object (no
-// trailing data), re-encodes it canonically, and enforces the byte cap on the
-// canonical form. Shared by the remote-config editor and the leaderboard
-// metadata field.
-func normalizeJSONObjectBlob(raw string, maxBytes int) ([]byte, error) {
-	dec := json.NewDecoder(strings.NewReader(raw))
-	dec.UseNumber()
-	var blob map[string]any
-	if err := dec.Decode(&blob); err != nil || blob == nil {
-		return nil, errors.New("control panel: not a JSON object")
-	}
-	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return nil, errors.New("control panel: trailing data after JSON object")
-	}
-	encoded, err := json.Marshal(blob)
-	if err != nil {
-		return nil, err
-	}
-	if len(encoded) > maxBytes {
-		return nil, errors.New("control panel: JSON object too large")
 	}
 	return encoded, nil
 }

@@ -93,6 +93,9 @@ type APIKey struct {
 	// ConnectionLimits is the optional platform-managed realtime admission
 	// envelope resolved atomically with this key. nil uses the tier default.
 	ConnectionLimits *ConnectionLimits
+	// Hash is the SHA-256 of the presented key value (api_keys.key_hash). A
+	// realtime ticket stores it so the key can be resolved again later.
+	Hash []byte
 }
 
 // ConnectionLimits is a tenant's sustained and temporary realtime connection
@@ -152,30 +155,51 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 			}
 
 			sum := sha256.Sum256([]byte(token))
-			key, err := lookup(r.Context(), sum[:])
-			if errors.Is(err, ErrUnknownKey) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			ctx, status := Admit(r.Context(), lookup, sum[:])
+			if status != 0 {
+				WriteRefusal(w, status)
 				return
 			}
-			if err != nil {
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
-			// Revoked keys and disabled tenants get the same terse 403 — a
-			// clear "no access" that does not reveal which of the two it is.
-			if key.Revoked || key.TenantDisabled {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-
-			ctx := db.WithTenant(r.Context(), key.TenantID)
-			if key.ProjectID != nil {
-				ctx = db.WithProject(ctx, *key.ProjectID)
-			}
-			ctx = WithAPIKey(ctx, *key)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// Admit resolves the key with this hash and installs the tenant, the project
+// pin, and the key on ctx. It returns a non-zero HTTP status when the key is
+// refused: 401 for an unknown key, 403 for a revoked key or a disabled
+// tenant (the same terse answer for both, so it does not reveal which), and
+// 500 for a lookup error.
+func Admit(ctx context.Context, lookup Lookup, keyHash []byte) (context.Context, int) {
+	key, err := lookup(ctx, keyHash)
+	if errors.Is(err, ErrUnknownKey) {
+		return ctx, http.StatusUnauthorized
+	}
+	if err != nil {
+		return ctx, http.StatusInternalServerError
+	}
+	if key.Revoked || key.TenantDisabled {
+		return ctx, http.StatusForbidden
+	}
+	key.Hash = keyHash
+	ctx = db.WithTenant(ctx, key.TenantID)
+	if key.ProjectID != nil {
+		ctx = db.WithProject(ctx, *key.ProjectID)
+	}
+	return WithAPIKey(ctx, *key), 0
+}
+
+// WriteRefusal writes the plain-text body that the middleware uses for each
+// status Admit returns.
+func WriteRefusal(w http.ResponseWriter, status int) {
+	msg := "internal error"
+	switch status {
+	case http.StatusUnauthorized:
+		msg = "unauthorized"
+	case http.StatusForbidden:
+		msg = "forbidden"
+	}
+	http.Error(w, msg, status)
 }
 
 // RequireKeyScope is middleware that returns 403 unless the resolved API key

@@ -9,8 +9,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -28,37 +26,11 @@ const (
 
 	scoreOperatorBest = "best"
 	resetScheduleNone = period.ScheduleNone
-
-	// maxLeaderboardMetadataBytes caps the per-board display blob. It is
-	// deliberately smaller than remote config: every /v1/leaderboards reply
-	// carries it for every board.
-	maxLeaderboardMetadataBytes = 16 << 10
 )
 
 // leaderboardFormFields is the parsed create/edit form. ScoreOperator is
 // empty on edit — the operator is fixed at creation.
 type leaderboardFormFields = projectadmin.LeaderboardSettings
-
-// leaderboardNameMax bounds a board name. The column is unbounded text, so
-// without a limit the form accepts an arbitrarily long value.
-const leaderboardNameMax = 120
-
-// validLeaderboardName rejects names PostgreSQL cannot store or that are
-// unbounded. A NUL byte raises SQLSTATE 22021, which the duplicate-name
-// translator does not match, so it would render as a 500 instead of a field
-// error. Invalid UTF-8 is checked first because the rune loop below would see
-// it as U+FFFD.
-func validLeaderboardName(name string) bool {
-	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > leaderboardNameMax {
-		return false
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
-}
 
 // parseLeaderboardForm validates the shared create/edit form and collects
 // per-field errors. Blank optional fields default (best operator, no
@@ -70,8 +42,8 @@ func parseLeaderboardForm(form url.Values, edit bool) (leaderboardFormFields, ma
 	switch {
 	case fields.Name == "":
 		errs["name"] = "Name is required."
-	case !validLeaderboardName(fields.Name):
-		errs["name"] = fmt.Sprintf("Name must be 1–%d characters and cannot contain control characters.", leaderboardNameMax)
+	case !projectadmin.ValidLeaderboardName(fields.Name):
+		errs["name"] = fmt.Sprintf("Name must be 1–%d characters and cannot contain control characters.", projectadmin.LeaderboardNameMax)
 	}
 
 	var sortOK bool
@@ -147,7 +119,7 @@ func parseOptionalScore(raw, field, label string, errs map[string]string) *int64
 // normalizeLeaderboardMetadata mirrors the remote-config rules at a smaller
 // cap: a single top-level JSON object, re-encoded canonically.
 func normalizeLeaderboardMetadata(raw string) ([]byte, error) {
-	return normalizeJSONObjectBlob(raw, maxLeaderboardMetadataBytes)
+	return projectadmin.NormalizeJSONObject(raw, projectadmin.LeaderboardMetadataMaxBytes)
 }
 
 // normalizeSortOrder trims and lowercases the submitted sort order, defaulting

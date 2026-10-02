@@ -182,6 +182,10 @@ type Deps struct {
 	MCPEnabled            bool
 	MCPTokenRatePerSecond float64
 	MCPTokenBurst         float64
+	// MCPMaxProjectAPIKeys limits the create_api_key tool.
+	MCPMaxProjectAPIKeys int64
+	// CORSMaxProjectOrigins limits the set_allowed_origins tool.
+	CORSMaxProjectOrigins int
 
 	// EntitlementAPIToken, when non-empty, mounts the internal declarative
 	// entitlement API at /internal/entitlements behind this bearer token —
@@ -331,6 +335,8 @@ func NewRouter(d Deps) http.Handler {
 				RelayEnabled:       d.ControlPanel.RelayEnabled,
 				RelayConfigured:    d.RelayIssuer != nil,
 				CORSAllowedOrigins: d.CORSAllowedOrigins,
+				MaxProjectAPIKeys:  d.MCPMaxProjectAPIKeys,
+				MaxProjectOrigins:  d.CORSMaxProjectOrigins,
 				Now:                d.Now,
 			}))
 		})
@@ -402,6 +408,12 @@ func NewRouter(d Deps) http.Handler {
 		}
 
 		if d.hasAuthDeps() {
+			// /v1/ws takes the API key and session from headers (native
+			// clients) or a one-time ticket (browsers), so it carries its own
+			// authentication instead of the group middleware below.
+			if ws := realtimeHandler(d); ws != nil {
+				r.Get("/ws", realtimeRoute(d, ws, reg))
+			}
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.New(d.Lookup))
 				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
@@ -464,7 +476,6 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
-					mountRealtimeRoutes(r, d)
 
 					if d.Matchmaker != nil {
 						r.Group(func(r chi.Router) {
@@ -506,6 +517,9 @@ func NewRouter(d Deps) http.Handler {
 					registerFriendRoutes(papi, d)
 					registerRemoteAddrRoutes(papi, d)
 					registerGameSessionRoutes(papi, d)
+					if d.Hub != nil {
+						registerRealtimeTicket(papi, d)
+					}
 
 					// Score submission authorizes in the handler, not here:
 					// boards are server-authoritative (secret key) by

@@ -49,6 +49,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerGameSessionRoutes(api, d)
 	registerMatchmakerRoutes(api, d)
 	registerPartyRoutes(api, d)
+	registerRealtimeTicket(api, d)
 
 	doc := cfg.OpenAPI
 	enrichVerifyOp(doc)
@@ -94,9 +95,17 @@ func addWebSocketStub(doc *huma.OpenAPI) {
 			OperationID: "realtimeWebSocket",
 			Summary:     "Realtime WebSocket channel",
 			Description: "Upgrades to a WebSocket for realtime player events; not a JSON endpoint. " +
-				"Authenticate with the tenant API key and the player session token.",
+				"Authenticate with the tenant API key and the player session token in headers, or, " +
+				"from a browser (which cannot set WebSocket headers), with a one-time ticket from " +
+				"POST /v1/ws/ticket in the ticket query parameter and no headers.",
 			Tags:     []string{"Realtime"},
-			Security: playerSecurity,
+			Security: append([]map[string][]string{{}}, playerSecurity...),
+			Parameters: []*huma.Param{{
+				Name:        "ticket",
+				In:          "query",
+				Description: "One-time ticket from POST /v1/ws/ticket. Use it instead of the auth headers.",
+				Schema:      &huma.Schema{Type: huma.TypeString},
+			}},
 			Responses: map[string]*huma.Response{
 				"101": {Description: "Switching Protocols (WebSocket upgrade)"},
 			},

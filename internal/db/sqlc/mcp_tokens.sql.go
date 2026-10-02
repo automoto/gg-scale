@@ -67,7 +67,7 @@ func (q *Queries) CreateMCPToken(ctx context.Context, arg CreateMCPTokenParams) 
 }
 
 const getMCPTokenByHash = `-- name: GetMCPTokenByHash :one
-SELECT k.id, k.tenant_id, k.project_id, k.created_by_user_id, k.scopes,
+SELECT k.id, k.tenant_id, k.project_id, k.created_by_user_id, k.label, k.scopes,
        k.expires_at, k.revoked_at, k.last_used_at,
        (t.disabled_at IS NOT NULL OR t.deleted_at IS NOT NULL)::bool AS tenant_disabled,
        (u.disabled_at IS NOT NULL)::bool AS creator_disabled
@@ -82,6 +82,7 @@ type GetMCPTokenByHashRow struct {
 	TenantID        int64
 	ProjectID       int64
 	CreatedByUserID int64
+	Label           string
 	Scopes          []string
 	ExpiresAt       pgtype.Timestamptz
 	RevokedAt       pgtype.Timestamptz
@@ -101,6 +102,7 @@ func (q *Queries) GetMCPTokenByHash(ctx context.Context, tokenHash []byte) (GetM
 		&i.TenantID,
 		&i.ProjectID,
 		&i.CreatedByUserID,
+		&i.Label,
 		&i.Scopes,
 		&i.ExpiresAt,
 		&i.RevokedAt,
@@ -186,7 +188,7 @@ func (q *Queries) ListMCPTokensForProject(ctx context.Context, projectID int64) 
 	return items, nil
 }
 
-const lockProjectForMCPTokenCreate = `-- name: LockProjectForMCPTokenCreate :one
+const lockLiveProject = `-- name: LockLiveProject :one
 SELECT id FROM projects
 WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -194,8 +196,9 @@ WHERE id = $1
 FOR UPDATE
 `
 
-func (q *Queries) LockProjectForMCPTokenCreate(ctx context.Context, projectID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, lockProjectForMCPTokenCreate, projectID)
+// Serializes creates that check a per-project limit.
+func (q *Queries) LockLiveProject(ctx context.Context, projectID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockLiveProject, projectID)
 	var id int64
 	err := row.Scan(&id)
 	return id, err

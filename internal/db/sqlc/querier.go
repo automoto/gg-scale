@@ -106,6 +106,7 @@ type Querier interface {
 	ConsumePlayerAccountTOTPBackupCode(ctx context.Context, arg ConsumePlayerAccountTOTPBackupCodeParams) (int64, error)
 	ControlPanelCreateTenant(ctx context.Context, arg ControlPanelCreateTenantParams) (ControlPanelCreateTenantRow, error)
 	ControlPanelCreateTenantBare(ctx context.Context, arg ControlPanelCreateTenantBareParams) (int64, error)
+	CountActiveAPIKeysForProject(ctx context.Context, projectID *int64) (int64, error)
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
@@ -152,8 +153,8 @@ type Querier interface {
 	// secret keys), so it is an explicit parameter — never the column default.
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
-	// New keys start with the matchmaker scope: matchmaking is a zero-config
-	// feature. Fleet/relay scopes stay opt-in via the control panel toggles.
+	// The caller passes the scopes; projectadmin.CreateAPIKey always includes
+	// matchmaker, a zero-config feature.
 	CreateControlPanelAPIKey(ctx context.Context, arg CreateControlPanelAPIKeyParams) (CreateControlPanelAPIKeyRow, error)
 	// Control panel team invitations (operator-side: platform / tenant admins).
 	CreateControlPanelInvitation(ctx context.Context, arg CreateControlPanelInvitationParams) (CreateControlPanelInvitationRow, error)
@@ -196,6 +197,7 @@ type Querier interface {
 	CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error)
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
+	CreateRealtimeTicket(ctx context.Context, arg CreateRealtimeTicketParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	// Submit a tenant change request. The pending-unique index rejects a second
 	// open request of the same kind/feature (surfaced as a friendly message).
@@ -247,6 +249,7 @@ type Querier interface {
 	// lookup filters expires_at — so deleting them a day later is pure hygiene.
 	DeleteExpiredPlayerAccountPasswordResets(ctx context.Context) (int64, error)
 	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
+	DeleteExpiredRealtimeTickets(ctx context.Context) (int64, error)
 	// Delete only after its allocation has been successfully deallocated. The
 	// guards make retries and a concurrent cleanup safe.
 	DeleteExpiredUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error)
@@ -762,6 +765,8 @@ type Querier interface {
 	// Serializes last-admin checks by locking the currently enabled platform
 	// admin rows before counting them in the surrounding transaction.
 	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
+	// Serializes creates that check a per-project limit.
+	LockLiveProject(ctx context.Context, projectID int64) (int64, error)
 	// Row lock for the last-sign-in-method rule: two concurrent unlink requests
 	// serialize here, so they cannot both pass the count and remove the last
 	// two methods.
@@ -777,7 +782,6 @@ type Querier interface {
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
-	LockProjectForMCPTokenCreate(ctx context.Context, projectID int64) (int64, error)
 	// Serializes a player's concurrent signal sends within the transaction so the
 	// per-minute count+insert below can't be raced past the cap under READ
 	// COMMITTED. player_id (project_players.id) is globally unique, so the lock
@@ -840,6 +844,8 @@ type Querier interface {
 	// version matches expected. RETURNING NULL row on mismatch.
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordControlPanelLoginSuccess(ctx context.Context, id int64) error
+	// Single use: the row is deleted as it is read. Runs with no tenant set.
+	RedeemRealtimeTicket(ctx context.Context, ticketHash []byte) (RedeemRealtimeTicketRow, error)
 	ReleaseAllocation(ctx context.Context, id int64) error
 	// Worker-driven release of one failed group: the resolver (allocator,
 	// session creator) failed. Bump allocation_attempts; flip to 'failed' on

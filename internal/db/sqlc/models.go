@@ -795,6 +795,17 @@ type RealtimeConnectionGrant struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type RealtimeTicket struct {
+	ID           int64
+	TenantID     int64
+	TicketHash   []byte
+	ApiKeyHash   []byte
+	PlayerID     int64
+	ProjectID    int64
+	SessionEpoch int64
+	ExpiresAt    pgtype.Timestamptz
+}
+
 type RelaySessionUsage struct {
 	TenantID    int64
 	Month       pgtype.Date

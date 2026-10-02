@@ -303,7 +303,7 @@ func (h *Handler) createMCPToken(ctx context.Context, tenantID, projectID, userI
 	ctx = db.WithTenant(ctx, tenantID)
 	return h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if _, err := q.LockProjectForMCPTokenCreate(ctx, projectID); err != nil {
+		if _, err := q.LockLiveProject(ctx, projectID); err != nil {
 			return err
 		}
 		n, err := q.CountActiveMCPTokens(ctx, projectID)

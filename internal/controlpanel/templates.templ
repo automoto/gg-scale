@@ -3017,7 +3017,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 		if vm.MCPEnabled {
 			<section class="card">
 				<h2>MCP tokens</h2>
-				<p class="card-subtitle">Tokens that let a coding agent read this Game Project and find setup problems.</p>
+				<p class="card-subtitle">Tokens that let a coding agent find setup problems in this Game Project and, with write scopes, change its settings.</p>
 				<a href={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Manage MCP tokens</a>
 			</section>
 		}
@@ -3135,6 +3135,8 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenRateBurst)) }</dd>
 					<dt>Active tokens per Game Project</dt>
 					<dd>{ stringFromInt(int64(vm.Snapshot.MCPMaxProjectTokens)) }</dd>
+					<dt>API keys per Game Project (create_api_key)</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.MCPMaxProjectAPIKeys)) }</dd>
 				</dl>
 			</section>
 		}
@@ -3220,7 +3222,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 			<div>
 				<p class="eyebrow">Game Project #{ stringFromInt(vm.ProjectID) }</p>
 				<h1>MCP tokens</h1>
-				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) read this Game Project and find setup problems. A token works for this Game Project only, and never has more rights than the person who created it.</p>
+				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) find setup problems in this Game Project and, with write scopes, change remote config, leaderboards, publishable API keys, and browser origins. A token works for this Game Project only, and never has more rights than the person who created it.</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)

@@ -55,7 +55,10 @@ type Deps struct {
 	RelayEnabled       bool
 	RelayConfigured    bool
 	CORSAllowedOrigins []string
-	Now                func() time.Time
+	// MaxProjectAPIKeys and MaxProjectOrigins limit the write tools.
+	MaxProjectAPIKeys int64
+	MaxProjectOrigins int
+	Now               func() time.Time
 }
 
 // Principal is the authenticated token. It holds no dashboard session.
@@ -64,6 +67,7 @@ type Principal struct {
 	TenantID        int64
 	ProjectID       int64
 	CreatedByUserID int64
+	Label           string
 	Scopes          []string
 	ExpiresAt       time.Time
 }
@@ -97,6 +101,12 @@ func New(d Deps) http.Handler {
 func newHandler(d Deps) *handler {
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.MaxProjectAPIKeys <= 0 {
+		d.MaxProjectAPIKeys = 20
+	}
+	if d.MaxProjectOrigins <= 0 {
+		d.MaxProjectOrigins = 20
 	}
 	h := &handler{d: d}
 	srv := h.newServer()
@@ -214,6 +224,7 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 		TenantID:        row.TenantID,
 		ProjectID:       row.ProjectID,
 		CreatedByUserID: row.CreatedByUserID,
+		Label:           row.Label,
 		Scopes:          row.Scopes,
 		ExpiresAt:       row.ExpiresAt.Time,
 	}

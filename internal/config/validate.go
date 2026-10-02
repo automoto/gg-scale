@@ -395,6 +395,7 @@ func (c *Config) checkFields() error {
 		{"MCP_TOKEN_RATE_PER_SECOND", int64(c.MCPTokenRatePerSecond)},
 		{"MCP_TOKEN_RATE_BURST", int64(c.MCPTokenRateBurst)},
 		{"MCP_MAX_PROJECT_TOKENS", int64(c.MCPMaxProjectTokens)},
+		{"MCP_MAX_PROJECT_API_KEYS", int64(c.MCPMaxProjectAPIKeys)},
 		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},
 	} {
 		if n.val <= 0 {

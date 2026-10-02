@@ -130,6 +130,67 @@ var tools = []tool{
 		description: "List the kept revisions (newest 3) of the remote config or of one leaderboard.",
 		add:         handle(listRevisions),
 	},
+	{
+		name: "set_remote_config",
+		description: "Replace the remote config of this Game Project. Give the full config as a JSON object string and " +
+			"the revision number from get_remote_config. A stale revision is refused. Undo with rollback_remote_config.",
+		scope: ScopeConfigWrite, pair: rbac.ProjectConfigObject, action: rbac.ActionUpdate,
+		add: handle(setRemoteConfig),
+	},
+	{
+		name: "rollback_remote_config",
+		description: "Apply a kept revision of the remote config as a new revision. Use list_revisions to find one. " +
+			"expected_revision must be the newest revision number.",
+		scope: ScopeConfigWrite, pair: rbac.ProjectConfigObject, action: rbac.ActionUpdate,
+		add: handle(rollbackRemoteConfig),
+	},
+	{
+		name:        "create_leaderboard",
+		description: "Create a leaderboard in this Game Project. score_operator is fixed after creation.",
+		scope:       ScopeLeaderboardsWrite, pair: rbac.ProjectLeaderboardObject, action: rbac.ActionManage,
+		add: handle(createLeaderboard),
+	},
+	{
+		name: "update_leaderboard",
+		description: "Replace the settings of a leaderboard. Send all settings: an optional setting that is not sent " +
+			"is removed. Read them with get_leaderboard first and give its revision. Undo with rollback_leaderboard.",
+		scope: ScopeLeaderboardsWrite, pair: rbac.ProjectLeaderboardObject, action: rbac.ActionManage,
+		add: handle(updateLeaderboard),
+	},
+	{
+		name: "rollback_leaderboard",
+		description: "Apply a kept revision of a leaderboard's settings as a new revision. Scores do not change. " +
+			"expected_revision must be the newest revision number.",
+		scope: ScopeLeaderboardsWrite, pair: rbac.ProjectLeaderboardObject, action: rbac.ActionManage,
+		add: handle(rollbackLeaderboard),
+	},
+	{
+		name:        "delete_leaderboard",
+		description: "Delete a leaderboard. Scores are kept, and restore_leaderboard undoes the delete.",
+		scope:       ScopeLeaderboardsWrite, pair: rbac.ProjectLeaderboardObject, action: rbac.ActionManage,
+		add: handle(deleteLeaderboard),
+	},
+	{
+		name: "restore_leaderboard",
+		description: "Restore a deleted leaderboard with its scores. Use list_leaderboards with include_deleted to find it. " +
+			"Refused if a live leaderboard in this Game Project has the same name.",
+		scope: ScopeLeaderboardsWrite, pair: rbac.ProjectLeaderboardObject, action: rbac.ActionManage,
+		add: handle(restoreLeaderboard),
+	},
+	{
+		name: "create_api_key",
+		description: "Create a publishable (ggp_) API key for this Game Project, to ship in a game client. Secret keys " +
+			"cannot be made here. The value is returned once. Scopes are limited to the features this Game Project has.",
+		scope: ScopeKeysCreate, pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, action: rbac.ActionManage,
+		add: handle(createAPIKey),
+	},
+	{
+		name: "set_allowed_origins",
+		description: "Replace the browser origins of this Game Project (CORS for web builds). Give the full list. " +
+			"The result has the old list, so a wrong change can be put back.",
+		scope: ScopeOriginsWrite, pair: rbac.ProjectConfigObject, action: rbac.ActionUpdate,
+		add: handle(setAllowedOrigins),
+	},
 }
 
 // newServer builds the SDK server with all tools. A call to a tool outside

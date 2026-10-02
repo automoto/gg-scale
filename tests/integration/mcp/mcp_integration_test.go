@@ -100,6 +100,7 @@ func newFixture(t *testing.T) *fixture {
 		Limiter:            ratelimit.NewCacheLimiter(memory.New()),
 		TokenRatePerSecond: 1000,
 		TokenBurst:         1000,
+		MaxProjectAPIKeys:  3,
 	}))
 	t.Cleanup(f.srv.Close)
 	return f

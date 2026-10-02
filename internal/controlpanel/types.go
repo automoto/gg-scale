@@ -92,6 +92,7 @@ type ServerSettingsSnapshot struct {
 	MCPTokenRatePerSecond int
 	MCPTokenRateBurst     int
 	MCPMaxProjectTokens   int
+	MCPMaxProjectAPIKeys  int
 
 	CORSAllowedOrigins    []string
 	CORSMaxProjectOrigins int

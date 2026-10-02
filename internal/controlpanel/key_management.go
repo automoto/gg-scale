@@ -2,7 +2,6 @@ package controlpanel
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/url"
@@ -16,6 +15,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
@@ -107,45 +107,11 @@ func (h *Handler) listAPIKeys(ctx context.Context, tenantID int64) ([]APIKeyView
 // backing feature for the key's tenant/project. Keys pinned to no project use
 // tenant-level grants (projectID 0).
 func (h *Handler) scopeGrantable(ctx context.Context, tenantID int64, projectID *int64, scope string) bool {
-	feature, ok := scopeFeature(scope)
-	if !ok {
-		return false
-	}
-	switch scope {
-	case tenant.ScopeFleet:
-		if !h.cfg.FleetEnabled {
-			return false
-		}
-	case tenant.ScopeP2PRelay:
-		if !h.cfg.RelayEnabled {
-			return false
-		}
-	case tenant.ScopeMatchmaker:
-		// No env kill switch: matchmaker is zero-config.
-	}
-	if h.rbac == nil {
-		return false
-	}
-	var pid int64
-	if projectID != nil {
-		pid = *projectID
-	}
-	enabled, err := h.rbac.FeatureEnabled(ctx, tenantID, pid, feature)
-	return err == nil && enabled
+	return projectadmin.ScopeGrantable(ctx, h.rbac, h.keySwitches(), tenantID, projectID, scope)
 }
 
-// scopeFeature maps a per-key scope to the feature_grant gate that governs it.
-func scopeFeature(scope string) (rbac.Feature, bool) {
-	switch scope {
-	case tenant.ScopeFleet:
-		return rbac.FeatureDedicatedServers, true
-	case tenant.ScopeP2PRelay:
-		return rbac.FeatureP2PRelay, true
-	case tenant.ScopeMatchmaker:
-		return rbac.FeatureMatchmaker, true
-	default:
-		return "", false
-	}
+func (h *Handler) keySwitches() projectadmin.KeySwitches {
+	return projectadmin.KeySwitches{FleetEnabled: h.cfg.FleetEnabled, RelayEnabled: h.cfg.RelayEnabled}
 }
 
 func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
@@ -414,45 +380,18 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		return createKeyResult{}, errors.New(msgControlPanelPoolNeeded)
 	}
 
-	apiKey, err := randomAPIKey(in.KeyType)
+	id, apiKey, err := projectadmin.CreateAPIKey(ctx, h.pool, h.rbac, in.TenantID, projectadmin.NewAPIKey{
+		ProjectID: in.ProjectID,
+		Label:     in.Label,
+		Type:      in.KeyType,
+	}, projectadmin.Actor{UserID: actorID})
+	if errors.Is(err, projectadmin.ErrProjectNotInTenant) {
+		return createKeyResult{}, errProjectNotInTenant
+	}
 	if err != nil {
 		return createKeyResult{}, err
 	}
-	sum := sha256.Sum256([]byte(apiKey))
-
-	var row sqlcgen.CreateControlPanelAPIKeyRow
-	ctx = db.WithTenant(ctx, in.TenantID)
-	err = h.pool.Q(ctx, func(tx pgx.Tx) error {
-		var err error
-		row, err = sqlcgen.New(tx).CreateControlPanelAPIKey(ctx, sqlcgen.CreateControlPanelAPIKeyParams{
-			ProjectID: in.ProjectID,
-			KeyHash:   sum[:],
-			Label:     strings.TrimSpace(in.Label),
-			KeyType:   string(in.KeyType),
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return errProjectNotInTenant
-			}
-			return fmt.Errorf("create api key: %w", err)
-		}
-		if h.rbac != nil {
-			if err := h.rbac.AddAPIKeyRoleTx(ctx, tx, row.ID, in.TenantID, in.KeyType); err != nil {
-				return fmt.Errorf("rbac api key create: %w", err)
-			}
-		}
-		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.api_key.create", strconv.FormatInt(row.ID, 10), map[string]any{
-			"label":      in.Label,
-			"project_id": in.ProjectID,
-			"tenant_id":  in.TenantID,
-			"key_type":   string(in.KeyType),
-		})
-	})
-	if err != nil {
-		return createKeyResult{}, err
-	}
-	h.reloadRBACPolicy(ctx)
-	return createKeyResult{APIKeyID: row.ID, APIKey: apiKey}, nil
+	return createKeyResult{APIKeyID: id, APIKey: apiKey}, nil
 }
 
 func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiKeyID int64, label string) error {

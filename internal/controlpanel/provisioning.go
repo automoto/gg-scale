@@ -2,9 +2,7 @@ package controlpanel
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -47,7 +46,7 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 	}
 
 	// The bootstrap tenant-creation key is a secret key (server-side use).
-	apiKey, err := randomAPIKey(tenant.KeyTypeSecret)
+	apiKey, err := projectadmin.NewAPIKeyValue(tenant.KeyTypeSecret)
 	if err != nil {
 		return signupResult{}, err
 	}
@@ -99,21 +98,4 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 		APIKeyID:  row.ApiKeyID,
 		APIKey:    apiKey,
 	}, nil
-}
-
-// randomAPIKey mints a fresh plaintext API key with a Stripe-style
-// type-indicating prefix: ggp_ for publishable, ggs_ for secret. The
-// prefix is part of the stored value (the caller hashes the whole string),
-// so it eases log-grep and accidental-leak detection without affecting
-// server policy.
-func randomAPIKey(keyType tenant.KeyType) (string, error) {
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("control panel api key rand: %w", err)
-	}
-	prefix := "ggs_"
-	if keyType == tenant.KeyTypePublishable {
-		prefix = "ggp_"
-	}
-	return prefix + base64.RawURLEncoding.EncodeToString(b[:]), nil
 }

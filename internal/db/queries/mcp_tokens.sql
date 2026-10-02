@@ -2,7 +2,7 @@
 -- Runs with no tenant set (mcp_tokens_bootstrap and tenants_bootstrap allow
 -- it). projects has no bootstrap policy, so the project check is a second
 -- query in the tenant scope.
-SELECT k.id, k.tenant_id, k.project_id, k.created_by_user_id, k.scopes,
+SELECT k.id, k.tenant_id, k.project_id, k.created_by_user_id, k.label, k.scopes,
        k.expires_at, k.revoked_at, k.last_used_at,
        (t.disabled_at IS NOT NULL OR t.deleted_at IS NOT NULL)::bool AS tenant_disabled,
        (u.disabled_at IS NOT NULL)::bool AS creator_disabled
@@ -27,7 +27,8 @@ WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND (last_used_at IS NULL OR last_used_at < now() - interval '1 minute');
 
--- name: LockProjectForMCPTokenCreate :one
+-- name: LockLiveProject :one
+-- Serializes creates that check a per-project limit.
 SELECT id FROM projects
 WHERE id = sqlc.arg(project_id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint

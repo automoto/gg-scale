@@ -58,6 +58,10 @@ type Config struct {
 	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
 	// for each project. Default 20.
 	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`
+	// MCPMaxProjectAPIKeys refuses the create_api_key tool when the project
+	// already has this many active keys (all keys, not only agent-made ones).
+	// The dashboard is not limited by it. Default 20.
+	MCPMaxProjectAPIKeys int `env:"MCP_MAX_PROJECT_API_KEYS" envDefault:"20"`
 
 	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
 	// by default so fleets stay off until an operator opts in; only consulted

@@ -80,6 +80,66 @@ func SessionEpochFromContext(ctx context.Context) (int64, bool) {
 	return v, ok
 }
 
+// Refusal is why Admit refused a session. A zero Status means admitted.
+type Refusal struct {
+	Status int
+	// Challenge is the WWW-Authenticate value, when the client can act on it.
+	Challenge string
+}
+
+// Write sends the refusal with the same body text as the middleware.
+func (r Refusal) Write(w http.ResponseWriter) {
+	if r.Challenge != "" {
+		w.Header().Set("WWW-Authenticate", r.Challenge)
+	}
+	msg := "internal error"
+	switch r.Status {
+	case http.StatusUnauthorized:
+		msg = "unauthorized"
+	case http.StatusForbidden:
+		msg = "forbidden"
+	}
+	http.Error(w, msg, r.Status)
+}
+
+// Admit checks verified session claims against the tenant and project that
+// the API key gave ctx, and against the player's current session epoch, then
+// installs the player on ctx. The middleware and the realtime ticket path
+// both use it, so the rules stay in one place.
+func Admit(ctx context.Context, tenantID int64, claims auth.Claims, validator EpochValidator) (context.Context, Refusal) {
+	if claims.TenantID != tenantID {
+		return ctx, Refusal{Status: http.StatusForbidden}
+	}
+	// When the api_key is project-pinned, also assert the session's pid
+	// claim matches. Closes a same-tenant cross-project session-replay seam:
+	// a session minted under project A must not work when presented under
+	// an api_key pinned to project B.
+	if projectID, ok := db.ProjectFromContext(ctx); ok && claims.ProjectID != projectID {
+		return ctx, Refusal{Status: http.StatusForbidden}
+	}
+	if validator != nil {
+		epoch, err := validator.CurrentEpoch(ctx, claims.PlayerID)
+		if errors.Is(err, ErrRevoked) {
+			return ctx, Refusal{Status: http.StatusUnauthorized}
+		}
+		if err != nil {
+			return ctx, Refusal{Status: http.StatusInternalServerError}
+		}
+		if claims.SessionEpoch != epoch {
+			// Stale epoch: the player was banned/disabled/changed password
+			// after this token was minted.
+			return ctx, Refusal{Status: http.StatusUnauthorized,
+				Challenge: `Bearer error="invalid_token", error_description="session revoked"`}
+		}
+	}
+	ctx = WithID(ctx, claims.PlayerID)
+	ctx = WithSessionEpoch(ctx, claims.SessionEpoch)
+	if claims.ProjectID != 0 {
+		ctx = WithProjectID(ctx, claims.ProjectID)
+	}
+	return ctx, Refusal{}
+}
+
 // New builds the middleware. The tenant middleware must run first so the
 // request context already carries a tenant_id. When validator is non-nil the
 // middleware also re-checks the player's session_epoch on every request so a
@@ -111,46 +171,10 @@ func New(signer *auth.Signer, validator EpochValidator) func(http.Handler) http.
 				return
 			}
 
-			if claims.TenantID != tenantID {
-				http.Error(w, "forbidden", http.StatusForbidden)
+			ctx, refusal := Admit(r.Context(), tenantID, claims, validator)
+			if refusal.Status != 0 {
+				refusal.Write(w)
 				return
-			}
-
-			// When the api_key is project-pinned, also assert the
-			// session's pid claim matches. Closes a same-tenant cross-
-			// project session-replay seam: a session minted under
-			// project A must not work when presented under an api_key
-			// pinned to project B.
-			if projectID, ok := db.ProjectFromContext(r.Context()); ok {
-				if claims.ProjectID != projectID {
-					http.Error(w, "forbidden", http.StatusForbidden)
-					return
-				}
-			}
-
-			if validator != nil {
-				epoch, verr := validator.CurrentEpoch(r.Context(), claims.PlayerID)
-				if errors.Is(verr, ErrRevoked) {
-					http.Error(w, "unauthorized", http.StatusUnauthorized)
-					return
-				}
-				if verr != nil {
-					http.Error(w, "internal error", http.StatusInternalServerError)
-					return
-				}
-				if claims.SessionEpoch != epoch {
-					// Stale epoch: the player was banned/disabled/changed
-					// password after this token was minted.
-					w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token", error_description="session revoked"`)
-					http.Error(w, "unauthorized", http.StatusUnauthorized)
-					return
-				}
-			}
-
-			ctx := WithID(r.Context(), claims.PlayerID)
-			ctx = WithSessionEpoch(ctx, claims.SessionEpoch)
-			if claims.ProjectID != 0 {
-				ctx = WithProjectID(ctx, claims.ProjectID)
 			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

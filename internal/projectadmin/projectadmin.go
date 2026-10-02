@@ -66,7 +66,9 @@ func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, 
 		payload = map[string]any{}
 	}
 	payload["tenant_id"] = tenantID
-	payload["project_id"] = projectID
+	if projectID != 0 {
+		payload["project_id"] = projectID
+	}
 	if a.TokenID == 0 {
 		return auditlog.WritePlatform(ctx, tx, a.UserID, action, target, payload)
 	}

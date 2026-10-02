@@ -3,7 +3,6 @@ package controlpanel
 import (
 	"context"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -28,19 +27,6 @@ func TestScopeGrantable_denies_by_default(t *testing.T) {
 	hOff := &Handler{cfg: Config{FleetEnabled: false, RelayEnabled: false}, rbac: auth}
 	assert.False(t, hOff.scopeGrantable(t.Context(), 7, nil, tenant.ScopeFleet))
 	assert.False(t, hOff.scopeGrantable(t.Context(), 7, nil, tenant.ScopeP2PRelay))
-}
-
-func TestScopeFeature_maps_known_scopes(t *testing.T) {
-	f, ok := scopeFeature(tenant.ScopeFleet)
-	require.True(t, ok)
-	assert.Equal(t, rbac.FeatureDedicatedServers, f)
-
-	f, ok = scopeFeature(tenant.ScopeP2PRelay)
-	require.True(t, ok)
-	assert.Equal(t, rbac.FeatureP2PRelay, f)
-
-	_, ok = scopeFeature("mystery")
-	assert.False(t, ok)
 }
 
 func TestParseManagedAPIKeyScopes(t *testing.T) {
@@ -77,24 +63,6 @@ func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
 	)
 
 	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
-}
-
-func TestRandomAPIKey_PrefixByType(t *testing.T) {
-	cases := []struct {
-		keyType    tenant.KeyType
-		wantPrefix string
-	}{
-		{tenant.KeyTypePublishable, "ggp_"},
-		{tenant.KeyTypeSecret, "ggs_"},
-	}
-	for _, tc := range cases {
-		t.Run(string(tc.keyType), func(t *testing.T) {
-			key, err := randomAPIKey(tc.keyType)
-			require.NoError(t, err)
-			assert.True(t, strings.HasPrefix(key, tc.wantPrefix), "key=%q", key)
-			assert.Greater(t, len(key), len(tc.wantPrefix)+16)
-		})
-	}
 }
 
 func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {
@@ -143,10 +111,4 @@ func TestScopeGrantable_matchmaker_defaults_on(t *testing.T) {
 	h := &Handler{cfg: Config{}, rbac: auth}
 	assert.True(t, h.scopeGrantable(t.Context(), 7, nil, tenant.ScopeMatchmaker),
 		"matchmaker scope is grantable with zero config")
-}
-
-func TestScopeFeature_maps_matchmaker(t *testing.T) {
-	f, ok := scopeFeature(tenant.ScopeMatchmaker)
-	require.True(t, ok)
-	assert.Equal(t, rbac.FeatureMatchmaker, f)
 }
