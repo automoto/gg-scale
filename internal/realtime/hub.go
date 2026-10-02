@@ -43,6 +43,7 @@ type connKey struct {
 type Hub struct {
 	mu      sync.RWMutex
 	writers map[connKey]Writer
+	relay   Relay
 }
 
 // NewHub returns an empty hub.

@@ -63,7 +63,3 @@ friends and invites, and the control panel.
 
 The game-server **fleet** feature is beta and not yet ready for production.
 
-## Party queues
-
-Friends can queue as one party and rematch with the same party ID.
-Party enqueue defaults to disabled until the operator completes the database cutover.

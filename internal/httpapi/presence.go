@@ -77,7 +77,7 @@ func registerPresence(api huma.API, d Deps) {
 			})
 			msg := realtime.Message{Type: "presence", Payload: json.RawMessage(payload)}
 			for _, friendID := range acceptedFriendPlayersInProject(ctx, d, callerID, projectID) {
-				_ = d.Hub.Send(ctx, tenantID, friendID, msg)
+				_ = d.Hub.Push(ctx, tenantID, friendID, msg)
 			}
 		}
 

@@ -812,7 +812,9 @@ func (w *Worker) notifyAndClaim(ctx, tenantCtx context.Context, tickets []*Ticke
 }
 
 // notifyMatched pushes matchmaker_matched to each rostered player and
-// returns the number of successful deliveries.
+// returns the number of successful deliveries. It uses Send, not Push: a
+// delivery claims the match, and a relay to another host cannot confirm
+// delivery. A player on another host polls its ticket, which claims the match.
 func (w *Worker) notifyMatched(ctx context.Context, tickets []*Ticket, match *Match) int {
 	if w.hub == nil {
 		return 0

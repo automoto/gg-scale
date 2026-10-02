@@ -16,7 +16,7 @@ func (s *Store) Queue(ctx context.Context, project, id, player, version int64, k
 		return nil, ErrStale
 	}
 	var out *Party
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		var err error
 		out, err = load(ctx, tx, project, id)
 		if err != nil {
@@ -85,7 +85,7 @@ func (s *Store) Queue(ctx context.Context, project, id, player, version int64, k
 		out.State = "queued"
 		out.CurrentQueueEntryID = &entry
 		out.Version++
-		if err := save(ctx, tx, out); err != nil {
+		if err := save(ctx, tx, w, out); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `SELECT pg_notify('matchmaker_ticket',jsonb_build_object('tenant_id',current_setting('app.tenant_id')::bigint,'project_id',$1::bigint,'mode',$2::text,'fleet_id',NULLIF($3::bigint,0),'region',$4::text,'game_mode',$5::text)::text)`, project, cfg.Mode, cfg.FleetID, cfg.Region, cfg.GameMode)

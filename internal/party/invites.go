@@ -65,7 +65,7 @@ func (s *Store) RevokeCode(ctx context.Context, project, id, player, version, co
 	})
 }
 
-func join(ctx context.Context, tx pgx.Tx, p *Party, player int64) error {
+func join(ctx context.Context, tx pgx.Tx, w *writes, p *Party, player int64) error {
 	if p.State != "idle" {
 		return ErrBusy
 	}
@@ -78,14 +78,14 @@ func join(ctx context.Context, tx pgx.Tx, p *Party, player int64) error {
 	now := time.Now().UTC()
 	p.Members = append(p.Members, Member{PlayerID: player, JoinedAt: now, LastSeenAt: now, DisconnectDeadline: now.Add(30 * time.Second)})
 	p.rosterChanged()
-	return save(ctx, tx, p)
+	return save(ctx, tx, w, p)
 }
 
 // JoinCode checks durable player and IP failure windows before redemption.
 func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip string) (*Party, error) {
 	var out *Party
 	var verdict error
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		var blocked bool
 		if err := tx.QueryRow(ctx, `SELECT party_code_ip_limit($1,false)`, ip).Scan(&blocked); err != nil {
 			return err
@@ -139,7 +139,7 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 		if result.RowsAffected() != 1 {
 			return ErrInvite
 		}
-		if err := join(ctx, tx, out, player); err != nil {
+		if err := join(ctx, tx, w, out, player); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `UPDATE party_code_attempts SET failures=0,window_start=now(),blocked_until=NULL WHERE project_id=$1 AND subject=$2`, project, subjects[0])
@@ -154,7 +154,7 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 // InviteFriend sends an invitation only to an accepted, unblocked friend in this project.
 func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, target int64) (*Invite, error) {
 	out := &Invite{PartyID: id, TargetID: target}
-	_, err := s.mutate(ctx, project, id, player, version, true, func(tx pgx.Tx, p *Party) error {
+	p, err := s.mutate(ctx, project, id, player, version, true, func(tx pgx.Tx, p *Party) error {
 		if p.State != "idle" {
 			return ErrBusy
 		}
@@ -181,7 +181,11 @@ func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, 
 		out.PartyVersion = p.Version
 		return tx.QueryRow(ctx, `INSERT INTO party_invites(tenant_id,project_id,party_id,target_id) VALUES(current_setting('app.tenant_id')::bigint,$1,$2,$3) ON CONFLICT(party_id,target_id) WHERE status='pending' DO UPDATE SET expires_at=EXCLUDED.expires_at RETURNING id,expires_at`, project, id, target).Scan(&out.ID, &out.ExpiresAt)
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	push(ctx, s.pusher, p.TenantID, target, EventInvite, map[string]int64{"invite_id": out.ID, "party_id": id, "from_player_id": player})
+	return out, nil
 }
 
 // Invites lists only the authenticated player's live invitations.
@@ -208,7 +212,7 @@ func (s *Store) Invites(ctx context.Context, project, player int64) ([]Invite, e
 // ResolveInvite accepts, declines, or revokes an invitation atomically.
 func (s *Store) ResolveInvite(ctx context.Context, project, id, player, version int64, accept bool) (*Party, error) {
 	var out *Party
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		var partyID, target int64
 		err := tx.QueryRow(ctx, `SELECT party_id,target_id FROM party_invites WHERE project_id=$1 AND id=$2 AND status='pending' AND expires_at>now()`, project, id).Scan(&partyID, &target)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -242,10 +246,10 @@ func (s *Store) ResolveInvite(ctx context.Context, project, id, player, version 
 			return ErrInvite
 		}
 		if accept {
-			return join(ctx, tx, out, player)
+			return join(ctx, tx, w, out, player)
 		}
 		out.Version++
-		return save(ctx, tx, out)
+		return save(ctx, tx, w, out)
 	})
 	return out, err
 }
