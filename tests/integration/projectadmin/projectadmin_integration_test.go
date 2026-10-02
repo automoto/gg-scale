@@ -147,6 +147,15 @@ func TestRemoteConfig_should_store_base_row_on_first_write(t *testing.T) {
 	assert.JSONEq(t, `{}`, string(revs[1].Snapshot))
 }
 
+func TestRemoteConfig_base_row_should_have_source_base(t *testing.T) {
+	f := newFixture(t)
+
+	f.setConfig(t, `{"a":1}`)
+
+	revs := f.revisions(t, projectadmin.KindRemoteConfig, f.project)
+	assert.Equal(t, []string{"dashboard", "base"}, []string{revs[0].Source, revs[1].Source})
+}
+
 func TestRemoteConfig_should_increase_revision_on_each_write(t *testing.T) {
 	f := newFixture(t)
 	f.setConfig(t, `{"a":1}`)

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -233,4 +234,70 @@ func TestMatchmakerQueue_admin_can_open_queue_but_not_fleets(t *testing.T) {
 	}
 
 	assert.Equal(t, []int{http.StatusOK, http.StatusForbidden, http.StatusForbidden}, codes)
+}
+
+// dropAdminSecretKeyPair takes (api_key:secret, manage) away from tenant
+// admins, the pair a non-creator needs to revoke a token.
+func (p mcpPanel) dropAdminSecretKeyPair(t *testing.T) {
+	t.Helper()
+	_, err := p.raw.Exec(context.Background(),
+		`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret'`)
+	require.NoError(t, err)
+	require.NoError(t, p.authz.ReloadPolicy())
+}
+
+func (p mcpPanel) onlyTokenID(t *testing.T) int64 {
+	t.Helper()
+	var id int64
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT id FROM mcp_tokens`).Scan(&id))
+	return id
+}
+
+func (p mcpPanel) revoked(t *testing.T, id int64) bool {
+	t.Helper()
+	var revoked bool
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT revoked_at IS NOT NULL FROM mcp_tokens WHERE id = $1`, id).Scan(&revoked))
+	return revoked
+}
+
+func TestMCPTokens_non_creator_without_secret_key_pair_cannot_revoke(t *testing.T) {
+	p := newMCPPanel(t, true)
+	owner, ownerCSRF, _ := p.member(t, "owner@example.com", "owner")
+	p.create(t, owner, ownerCSRF, nil)
+	id := p.onlyTokenID(t)
+	admin, adminCSRF, _ := p.member(t, "admin@example.com", "admin")
+	p.dropAdminSecretKeyPair(t)
+
+	resp, _ := tfPostForm(t, admin, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {adminCSRF}})
+
+	assert.Equal(t, []any{http.StatusForbidden, false}, []any{resp.StatusCode, p.revoked(t, id)})
+}
+
+func TestMCPTokens_creator_can_revoke_own_token_without_secret_key_pair(t *testing.T) {
+	p := newMCPPanel(t, true)
+	admin, csrf, _ := p.member(t, "admin@example.com", "admin")
+	p.create(t, admin, csrf, nil)
+	id := p.onlyTokenID(t)
+	p.dropAdminSecretKeyPair(t)
+
+	resp, _ := tfPostForm(t, admin, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {csrf}})
+
+	assert.Equal(t, []any{http.StatusSeeOther, true}, []any{resp.StatusCode, p.revoked(t, id)})
+}
+
+func TestMCPTokens_list_hides_tokens_expired_over_30_days(t *testing.T) {
+	p := newMCPPanel(t, true)
+	c, _, ownerID := p.member(t, "owner@example.com", "owner")
+	_, err := p.raw.Exec(context.Background(), `
+		INSERT INTO mcp_tokens (tenant_id, project_id, created_by_user_id, label, token_hash, token_hint, expires_at) VALUES
+		  ($1, $2, $3, 'recently-expired', '\x01'::bytea, 'aaaa', now() - interval '1 day'),
+		  ($1, $2, $3, 'long-expired',     '\x02'::bytea, 'bbbb', now() - interval '31 days')`,
+		p.tenantID, p.project, ownerID)
+	require.NoError(t, err)
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Equal(t, []bool{true, false},
+		[]bool{strings.Contains(body, "recently-expired"), strings.Contains(body, "long-expired")})
 }

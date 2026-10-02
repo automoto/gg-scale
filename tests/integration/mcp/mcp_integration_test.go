@@ -46,6 +46,13 @@ type fixture struct {
 // app-role pool, so row security and grants apply as in production.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureWith(t, nil)
+}
+
+// newFixtureWith lets a test change the handler's Deps before the server
+// starts.
+func newFixtureWith(t *testing.T, change func(*mcp.Deps)) *fixture {
+	t.Helper()
 	ctx := context.Background()
 	ctr, err := tcpostgres.Run(ctx, "postgres:17",
 		tcpostgres.WithDatabase("ggscale_test"),
@@ -94,14 +101,18 @@ func newFixture(t *testing.T) *fixture {
 	f.projectC = f.scalar(`INSERT INTO projects (tenant_id, name) VALUES ($1, 'pc') RETURNING id`, f.tenantB)
 	f.ownerID = f.user("owner@example.com", f.tenantA, "owner")
 
-	f.srv = httptest.NewServer(mcp.New(mcp.Deps{
+	deps := mcp.Deps{
 		Pool:               pool,
 		RBAC:               authz,
 		Limiter:            ratelimit.NewCacheLimiter(memory.New()),
 		TokenRatePerSecond: 1000,
 		TokenBurst:         1000,
 		MaxProjectAPIKeys:  3,
-	}))
+	}
+	if change != nil {
+		change(&deps)
+	}
+	f.srv = httptest.NewServer(mcp.New(deps))
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -434,4 +445,66 @@ func TestMCP_platform_admin_tools_list_has_only_table_tools(t *testing.T) {
 		"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
 		"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions",
 	}, names)
+}
+
+func TestMCP_token_that_no_longer_works_is_limited_by_ip(t *testing.T) {
+	f := newFixture(t)
+	tok := f.ownerToken()
+	require.NoError(t, f.authz.RemoveControlPanelRoles(f.ownerID, f.tenantA))
+
+	var last int
+	for range 11 {
+		resp, _ := f.post(tok, initialize)
+		last = resp.StatusCode
+	}
+
+	assert.Equal(t, http.StatusTooManyRequests, last)
+}
+
+func TestMCP_agent_over_its_token_rate_keeps_the_ip_bucket(t *testing.T) {
+	f := newFixtureWith(t, func(d *mcp.Deps) { d.TokenRatePerSecond, d.TokenBurst = 0.001, 1 })
+	limited := f.ownerToken()
+	for range 15 {
+		f.post(limited, initialize)
+	}
+
+	resp, _ := f.post(f.ownerToken(), initialize)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestMCP_refused_request_does_not_update_last_used(t *testing.T) {
+	f := newFixture(t)
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	require.NoError(t, f.authz.RemoveControlPanelRoles(f.ownerID, f.tenantA))
+
+	f.post(tok, initialize)
+
+	var used bool
+	require.NoError(t, f.owner.QueryRow(context.Background(),
+		`SELECT last_used_at IS NOT NULL FROM mcp_tokens WHERE id = $1`, id).Scan(&used))
+	assert.False(t, used)
+}
+
+func TestMCP_revoked_and_unknown_tokens_get_the_same_answer(t *testing.T) {
+	f := newFixture(t)
+	revoked, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	f.exec(`UPDATE mcp_tokens SET revoked_at = now() WHERE id = $1`, id)
+
+	got := []string{postBody(t, f, revoked), postBody(t, f, "ggm_unknown")}
+
+	assert.Equal(t, []string{"unauthorized\n", "unauthorized\n"}, got)
+}
+
+func postBody(t *testing.T, f *fixture, token string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, f.srv.URL, bytes.NewBufferString(initialize))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	b, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return string(b)
 }

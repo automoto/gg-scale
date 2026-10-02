@@ -1,6 +1,6 @@
 module github.com/automoto/gg-scale
 
-go 1.26.5
+go 1.26.6
 
 require (
 	agones.dev/agones v1.59.0

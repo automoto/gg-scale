@@ -30,6 +30,8 @@ const (
 	sourceDashboard = "dashboard"
 	sourceMCP       = "mcp"
 	sourceRollback  = "rollback"
+	// sourceBase marks the value from before revision history.
+	sourceBase = "base"
 
 	// keepRevisions is the number of revisions kept for each resource,
 	// the base row included.
@@ -158,7 +160,7 @@ func recordRevision(ctx context.Context, q *sqlcgen.Queries, latest int64, w rev
 	}
 	if latest == 0 && w.before != nil {
 		// The base row holds a value that no tracked actor wrote.
-		if err := insert(1, w.before, Actor{}, w.source); err != nil {
+		if err := insert(1, w.before, Actor{}, sourceBase); err != nil {
 			return 0, err
 		}
 		latest = 1

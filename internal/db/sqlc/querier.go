@@ -691,6 +691,9 @@ type Querier interface {
 	// Finished periods, newest first, keyset-paginated on the period number.
 	ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
+	// Unexpired tokens, plus tokens that expired in the last 30 days so a person
+	// can see why an agent stopped. Older expired tokens leave the list, so they
+	// cannot push active tokens past the LIMIT.
 	ListMCPTokensForProject(ctx context.Context, projectID int64) ([]ListMCPTokensForProjectRow, error)
 	// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 	// bucket for the current tenant's project, plus oldest queued ticket and

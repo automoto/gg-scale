@@ -142,6 +142,7 @@ JOIN control_panel_users u ON u.id = k.created_by_user_id
 WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND k.project_id = $1
   AND k.revoked_at IS NULL
+  AND k.expires_at > now() - interval '30 days'
 ORDER BY k.id DESC
 LIMIT 100
 `
@@ -158,6 +159,9 @@ type ListMCPTokensForProjectRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+// Unexpired tokens, plus tokens that expired in the last 30 days so a person
+// can see why an agent stopped. Older expired tokens leave the list, so they
+// cannot push active tokens past the LIMIT.
 func (q *Queries) ListMCPTokensForProject(ctx context.Context, projectID int64) ([]ListMCPTokensForProjectRow, error) {
 	rows, err := q.db.Query(ctx, listMCPTokensForProject, projectID)
 	if err != nil {

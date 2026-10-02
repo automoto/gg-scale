@@ -231,3 +231,34 @@ func TestSetAllowedOrigins_should_refuse_invalid_origin(t *testing.T) {
 
 	assert.Contains(t, resultText(res), "wildcard")
 }
+
+func TestWriteTools_should_not_find_leaderboards_of_other_projects(t *testing.T) {
+	f := newFixture(t)
+	tok := f.scopedToken("leaderboards:write")
+	otherProject := f.board(f.projectB, "b")
+	otherTenant := f.board(f.projectC, "c")
+	deletedOther := f.board(f.projectB, "gone")
+	f.exec(`UPDATE leaderboards SET deleted_at = now() WHERE id = $1`, deletedOther)
+
+	cases := map[string]map[string]any{
+		"update other project":   {"leaderboard_id": otherProject, "expected_revision": 0, "name": "x"},
+		"update other tenant":    {"leaderboard_id": otherTenant, "expected_revision": 0, "name": "x"},
+		"rollback other project": {"leaderboard_id": otherProject, "revision": 1, "expected_revision": 0},
+		"delete other project":   {"leaderboard_id": otherProject},
+		"delete other tenant":    {"leaderboard_id": otherTenant},
+		"restore other project":  {"leaderboard_id": deletedOther},
+	}
+	tools := map[string]string{
+		"update other project": "update_leaderboard", "update other tenant": "update_leaderboard",
+		"rollback other project": "rollback_leaderboard", "delete other project": "delete_leaderboard",
+		"delete other tenant": "delete_leaderboard", "restore other project": "restore_leaderboard",
+	}
+	for name, args := range cases {
+		t.Run(name, func(t *testing.T) {
+			res := f.call(tok, tools[name], args)
+
+			assert.Equal(t, "not found in this Game Project", resultText(res))
+		})
+	}
+	assert.Equal(t, 0, f.count(`SELECT count(*) FROM leaderboards WHERE id IN ($1, $2) AND (deleted_at IS NOT NULL OR name = 'x')`, otherProject, otherTenant))
+}

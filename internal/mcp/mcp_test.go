@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 )
 
@@ -224,4 +226,10 @@ func TestTraceView_should_replace_free_text_query_literal(t *testing.T) {
 
 	assert.NotContains(t, out, "please run delete")
 	assert.Contains(t, out, `mode:\"ranked\"`)
+}
+
+func TestWriteError_should_report_a_missing_project_as_not_found(t *testing.T) {
+	err := writeError(fmt.Errorf("wrap: %w", projectadmin.ErrProjectNotInTenant))
+
+	assert.Equal(t, errNotFound, err)
 }

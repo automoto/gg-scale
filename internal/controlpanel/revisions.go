@@ -27,7 +27,10 @@ type RevisionView struct {
 func revisionViews(revs []projectadmin.Revision) []RevisionView {
 	out := make([]RevisionView, 0, len(revs))
 	for _, r := range revs {
-		actor := "—"
+		actor, source := "—", r.Source
+		if source == "base" {
+			source = "before history"
+		}
 		switch {
 		case r.TokenID != nil:
 			actor = "MCP token #" + strconv.FormatInt(*r.TokenID, 10)
@@ -36,7 +39,7 @@ func revisionViews(revs []projectadmin.Revision) []RevisionView {
 		}
 		out = append(out, RevisionView{
 			Revision:  r.Revision,
-			Source:    r.Source,
+			Source:    source,
 			Actor:     actor,
 			Snapshot:  formatRemoteConfig(r.Snapshot),
 			CreatedAt: r.CreatedAt,

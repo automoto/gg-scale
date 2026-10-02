@@ -3274,6 +3274,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 		</section>
 		<section class="card">
 			<h2>Active tokens</h2>
+			<p class="muted">Expired tokens stay in this list for 30 days.</p>
 			if len(vm.Tokens) == 0 {
 				<p class="muted">No tokens.</p>
 			} else {

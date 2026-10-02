@@ -57,6 +57,9 @@ VALUES (
 RETURNING id;
 
 -- name: ListMCPTokensForProject :many
+-- Unexpired tokens, plus tokens that expired in the last 30 days so a person
+-- can see why an agent stopped. Older expired tokens leave the list, so they
+-- cannot push active tokens past the LIMIT.
 SELECT k.id, k.label, k.token_hint, k.scopes, k.created_by_user_id,
        u.email AS creator_email, k.expires_at, k.last_used_at, k.created_at
 FROM mcp_tokens k
@@ -64,6 +67,7 @@ JOIN control_panel_users u ON u.id = k.created_by_user_id
 WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND k.project_id = sqlc.arg(project_id)
   AND k.revoked_at IS NULL
+  AND k.expires_at > now() - interval '30 days'
 ORDER BY k.id DESC
 LIMIT 100;
 

@@ -133,8 +133,9 @@ func realtimeTicketAuth(d Deps) func(http.Handler) http.Handler {
 
 // realtimeRoute serves GET /v1/ws for both kinds of client. A native client
 // sends the Authorization and X-Session-Token headers; a browser sends a
-// ticket. Both paths use the same limiters in the same order as the other
-// player routes.
+// ticket. The header path keeps the middleware order of the other player
+// routes. The ticket path authenticates first, then runs the same two
+// limiters (per API key, then per player).
 func realtimeRoute(d Deps, ws http.Handler, reg prometheus.Registerer) http.HandlerFunc {
 	limited := ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
 		ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))

@@ -24,7 +24,7 @@ func writeError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		return errNotFound
 	case errors.Is(err, projectadmin.ErrRevisionConflict):
 		return errorf("expected_revision is not the newest revision. Read the resource again and retry with its revision.")

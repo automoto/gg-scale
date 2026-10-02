@@ -180,7 +180,10 @@ func sameOrigin(r *http.Request) bool {
 
 // authenticate runs the request checks in order and stops at the first
 // failure. The per-IP bucket is debited before the token lookup and refunded
-// when the token is valid, so only wrong tokens use it up.
+// only when the token passes every identity check, so a wrong token, and a
+// real token that no longer works, both use up the bucket. The per-token
+// limiter runs after the refund: an agent that only goes over its own rate
+// does not use up the per-IP bucket.
 func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 	ctx := r.Context()
 	ipBucket := "ratelimit:ip:mcp:" + h.d.ProxyTrust.ClientIP(r)
@@ -203,20 +206,15 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 		return err
 	})
 	switch {
-	case errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, pgx.ErrNoRows), err == nil && row.RevokedAt.Valid:
 		return Principal{}, &authError{http.StatusUnauthorized, "unauthorized"}
 	case err != nil:
 		slog.ErrorContext(ctx, "mcp: token lookup", "err", err)
 		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
-	case row.RevokedAt.Valid:
-		return Principal{}, &authError{http.StatusUnauthorized, "token revoked"}
 	case !row.ExpiresAt.Time.After(h.d.Now()):
+		// A distinct message, so the agent can tell the developer to make a
+		// new token.
 		return Principal{}, &authError{http.StatusUnauthorized, "token expired"}
-	}
-	if refunder, ok := h.d.Limiter.(ratelimit.Refunder); ok {
-		if err := refunder.Refund(ctx, ipBucket, ratelimit.AuthIPRate, ratelimit.AuthIPBurst); err != nil {
-			slog.WarnContext(ctx, "mcp: refund per-IP bucket", "err", err)
-		}
 	}
 
 	p := Principal{
@@ -234,16 +232,9 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 	var live bool
 	tctx := db.WithTenant(ctx, p.TenantID)
 	err = h.d.Pool.Q(tctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
 		var err error
-		if live, err = q.ProjectIsLive(tctx, p.ProjectID); err != nil || !live {
-			return err
-		}
-		// At most one write per minute for each token.
-		if row.LastUsedAt.Valid && h.d.Now().Sub(row.LastUsedAt.Time) < lastUsedPrecision {
-			return nil
-		}
-		return q.TouchMCPTokenLastUsed(tctx, p.TokenID)
+		live, err = sqlcgen.New(tx).ProjectIsLive(tctx, p.ProjectID)
+		return err
 	})
 	if err != nil {
 		slog.ErrorContext(ctx, "mcp: project check", "err", err)
@@ -261,6 +252,11 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 		return Principal{}, &authError{http.StatusForbidden, "the person who created this token can no longer manage this Game Project"}
 	}
 
+	if refunder, ok := h.d.Limiter.(ratelimit.Refunder); ok {
+		if err := refunder.Refund(ctx, ipBucket, ratelimit.AuthIPRate, ratelimit.AuthIPBurst); err != nil {
+			slog.WarnContext(ctx, "mcp: refund per-IP bucket", "err", err)
+		}
+	}
 	decision, err = h.d.Limiter.Allow(ctx, "ratelimit:mcp:"+strconv.FormatInt(p.TokenID, 10), h.d.TokenRatePerSecond, h.d.TokenBurst)
 	if err != nil {
 		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
@@ -268,6 +264,16 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 	if !decision.Allowed {
 		return Principal{}, &authError{http.StatusTooManyRequests,
 			fmt.Sprintf("rate limit exceeded; retry in %d seconds", int(math.Ceil(decision.RetryAfter.Seconds())))}
+	}
+
+	// Only a request that is let through counts as a use, at most one write
+	// per minute for each token. A failed write does not refuse the request.
+	if !row.LastUsedAt.Valid || h.d.Now().Sub(row.LastUsedAt.Time) >= lastUsedPrecision {
+		if err := h.d.Pool.Q(tctx, func(tx pgx.Tx) error {
+			return sqlcgen.New(tx).TouchMCPTokenLastUsed(tctx, p.TokenID)
+		}); err != nil {
+			slog.WarnContext(ctx, "mcp: touch last_used_at", "err", err)
+		}
 	}
 	return p, nil
 }
