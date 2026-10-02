@@ -57,7 +57,8 @@ import (
 // /v1/healthz + /metrics routes are mounted — useful for unit tests that
 // don't need authenticated paths.
 type Deps struct {
-	// PartyEnqueueEnabled opens party queue after the one-time entry cutover.
+	// PartyEnqueueEnabled lets party leaders queue and rematch. When false,
+	// both return 503 party_enqueue_disabled.
 	PartyEnqueueEnabled bool
 	Version             string
 	Commit              string
