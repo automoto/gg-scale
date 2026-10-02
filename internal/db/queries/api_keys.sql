@@ -35,7 +35,8 @@ WITH args AS (
         sqlc.narg(project_id)::bigint AS project_id,
         sqlc.arg(key_hash)::bytea AS key_hash,
         sqlc.arg(label)::text AS label,
-        sqlc.arg(key_type)::text AS key_type
+        sqlc.arg(key_type)::text AS key_type,
+        sqlc.arg(scopes)::text[] AS scopes
 ), tenant_ctx AS (
     SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
 ),
@@ -48,10 +49,10 @@ project_ctx AS (
     FROM projects p, tenant_ctx t, args
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
--- New keys start with the matchmaker scope: matchmaking is a zero-config
--- feature. Fleet/relay scopes stay opt-in via the control panel toggles.
+-- The caller passes the scopes; projectadmin.CreateAPIKey always includes
+-- matchmaker, a zero-config feature.
 INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
-SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{matchmaker}'::text[]
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, args.scopes
 FROM tenant_ctx t
 CROSS JOIN project_ctx p
 CROSS JOIN args
@@ -83,3 +84,10 @@ WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 UPDATE api_keys
 SET scopes = sqlc.arg(scopes)::text[]
 WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;
+
+-- name: CountActiveAPIKeysForProject :one
+SELECT count(*)::bigint
+FROM api_keys
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND revoked_at IS NULL;

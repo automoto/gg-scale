@@ -408,3 +408,31 @@ WHERE p.state='closed'
   AND NOT EXISTS (SELECT 1 FROM party_members m WHERE m.party_id=p.id)
   AND NOT EXISTS (SELECT 1 FROM matchmaking_entries e WHERE e.party_id=p.id)
   AND NOT EXISTS (SELECT 1 FROM matchmaking_tickets t WHERE t.party_id=p.id);
+
+-- name: GetMatchmakingTicketForTrace :one
+-- Diagnostic read by primary key, scoped to one project.
+SELECT id, party_id, player_id, fleet_id, region, game_mode,
+       octet_length(attributes::text)::int AS attributes_bytes,
+       status::text AS status, mode, min_count, max_count, count_multiple,
+       allow_cross_region, query, string_properties, numeric_properties,
+       created_at, matched_at, expires_at, failure_reason,
+       (claim_id IS NOT NULL)::bool AS claimed
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND id = sqlc.arg(id);
+
+-- name: CountQueuedTicketsLike :one
+-- Queued, unclaimed, unexpired tickets in the same bucket as a ticket. Uses
+-- matchmaking_tickets_queued_idx.
+SELECT count(*)::bigint
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND mode = sqlc.arg(mode)
+  AND fleet_id IS NOT DISTINCT FROM sqlc.narg(fleet_id)::bigint
+  AND region = sqlc.arg(region)
+  AND game_mode = sqlc.arg(game_mode)
+  AND status = 'queued'
+  AND claim_id IS NULL
+  AND (expires_at IS NULL OR expires_at > now());

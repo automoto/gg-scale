@@ -61,7 +61,7 @@ func TestCloudAgentDockerfileProvidesSystemToolchain(t *testing.T) {
 		want string
 	}{
 		{name: "Ubuntu base", want: "FROM ubuntu:24.04"},
-		{name: "Go version", want: "ARG GO_VERSION=1.26.5"},
+		{name: "Go version", want: "ARG GO_VERSION=1.26.6"},
 		{name: "Docker version", want: "ARG DOCKER_ENGINE_VERSION=29.8.0"},
 		{name: "lint version", want: "ARG GOLANGCI_LINT_VERSION=v2.11.4"},
 		{name: "Compose plugin", want: "docker-compose-plugin"},

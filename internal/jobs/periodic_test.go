@@ -42,7 +42,7 @@ func TestPeriodicRegistrations_all_jobs_registered_with_positive_interval(t *tes
 	}
 	for _, want := range []string{
 		GameSessionGCKind, TrustedDeviceGCKind, ConnectionGrantGCKind,
-		MatchmakerGCKind, StorageWarnKind, PlayerDeletePurgeKind,
+		MatchmakerGCKind, StorageWarnKind, PlayerDeletePurgeKind, RealtimeTicketGCKind,
 	} {
 		assert.True(t, kinds[want], "missing periodic registration for %s", want)
 	}

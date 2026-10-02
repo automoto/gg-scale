@@ -44,6 +44,24 @@ type Config struct {
 	// Defaults false: no relay issuer or UDP listener is built and relay entry
 	// points refuse regardless of RelaySharedSecret.
 	FeatureP2PRelayEnabled bool `env:"FEATURE_P2P_RELAY_ENABLED" envDefault:"false"`
+	// FeatureMCPEnabled mounts POST /mcp and the dashboard MCP token page.
+	// Defaults false.
+	FeatureMCPEnabled bool `env:"FEATURE_MCP_ENABLED" envDefault:"false"`
+	// MCPTokenMaxExpiryDays is the longest lifetime a person can give an MCP
+	// token. Default 365.
+	MCPTokenMaxExpiryDays int `env:"MCP_TOKEN_MAX_EXPIRY_DAYS" envDefault:"365"`
+	// MCPTokenRatePerSecond / MCPTokenRateBurst set the per-token request
+	// bucket on /mcp. Process-local, so with N app hosts the effective limit
+	// can be N times the value. Defaults 5 / 20.
+	MCPTokenRatePerSecond int `env:"MCP_TOKEN_RATE_PER_SECOND" envDefault:"5"`
+	MCPTokenRateBurst     int `env:"MCP_TOKEN_RATE_BURST" envDefault:"20"`
+	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
+	// for each project. Default 20.
+	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`
+	// MCPMaxProjectAPIKeys refuses the create_api_key tool when the project
+	// already has this many active keys (all keys, not only agent-made ones).
+	// The dashboard is not limited by it. Default 20.
+	MCPMaxProjectAPIKeys int `env:"MCP_MAX_PROJECT_API_KEYS" envDefault:"20"`
 
 	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
 	// by default so fleets stay off until an operator opts in; only consulted
@@ -253,6 +271,9 @@ type Config struct {
 	// the API router. Empty in dev allows "*"; in production an empty list
 	// is rejected by Validate.
 	CORSAllowedOrigins []string `env:"CORS_ALLOWED_ORIGINS"`
+	// CORSMaxProjectOrigins caps the browser origins a Game Project can list
+	// in its own allowed-origins setting. Default 20.
+	CORSMaxProjectOrigins int `env:"CORS_MAX_PROJECT_ORIGINS" envDefault:"20"`
 
 	// DBMaxConns / DBMinConns size the pgx pool. Defaults: 25 / 2. The
 	// LISTEN connection holds one slot for the process lifetime, so

@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/realtime"
 	"github.com/automoto/gg-scale/internal/tenant"
@@ -39,9 +37,11 @@ func requireAPIKeyPermission(d Deps, obj, act string) func(http.Handler) http.Ha
 	}
 }
 
-func mountRealtimeRoutes(r chi.Router, d Deps) {
+// realtimeHandler returns the /v1/ws handler, or nil when realtime is off.
+// The caller puts the authentication in front of it (headers or a ticket).
+func realtimeHandler(d Deps) http.HandlerFunc {
 	if d.Hub == nil {
-		return
+		return nil
 	}
 	heartbeat := d.RealtimeHeartbeat
 	if heartbeat <= 0 {
@@ -58,8 +58,9 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 		EnvMaxPerTenant:   d.RealtimeMaxPerTenant,
 		MaxPerPlayer:      d.RealtimeMaxPerPlayer,
 		HeartbeatInterval: heartbeat,
+		AllowOrigin:       d.origins.allowOrigin,
 	}
-	r.Get("/ws", func(w http.ResponseWriter, req *http.Request) {
+	return func(w http.ResponseWriter, req *http.Request) {
 		opts := base
 		if lifecycle != nil {
 			if st, ok := lifecycle.register(req.Context()); ok {
@@ -87,7 +88,7 @@ func mountRealtimeRoutes(r chi.Router, d Deps) {
 			}
 		}
 		realtime.ServeWS(opts)(w, req)
-	})
+	}
 }
 
 // passwordResetEnqueuer binds the shared durable-job insert hook to one auth

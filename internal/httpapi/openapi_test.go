@@ -92,6 +92,7 @@ var expectedV1Paths = []string{
 	"/v1/storage/objects",
 	"/v1/storage/objects/{key}",
 	"/v1/ws",
+	"/v1/ws/ticket",
 }
 
 func TestOpenAPIDoc_covers_expected_paths(t *testing.T) {

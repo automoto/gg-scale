@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/sso"
 )
 
@@ -57,6 +58,15 @@ type Config struct {
 	// tenant provisioning sets enforce_quotas=true on the new tenant so the
 	// class ladder is enforced from creation.
 	EnforceNewTenantQuotas bool
+	// MCPEnabled mirrors FEATURE_MCP_ENABLED. When false the MCP token page is
+	// hidden and its routes 404.
+	MCPEnabled bool
+	// MCPMaxExpiryDays mirrors MCP_TOKEN_MAX_EXPIRY_DAYS; 0 uses 365.
+	MCPMaxExpiryDays int
+	// MCPMaxProjectTokens mirrors MCP_MAX_PROJECT_TOKENS; 0 uses 20.
+	MCPMaxProjectTokens int
+	// CORSMaxProjectOrigins mirrors CORS_MAX_PROJECT_ORIGINS; 0 uses 20.
+	CORSMaxProjectOrigins int
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this
@@ -76,6 +86,16 @@ type ServerSettingsSnapshot struct {
 	PlayersEnabled         bool
 	FeatureFleetEnabled    bool
 	FeatureP2PRelayEnabled bool
+	FeatureMCPEnabled      bool
+
+	MCPTokenMaxExpiryDays int
+	MCPTokenRatePerSecond int
+	MCPTokenRateBurst     int
+	MCPMaxProjectTokens   int
+	MCPMaxProjectAPIKeys  int
+
+	CORSAllowedOrigins    []string
+	CORSMaxProjectOrigins int
 
 	FleetBackend string
 	FleetRegion  string
@@ -538,11 +558,20 @@ type ProjectSettingsView struct {
 	DefaultInviterHour float64
 	DefaultDomainDay   float64
 	RemoteConfig       string
+	// RemoteConfigRevisions are the kept revisions, newest first.
+	RemoteConfigRevisions []RevisionView
 	// Steam sign-in credentials. The Web API key is write-only: the view
 	// carries only whether one is stored, never its value.
 	SteamAppID         string
 	SteamKeyConfigured bool
-	FieldErrors        map[string]string
+	// MCPEnabled shows the link to the MCP token page.
+	MCPEnabled bool
+	// AllowedOrigins is the project's browser origin list, one per line.
+	AllowedOrigins    string
+	MaxAllowedOrigins int
+	// OriginDelay is how long a saved list takes to reach each server.
+	OriginDelay string
+	FieldErrors map[string]string
 }
 
 // ServerSettingsView renders the read-only server settings page.
@@ -1019,6 +1048,7 @@ type LeaderboardsListView struct {
 	TenantID     int64
 	ProjectID    int64
 	Leaderboards []LeaderboardRowView
+	Deleted      []projectadmin.DeletedLeaderboard
 	Message      string
 }
 
@@ -1050,6 +1080,8 @@ type LeaderboardFormView struct {
 	AttemptCap        string
 	Metadata          string
 	CurrentPeriod     int32
+	Revisions         []RevisionView
+	Message           string
 	Error             string
 	FieldErrors       map[string]string
 }

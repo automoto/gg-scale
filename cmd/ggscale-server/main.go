@@ -632,6 +632,10 @@ func run() error {
 			BillingPortalURL:       cfg.BillingPortalURL,
 			BillingUpgradeURL:      cfg.BillingUpgradeURL,
 			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
+			MCPEnabled:             cfg.FeatureMCPEnabled,
+			MCPMaxExpiryDays:       cfg.MCPTokenMaxExpiryDays,
+			MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
+			CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/control-panel/sso",
 				cfg.ControlPanelSSOGoogleClientID, cfg.ControlPanelSSOGoogleClientSecret),
 			// Redacted read-only snapshot for the server settings page.
@@ -644,6 +648,14 @@ func run() error {
 				PlayersEnabled:         cfg.PlayersEnabled,
 				FeatureFleetEnabled:    cfg.FeatureFleetEnabled,
 				FeatureP2PRelayEnabled: cfg.FeatureP2PRelayEnabled,
+				FeatureMCPEnabled:      cfg.FeatureMCPEnabled,
+				MCPTokenMaxExpiryDays:  cfg.MCPTokenMaxExpiryDays,
+				MCPTokenRatePerSecond:  cfg.MCPTokenRatePerSecond,
+				MCPTokenRateBurst:      cfg.MCPTokenRateBurst,
+				MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
+				MCPMaxProjectAPIKeys:   cfg.MCPMaxProjectAPIKeys,
+				CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
+				CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
 				FleetBackend:           cfg.FleetBackend,
 				FleetRegion:            cfg.FleetRegion,
 			},
@@ -661,6 +673,11 @@ func run() error {
 		CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
 		MetricsAuthToken:       cfg.MetricsAuthToken,
 		EntitlementAPIToken:    entitlementToken,
+		MCPEnabled:             cfg.FeatureMCPEnabled,
+		MCPTokenRatePerSecond:  float64(cfg.MCPTokenRatePerSecond),
+		MCPTokenBurst:          float64(cfg.MCPTokenRateBurst),
+		MCPMaxProjectAPIKeys:   int64(cfg.MCPMaxProjectAPIKeys),
+		CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
 		BillingHandoffKey:      billingHandoffKey,
 	})
 
@@ -767,6 +784,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewRealtimeTicketGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewConnectionGrantGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewMatchmakerGCWorker(appPool, matchReleaser))
 	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))

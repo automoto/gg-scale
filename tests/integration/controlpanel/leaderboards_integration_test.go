@@ -222,7 +222,8 @@ func TestLeaderboards_soft_delete_hides_and_frees_name(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, deleteResp.StatusCode)
 
 	_, listBody := tfGet(t, admin, srv.URL+leaderboardsPath(tenantID, projectA))
-	assert.NotContains(t, listBody, "<td>board</td>")
+	// The board moves to the deleted section, so the live list is empty.
+	assert.Contains(t, listBody, "No leaderboards yet.")
 
 	// The partial unique index only covers live rows, so the name is reusable.
 	recreateResp, _ := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
@@ -368,4 +369,111 @@ func TestLeaderboards_duplicate_name_on_create_and_rename(t *testing.T) {
 		url.Values{"_csrf": {csrf}, "name": {"board"}, "sort_order": {"desc"}})
 	assert.Equal(t, http.StatusConflict, renameResp.StatusCode, "rename collision should 409")
 	assert.Contains(t, renameBody, "already exists")
+}
+
+func TestLeaderboards_restore_returns_conflict_when_name_in_use(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+	id := boardID(t, raw, projectA, "board")
+	boardURL := srv.URL + leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+	tfPostForm(t, admin, boardURL+"/delete", url.Values{"_csrf": {csrf}})
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+
+	// Act
+	resp, _ := tfPostForm(t, admin, boardURL+"/restore", url.Values{"_csrf": {csrf}})
+
+	// Assert
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestLeaderboards_restore_brings_back_deleted_board(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+	id := boardID(t, raw, projectA, "board")
+	boardURL := srv.URL + leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+	tfPostForm(t, admin, boardURL+"/delete", url.Values{"_csrf": {csrf}})
+
+	resp, _ := tfPostForm(t, admin, boardURL+"/restore", url.Values{"_csrf": {csrf}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	assert.Equal(t, id, boardID(t, raw, projectA, "board"))
+}
+
+func TestLeaderboards_rollback_restores_old_name(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+	id := boardID(t, raw, projectA, "board")
+	boardURL := srv.URL + leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+	tfPostForm(t, admin, boardURL, url.Values{"_csrf": {csrf}, "name": {"renamed"}, "sort_order": {"desc"}})
+
+	resp, _ := tfPostForm(t, admin, boardURL+"/rollback", url.Values{
+		"_csrf": {csrf}, "revision": {"1"}, "expected_revision": {"2"},
+	})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	assert.Equal(t, id, boardID(t, raw, projectA, "board"))
+}
+
+func TestLeaderboards_rollback_from_stale_page_returns_conflict(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "board", "desc")
+	id := boardID(t, raw, projectA, "board")
+	boardURL := srv.URL + leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+	tfPostForm(t, admin, boardURL, url.Values{"_csrf": {csrf}, "name": {"renamed"}, "sort_order": {"desc"}})
+
+	resp, _ := tfPostForm(t, admin, boardURL+"/rollback", url.Values{
+		"_csrf": {csrf}, "revision": {"1"}, "expected_revision": {"1"},
+	})
+
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestRemoteConfig_settings_page_shows_history_after_save(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	projectURL := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10)
+	tfPostForm(t, admin, projectURL+"/config", url.Values{"_csrf": {csrf}, "config": {`{"a":1}`}})
+
+	_, body := tfGet(t, admin, projectURL+"/settings")
+
+	assert.Contains(t, body, `name="expected_revision" value="2"`)
+}
+
+func storedOrigins(t *testing.T, raw *pgxpool.Pool, projectID int64) []string {
+	t.Helper()
+	var out []string
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`SELECT allowed_origins FROM projects WHERE id = $1`, projectID).Scan(&out))
+	return out
+}
+
+func TestAllowedOrigins_form_saves_normalized_list(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	path := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/allowed-origins"
+
+	resp, _ := tfPostForm(t, admin, path, url.Values{"_csrf": {csrf}, "origins": {"HTTPS://Game.Example/\r\nhttp://localhost:5173\n"}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	assert.Equal(t, []string{"https://game.example", "http://localhost:5173"}, storedOrigins(t, raw, projectA))
+}
+
+func TestAllowedOrigins_form_refuses_wildcard(t *testing.T) {
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	path := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectA, 10) + "/allowed-origins"
+
+	resp, body := tfPostForm(t, admin, path, url.Values{"_csrf": {csrf}, "origins": {"https://*.example"}})
+
+	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
+	assert.Contains(t, body, "must not contain a wildcard")
+	assert.Empty(t, storedOrigins(t, raw, projectA))
 }

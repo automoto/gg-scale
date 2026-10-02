@@ -11,6 +11,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveAPIKeysForProject = `-- name: CountActiveAPIKeysForProject :one
+SELECT count(*)::bigint
+FROM api_keys
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND revoked_at IS NULL
+`
+
+func (q *Queries) CountActiveAPIKeysForProject(ctx context.Context, projectID *int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAPIKeysForProject, projectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAPIKey = `-- name: CreateAPIKey :one
 INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -53,7 +68,8 @@ WITH args AS (
         $1::bigint AS project_id,
         $2::bytea AS key_hash,
         $3::text AS label,
-        $4::text AS key_type
+        $4::text AS key_type,
+        $5::text[] AS scopes
 ), tenant_ctx AS (
     SELECT nullif(current_setting('app.tenant_id', true), '')::bigint AS tenant_id
 ),
@@ -67,7 +83,7 @@ project_ctx AS (
     WHERE p.id = args.project_id AND p.tenant_id = t.tenant_id
 )
 INSERT INTO api_keys (tenant_id, project_id, key_hash, label, key_type, scopes)
-SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, '{matchmaker}'::text[]
+SELECT t.tenant_id, p.project_id, args.key_hash, nullif(trim(args.label), ''), args.key_type, args.scopes
 FROM tenant_ctx t
 CROSS JOIN project_ctx p
 CROSS JOIN args
@@ -79,6 +95,7 @@ type CreateControlPanelAPIKeyParams struct {
 	KeyHash   []byte
 	Label     string
 	KeyType   string
+	Scopes    []string
 }
 
 type CreateControlPanelAPIKeyRow struct {
@@ -86,14 +103,15 @@ type CreateControlPanelAPIKeyRow struct {
 	CreatedAt pgtype.Timestamptz
 }
 
-// New keys start with the matchmaker scope: matchmaking is a zero-config
-// feature. Fleet/relay scopes stay opt-in via the control panel toggles.
+// The caller passes the scopes; projectadmin.CreateAPIKey always includes
+// matchmaker, a zero-config feature.
 func (q *Queries) CreateControlPanelAPIKey(ctx context.Context, arg CreateControlPanelAPIKeyParams) (CreateControlPanelAPIKeyRow, error) {
 	row := q.db.QueryRow(ctx, createControlPanelAPIKey,
 		arg.ProjectID,
 		arg.KeyHash,
 		arg.Label,
 		arg.KeyType,
+		arg.Scopes,
 	)
 	var i CreateControlPanelAPIKeyRow
 	err := row.Scan(&i.ID, &i.CreatedAt)

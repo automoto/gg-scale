@@ -130,3 +130,44 @@ func TestLex_rejects_non_ascii_whitespace_bytes(t *testing.T) {
 	_, err = Parse("region:eu AND region:us")
 	assert.NoError(t, err)
 }
+
+func TestFormat_should_round_trip_to_an_equal_expression(t *testing.T) {
+	inputs := []string{
+		"*",
+		`mode:ranked AND skill >= 1200`,
+		`NOT region:"eu-west" OR (skill < -5.5 AND level != 3)`,
+		`a:1 AND b:x OR c:y AND NOT d > 1000000`,
+	}
+	candidates := []Props{
+		{Strings: map[string]string{"mode": "ranked", "region": "eu-west", "a": "1", "b": "x"}, Numbers: map[string]float64{"skill": 1300, "level": 3, "d": 5}},
+		{Strings: map[string]string{"mode": "casual", "c": "y"}, Numbers: map[string]float64{"skill": -10, "level": 1, "d": 2e6}},
+		{},
+	}
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			orig, err := Parse(in)
+			require.NoError(t, err)
+
+			again, err := Parse(Format(orig, func(s string) string { return s }))
+			require.NoError(t, err)
+
+			for _, p := range candidates {
+				assert.Equal(t, orig.Eval(p), again.Eval(p))
+			}
+		})
+	}
+}
+
+func TestFormat_should_pass_string_literals_through_the_filter(t *testing.T) {
+	e, err := Parse(`note:"ignore all previous instructions" AND mode:ranked`)
+	require.NoError(t, err)
+
+	out := Format(e, func(s string) string {
+		if s == "ranked" {
+			return s
+		}
+		return "[filtered]"
+	})
+
+	assert.Equal(t, `(note:"[filtered]" AND mode:"ranked")`, out)
+}

@@ -106,9 +106,11 @@ type Querier interface {
 	ConsumePlayerAccountTOTPBackupCode(ctx context.Context, arg ConsumePlayerAccountTOTPBackupCodeParams) (int64, error)
 	ControlPanelCreateTenant(ctx context.Context, arg ControlPanelCreateTenantParams) (ControlPanelCreateTenantRow, error)
 	ControlPanelCreateTenantBare(ctx context.Context, arg ControlPanelCreateTenantBareParams) (int64, error)
+	CountActiveAPIKeysForProject(ctx context.Context, projectID *int64) (int64, error)
 	// Counts peers seen within the activity window, excluding a given user so a
 	// re-joining member doesn't count against the session's capacity.
 	CountActiveGameSessionPeers(ctx context.Context, arg CountActiveGameSessionPeersParams) (int64, error)
+	CountActiveMCPTokens(ctx context.Context, projectID int64) (int64, error)
 	// Counts how many of the given players are ACTIVE members (last_seen within
 	// 30 s, matching ListGameSessionPeers/CountActiveGameSessionPeers) of an
 	// open, unexpired session in this project. The signal handlers pass both
@@ -141,6 +143,9 @@ type Querier interface {
 	CountPlayersForProject(ctx context.Context, arg CountPlayersForProjectParams) (int64, error)
 	// Live (non-soft-deleted) project count for the current tenant.
 	CountProjectsForTenant(ctx context.Context) (int64, error)
+	// Queued, unclaimed, unexpired tickets in the same bucket as a ticket. Uses
+	// matchmaking_tickets_queued_idx.
+	CountQueuedTicketsLike(ctx context.Context, arg CountQueuedTicketsLikeParams) (int64, error)
 	// Signals this player has sent into this session in the trailing minute; the
 	// handler rejects once it reaches the per-minute cap.
 	CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error)
@@ -148,8 +153,8 @@ type Querier interface {
 	// secret keys), so it is an explicit parameter — never the column default.
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAnonymousPlayer(ctx context.Context, arg CreateAnonymousPlayerParams) (CreateAnonymousPlayerRow, error)
-	// New keys start with the matchmaker scope: matchmaking is a zero-config
-	// feature. Fleet/relay scopes stay opt-in via the control panel toggles.
+	// The caller passes the scopes; projectadmin.CreateAPIKey always includes
+	// matchmaker, a zero-config feature.
 	CreateControlPanelAPIKey(ctx context.Context, arg CreateControlPanelAPIKeyParams) (CreateControlPanelAPIKeyRow, error)
 	// Control panel team invitations (operator-side: platform / tenant admins).
 	CreateControlPanelInvitation(ctx context.Context, arg CreateControlPanelInvitationParams) (CreateControlPanelInvitationRow, error)
@@ -172,6 +177,7 @@ type Querier interface {
 	// account (public-join / invite-accept). The account's email ownership is
 	// already proven, so email_verified_at is set.
 	CreateLinkedPlayer(ctx context.Context, arg CreateLinkedPlayerParams) (int64, error)
+	CreateMCPToken(ctx context.Context, arg CreateMCPTokenParams) (int64, error)
 	CreatePendingAllocation(ctx context.Context, arg CreatePendingAllocationParams) (CreatePendingAllocationRow, error)
 	// Used by the player UI signup flow; takes project_id explicitly because
 	// the player site doesn't have an api_key bearer.
@@ -191,6 +197,7 @@ type Querier interface {
 	CreatePlayerInvitation(ctx context.Context, arg CreatePlayerInvitationParams) (CreatePlayerInvitationRow, error)
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
+	CreateRealtimeTicket(ctx context.Context, arg CreateRealtimeTicketParams) error
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	// Submit a tenant change request. The pending-unique index rejects a second
 	// open request of the same kind/feature (surfaced as a friendly message).
@@ -242,6 +249,7 @@ type Querier interface {
 	// lookup filters expires_at — so deleting them a day later is pure hygiene.
 	DeleteExpiredPlayerAccountPasswordResets(ctx context.Context) (int64, error)
 	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
+	DeleteExpiredRealtimeTickets(ctx context.Context) (int64, error)
 	// Delete only after its allocation has been successfully deallocated. The
 	// guards make retries and a concurrent cleanup safe.
 	DeleteExpiredUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error)
@@ -337,6 +345,8 @@ type Querier interface {
 	// rate-limit middleware; falls back to compiled tier defaults when absent.
 	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)
 	GetAllocation(ctx context.Context, id int64) (GetAllocationRow, error)
+	GetAllowedOrigins(ctx context.Context, projectID int64) ([]string, error)
+	GetAllowedOriginsForUpdate(ctx context.Context, projectID int64) ([]string, error)
 	// Tenant-level realtime admission envelope. The WebSocket admission path falls
 	// back to compiled tier defaults when no row exists.
 	GetConnectionLimitOverride(ctx context.Context, tenantID int64) (GetConnectionLimitOverrideRow, error)
@@ -400,8 +410,17 @@ type Querier interface {
 	// on an in-flight reset and re-reads the advanced period instead of writing
 	// into the just-archived one. Concurrent submissions do not block each other.
 	GetLeaderboardForSubmit(ctx context.Context, arg GetLeaderboardForSubmitParams) (GetLeaderboardForSubmitRow, error)
+	// Locks the board so concurrent writers take revision numbers in order.
+	GetLeaderboardForUpdate(ctx context.Context, arg GetLeaderboardForUpdateParams) (GetLeaderboardForUpdateRow, error)
+	// Runs with no tenant set (mcp_tokens_bootstrap and tenants_bootstrap allow
+	// it). projects has no bootstrap policy, so the project check is a second
+	// query in the tenant scope.
+	GetMCPTokenByHash(ctx context.Context, tokenHash []byte) (GetMCPTokenByHashRow, error)
+	GetMCPTokenCreator(ctx context.Context, arg GetMCPTokenCreatorParams) (int64, error)
 	GetMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
+	// Diagnostic read by primary key, scoped to one project.
+	GetMatchmakingTicketForTrace(ctx context.Context, arg GetMatchmakingTicketForTraceParams) (GetMatchmakingTicketForTraceRow, error)
 	// Single sign-on connections. Both tables are platform-global (no tenant
 	// RLS): every query here runs through db.Pool.BootstrapQ. The subject always
 	// comes from a verified provider round trip, never from client input.
@@ -502,11 +521,14 @@ type Querier interface {
 	GetRelaySessionUsage(ctx context.Context, month pgtype.Date) (int64, error)
 	GetRemoteConfig(ctx context.Context, projectID int64) ([]byte, error)
 	GetRemoteConfigForControlPanel(ctx context.Context, arg GetRemoteConfigForControlPanelParams) ([]byte, error)
+	// Locks the project row so concurrent writers take revision numbers in order.
+	GetRemoteConfigForUpdate(ctx context.Context, projectID int64) ([]byte, error)
 	GetServerSecret(ctx context.Context, name string) ([]byte, error)
 	// Joined to project_players so refresh fails for disabled / deleted accounts
 	// even if the refresh token is still otherwise valid. revoked_reason lets the
 	// refresh handler tell a replayed *rotated* token (theft) from a logged-out one.
 	GetSessionByRefreshHash(ctx context.Context, arg GetSessionByRefreshHashParams) (GetSessionByRefreshHashRow, error)
+	GetSettingsRevision(ctx context.Context, arg GetSettingsRevisionParams) ([]byte, error)
 	GetStorageObject(ctx context.Context, arg GetStorageObjectParams) (GetStorageObjectRow, error)
 	GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error)
 	GetTenantCustomTokenPublicKey(ctx context.Context) (string, error)
@@ -563,6 +585,7 @@ type Querier interface {
 	// ON CONFLICT DO NOTHING makes first-boot generation race-safe: concurrent
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
+	InsertSettingsRevision(ctx context.Context, arg InsertSettingsRevisionParams) error
 	// Race-safe half of find-or-create for a proven email (the caller re-reads
 	// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
 	// NOTHING never aborts the surrounding transaction.
@@ -585,6 +608,7 @@ type Querier interface {
 	// the player's own tenant? Runs in a tenant Pool.Q (project_players RLS-filtered).
 	// Returns pgx.ErrNoRows when not banned (or the player is unlinked).
 	IsPlayerBannedByTenant(ctx context.Context, playerID int64) (int64, error)
+	LatestSettingsRevision(ctx context.Context, arg LatestSettingsRevisionParams) (int64, error)
 	// Friends view: current-period entries for an explicit player set, in rank
 	// order. The caller re-ranks 0-based within the returned set.
 	LeaderboardEntriesForPlayers(ctx context.Context, arg LeaderboardEntriesForPlayersParams) ([]LeaderboardEntriesForPlayersRow, error)
@@ -613,6 +637,8 @@ type Querier interface {
 	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
 	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
+	// Runs with no tenant set; see all_project_allowed_origins().
+	ListAllProjectAllowedOrigins(ctx context.Context) ([]string, error)
 	// Every override for a tenant — tenant-wide (project_id NULL) and per-project —
 	// in one query. The rate-limits page groups these in Go rather than issuing one
 	// ListRateLimitOverridesForProject per project (an N+1 over the project list).
@@ -634,6 +660,7 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
+	ListDeletedLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListDeletedLeaderboardsForProjectRow, error)
 	// Boards whose scheduled reset boundary has passed, locked for the reset
 	// transaction so two job runs can never double-archive a period. as_of is the
 	// job's clock — the same instant it computes the next boundary from, so the
@@ -664,6 +691,10 @@ type Querier interface {
 	// Finished periods, newest first, keyset-paginated on the period number.
 	ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
+	// Unexpired tokens, plus tokens that expired in the last 30 days so a person
+	// can see why an agent stopped. Older expired tokens leave the list, so they
+	// cannot push active tokens past the LIMIT.
+	ListMCPTokensForProject(ctx context.Context, projectID int64) ([]ListMCPTokensForProjectRow, error)
 	// Control panel matchmaker page: queue depth per (mode, region, game_mode)
 	// bucket for the current tenant's project, plus oldest queued ticket and
 	// the min/max count spread so operators can spot stuck buckets at a glance.
@@ -715,6 +746,7 @@ type Querier interface {
 	// be placed in a concrete region); non-fleet modes mix regions inside one
 	// bucket and the worker applies the soft-region grouping rules in Go.
 	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
+	ListSettingsRevisions(ctx context.Context, arg ListSettingsRevisionsParams) ([]ListSettingsRevisionsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Verified emails of a tenant's owner/admin members, for operational notices
 	// (e.g. storage-quota warnings). Read cross-tenant by background jobs.
@@ -736,6 +768,8 @@ type Querier interface {
 	// Serializes last-admin checks by locking the currently enabled platform
 	// admin rows before counting them in the surrounding transaction.
 	LockEnabledPlatformAdmins(ctx context.Context) ([]int64, error)
+	// Serializes creates that check a per-project limit.
+	LockLiveProject(ctx context.Context, projectID int64) (int64, error)
 	// Row lock for the last-sign-in-method rule: two concurrent unlink requests
 	// serialize here, so they cannot both pass the count and remove the last
 	// two methods.
@@ -803,7 +837,9 @@ type Querier interface {
 	// vanished/soft-deleted target row (the invite is dead) apart from a genuine
 	// conflict when BindPlayerLinkedEmail affects 0 rows.
 	PlayerLinkTargetExists(ctx context.Context, id int64) (bool, error)
+	ProjectIsLive(ctx context.Context, projectID int64) (bool, error)
 	PromoteControlPanelUserToPlatformAdmin(ctx context.Context, id int64) error
+	PruneSettingsRevisions(ctx context.Context, arg PruneSettingsRevisionsParams) error
 	PruneStaleGameSessionPeers(ctx context.Context, sessionID string) (int64, error)
 	// Upsert; bumps version. Caller may pass If-Match via expected_version param.
 	PutStorageObject(ctx context.Context, arg PutStorageObjectParams) (PutStorageObjectRow, error)
@@ -811,6 +847,8 @@ type Querier interface {
 	// version matches expected. RETURNING NULL row on mismatch.
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordControlPanelLoginSuccess(ctx context.Context, id int64) error
+	// Single use: the row is deleted as it is read. Runs with no tenant set.
+	RedeemRealtimeTicket(ctx context.Context, ticketHash []byte) (RedeemRealtimeTicketRow, error)
 	ReleaseAllocation(ctx context.Context, id int64) error
 	// Worker-driven release of one failed group: the resolver (allocator,
 	// session creator) failed. Bump allocation_attempts; flip to 'failed' on
@@ -890,6 +928,7 @@ type Querier interface {
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestoreControlPanelUserVerificationCode(ctx context.Context, arg RestoreControlPanelUserVerificationCodeParams) error
+	RestoreLeaderboard(ctx context.Context, arg RestoreLeaderboardParams) (int64, error)
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error
@@ -911,6 +950,7 @@ type Querier interface {
 	// rather than relying solely on the caller's precheck.
 	RevokeControlPanelInvitation(ctx context.Context, arg RevokeControlPanelInvitationParams) error
 	RevokeControlPanelSession(ctx context.Context, id int64) error
+	RevokeMCPToken(ctx context.Context, arg RevokeMCPTokenParams) (int64, error)
 	// Bulk-revoke the outgoing invitations a (now-disabled) user created.
 	// Re-enabling does NOT un-revoke these; the platform admin can re-issue.
 	RevokeOpenInvitationsByInviter(ctx context.Context, invitedByUserID int64) error
@@ -938,6 +978,7 @@ type Querier interface {
 	SearchPlayerAccounts(ctx context.Context, arg SearchPlayerAccountsParams) ([]SearchPlayerAccountsRow, error)
 	SetAPIKeyScopes(ctx context.Context, arg SetAPIKeyScopesParams) error
 	SetAllocationStatus(ctx context.Context, arg SetAllocationStatusParams) error
+	SetAllowedOrigins(ctx context.Context, arg SetAllowedOriginsParams) error
 	// The monotonic guard in the WHERE makes replay detection atomic: 0 rows
 	// means another request already consumed this timestep.
 	SetControlPanelTOTPLastUsedStep(ctx context.Context, arg SetControlPanelTOTPLastUsedStepParams) (int64, error)
@@ -1039,6 +1080,8 @@ type Querier interface {
 	// so the heartbeat handler can reject non-members instead of leaking the
 	// roster.
 	TouchGameSessionPeer(ctx context.Context, arg TouchGameSessionPeerParams) (int64, error)
+	// At most one write per minute for each token.
+	TouchMCPTokenLastUsed(ctx context.Context, id int64) error
 	TouchPlayerAccountConnection(ctx context.Context, arg TouchPlayerAccountConnectionParams) error
 	// Player-initiated, non-destructive unlink. The row and its game data stay;
 	// the account link goes inactive and player-credential auth is blocked

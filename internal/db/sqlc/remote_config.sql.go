@@ -44,6 +44,23 @@ func (q *Queries) GetRemoteConfigForControlPanel(ctx context.Context, arg GetRem
 	return remote_config, err
 }
 
+const getRemoteConfigForUpdate = `-- name: GetRemoteConfigForUpdate :one
+SELECT remote_config
+FROM projects
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+// Locks the project row so concurrent writers take revision numbers in order.
+func (q *Queries) GetRemoteConfigForUpdate(ctx context.Context, projectID int64) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getRemoteConfigForUpdate, projectID)
+	var remote_config []byte
+	err := row.Scan(&remote_config)
+	return remote_config, err
+}
+
 const updateRemoteConfig = `-- name: UpdateRemoteConfig :execrows
 UPDATE projects
 SET remote_config = $1

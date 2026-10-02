@@ -418,8 +418,9 @@ func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing
 
 // The dedicated-server view pages (fleet config, allocations, matchmaker
 // queue) must require the per-object read scope, not just the coarse
-// project:manage route gate. A tenant_admin holds project:manage but not
-// project:*:fleet/allocation/matchmaker, so must be denied; an owner may view.
+// project:manage route gate. A tenant_admin holds project:manage and
+// project:*:matchmaker read, but not project:*:fleet/allocation read, so it
+// may view only the queue; an owner may view all three.
 func TestControlPanelFleet_view_pages_require_object_read_scope(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-scope")
@@ -437,7 +438,9 @@ func TestControlPanelFleet_view_pages_require_object_read_scope(t *testing.T) {
 	pages := []string{base + "/matchmaker", base + "/allocations", base + "/fleets"}
 
 	adminCookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
-	for _, p := range pages {
+	assert.Equal(t, http.StatusOK, getStatusWithCookie(t, base+"/matchmaker", adminCookie),
+		"tenant admin may view the matchmaker queue")
+	for _, p := range pages[1:] {
 		assert.Equal(t, http.StatusForbidden, getStatusWithCookie(t, p, adminCookie),
 			"tenant admin must not view %s", p)
 	}

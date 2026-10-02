@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 func TestParseLeaderboardForm_defaults_for_minimal_form(t *testing.T) {
@@ -69,7 +71,7 @@ func TestParseLeaderboardForm_field_errors(t *testing.T) {
 		{"name_with_nul", url.Values{"name": {"we\x00ekly"}}, "name"},
 		{"name_with_control_char", url.Values{"name": {"we\x01ekly"}}, "name"},
 		{"name_invalid_utf8", url.Values{"name": {"weekly\xff"}}, "name"},
-		{"name_overlong", url.Values{"name": {strings.Repeat("x", leaderboardNameMax+1)}}, "name"},
+		{"name_overlong", url.Values{"name": {strings.Repeat("x", projectadmin.LeaderboardNameMax+1)}}, "name"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -30,10 +30,12 @@ import (
 	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/matchmaker"
+	"github.com/automoto/gg-scale/internal/mcp"
 	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/players"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/realtime"
@@ -175,11 +177,25 @@ type Deps struct {
 	// Empty leaves /metrics open (dev / explicitly-unauthenticated deployments).
 	MetricsAuthToken string
 
+	// MCPEnabled mounts POST /mcp for coding agents (FEATURE_MCP_ENABLED).
+	// MCPTokenRatePerSecond / MCPTokenBurst set the per-token bucket.
+	MCPEnabled            bool
+	MCPTokenRatePerSecond float64
+	MCPTokenBurst         float64
+	// MCPMaxProjectAPIKeys limits the create_api_key tool.
+	MCPMaxProjectAPIKeys int64
+	// CORSMaxProjectOrigins limits the set_allowed_origins tool.
+	CORSMaxProjectOrigins int
+
 	// EntitlementAPIToken, when non-empty, mounts the internal declarative
 	// entitlement API at /internal/entitlements behind this bearer token —
 	// outside /v1, so it never enters openapi.yaml or the SDKs. Empty (the
 	// default) leaves the surface unmounted entirely.
 	EntitlementAPIToken string
+
+	// origins is built by NewRouter from CORSAllowedOrigins and the project
+	// origin lists; it serves the CORS handler and the WebSocket upgrade.
+	origins *originSet
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -273,8 +289,16 @@ func NewRouter(d Deps) http.Handler {
 		// Dev fallback: wildcard. config.Validate rejects this in prod.
 		allowedOrigins = []string{"*"}
 	}
+	d.origins = newOriginSet(allowedOrigins, func(ctx context.Context) ([]string, error) {
+		if d.Pool == nil {
+			return nil, nil
+		}
+		return projectadmin.AllProjectOrigins(ctx, d.Pool)
+	})
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
+		// AllowOriginFunc replaces AllowedOrigins: it covers the env list
+		// and the project lists.
+		AllowOriginFunc:  d.origins.allowOrigin,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Session-Token", "X-Request-Id", "If-Match", "If-None-Match"},
 		ExposedHeaders:   []string{"X-Request-Id", "X-API-Version", "Retry-After", "ETag"},
@@ -289,10 +313,39 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/favicon.ico", webassets.FaviconHandler())
 	mountInternalAPI(r, d)
 
+	// One observability middleware for /v1 and /mcp: it registers its
+	// collectors on reg, so it can be built only once.
+	observe := middleware.NewObservability(reg)
+	if d.MCPEnabled && d.Pool != nil && d.Limiter != nil && d.RBAC != nil {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.NewRequestID())
+			r.Use(observe)
+			if d.RequestTimeout > 0 {
+				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
+			}
+			r.Handle("/mcp", mcp.New(mcp.Deps{
+				Pool:               d.Pool,
+				RBAC:               d.RBAC,
+				Limiter:            d.Limiter,
+				ProxyTrust:         d.ProxyTrust,
+				Version:            d.Version,
+				TokenRatePerSecond: d.MCPTokenRatePerSecond,
+				TokenBurst:         d.MCPTokenBurst,
+				FleetEnabled:       d.ControlPanel.FleetEnabled,
+				RelayEnabled:       d.ControlPanel.RelayEnabled,
+				RelayConfigured:    d.RelayIssuer != nil,
+				CORSAllowedOrigins: d.CORSAllowedOrigins,
+				MaxProjectAPIKeys:  d.MCPMaxProjectAPIKeys,
+				MaxProjectOrigins:  d.CORSMaxProjectOrigins,
+				Now:                d.Now,
+			}))
+		})
+	}
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(middleware.NewRequestID())
 		r.Use(middleware.NewVersion(d.Version, reg))
-		r.Use(middleware.NewObservability(reg))
+		r.Use(observe)
 		if d.RequestTimeout > 0 {
 			r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 		}
@@ -355,6 +408,12 @@ func NewRouter(d Deps) http.Handler {
 		}
 
 		if d.hasAuthDeps() {
+			// /v1/ws takes the API key and session from headers (native
+			// clients) or a one-time ticket (browsers), so it carries its own
+			// authentication instead of the group middleware below.
+			if ws := realtimeHandler(d); ws != nil {
+				r.Get("/ws", realtimeRoute(d, ws, reg))
+			}
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.New(d.Lookup))
 				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
@@ -417,7 +476,6 @@ func NewRouter(d Deps) http.Handler {
 				r.Group(func(r chi.Router) {
 					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
-					mountRealtimeRoutes(r, d)
 
 					if d.Matchmaker != nil {
 						r.Group(func(r chi.Router) {
@@ -459,6 +517,9 @@ func NewRouter(d Deps) http.Handler {
 					registerFriendRoutes(papi, d)
 					registerRemoteAddrRoutes(papi, d)
 					registerGameSessionRoutes(papi, d)
+					if d.Hub != nil {
+						registerRealtimeTicket(papi, d)
+					}
 
 					// Score submission authorizes in the handler, not here:
 					// boards are server-authoritative (secret key) by

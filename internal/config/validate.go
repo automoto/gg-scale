@@ -391,6 +391,12 @@ func (c *Config) checkFields() error {
 		{"MATCHMAKER_WORKER_COUNT", int64(c.MatchmakerWorkerCount)},
 		{"DB_MAX_CONNS", int64(c.DBMaxConns)},
 		{"STORAGE_MAX_VALUE_BYTES", c.StorageMaxValueBytes},
+		{"MCP_TOKEN_MAX_EXPIRY_DAYS", int64(c.MCPTokenMaxExpiryDays)},
+		{"MCP_TOKEN_RATE_PER_SECOND", int64(c.MCPTokenRatePerSecond)},
+		{"MCP_TOKEN_RATE_BURST", int64(c.MCPTokenRateBurst)},
+		{"MCP_MAX_PROJECT_TOKENS", int64(c.MCPMaxProjectTokens)},
+		{"MCP_MAX_PROJECT_API_KEYS", int64(c.MCPMaxProjectAPIKeys)},
+		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},
 	} {
 		if n.val <= 0 {
 			return fmt.Errorf("%s %d: must be a positive integer", n.name, n.val)

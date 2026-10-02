@@ -18,3 +18,12 @@ SET remote_config = sqlc.arg(remote_config)
 WHERE id = sqlc.arg(project_id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL;
+
+-- name: GetRemoteConfigForUpdate :one
+-- Locks the project row so concurrent writers take revision numbers in order.
+SELECT remote_config
+FROM projects
+WHERE id = sqlc.arg(project_id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+FOR UPDATE;

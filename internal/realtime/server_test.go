@@ -347,3 +347,37 @@ func (errCap) Acquire(context.Context, int64, ratelimit.CapLimits) (ratelimit.Ca
 	return ratelimit.CapDecision{}, errors.New("cache unavailable")
 }
 func (errCap) Release(context.Context, int64) error { return nil }
+
+func dialFromOrigin(t *testing.T, opts realtime.Options, origin string) (*http.Response, error) {
+	t.Helper()
+	url, stop := newTestServer(t, realtime.NewHub(), opts, 1, 42)
+	t.Cleanup(stop)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, url, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {origin}}})
+	if conn != nil {
+		_ = conn.CloseNow()
+	}
+	return resp, err
+}
+
+func allowOnly(allowed string) func(*http.Request, string) bool {
+	return func(_ *http.Request, origin string) bool { return origin == allowed }
+}
+
+func TestServeWS_allowed_origin_can_connect(t *testing.T) {
+	opts := realtime.Options{HeartbeatInterval: time.Hour, AllowOrigin: allowOnly("https://html-classic.itch.zone")}
+
+	_, err := dialFromOrigin(t, opts, "https://html-classic.itch.zone")
+
+	assert.NoError(t, err)
+}
+
+func TestServeWS_unknown_origin_is_refused(t *testing.T) {
+	opts := realtime.Options{HeartbeatInterval: time.Hour, AllowOrigin: allowOnly("https://html-classic.itch.zone")}
+
+	resp, err := dialFromOrigin(t, opts, "https://evil.example")
+
+	require.Error(t, err)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}

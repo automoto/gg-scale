@@ -313,6 +313,43 @@ func (q *Queries) CountPlayerLiveFleetAllocations(ctx context.Context, playerID 
 	return live, err
 }
 
+const countQueuedTicketsLike = `-- name: CountQueuedTicketsLike :one
+SELECT count(*)::bigint
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND mode = $2
+  AND fleet_id IS NOT DISTINCT FROM $3::bigint
+  AND region = $4
+  AND game_mode = $5
+  AND status = 'queued'
+  AND claim_id IS NULL
+  AND (expires_at IS NULL OR expires_at > now())
+`
+
+type CountQueuedTicketsLikeParams struct {
+	ProjectID int64
+	Mode      string
+	FleetID   *int64
+	Region    string
+	GameMode  string
+}
+
+// Queued, unclaimed, unexpired tickets in the same bucket as a ticket. Uses
+// matchmaking_tickets_queued_idx.
+func (q *Queries) CountQueuedTicketsLike(ctx context.Context, arg CountQueuedTicketsLikeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedTicketsLike,
+		arg.ProjectID,
+		arg.Mode,
+		arg.FleetID,
+		arg.Region,
+		arg.GameMode,
+	)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteClosedParties = `-- name: DeleteClosedParties :execrows
 DELETE FROM parties p
 WHERE p.state='closed'
@@ -583,6 +620,78 @@ func (q *Queries) GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTi
 		&i.MatchedAt,
 		&i.ExpiresAt,
 		&i.FailureReason,
+	)
+	return i, err
+}
+
+const getMatchmakingTicketForTrace = `-- name: GetMatchmakingTicketForTrace :one
+SELECT id, party_id, player_id, fleet_id, region, game_mode,
+       octet_length(attributes::text)::int AS attributes_bytes,
+       status::text AS status, mode, min_count, max_count, count_multiple,
+       allow_cross_region, query, string_properties, numeric_properties,
+       created_at, matched_at, expires_at, failure_reason,
+       (claim_id IS NOT NULL)::bool AS claimed
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+`
+
+type GetMatchmakingTicketForTraceParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+type GetMatchmakingTicketForTraceRow struct {
+	ID                int64
+	PartyID           *int64
+	PlayerID          int64
+	FleetID           *int64
+	Region            string
+	GameMode          string
+	AttributesBytes   int32
+	Status            string
+	Mode              string
+	MinCount          int32
+	MaxCount          int32
+	CountMultiple     int32
+	AllowCrossRegion  bool
+	Query             string
+	StringProperties  []byte
+	NumericProperties []byte
+	CreatedAt         pgtype.Timestamptz
+	MatchedAt         pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	FailureReason     *string
+	Claimed           bool
+}
+
+// Diagnostic read by primary key, scoped to one project.
+func (q *Queries) GetMatchmakingTicketForTrace(ctx context.Context, arg GetMatchmakingTicketForTraceParams) (GetMatchmakingTicketForTraceRow, error) {
+	row := q.db.QueryRow(ctx, getMatchmakingTicketForTrace, arg.ProjectID, arg.ID)
+	var i GetMatchmakingTicketForTraceRow
+	err := row.Scan(
+		&i.ID,
+		&i.PartyID,
+		&i.PlayerID,
+		&i.FleetID,
+		&i.Region,
+		&i.GameMode,
+		&i.AttributesBytes,
+		&i.Status,
+		&i.Mode,
+		&i.MinCount,
+		&i.MaxCount,
+		&i.CountMultiple,
+		&i.AllowCrossRegion,
+		&i.Query,
+		&i.StringProperties,
+		&i.NumericProperties,
+		&i.CreatedAt,
+		&i.MatchedAt,
+		&i.ExpiresAt,
+		&i.FailureReason,
+		&i.Claimed,
 	)
 	return i, err
 }

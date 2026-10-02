@@ -1558,6 +1558,20 @@ components:
         - id
         - created_at
       type: object
+    RealtimeTicketOutputBody:
+      additionalProperties: false
+      properties:
+        expires_in_seconds:
+          description: The ticket expires after this many seconds.
+          format: int64
+          type: integer
+        ticket:
+          description: One-time ticket. Open /v1/ws?ticket=<ticket> with it.
+          type: string
+      required:
+        - ticket
+        - expires_in_seconds
+      type: object
     RefreshRequest:
       additionalProperties: false
       properties:
@@ -4805,15 +4819,45 @@ paths:
         - Cloud Saves
   /v1/ws:
     get:
-      description: Upgrades to a WebSocket for realtime player events; not a JSON endpoint. Authenticate with the tenant API key and the player session token.
+      description: Upgrades to a WebSocket for realtime player events; not a JSON endpoint. Authenticate with the tenant API key and the player session token in headers, or, from a browser (which cannot set WebSocket headers), with a one-time ticket from POST /v1/ws/ticket in the ticket query parameter and no headers.
       operationId: realtimeWebSocket
+      parameters:
+        - description: One-time ticket from POST /v1/ws/ticket. Use it instead of the auth headers.
+          in: query
+          name: ticket
+          schema:
+            type: string
       responses:
         "101":
           description: Switching Protocols (WebSocket upgrade)
       security:
+        - {}
         - ApiKeyAuth: []
           PlayerSession: []
       summary: Realtime WebSocket channel
+      tags:
+        - Realtime
+  /v1/ws/ticket:
+    post:
+      description: For browser clients, which cannot set headers on a WebSocket. Open /v1/ws?ticket=<ticket> within 30 seconds. The ticket works once.
+      operationId: createRealtimeTicket
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealtimeTicketOutputBody"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ApiKeyAuth: []
+          PlayerSession: []
+      summary: Get a one-time ticket for the realtime WebSocket
       tags:
         - Realtime
 servers:

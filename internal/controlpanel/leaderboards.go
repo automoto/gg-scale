@@ -9,26 +9,16 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/period"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
-
-var errDuplicateLeaderboard = errors.New("control panel: leaderboard with that name already exists")
-
-// errSortOrderLocked rejects a sort-order change on a board that already has
-// entries: collapsed bests are frozen under the order they were written with.
-var errSortOrderLocked = errors.New("control panel: sort order is fixed once scores exist")
 
 const (
 	sortOrderAsc  = "asc"
@@ -36,47 +26,11 @@ const (
 
 	scoreOperatorBest = "best"
 	resetScheduleNone = period.ScheduleNone
-
-	// maxLeaderboardMetadataBytes caps the per-board display blob. It is
-	// deliberately smaller than remote config: every /v1/leaderboards reply
-	// carries it for every board.
-	maxLeaderboardMetadataBytes = 16 << 10
 )
 
 // leaderboardFormFields is the parsed create/edit form. ScoreOperator is
 // empty on edit — the operator is fixed at creation.
-type leaderboardFormFields struct {
-	Name              string
-	SortOrder         string
-	ScoreOperator     string
-	ClientSubmissions bool
-	ScoreMin          *int64
-	ScoreMax          *int64
-	ResetSchedule     string
-	AttemptCap        *int32
-	Metadata          []byte
-}
-
-// leaderboardNameMax bounds a board name. The column is unbounded text, so
-// without a limit the form accepts an arbitrarily long value.
-const leaderboardNameMax = 120
-
-// validLeaderboardName rejects names PostgreSQL cannot store or that are
-// unbounded. A NUL byte raises SQLSTATE 22021, which the duplicate-name
-// translator does not match, so it would render as a 500 instead of a field
-// error. Invalid UTF-8 is checked first because the rune loop below would see
-// it as U+FFFD.
-func validLeaderboardName(name string) bool {
-	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > leaderboardNameMax {
-		return false
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
-}
+type leaderboardFormFields = projectadmin.LeaderboardSettings
 
 // parseLeaderboardForm validates the shared create/edit form and collects
 // per-field errors. Blank optional fields default (best operator, no
@@ -88,8 +42,8 @@ func parseLeaderboardForm(form url.Values, edit bool) (leaderboardFormFields, ma
 	switch {
 	case fields.Name == "":
 		errs["name"] = "Name is required."
-	case !validLeaderboardName(fields.Name):
-		errs["name"] = fmt.Sprintf("Name must be 1–%d characters and cannot contain control characters.", leaderboardNameMax)
+	case !projectadmin.ValidLeaderboardName(fields.Name):
+		errs["name"] = fmt.Sprintf("Name must be 1–%d characters and cannot contain control characters.", projectadmin.LeaderboardNameMax)
 	}
 
 	var sortOK bool
@@ -165,7 +119,7 @@ func parseOptionalScore(raw, field, label string, errs map[string]string) *int64
 // normalizeLeaderboardMetadata mirrors the remote-config rules at a smaller
 // cap: a single top-level JSON object, re-encoded canonically.
 func normalizeLeaderboardMetadata(raw string) ([]byte, error) {
-	return normalizeJSONObjectBlob(raw, maxLeaderboardMetadataBytes)
+	return projectadmin.NormalizeJSONObject(raw, projectadmin.LeaderboardMetadataMaxBytes)
 }
 
 // normalizeSortOrder trims and lowercases the submitted sort order, defaulting
@@ -203,6 +157,12 @@ func (h *Handler) leaderboardsListPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "leaderboards list failed", http.StatusInternalServerError)
 		return
 	}
+	deleted, err := projectadmin.ListDeletedLeaderboards(r.Context(), h.pool, tenantID, projectID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "deleted leaderboards list failed", "err", err)
+		http.Error(w, "leaderboards list failed", http.StatusInternalServerError)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, LeaderboardsListPage(LeaderboardsListView{
 		UserEmail:    session.User.Email,
@@ -210,6 +170,7 @@ func (h *Handler) leaderboardsListPage(w http.ResponseWriter, r *http.Request) {
 		TenantID:     tenantID,
 		ProjectID:    projectID,
 		Leaderboards: boards,
+		Deleted:      deleted,
 		Message:      r.URL.Query().Get("flash"),
 	}))
 }
@@ -304,24 +265,24 @@ func (h *Handler) leaderboardFormHandler(w http.ResponseWriter, r *http.Request,
 	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectLeaderboardObject(projectID), rbac.ActionManage) {
 		return
 	}
+	actor := projectadmin.Actor{UserID: session.User.ID}
 	var err error
 	if edit {
-		err = h.updateLeaderboard(r.Context(), tenantID, projectID, id, fields)
+		_, err = projectadmin.UpdateLeaderboard(r.Context(), h.pool, tenantID, projectID, id, fields, nil, actor)
 	} else {
-		id, err = h.createLeaderboard(r.Context(), tenantID, projectID, fields)
+		_, err = projectadmin.CreateLeaderboard(r.Context(), h.pool, tenantID, projectID, fields, actor)
 	}
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		// Deleted concurrently — nothing was written, so no success flash
-		// and no audit row.
+		// Deleted concurrently — nothing was written.
 		http.NotFound(w, r)
 		return
-	case errors.Is(err, errDuplicateLeaderboard):
+	case errors.Is(err, projectadmin.ErrDuplicateLeaderboard):
 		view.FieldErrors["name"] = "A leaderboard with that name already exists."
 		w.WriteHeader(http.StatusConflict)
 		webutil.Render(r, w, page(view))
 		return
-	case errors.Is(err, errSortOrderLocked):
+	case errors.Is(err, projectadmin.ErrSortOrderLocked):
 		view.FieldErrors["sort_order"] = "Sort order is fixed once scores exist."
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, page(view))
@@ -333,19 +294,6 @@ func (h *Handler) leaderboardFormHandler(w http.ResponseWriter, r *http.Request,
 		webutil.Render(r, w, page(view))
 		return
 	}
-	payload := map[string]any{
-		"project_id":         projectID,
-		"leaderboard_name":   fields.Name,
-		"reset_schedule":     fields.ResetSchedule,
-		"client_submissions": fields.ClientSubmissions,
-	}
-	if fields.AttemptCap != nil {
-		payload["attempt_cap"] = *fields.AttemptCap
-	}
-	if !edit {
-		payload["score_operator"] = fields.ScoreOperator
-	}
-	h.auditLeaderboard(r.Context(), tenantID, session.User.ID, action, id, payload)
 	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+queryFlash+url.QueryEscape("Leaderboard \""+fields.Name+"\" "+verb+"."), http.StatusSeeOther)
 }
 
@@ -368,6 +316,12 @@ func (h *Handler) leaderboardsEditPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "leaderboard lookup failed", http.StatusInternalServerError)
 		return
 	}
+	revs, err := projectadmin.ListRevisions(r.Context(), h.pool, tenantID, projectID, projectadmin.KindLeaderboard, id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "leaderboard revisions failed", "err", err)
+		http.Error(w, "leaderboard lookup failed", http.StatusInternalServerError)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, EditLeaderboardPage(LeaderboardFormView{
 		UserEmail:         session.User.Email,
@@ -385,6 +339,8 @@ func (h *Handler) leaderboardsEditPage(w http.ResponseWriter, r *http.Request) {
 		AttemptCap:        optionalInt32String(row.AttemptCap),
 		Metadata:          formatLeaderboardMetadata(row.Metadata),
 		CurrentPeriod:     row.CurrentPeriod,
+		Revisions:         revisionViews(revs),
+		Message:           r.URL.Query().Get("flash"),
 	}))
 }
 
@@ -423,7 +379,8 @@ func (h *Handler) leaderboardsDeleteHandler(w http.ResponseWriter, r *http.Reque
 	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectLeaderboardObject(projectID), rbac.ActionManage) {
 		return
 	}
-	err := h.softDeleteLeaderboard(r.Context(), tenantID, projectID, id)
+	session, _ := sessionFromContext(r.Context())
+	err := projectadmin.DeleteLeaderboard(r.Context(), h.pool, tenantID, projectID, id, projectadmin.Actor{UserID: session.User.ID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -433,10 +390,6 @@ func (h *Handler) leaderboardsDeleteHandler(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	session, _ := sessionFromContext(r.Context())
-	h.auditLeaderboard(r.Context(), tenantID, session.User.ID, "leaderboard.delete", id, map[string]any{
-		"project_id": projectID,
-	})
 	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+queryFlash+url.QueryEscape("Leaderboard deleted."), http.StatusSeeOther)
 }
 
@@ -481,150 +434,4 @@ func (h *Handler) getLeaderboard(ctx context.Context, tenantID, projectID, id in
 		return err
 	})
 	return row, err
-}
-
-func (h *Handler) createLeaderboard(ctx context.Context, tenantID, projectID int64, f leaderboardFormFields) (int64, error) {
-	if h.pool == nil {
-		return 0, errors.New(msgControlPanelPoolNeeded)
-	}
-	params := sqlcgen.CreateLeaderboardParams{
-		ProjectID:         projectID,
-		Name:              f.Name,
-		SortOrder:         f.SortOrder,
-		ScoreOperator:     f.ScoreOperator,
-		Metadata:          f.Metadata,
-		ClientSubmissions: f.ClientSubmissions,
-		ScoreMin:          f.ScoreMin,
-		ScoreMax:          f.ScoreMax,
-		ResetSchedule:     f.ResetSchedule,
-		AttemptCap:        f.AttemptCap,
-	}
-	// One clock for both fields: a second Now() straddling a calendar
-	// boundary would put next_reset_at before period_started_at.
-	now := time.Now().UTC()
-	if next, ok := period.NextReset(f.ResetSchedule, now); ok {
-		params.PeriodStartedAt = pgtype.Timestamptz{Time: now, Valid: true}
-		params.NextResetAt = pgtype.Timestamptz{Time: next, Valid: true}
-	}
-	var id int64
-	ctx = db.WithTenant(ctx, tenantID)
-	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		var err error
-		id, err = sqlcgen.New(tx).CreateLeaderboard(ctx, params)
-		return translateLeaderboardDuplicate(err)
-	})
-	return id, err
-}
-
-// updateLeaderboard saves the edit form onto a live leaderboard. It returns
-// pgx.ErrNoRows when the row no longer exists (e.g. deleted concurrently), so
-// callers never report success for a mutation that matched nothing. Period
-// bookkeeping only moves when the schedule actually changes — recomputing
-// next_reset_at on an unrelated edit would erase an overdue reset the job has
-// not caught up with yet.
-func (h *Handler) updateLeaderboard(ctx context.Context, tenantID, projectID, id int64, f leaderboardFormFields) error {
-	if h.pool == nil {
-		return errors.New(msgControlPanelPoolNeeded)
-	}
-	ctx = db.WithTenant(ctx, tenantID)
-	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		cur, err := q.GetLeaderboardForControlPanel(ctx, sqlcgen.GetLeaderboardForControlPanelParams{
-			ProjectID: projectID, ID: id,
-		})
-		if err != nil {
-			return err
-		}
-		// The collapsed entry model freezes each best under the sort order
-		// it was written with, so the direction is only editable while the
-		// board has no entries in any period. (A submit racing this check is
-		// a milliseconds-wide window; at worst one entry lands under the old
-		// order, the same exposure as two adjacent submits.)
-		if f.SortOrder != cur.SortOrder {
-			hasEntries, herr := q.LeaderboardHasEntries(ctx, id)
-			if herr != nil {
-				return herr
-			}
-			if hasEntries {
-				return errSortOrderLocked
-			}
-		}
-		periodStarted, nextReset := cur.PeriodStartedAt, cur.NextResetAt
-		if f.ResetSchedule != cur.ResetSchedule {
-			now := time.Now().UTC()
-			if next, ok := period.NextReset(f.ResetSchedule, now); ok {
-				nextReset = pgtype.Timestamptz{Time: next, Valid: true}
-				if !periodStarted.Valid || cur.ResetSchedule == resetScheduleNone {
-					periodStarted = pgtype.Timestamptz{Time: now, Valid: true}
-				}
-			} else {
-				// Schedule turned off: the current period persists, it just
-				// stops resetting.
-				nextReset = pgtype.Timestamptz{}
-			}
-		}
-		n, err := q.UpdateLeaderboard(ctx, sqlcgen.UpdateLeaderboardParams{
-			Name:              f.Name,
-			SortOrder:         f.SortOrder,
-			Metadata:          f.Metadata,
-			ClientSubmissions: f.ClientSubmissions,
-			ScoreMin:          f.ScoreMin,
-			ScoreMax:          f.ScoreMax,
-			ResetSchedule:     f.ResetSchedule,
-			AttemptCap:        f.AttemptCap,
-			PeriodStartedAt:   periodStarted,
-			NextResetAt:       nextReset,
-			ProjectID:         projectID,
-			ID:                id,
-		})
-		if err != nil {
-			return translateLeaderboardDuplicate(err)
-		}
-		if n == 0 {
-			return pgx.ErrNoRows
-		}
-		return nil
-	})
-}
-
-// softDeleteLeaderboard hides a leaderboard; like updateLeaderboard it returns
-// pgx.ErrNoRows when nothing matched.
-func (h *Handler) softDeleteLeaderboard(ctx context.Context, tenantID, projectID, id int64) error {
-	if h.pool == nil {
-		return errors.New(msgControlPanelPoolNeeded)
-	}
-	ctx = db.WithTenant(ctx, tenantID)
-	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		n, err := sqlcgen.New(tx).SoftDeleteLeaderboard(ctx, sqlcgen.SoftDeleteLeaderboardParams{
-			ProjectID: projectID,
-			ID:        id,
-		})
-		if err != nil {
-			return err
-		}
-		if n == 0 {
-			return pgx.ErrNoRows
-		}
-		return nil
-	})
-}
-
-func translateLeaderboardDuplicate(err error) error {
-	if err == nil {
-		return nil
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return errDuplicateLeaderboard
-	}
-	return err
-}
-
-// auditLeaderboard records a leaderboard mutation by a control panel user in
-// platform_audit_log (the actor is a control_panel_user, not a player). Audit
-// failure is logged, never fatal to the request.
-func (h *Handler) auditLeaderboard(ctx context.Context, tenantID, actorUserID int64, action string, id int64, payload map[string]any) {
-	if err := h.writePlatformAudit(ctx, tenantID, actorUserID, action, strconv.FormatInt(id, 10), payload); err != nil {
-		slog.WarnContext(ctx, "audit log: "+action, "err", err)
-	}
 }
