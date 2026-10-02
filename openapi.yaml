@@ -1950,20 +1950,24 @@ components:
         - verified
       type: object
   securitySchemes:
-    ApiKeyAuth:
-      description: Tenant API key (publishable or secret).
-      scheme: bearer
-      type: http
     PlayerSession:
       description: Player session JWT issued by the /v1/auth endpoints.
       in: header
       name: X-Session-Token
       type: apiKey
+    PublishableKey:
+      description: "Publishable API key of the Game Project: the key you ship in the game client. A secret key also works on these operations, but a secret key must never ship in a game."
+      scheme: bearer
+      type: http
+    SecretKey:
+      description: Secret API key of the Game Project. Use it only from a game server or backend. Operations that list only this scheme refuse a publishable key with 403.
+      scheme: bearer
+      type: http
 info:
   contact:
     name: ggscale
     url: https://github.com/automoto/gg-scale
-  description: "Player-facing and game-server-facing HTTP API for ggscale. Authenticate with a tenant API key (Authorization: Bearer). Player endpoints additionally require a session token in X-Session-Token."
+  description: "Player-facing and game-server-facing HTTP API for ggscale. Authenticate with your Game Project's API key (Authorization: Bearer). Game clients use the publishable key; game servers and backends use the secret key. Player endpoints additionally require a session token in X-Session-Token."
   title: ggscale API
   version: 1.0.0
 openapi: 3.1.0
@@ -1985,8 +1989,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get the caller's remote addresses
       tags:
         - Remote Addresses
@@ -2012,8 +2016,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Replace the caller's remote addresses
       tags:
         - Remote Addresses
@@ -2034,7 +2038,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Create an anonymous player session
       tags:
         - Authentication
@@ -2062,7 +2066,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Exchange a tenant-signed token for a session
       tags:
         - Authentication
@@ -2090,8 +2094,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Request deletion of the calling player's data in this project
       tags:
         - Authentication
@@ -2115,7 +2119,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Cancel a pending player deletion with email and password
       tags:
         - Authentication
@@ -2139,8 +2143,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Disable the calling player
       tags:
         - Authentication
@@ -2164,8 +2168,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Attach email + password sign-in to the calling player
       tags:
         - Authentication
@@ -2189,8 +2193,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Attach a Steam identity to the calling player
       tags:
         - Authentication
@@ -2217,7 +2221,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Log in with email and password
       tags:
         - Authentication
@@ -2240,7 +2244,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Revoke a refresh token
       tags:
         - Authentication
@@ -2264,8 +2268,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Change the calling player's password
       tags:
         - Authentication
@@ -2289,7 +2293,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Request an in-client password reset code
       tags:
         - Authentication
@@ -2313,7 +2317,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Confirm a password reset with the emailed code
       tags:
         - Authentication
@@ -2340,7 +2344,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Rotate a refresh token
       tags:
         - Authentication
@@ -2363,7 +2367,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Sign up with email and password
       tags:
         - Authentication
@@ -2391,7 +2395,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Exchange a Steam session ticket for a session
       tags:
         - Authentication
@@ -2418,7 +2422,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Verify an email address with a code
       tags:
         - Authentication
@@ -2442,13 +2446,13 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Resend the email verification code
       tags:
         - Authentication
   /v1/config:
     get:
-      description: Returns the project-defined JSON object using only a project-pinned tenant API key. Send If-None-Match with a previous ETag to receive 304 when unchanged.
+      description: Returns the project-defined JSON object using only an API key that is limited to one Game Project, with no player session. Send If-None-Match with a previous ETag to receive 304 when unchanged.
       operationId: getRemoteConfig
       parameters:
         - description: ETag from a previous config response.
@@ -2483,12 +2487,13 @@ paths:
         "304":
           description: Config has not changed; response has no body
       security:
-        - ApiKeyAuth: []
+        - PublishableKey: []
       summary: Get the project's remote config
       tags:
         - Remote Config
   /v1/fleets/heartbeat:
     post:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: fleetHeartbeat
       requestBody:
         content:
@@ -2506,7 +2511,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: Game-server liveness heartbeat
       tags:
         - Game Server Fleet
@@ -2535,8 +2540,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List live servers in a fleet
       tags:
         - Game Server Fleet
@@ -2579,8 +2584,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List the caller's friends by status
       tags:
         - Friends & Presence
@@ -2607,8 +2612,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Remove a friend
       tags:
         - Friends & Presence
@@ -2639,8 +2644,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Accept a friend request
       tags:
         - Friends & Presence
@@ -2671,8 +2676,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Block a player
       tags:
         - Friends & Presence
@@ -2703,8 +2708,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Reject a friend request
       tags:
         - Friends & Presence
@@ -2733,8 +2738,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get an accepted friend's remote addresses
       tags:
         - Remote Addresses
@@ -2765,8 +2770,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Send a friend request
       tags:
         - Friends & Presence
@@ -2797,8 +2802,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Unblock a player
       tags:
         - Friends & Presence
@@ -2827,8 +2832,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Resolve a game session by join code
       tags:
         - Game Sessions & Invites
@@ -2855,8 +2860,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Create a game session
       tags:
         - Game Sessions & Invites
@@ -2882,8 +2887,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Leave (or, for the host, end) a game session
       tags:
         - Game Sessions & Invites
@@ -2911,8 +2916,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a game session
       tags:
         - Game Sessions & Invites
@@ -2948,8 +2953,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Heartbeat a game session peer
       tags:
         - Game Sessions & Invites
@@ -2984,8 +2989,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Join a game session
       tags:
         - Game Sessions & Invites
@@ -3023,8 +3028,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Poll game-session negotiation signals
       tags:
         - Game Sessions & Invites
@@ -3058,8 +3063,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Send a game-session negotiation signal
       tags:
         - Game Sessions & Invites
@@ -3103,8 +3108,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Browse public game sessions
       tags:
         - Game Sessions & Invites
@@ -3144,8 +3149,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List the caller's pending game invites
       tags:
         - Game Sessions & Invites
@@ -3171,8 +3176,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Invite a friend to a game session
       tags:
         - Game Sessions & Invites
@@ -3198,8 +3203,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Cancel or dismiss a game invite
       tags:
         - Game Sessions & Invites
@@ -3221,8 +3226,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List the project's leaderboards
       tags:
         - Leaderboards
@@ -3260,8 +3265,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Scores around the caller's rank
       tags:
         - Leaderboards
@@ -3293,8 +3298,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Scores of the caller and their accepted friends
       tags:
         - Leaderboards
@@ -3340,8 +3345,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Reset history of a leaderboard
       tags:
         - Leaderboards
@@ -3389,8 +3394,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Top scores of one leaderboard period
       tags:
         - Leaderboards
@@ -3424,8 +3429,10 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
+        - PlayerSession: []
+          SecretKey: []
       summary: Submit a score to a leaderboard
       tags:
         - Leaderboards
@@ -3463,8 +3470,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Top scores for a leaderboard
       tags:
         - Leaderboards
@@ -3491,8 +3498,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Create a matchmaking ticket
       tags:
         - Matchmaking
@@ -3518,8 +3525,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Cancel a matchmaking ticket
       tags:
         - Matchmaking
@@ -3548,8 +3555,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a matchmaking ticket
       tags:
         - Matchmaking
@@ -3576,8 +3583,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Create a party
       tags:
         - Parties
@@ -3598,8 +3605,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Recover the current party
       tags:
         - Parties
@@ -3626,8 +3633,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Join a party by invite code
       tags:
         - Parties
@@ -3662,8 +3669,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Disband a party
       tags:
         - Parties
@@ -3691,8 +3698,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a party
       tags:
         - Parties
@@ -3726,8 +3733,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Set party queue settings
       tags:
         - Parties
@@ -3762,8 +3769,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Extend party presence
       tags:
         - Parties
@@ -3798,8 +3805,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Create or rotate a party invite code
       tags:
         - Parties
@@ -3841,8 +3848,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Revoke a party invite code
       tags:
         - Parties
@@ -3877,8 +3884,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Invite a friend to the party
       tags:
         - Parties
@@ -3913,8 +3920,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Leave a party
       tags:
         - Parties
@@ -3949,8 +3956,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Set your readiness and properties
       tags:
         - Parties
@@ -3992,8 +3999,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Remove a party member
       tags:
         - Parties
@@ -4028,8 +4035,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Cancel the whole party queue entry
       tags:
         - Parties
@@ -4070,8 +4077,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Queue the ready party
       tags:
         - Parties
@@ -4113,8 +4120,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Queue the current party for another match
       tags:
         - Parties
@@ -4139,8 +4146,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List your pending party invites
       tags:
         - Parties
@@ -4175,8 +4182,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Decline or revoke a party invite
       tags:
         - Parties
@@ -4211,8 +4218,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Accept a party invite
       tags:
         - Parties
@@ -4242,8 +4249,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Resolve player ids to public profiles
       tags:
         - Player Profiles
@@ -4275,8 +4282,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Resolve a friend code to a public player
       tags:
         - Friends & Presence
@@ -4308,8 +4315,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a player's public profile
       tags:
         - Player Profiles
@@ -4336,8 +4343,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Update the caller's presence
       tags:
         - Friends & Presence
@@ -4358,8 +4365,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get the caller's profile
       tags:
         - Player Profiles
@@ -4382,8 +4389,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Update the caller's email, xuid, or display name
       tags:
         - Player Profiles
@@ -4405,8 +4412,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Regenerate the caller's friend code
       tags:
         - Friends & Presence
@@ -4435,13 +4442,14 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Issue short-lived TURN-REST relay credentials
       tags:
         - P2P & TURN Relay
   /v1/server/leaderboards/{id}/scores:
     post:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: serverSubmitScore
       parameters:
         - in: path
@@ -4469,12 +4477,13 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: submit a score for a player"
       tags:
         - Leaderboards
   /v1/server/player-sessions/verify:
     post:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: verifyPlayerSession
       requestBody:
         content:
@@ -4499,12 +4508,13 @@ paths:
                 type: object
           description: Invalid session (opaque; covers every failure mode)
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: verify a player session token"
       tags:
         - Session Verification
   /v1/server/players/{player_id}/remote-addrs:
     get:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: serverGetPlayerRemoteAddrs
       parameters:
         - in: path
@@ -4528,12 +4538,13 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: read a player's remote addresses"
       tags:
         - Remote Addresses
   /v1/server/players/{player_id}/storage/objects:
     get:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: serverListStorageObjects
       parameters:
         - in: path
@@ -4580,12 +4591,13 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: list a player's storage objects"
       tags:
         - Cloud Saves
   /v1/server/players/{player_id}/storage/objects/{key}:
     get:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: serverGetStorageObject
       parameters:
         - in: path
@@ -4618,11 +4630,12 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: get a player's storage object"
       tags:
         - Cloud Saves
     put:
+      description: "Requires a secret API key: call it from a game server or backend, never from a game client."
       operationId: serverPutStorageObject
       parameters:
         - in: path
@@ -4670,7 +4683,7 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
+        - SecretKey: []
       summary: "Server-tier: create or replace a player's storage object"
       tags:
         - Cloud Saves
@@ -4713,8 +4726,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: List the caller's storage objects
       tags:
         - Cloud Saves
@@ -4739,8 +4752,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Delete a storage object
       tags:
         - Cloud Saves
@@ -4768,8 +4781,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a storage object
       tags:
         - Cloud Saves
@@ -4812,14 +4825,23 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Create or replace a storage object
       tags:
         - Cloud Saves
   /v1/ws:
     get:
-      description: Upgrades to a WebSocket for realtime player events; not a JSON endpoint. Authenticate with the tenant API key and the player session token in headers, or, from a browser (which cannot set WebSocket headers), with a one-time ticket from POST /v1/ws/ticket in the ticket query parameter and no headers.
+      description: |-
+        Upgrades to a WebSocket for realtime player events; not a JSON endpoint. Authenticate with your Game Project's publishable API key (the key the player logged in with) and the player session token in headers, or, from a browser (which cannot set WebSocket headers), with a one-time ticket from POST /v1/ws/ticket in the ticket query parameter and no headers.
+
+        The server sends JSON text frames of the form {"type": ..., "payload": {...}}. Events are best effort: a client that misses one recovers the state with the matching GET.
+
+        - matchmaker_matched: a ticket matched. Payload: ticket_id, match_id, mode, address, protocol_hint, session_id, join_code, host_player_id, users.
+        - presence: a friend changed status. Payload: player_id, status, session_id.
+        - game_invite: a friend invited you to a game session. Payload: invite_id, session_id, join_code.
+        - party_changed: a party you are in, or were removed from, changed. Payload: party_id, version, state. Call GET /v1/parties/{id} when version is newer than yours; 404 means you are no longer a member.
+        - party_invite: a friend invited you to a party. Payload: invite_id, party_id, from_player_id.
       operationId: realtimeWebSocket
       parameters:
         - description: One-time ticket from POST /v1/ws/ticket. Use it instead of the auth headers.
@@ -4832,8 +4854,8 @@ paths:
           description: Switching Protocols (WebSocket upgrade)
       security:
         - {}
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Realtime WebSocket channel
       tags:
         - Realtime
@@ -4855,8 +4877,8 @@ paths:
                 $ref: "#/components/schemas/ErrorModel"
           description: Error
       security:
-        - ApiKeyAuth: []
-          PlayerSession: []
+        - PlayerSession: []
+          PublishableKey: []
       summary: Get a one-time ticket for the realtime WebSocket
       tags:
         - Realtime

@@ -43,11 +43,14 @@ type connKey struct {
 type Hub struct {
 	mu      sync.RWMutex
 	writers map[connKey]Writer
+	relay   Relay
+	// queues holds the relayed frames per player; see enqueueRelayed.
+	queues map[connKey]chan []byte
 }
 
 // NewHub returns an empty hub.
 func NewHub() *Hub {
-	return &Hub{writers: make(map[connKey]Writer)}
+	return &Hub{writers: make(map[connKey]Writer), queues: make(map[connKey]chan []byte)}
 }
 
 // Register attaches w as the active socket for (tenantID, playerID). A
@@ -72,12 +75,17 @@ func (h *Hub) Register(tenantID, playerID int64, w Writer) func() {
 	}
 }
 
+func (h *Hub) writer(tenantID, playerID int64) (Writer, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	w, ok := h.writers[connKey{tenantID, playerID}]
+	return w, ok
+}
+
 // Send marshals msg as JSON and writes it to the registered socket. Returns
 // ErrNotConnected when the target has no live socket.
 func (h *Hub) Send(ctx context.Context, tenantID, playerID int64, msg Message) error {
-	h.mu.RLock()
-	w, ok := h.writers[connKey{tenantID, playerID}]
-	h.mu.RUnlock()
+	w, ok := h.writer(tenantID, playerID)
 	if !ok {
 		return ErrNotConnected
 	}

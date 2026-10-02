@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/automoto/gg-scale/internal/party"
 )
 
 // Lock order matches party mutations: party, entry, then tickets. A nil ID
@@ -37,24 +39,35 @@ func requireWholeEntries(ctx context.Context, tx pgx.Tx, ids []int64) error {
 	return nil
 }
 
-// Terminal entry state and party state change in the ticket transaction.
-func settleEntries(ctx context.Context, tx pgx.Tx, ids []int64, matchID string) error {
+// Terminal entry state and party state change in the ticket transaction. It
+// returns the parties it changed; the caller sends their events after the
+// commit.
+func settleEntries(ctx context.Context, tx pgx.Tx, ids []int64, matchID string) ([]party.Change, error) {
 	_, err := tx.Exec(ctx, `UPDATE matchmaking_entries e SET status=t.status FROM matchmaking_tickets t WHERE t.entry_id=e.id AND e.status='queued' AND t.status<>'queued' AND ($1::bigint[] IS NULL OR t.id=ANY($1))`, ids)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// An entry's failure applies to its entire snapshot, including members with
 	// different expiry times left by an interrupted or administrative update.
 	_, err = tx.Exec(ctx, `UPDATE matchmaking_tickets t SET status=e.status,failure_reason=CASE WHEN e.status='failed' THEN COALESCE((SELECT failure_reason FROM matchmaking_tickets x WHERE x.entry_id=e.id AND x.failure_reason IS NOT NULL LIMIT 1),'expired') ELSE t.failure_reason END,claim_id=NULL,claimed_at=NULL,claim_expires_at=NULL FROM matchmaking_entries e WHERE t.entry_id=e.id AND t.status='queued' AND e.status IN ('failed','cancelled') AND ($1::bigint[] IS NULL OR e.id IN (SELECT entry_id FROM matchmaking_tickets WHERE id=ANY($1)))`, ids)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = tx.Exec(ctx, `WITH changed AS (
+	rows, err := tx.Query(ctx, `WITH changed AS (
  UPDATE parties p SET state=CASE WHEN e.status='matched' THEN 'matched' ELSE 'idle' END,
  last_match_id=CASE WHEN e.status='matched' THEN $2 ELSE p.last_match_id END,
  current_queue_entry_id=NULL,version=version+1,roster_version=roster_version+1,updated_at=now()
  FROM matchmaking_entries e WHERE p.current_queue_entry_id=e.id AND e.status<>'queued'
- AND ($1::bigint[] IS NULL OR e.id IN (SELECT entry_id FROM matchmaking_tickets WHERE id=ANY($1))) RETURNING p.id)
- UPDATE party_members SET ready_version=0 WHERE party_id IN (SELECT id FROM changed)`, ids, matchID)
-	return err
+ AND ($1::bigint[] IS NULL OR e.id IN (SELECT entry_id FROM matchmaking_tickets WHERE id=ANY($1))) RETURNING p.tenant_id,p.id,p.version,p.state),
+ reset AS (UPDATE party_members SET ready_version=0 WHERE party_id IN (SELECT id FROM changed))
+ SELECT c.tenant_id,c.id,c.version,c.state,COALESCE(array_agg(m.player_id) FILTER (WHERE m.player_id IS NOT NULL),'{}')
+ FROM changed c LEFT JOIN party_members m ON m.party_id=c.id GROUP BY c.tenant_id,c.id,c.version,c.state`, ids, matchID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (party.Change, error) {
+		var c party.Change
+		err := row.Scan(&c.TenantID, &c.PartyID, &c.Version, &c.State, &c.Players)
+		return c, err
+	})
 }

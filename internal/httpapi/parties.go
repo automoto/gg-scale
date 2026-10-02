@@ -117,12 +117,22 @@ func registerPartyOperation[I, O any](api huma.API, d Deps, id, method, path, su
 		if d.Pool == nil {
 			return nil, huma.Error503ServiceUnavailable("parties unavailable")
 		}
-		result, err := fn(ctx, party.NewStore(d.Pool), mc, in)
+		result, err := fn(ctx, partyStore(d), mc, in)
 		if err != nil {
 			return nil, partyError(err)
 		}
 		return &partyOutput[O]{Body: result}, nil
 	})
+}
+
+// partyStore sends party events through the hub, which relays them to
+// members on other hosts.
+func partyStore(d Deps) *party.Store {
+	s := party.NewStore(d.Pool)
+	if d.Hub != nil {
+		s = s.WithPusher(d.Hub)
+	}
+	return s
 }
 
 func partySettings(ctx context.Context, d Deps, mc matchmakerContext, req matchmakerTicketRequest) (party.Settings, error) {

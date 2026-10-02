@@ -58,6 +58,7 @@ type Member struct {
 
 // Party is the recoverable current party state.
 type Party struct {
+	TenantID            int64    `json:"-"`
 	ID                  int64    `json:"id"`
 	ProjectID           int64    `json:"project_id"`
 	LeaderID            int64    `json:"leader_id"`
@@ -69,6 +70,10 @@ type Party struct {
 	CurrentQueueEntryID *int64   `json:"current_queue_entry_id,omitempty"`
 	LastMatchID         string   `json:"last_match_id,omitempty"`
 	Members             []Member `json:"members"`
+
+	// loadedVersion is Version when the party was read. save sends an
+	// event only when the write changed the version.
+	loadedVersion int64
 }
 
 func (p *Party) rosterChanged() {

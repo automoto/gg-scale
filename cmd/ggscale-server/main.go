@@ -470,7 +470,10 @@ func run() error {
 	}
 	pluginInfo := pluginInfoFromCloser(ctx, fleetMgr, fleetCloser)
 
-	hub := realtime.NewHub()
+	// The relay carries realtime messages to players whose socket is on
+	// another server host.
+	hub := realtime.NewHub().WithRelay(appPool)
+	go hub.RunRelay(ctx)
 
 	var relayIssuer *relay.Issuer
 	if !cfg.FeatureP2PRelayEnabled {
@@ -543,7 +546,8 @@ func run() error {
 	}
 
 	mmQueue := matchmaker.NewPGQueue(appPool).WithFailureRecorder(metrics).
-		WithMaxUnclaimedFleetAllocations(cfg.MatchmakerMaxUnclaimedFleetAllocs)
+		WithMaxUnclaimedFleetAllocations(cfg.MatchmakerMaxUnclaimedFleetAllocs).
+		WithPartyEvents(hub)
 	workerDone := make(chan struct{})
 	workerCtx, cancelWorker := context.WithCancel(ctx)
 	defer cancelWorker()

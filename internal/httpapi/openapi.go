@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"reflect"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -54,6 +55,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	doc := cfg.OpenAPI
 	enrichVerifyOp(doc)
 	addWebSocketStub(doc)
+	noteSecretKeyOperations(doc)
 	return doc
 }
 
@@ -95,9 +97,19 @@ func addWebSocketStub(doc *huma.OpenAPI) {
 			OperationID: "realtimeWebSocket",
 			Summary:     "Realtime WebSocket channel",
 			Description: "Upgrades to a WebSocket for realtime player events; not a JSON endpoint. " +
-				"Authenticate with the tenant API key and the player session token in headers, or, " +
+				"Authenticate with your Game Project's publishable API key (the key the player logged in " +
+				"with) and the player session token in headers, or, " +
 				"from a browser (which cannot set WebSocket headers), with a one-time ticket from " +
-				"POST /v1/ws/ticket in the ticket query parameter and no headers.",
+				"POST /v1/ws/ticket in the ticket query parameter and no headers.\n\n" +
+				"The server sends JSON text frames of the form {\"type\": ..., \"payload\": {...}}. Events are " +
+				"best effort: a client that misses one recovers the state with the matching GET.\n\n" +
+				"- matchmaker_matched: a ticket matched. Payload: ticket_id, match_id, mode, address, " +
+				"protocol_hint, session_id, join_code, host_player_id, users.\n" +
+				"- presence: a friend changed status. Payload: player_id, status, session_id.\n" +
+				"- game_invite: a friend invited you to a game session. Payload: invite_id, session_id, join_code.\n" +
+				"- party_changed: a party you are in, or were removed from, changed. Payload: party_id, version, " +
+				"state. Call GET /v1/parties/{id} when version is newer than yours; 404 means you are no longer a member.\n" +
+				"- party_invite: a friend invited you to a party. Payload: invite_id, party_id, from_player_id.",
 			Tags:     []string{"Realtime"},
 			Security: append([]map[string][]string{{}}, playerSecurity...),
 			Parameters: []*huma.Param{{
@@ -111,4 +123,34 @@ func addWebSocketStub(doc *huma.OpenAPI) {
 			},
 		},
 	}
+}
+
+// serverOnlyNote starts the description of each operation that refuses a
+// publishable key.
+const serverOnlyNote = "Requires a secret API key: call it from a game server or backend, never from a game client."
+
+// noteSecretKeyOperations starts the description of each operation that
+// accepts only the SecretKey scheme with serverOnlyNote, for readers who skip
+// the security section.
+func noteSecretKeyOperations(doc *huma.OpenAPI) {
+	for _, item := range doc.Paths {
+		for _, op := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Patch} {
+			if op == nil || !secretKeyOnly(op) {
+				continue
+			}
+			op.Description = strings.TrimSpace(serverOnlyNote + " " + op.Description)
+		}
+	}
+}
+
+func secretKeyOnly(op *huma.Operation) bool {
+	if len(op.Security) == 0 {
+		return false
+	}
+	for _, req := range op.Security {
+		if _, ok := req["SecretKey"]; !ok {
+			return false
+		}
+	}
+	return true
 }

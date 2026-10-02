@@ -139,7 +139,7 @@ func registerLeaderboardSubmit(api huma.API, d Deps) {
 			"session, rate limited per player and validated against the board's " +
 			"score bounds.",
 		Tags:          []string{"Leaderboards"},
-		Security:      playerSecurity,
+		Security:      eitherKeyPlayerSecurity,
 		DefaultStatus: http.StatusCreated,
 	}, leaderboardSubmit(d))
 }

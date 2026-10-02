@@ -214,7 +214,7 @@ func gameInviteCreate(d Deps) func(context.Context, *gameInviteCreateInput) (*ga
 				"session_id": in.Body.SessionID,
 				"join_code":  joinCode,
 			})
-			_ = d.Hub.Send(ctx, tenantID, toUserID, realtime.Message{
+			_ = d.Hub.Push(ctx, tenantID, toUserID, realtime.Message{
 				Type:    "game_invite",
 				Payload: json.RawMessage(payload),
 			})

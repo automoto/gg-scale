@@ -108,7 +108,7 @@ func registerServerLeaderboardSubmit(api huma.API, d Deps) {
 		Path:          "/v1/server/leaderboards/{id}/scores",
 		Summary:       "Server-tier: submit a score for a player",
 		Tags:          []string{"Leaderboards"},
-		Security:      apiKeySecurity,
+		Security:      secretKeySecurity,
 		DefaultStatus: http.StatusCreated,
 	}, serverLeaderboardSubmit(d))
 }
@@ -166,7 +166,7 @@ func registerServerStorageRoutes(api huma.API, d Deps) {
 		Path:        "/v1/server/players/{player_id}/storage/objects",
 		Summary:     "Server-tier: list a player's storage objects",
 		Tags:        []string{"Cloud Saves"},
-		Security:    apiKeySecurity,
+		Security:    secretKeySecurity,
 	}, serverStorageList(d))
 
 	huma.Register(api, huma.Operation{
@@ -175,7 +175,7 @@ func registerServerStorageRoutes(api huma.API, d Deps) {
 		Path:         "/v1/server/players/{player_id}/storage/objects/{key}",
 		Summary:      "Server-tier: create or replace a player's storage object",
 		Tags:         []string{"Cloud Saves"},
-		Security:     apiKeySecurity,
+		Security:     secretKeySecurity,
 		MaxBodyBytes: storageBodyReadLimit(d),
 		RequestBody: &huma.RequestBody{
 			Required: true,
@@ -192,7 +192,7 @@ func registerServerStorageRoutes(api huma.API, d Deps) {
 		Path:        "/v1/server/players/{player_id}/storage/objects/{key}",
 		Summary:     "Server-tier: get a player's storage object",
 		Tags:        []string{"Cloud Saves"},
-		Security:    apiKeySecurity,
+		Security:    secretKeySecurity,
 	}, serverStorageGet(d))
 }
 

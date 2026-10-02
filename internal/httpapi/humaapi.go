@@ -17,14 +17,26 @@ import (
 // route while huma keeps the full path in the spec.
 const v1Prefix = "/v1"
 
-// playerSecurity is the security requirement for player-tier operations: a
-// tenant API key AND a player session token, matching the frozen spec's
-// `security: [{ApiKeyAuth: [], PlayerSession: []}]`.
-var playerSecurity = []map[string][]string{{"ApiKeyAuth": {}, "PlayerSession": {}}}
+// playerSecurity is the security requirement for player-tier operations: the
+// publishable key AND a player session token. A secret key also works there;
+// the PublishableKey scheme description says so.
+var playerSecurity = []map[string][]string{{"PublishableKey": {}, "PlayerSession": {}}}
 
-// apiKeySecurity is the requirement for endpoints authenticated by the tenant
-// API key alone (player-anonymous), e.g. the /v1/auth/* routes.
-var apiKeySecurity = []map[string][]string{{"ApiKeyAuth": {}}}
+// apiKeySecurity is the requirement for endpoints authenticated by the
+// publishable key alone (player-anonymous), e.g. the /v1/auth/* routes.
+var apiKeySecurity = []map[string][]string{{"PublishableKey": {}}}
+
+// secretKeySecurity is the requirement for operations that refuse a
+// publishable key: the router group behind tenant.RequireKeyType(secret). TestAPIKeyType_spec_matches_router
+// (integration) checks the spec against the real router.
+var secretKeySecurity = []map[string][]string{{"SecretKey": {}}}
+
+// eitherKeyPlayerSecurity is for score submit: the board decides whether a
+// publishable key may submit.
+var eitherKeyPlayerSecurity = []map[string][]string{
+	{"PublishableKey": {}, "PlayerSession": {}},
+	{"SecretKey": {}, "PlayerSession": {}},
+}
 
 // newHumaConfig builds the shared OpenAPI config. Every group adapter created
 // by groupAPI is constructed from this same value, so its embedded *OpenAPI
@@ -45,8 +57,9 @@ func newHumaConfig(version string) huma.Config {
 	cfg.DocsPath = ""
 	cfg.SchemasPath = ""
 	cfg.Info.Description = "Player-facing and game-server-facing HTTP API for ggscale. " +
-		"Authenticate with a tenant API key (Authorization: Bearer). Player endpoints " +
-		"additionally require a session token in X-Session-Token."
+		"Authenticate with your Game Project's API key (Authorization: Bearer). Game clients " +
+		"use the publishable key; game servers and backends use the secret key. Player " +
+		"endpoints additionally require a session token in X-Session-Token."
 	cfg.Info.Contact = &huma.Contact{
 		Name: "ggscale",
 		URL:  "https://github.com/automoto/gg-scale",
@@ -60,10 +73,17 @@ func newHumaConfig(version string) huma.Config {
 		},
 	}
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
-		"ApiKeyAuth": {
-			Type:        "http",
-			Scheme:      "bearer",
-			Description: "Tenant API key (publishable or secret).",
+		"PublishableKey": {
+			Type:   "http",
+			Scheme: "bearer",
+			Description: "Publishable API key of the Game Project: the key you ship in the game client. " +
+				"A secret key also works on these operations, but a secret key must never ship in a game.",
+		},
+		"SecretKey": {
+			Type:   "http",
+			Scheme: "bearer",
+			Description: "Secret API key of the Game Project. Use it only from a game server or backend. " +
+				"Operations that list only this scheme refuse a publishable key with 403.",
 		},
 		"PlayerSession": {
 			Type:        "apiKey",

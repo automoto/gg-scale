@@ -37,6 +37,7 @@ type PGQueue struct {
 	failures                FailureRecorder
 	notify                  *notifyLimiter
 	maxUnclaimedFleetAllocs int
+	partyEvents             party.Pusher
 }
 
 // defaultMaxUnclaimedFleetAllocs caps the concurrent unclaimed fleet
@@ -80,6 +81,17 @@ type ticketNotifyPayload struct {
 func (q *PGQueue) WithFailureRecorder(r FailureRecorder) *PGQueue {
 	q.failures = r
 	return q
+}
+
+// WithPartyEvents sends party_changed after a commit that changed a party,
+// and lets the party sweep send its events. Returns the queue for chaining.
+func (q *PGQueue) WithPartyEvents(p party.Pusher) *PGQueue {
+	q.partyEvents = p
+	return q
+}
+
+func (q *PGQueue) partyStore() *party.Store {
+	return party.NewStore(q.pool).WithPusher(q.partyEvents)
 }
 
 // recordFailures reports n tickets flipped to 'failed' for the given reason.
@@ -407,14 +419,16 @@ func (q *PGQueue) Cancel(ctx context.Context, id, playerID int64) error {
 		if qerr != nil {
 			return qerr
 		}
-		return settleEntries(ctx, tx, []int64{id}, "")
+		// A party ticket was refused above, so no party changes here.
+		_, err := settleEntries(ctx, tx, []int64{id}, "")
+		return err
 	})
 }
 
 // ListReadyBuckets is privileged: it scans across all tenants for buckets
 // holding unclaimed queued tickets.
 func (q *PGQueue) ListReadyBuckets(ctx context.Context) ([]Bucket, error) {
-	if err := party.NewStore(q.pool).Sweep(ctx); err != nil {
+	if err := q.partyStore().Sweep(ctx); err != nil {
 		slog.ErrorContext(ctx, "party sweep failed", "error", err)
 	}
 	var out []Bucket
@@ -531,13 +545,17 @@ func (q *PGQueue) CommitTickets(ctx context.Context, claim *Claim, ticketIDs []i
 		return 0, err
 	}
 	var n int64
+	var changes []party.Change
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		var err error
-		n, err = commitTicketsTx(ctx, tx, pgUUID, ticketIDs, matchID, matchAddress, matchProtocol)
+		n, changes, err = commitTicketsTx(ctx, tx, pgUUID, ticketIDs, matchID, matchAddress, matchProtocol)
 		return err
 	})
 	if errors.Is(err, ErrShortCommit) {
 		return n, ErrShortCommit
+	}
+	if err == nil {
+		party.PushChanges(ctx, q.partyEvents, changes)
 	}
 	return n, err
 }
@@ -578,6 +596,7 @@ func (q *PGQueue) ReleaseTickets(ctx context.Context, claim *Claim, ticketIDs []
 		return err
 	}
 	var failed int64
+	var changes []party.Change
 	err = q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if err := lockPartyEntries(ctx, tx, ticketIDs); err != nil {
 			return err
@@ -594,11 +613,13 @@ func (q *PGQueue) ReleaseTickets(ctx context.Context, claim *Claim, ticketIDs []
 		if qerr != nil {
 			return qerr
 		}
-		return settleEntries(ctx, tx, ticketIDs, "")
+		changes, qerr = settleEntries(ctx, tx, ticketIDs, "")
+		return qerr
 	})
 	if err != nil {
 		return err
 	}
+	party.PushChanges(ctx, q.partyEvents, changes)
 	q.recordFailures(failureReasonAttemptsExhausted, failed)
 	return nil
 }
@@ -625,6 +646,7 @@ func (q *PGQueue) ReturnUnmatched(ctx context.Context, claim *Claim) error {
 // counter (attempts_exhausted from the cap, expired from the TTL sweep).
 func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64, error) {
 	var n, attemptsFailed, expired int64
+	var changes []party.Change
 	err := q.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if err := lockPartyEntries(ctx, tx, nil); err != nil {
 			return err
@@ -640,11 +662,13 @@ func (q *PGQueue) SweepStaleClaims(ctx context.Context, maxAttempts int) (int64,
 		if qerr != nil {
 			return qerr
 		}
-		return settleEntries(ctx, tx, nil, "")
+		changes, qerr = settleEntries(ctx, tx, nil, "")
+		return qerr
 	})
 	if err != nil {
 		return 0, err
 	}
+	party.PushChanges(ctx, q.partyEvents, changes)
 	q.recordFailures(failureReasonAttemptsExhausted, attemptsFailed)
 	q.recordFailures(failureReasonExpired, expired)
 	return n, nil
@@ -864,12 +888,12 @@ func parseClaimID(s string) (pgtype.UUID, error) {
 	return pgtype.UUID{Bytes: u, Valid: true}, nil
 }
 
-func commitTicketsTx(ctx context.Context, tx pgx.Tx, claimID pgtype.UUID, ids []int64, matchID, address, protocol string) (int64, error) {
+func commitTicketsTx(ctx context.Context, tx pgx.Tx, claimID pgtype.UUID, ids []int64, matchID, address, protocol string) (int64, []party.Change, error) {
 	if err := lockPartyEntries(ctx, tx, ids); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if err := requireWholeEntries(ctx, tx, ids); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	// The presence sweep may not have run since the backend call began.
 	// Check deadlines under the party lock before committing its snapshot.
@@ -880,22 +904,23 @@ func commitTicketsTx(ctx context.Context, tx pgx.Tx, claimID pgtype.UUID, ids []
  WHERE t.id=ANY($1::bigint[]) AND t.party_id IS NOT NULL AND t.status='queued'
  AND (m.player_id IS NULL OR m.disconnect_deadline<=clock_timestamp()))`, ids).Scan(&disconnected)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	if disconnected {
-		return 0, ErrShortCommit
+		return 0, nil, ErrShortCommit
 	}
 	n, err := sqlcgen.New(tx).CommitMatchmakerTickets(ctx, sqlcgen.CommitMatchmakerTicketsParams{MatchID: matchID, MatchAddress: address, MatchProtocol: protocol, ClaimID: claimID, TicketIds: ids})
 	if err != nil {
-		return n, err
+		return n, nil, err
 	}
 	if n == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	if n != int64(len(ids)) {
-		return n, ErrShortCommit
+		return n, nil, ErrShortCommit
 	}
-	return n, settleEntries(ctx, tx, ids, matchID)
+	changes, err := settleEntries(ctx, tx, ids, matchID)
+	return n, changes, err
 }
 
 // CommitMatch persists the result and settles every entry in one transaction.
@@ -908,6 +933,7 @@ func (q *PGQueue) CommitMatch(ctx context.Context, claim *Claim, ids []int64, m 
 		return 0, err
 	}
 	var n int64
+	var changes []party.Change
 	drift := errors.New("claim drifted")
 	err = q.pool.Q(ctx, func(tx pgx.Tx) error {
 		if err := lockPartyEntries(ctx, tx, ids); err != nil {
@@ -917,7 +943,7 @@ func (q *PGQueue) CommitMatch(ctx context.Context, claim *Claim, ids []int64, m 
 			return err
 		}
 		var err error
-		n, err = commitTicketsTx(ctx, tx, claimID, ids, m.ID, m.Address, m.Protocol)
+		n, changes, err = commitTicketsTx(ctx, tx, claimID, ids, m.ID, m.Address, m.Protocol)
 		if err != nil {
 			return err
 		}
@@ -929,6 +955,9 @@ func (q *PGQueue) CommitMatch(ctx context.Context, claim *Claim, ids []int64, m 
 	})
 	if errors.Is(err, drift) {
 		return 0, nil
+	}
+	if err == nil {
+		party.PushChanges(ctx, q.partyEvents, changes)
 	}
 	return n, err
 }

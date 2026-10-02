@@ -13,14 +13,18 @@ import (
 )
 
 // Store serializes all party changes with the party row lock.
-type Store struct{ pool *db.Pool }
+type Store struct {
+	pool   *db.Pool
+	pusher Pusher
+}
 
 // NewStore uses the primary database for recovery and mutations.
 func NewStore(pool *db.Pool) *Store { return &Store{pool: pool} }
 
 func load(ctx context.Context, tx pgx.Tx, project, id int64) (*Party, error) {
 	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT to_jsonb(p) FROM parties p WHERE project_id=$1 AND id=$2 FOR UPDATE`, project, id).Scan(&raw)
+	var tenantID int64
+	err := tx.QueryRow(ctx, `SELECT to_jsonb(p),tenant_id FROM parties p WHERE project_id=$1 AND id=$2 FOR UPDATE`, project, id).Scan(&raw, &tenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -31,6 +35,7 @@ func load(ctx context.Context, tx pgx.Tx, project, id int64) (*Party, error) {
 	if err = json.Unmarshal(raw, &p); err != nil {
 		return nil, err
 	}
+	p.TenantID, p.loadedVersion = tenantID, p.Version
 	err = tx.QueryRow(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(m)||jsonb_build_object('ticket_id',COALESCE((SELECT t.id FROM matchmaking_tickets t WHERE t.party_id=m.party_id AND t.player_id=m.player_id ORDER BY t.created_at DESC,t.id DESC LIMIT 1),0)) ORDER BY joined_at,player_id),'[]') FROM party_members m WHERE party_id=$1`, id).Scan(&raw)
 	if err != nil {
 		return nil, err
@@ -45,7 +50,9 @@ func memberIndex(p *Party, player int64) int {
 	return slices.IndexFunc(p.Members, func(m Member) bool { return m.PlayerID == player })
 }
 
-func save(ctx context.Context, tx pgx.Tx, p *Party) error {
+// save writes the party and its members. When the version changed, it
+// records a Change in w for the members and the members it removed.
+func save(ctx context.Context, tx pgx.Tx, w *writes, p *Party) error {
 	settings, err := json.Marshal(p.Settings)
 	if err != nil {
 		return err
@@ -68,8 +75,19 @@ func save(ctx context.Context, tx pgx.Tx, p *Party) error {
 			return err
 		}
 	}
-	_, err = tx.Exec(ctx, `DELETE FROM party_members WHERE party_id=$1 AND NOT(player_id=ANY($2::bigint[]))`, p.ID, ids)
-	return err
+	rows, err := tx.Query(ctx, `DELETE FROM party_members WHERE party_id=$1 AND NOT(player_id=ANY($2::bigint[])) RETURNING player_id`, p.ID, ids)
+	if err != nil {
+		return err
+	}
+	removed, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return err
+	}
+	if p.Version != p.loadedVersion {
+		w.changes = append(w.changes, Change{TenantID: p.TenantID, PartyID: p.ID, Version: p.Version, State: p.State, Players: append(ids, removed...)})
+		p.loadedVersion = p.Version
+	}
+	return nil
 }
 
 func checkPlayer(ctx context.Context, tx pgx.Tx, project, player int64) error {
@@ -107,7 +125,7 @@ func (s *Store) Create(ctx context.Context, project, player int64, settings Sett
 		settings.Query = "*"
 	}
 	var out *Party
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		if err := checkPlayer(ctx, tx, project, player); err != nil {
 			return err
 		}
@@ -126,7 +144,7 @@ func (s *Store) Create(ctx context.Context, project, player int64, settings Sett
 		}
 		now := time.Now().UTC()
 		out.Members = []Member{{PlayerID: player, JoinedAt: now, LastSeenAt: now, DisconnectDeadline: now.Add(30 * time.Second)}}
-		return save(ctx, tx, out)
+		return save(ctx, tx, w, out)
 	})
 	return out, err
 }
@@ -158,7 +176,7 @@ func (s *Store) Get(ctx context.Context, project, id, player int64) (*Party, err
 
 func (s *Store) mutate(ctx context.Context, project, id, player, version int64, leader bool, fn func(pgx.Tx, *Party) error) (*Party, error) {
 	var out *Party
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		var err error
 		out, err = load(ctx, tx, project, id)
 		if err != nil {
@@ -176,7 +194,7 @@ func (s *Store) mutate(ctx context.Context, project, id, player, version int64, 
 		if err = fn(tx, out); err != nil {
 			return err
 		}
-		return save(ctx, tx, out)
+		return save(ctx, tx, w, out)
 	})
 	if webutil.IsUniqueViolation(err) {
 		err = ErrMembership
