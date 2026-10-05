@@ -3258,6 +3258,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 					<label><input type="radio" name="preset" value="read_only" checked/> Read only</label>
 					if len(vm.GrantableScopes) > 0 {
 						<label><input type="radio" name="preset" value="read_write"/> Read and write (all scopes below)</label>
+						<label><input type="radio" name="preset" value="custom"/> Custom (only the scopes checked below)</label>
 					}
 				</fieldset>
 				if len(vm.GrantableScopes) > 0 {
