@@ -25,3 +25,9 @@ func TestGraceLabel_renders_configured_duration_without_truncation(t *testing.T)
 		})
 	}
 }
+
+func TestPurgeTimeLabel_should_show_time_in_utc(t *testing.T) {
+	at := time.Date(2026, 10, 5, 14, 30, 0, 0, time.FixedZone("EST", -5*3600))
+
+	assert.Equal(t, "2026-10-05 19:30 UTC", purgeTimeLabel(at))
+}

@@ -13,13 +13,24 @@ WHERE p.id = sqlc.arg(id)
 
 -- name: GetPublicPlayerByFriendCode :one
 -- Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+-- Disabled (including pending-delete) players and a block in either direction
+-- with the caller look the same as an unknown code.
 SELECT p.id, a.display_name, p.created_at
 FROM project_players p
 LEFT JOIN player_accounts a ON a.id = p.player_account_id
 WHERE p.friend_code = sqlc.arg(friend_code)
   AND p.project_id = sqlc.arg(project_id)
   AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND p.deleted_at IS NULL;
+  AND p.deleted_at IS NULL
+  AND p.disabled_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM project_players me
+      JOIN friend_edges e
+        ON (e.from_account_id = me.player_account_id AND e.to_account_id = p.player_account_id)
+        OR (e.from_account_id = p.player_account_id AND e.to_account_id = me.player_account_id)
+      WHERE me.id = sqlc.arg(caller_id) AND e.status = 'blocked'
+  );
 
 -- name: SetPlayerFriendCodeIfAbsent :execrows
 -- Lazy first-read initialization: 0 rows means a concurrent reader won the

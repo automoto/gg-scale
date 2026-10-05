@@ -202,6 +202,14 @@ func TestCreateAPIKey_should_refuse_scope_above_feature_grants(t *testing.T) {
 	assert.Contains(t, resultText(res), "scope cannot be granted")
 }
 
+func TestCreateAPIKey_scope_error_should_not_name_go_package(t *testing.T) {
+	f := newFixture(t)
+
+	res := f.call(f.scopedToken("keys:create"), "create_api_key", map[string]any{"label": "x", "scopes": []string{"p2p_relay"}})
+
+	assert.NotContains(t, resultText(res), "projectadmin")
+}
+
 func TestCreateAPIKey_should_refuse_at_the_key_limit(t *testing.T) {
 	f := newFixture(t)
 	tok := f.scopedToken("keys:create")

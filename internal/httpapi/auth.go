@@ -172,7 +172,8 @@ func registerAuthPasswordRoutes(api huma.API, d Deps) {
 		Description: "Re-authenticates with credentials because the delete request " +
 			"revoked every session. Clears the pending deletion and re-enables " +
 			"sign-in. 404 covers unknown email, wrong password, and no pending " +
-			"deletion alike.",
+			"deletion alike. 403 means the project's team requested the " +
+			"deletion; only they can cancel it.",
 		Tags:          []string{"Authentication"},
 		Security:      apiKeySecurity,
 		DefaultStatus: http.StatusNoContent,
@@ -940,6 +941,7 @@ var (
 	errSessionRevoked           = errors.New("auth: session revoked or expired")
 	errPlayerBanned             = errors.New("auth: player banned in tenant")
 	errEmailUnverified          = errors.New("auth: email not verified")
+	errAdminDeleteRequest       = errors.New("auth: deletion requested by admin")
 	errCustomTokenNotConfigured = errors.New("auth: custom token public key not set")
 	errCustomTokenInvalid       = errors.New("auth: custom token invalid")
 	errVerifyBadCode            = errors.New("auth: bad verification code")

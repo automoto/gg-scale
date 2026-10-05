@@ -141,6 +141,85 @@ func TestFriendCode_unknown_code_is_404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
 }
 
+func TestFriends_list_should_show_email_only_for_accepted_friends(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fc")
+	srv := newServerForCluster(t, c)
+	tokA, idA := anonymousLoginWithID(t, srv.URL, "fc")
+	tokB, idB := anonymousLoginWithID(t, srv.URL, "fc")
+	linkPlayerAccount(t, c, idA)
+	linkPlayerAccount(t, c, idB)
+	emailB := fmt.Sprintf("linked-%d@example.com", idB)
+	resp, body := authedReq(t, http.MethodPost, fmt.Sprintf("%s/v1/friends/%d/request", srv.URL, idB), "fc", tokA, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	t.Run("should_hide_email_of_pending_target", func(t *testing.T) {
+		_, body := authedReq(t, http.MethodGet, srv.URL+"/v1/friends?status=pending", "fc", tokA, nil)
+		require.Contains(t, string(body), `"status":"pending"`)
+		assert.NotContains(t, string(body), emailB)
+	})
+	t.Run("should_show_email_once_accepted", func(t *testing.T) {
+		resp, body := authedReq(t, http.MethodPost, fmt.Sprintf("%s/v1/friends/%d/accept", srv.URL, idA), "fc", tokB, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		_, body = authedReq(t, http.MethodGet, srv.URL+"/v1/friends", "fc", tokA, nil)
+		assert.Contains(t, string(body), emailB)
+	})
+}
+
+func TestFriendCode_hidden_target_is_404(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fc")
+	srv := newServerForCluster(t, c)
+	tokCaller, idCaller := anonymousLoginWithID(t, srv.URL, "fc")
+	linkPlayerAccount(t, c, idCaller)
+
+	cases := []struct {
+		name string
+		hide func(t *testing.T, tok string, id int64)
+	}{
+		{"disabled", func(t *testing.T, _ string, id int64) {
+			_, err := c.bootstrapPool.Exec(context.Background(),
+				`UPDATE project_players SET disabled_at = now() WHERE id = $1`, id)
+			require.NoError(t, err)
+		}},
+		{"delete_requested", func(t *testing.T, _ string, id int64) {
+			_, err := c.bootstrapPool.Exec(context.Background(),
+				`UPDATE project_players SET delete_requested_at = now(), disabled_at = now() WHERE id = $1`, id)
+			require.NoError(t, err)
+		}},
+		{"target_blocked_caller", func(t *testing.T, tok string, _ int64) {
+			resp, body := authedReq(t, http.MethodPost,
+				fmt.Sprintf("%s/v1/friends/%d/block", srv.URL, idCaller), "fc", tok, nil)
+			require.Less(t, resp.StatusCode, http.StatusMultipleChoices, string(body))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tok, id := anonymousLoginWithID(t, srv.URL, "fc")
+			linkPlayerAccount(t, c, id)
+			code := getFriendCode(t, srv.URL, "fc", tok)
+			tc.hide(t, tok, id)
+
+			resp, body := resolveFriendCode(t, srv.URL, "fc", tokCaller, code)
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+		})
+	}
+}
+
+func TestFriendCode_malformed_code_is_404(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fc")
+	srv := newServerForCluster(t, c)
+	tok, _ := anonymousLoginWithID(t, srv.URL, "fc")
+
+	for _, code := range []string{"%00", "AB%00CD", "AAAA222", "%C3%A9AAA2222"} {
+		t.Run(code, func(t *testing.T) {
+			resp, body := resolveFriendCode(t, srv.URL, "fc", tok, code)
+			assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+		})
+	}
+}
+
 func TestFriendCode_cross_project_code_is_404(t *testing.T) {
 	c := startCluster(t)
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fc")

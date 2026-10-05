@@ -33,6 +33,7 @@ import (
 	"github.com/automoto/gg-scale/internal/mcp"
 	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/players"
 	"github.com/automoto/gg-scale/internal/projectadmin"
@@ -60,8 +61,11 @@ type Deps struct {
 	// PartyEnqueueEnabled lets party leaders queue and rematch. When false,
 	// both return 503 party_enqueue_disabled.
 	PartyEnqueueEnabled bool
-	Version             string
-	Commit              string
+	// PartyCodeLimits bound wrong party-code guesses. Zero fields use
+	// party.DefaultCodeLimits.
+	PartyCodeLimits party.CodeLimits
+	Version         string
+	Commit          string
 
 	// RequestTimeout bounds non-streaming requests; 0 disables the deadline
 	// middleware (used by unit-test fixtures). WebSocket paths are exempt.
@@ -183,6 +187,10 @@ type Deps struct {
 	MCPEnabled            bool
 	MCPTokenRatePerSecond float64
 	MCPTokenBurst         float64
+	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
+	// for failed /mcp authentications. Zero uses the mcp package default.
+	MCPAuthFailuresPerMinute float64
+	MCPAuthFailureBurst      float64
 	// MCPMaxProjectAPIKeys limits the create_api_key tool.
 	MCPMaxProjectAPIKeys int64
 	// CORSMaxProjectOrigins limits the set_allowed_origins tool.
@@ -325,20 +333,22 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 			}
 			r.Handle("/mcp", mcp.New(mcp.Deps{
-				Pool:               d.Pool,
-				RBAC:               d.RBAC,
-				Limiter:            d.Limiter,
-				ProxyTrust:         d.ProxyTrust,
-				Version:            d.Version,
-				TokenRatePerSecond: d.MCPTokenRatePerSecond,
-				TokenBurst:         d.MCPTokenBurst,
-				FleetEnabled:       d.ControlPanel.FleetEnabled,
-				RelayEnabled:       d.ControlPanel.RelayEnabled,
-				RelayConfigured:    d.RelayIssuer != nil,
-				CORSAllowedOrigins: d.CORSAllowedOrigins,
-				MaxProjectAPIKeys:  d.MCPMaxProjectAPIKeys,
-				MaxProjectOrigins:  d.CORSMaxProjectOrigins,
-				Now:                d.Now,
+				Pool:                  d.Pool,
+				RBAC:                  d.RBAC,
+				Limiter:               d.Limiter,
+				ProxyTrust:            d.ProxyTrust,
+				Version:               d.Version,
+				TokenRatePerSecond:    d.MCPTokenRatePerSecond,
+				TokenBurst:            d.MCPTokenBurst,
+				AuthFailuresPerMinute: d.MCPAuthFailuresPerMinute,
+				AuthFailureBurst:      d.MCPAuthFailureBurst,
+				FleetEnabled:          d.ControlPanel.FleetEnabled,
+				RelayEnabled:          d.ControlPanel.RelayEnabled,
+				RelayConfigured:       d.RelayIssuer != nil,
+				CORSAllowedOrigins:    d.CORSAllowedOrigins,
+				MaxProjectAPIKeys:     d.MCPMaxProjectAPIKeys,
+				MaxProjectOrigins:     d.CORSMaxProjectOrigins,
+				Now:                   d.Now,
 			}))
 		})
 	}

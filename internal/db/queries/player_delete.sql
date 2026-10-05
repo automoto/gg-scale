@@ -22,14 +22,16 @@ RETURNING delete_requested_at;
 -- name: CancelPlayerDeleteByAccount :execrows
 -- Clears the pending request; lifts the disable only when the request created
 -- it (disabled_at = delete_requested_at), so a pre-existing admin suspension
--- survives the cancel. 0 rows = no pending request (or already purged).
+-- survives the cancel. An admin's request is not the player's to cancel.
+-- 0 rows = no pending player request (or already purged).
 UPDATE project_players
 SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
     delete_requested_at = NULL
 WHERE id = sqlc.arg(id)
   AND player_account_id = sqlc.arg(player_account_id)
   AND deleted_at IS NULL
-  AND delete_requested_at IS NOT NULL;
+  AND delete_requested_at IS NOT NULL
+  AND NOT delete_requested_by_admin;
 
 -- name: GetPlayerDeleteRequestedByAccount :one
 -- Race repair for the idempotent portal request: when the guarded UPDATE

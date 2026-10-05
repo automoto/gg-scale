@@ -943,7 +943,7 @@ templ HelpPage(vm HelpView) {
 				<dt>Tenant admin</dt>
 				<dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd>
 				<dt>Tenant member</dt>
-				<dd>Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</dd>
+				<dd>Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.</dd>
 				<dt>Tenant owner</dt>
 				<dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd>
 			</dl>
@@ -1287,7 +1287,7 @@ templ InviteTeamPage(vm InviteTeamView) {
 					@fieldError(vm.FieldErrors, "role")
 					<small id="role-help">
 						Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.
-						Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.
+						Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.
 					</small>
 				</label>
 				<div class="form-actions">
@@ -3258,6 +3258,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 					<label><input type="radio" name="preset" value="read_only" checked/> Read only</label>
 					if len(vm.GrantableScopes) > 0 {
 						<label><input type="radio" name="preset" value="read_write"/> Read and write (all scopes below)</label>
+						<label><input type="radio" name="preset" value="custom"/> Custom (only the scopes checked below)</label>
 					}
 				</fieldset>
 				if len(vm.GrantableScopes) > 0 {

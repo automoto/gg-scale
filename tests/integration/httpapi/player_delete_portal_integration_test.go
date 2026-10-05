@@ -113,6 +113,47 @@ func TestPlayerPortalDelete_request_and_cancel_round_trip(t *testing.T) {
 	assert.Equal(t, http.StatusSeeOther, status)
 }
 
+func TestPlayerPortalDelete_admin_requested_cannot_be_cancelled(t *testing.T) {
+	c := startCluster(t)
+	ctx := context.Background()
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	srv, rec := newControlPanelAndPlayerServerWithLimiter(t, c, controlpanel.Config{
+		Mount:    true,
+		BaseURL:  "http://app.example.test",
+		MailFrom: "no-reply@example.test",
+	}, branchAllowAllLimiter{})
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+
+	link := sendPlayerInvite(t, srv, rec, cookie, csrf, tenantID, projectID, "admindel@example.com")
+	acceptPlayerInvite(t, srv, link, "accountpass1")
+	var playerID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT id FROM project_players WHERE email = 'admindel@example.com'`).Scan(&playerID))
+	account := playerAccountClient(t, srv.URL, "admindel@example.com", "accountpass1")
+	_, home := getPage(t, account, srv.URL+"/v1/players/account/")
+	accountCSRF := extractCSRFFromForm(t, home)
+	_, err := c.bootstrapPool.Exec(ctx,
+		`UPDATE project_players
+		    SET delete_requested_at = now(), disabled_at = now(), delete_requested_by_admin = true
+		  WHERE id = $1`, playerID)
+	require.NoError(t, err)
+	cancelPath := "/v1/players/account/projects/" + strconv.FormatInt(playerID, 10) + "/delete/cancel"
+
+	t.Run("should_not_offer_cancel", func(t *testing.T) {
+		_, home := getPage(t, account, srv.URL+"/v1/players/account/")
+		assert.NotContains(t, home, cancelPath)
+	})
+	t.Run("should_keep_request_on_forged_cancel", func(t *testing.T) {
+		postAccountForm(t, account, srv.URL+cancelPath, map[string][]string{"_csrf": {accountCSRF}})
+		var pending bool
+		require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+			`SELECT delete_requested_at IS NOT NULL FROM project_players WHERE id = $1`, playerID).Scan(&pending))
+		assert.True(t, pending)
+	})
+}
+
 func TestPlayerPortalDelete_preserves_prior_admin_suspension(t *testing.T) {
 	c := startCluster(t)
 	ctx := context.Background()

@@ -49,7 +49,8 @@ type Querier interface {
 	CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
-	// survives the cancel. 0 rows = no pending request (or already purged).
+	// survives the cancel. An admin's request is not the player's to cancel.
+	// 0 rows = no pending player request (or already purged).
 	CancelPlayerDeleteByAccount(ctx context.Context, arg CancelPlayerDeleteByAccountParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
@@ -58,7 +59,8 @@ type Querier interface {
 	CancelPlayerDeleteInProject(ctx context.Context, arg CancelPlayerDeleteInProjectParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a suspension that predates the
-	// request survives the cancel. 0 rows = no pending request (or purged).
+	// request survives the cancel. An admin's request is not the player's to
+	// cancel. 0 rows = no pending player request (or purged).
 	CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error)
 	// Bound the player count without splitting entries. The oldest entry can
 	// exceed a small budget so it is never starved. Their tickets
@@ -72,6 +74,13 @@ type Querier interface {
 	// Poll/realtime delivery claims only live matches. The expiry guard prevents a
 	// late poll from reviving an allocation after the GC lease has elapsed.
 	ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
+	// Race-safe half of find-or-create for a proven email (the caller re-reads
+	// after this, so a concurrent creator's row is picked up); ON CONFLICT never
+	// aborts the surrounding transaction. An unverified row is claimed: whoever
+	// created it never proved the email, so the proven owner's password replaces
+	// theirs and the row's pending code and display name are cleared. A verified
+	// row is left alone.
+	ClaimVerifiedPlayerAccount(ctx context.Context, arg ClaimVerifiedPlayerAccountParams) error
 	ClearControlPanelVerificationCode(ctx context.Context, id int64) error
 	// Runs when a confirm attempt arrives after the lockout expired: the lockout
 	// window is over, so the lifetime budget restarts with it.
@@ -329,6 +338,7 @@ type Querier interface {
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
 	FindAccountIDsByDisplayName(ctx context.Context, displayName *string) ([]FindAccountIDsByDisplayNameRow, error)
+	FindVerifiedAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier + key_type + optional realtime
 	// connection envelope. Resolving them in one authoritative query prevents a
@@ -512,6 +522,8 @@ type Querier interface {
 	// account email.
 	GetPublicPlayer(ctx context.Context, arg GetPublicPlayerParams) (GetPublicPlayerRow, error)
 	// Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+	// Disabled (including pending-delete) players and a block in either direction
+	// with the caller look the same as an unknown code.
 	GetPublicPlayerByFriendCode(ctx context.Context, arg GetPublicPlayerByFriendCodeParams) (GetPublicPlayerByFriendCodeRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
 	// The player's current queued ticket in the project, if any. Used to surface
@@ -586,10 +598,6 @@ type Querier interface {
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
 	InsertSettingsRevision(ctx context.Context, arg InsertSettingsRevisionParams) error
-	// Race-safe half of find-or-create for a proven email (the caller re-reads
-	// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
-	// NOTHING never aborts the surrounding transaction.
-	InsertVerifiedPlayerAccountIfAbsent(ctx context.Context, arg InsertVerifiedPlayerAccountIfAbsentParams) error
 	// Burns every outstanding reset link for the user. Run in the same
 	// transaction as any password change so an older emailed link cannot reset
 	// the password again afterwards.
@@ -885,7 +893,8 @@ type Querier interface {
 	RequestPlayerDeleteByAccount(ctx context.Context, arg RequestPlayerDeleteByAccountParams) (pgtype.Timestamptz, error)
 	// Admin-side delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same
-	// now() so cancel can tell the two apart. 0 rows = gone or already pending.
+	// now() so cancel can tell the two apart. Marks the request as the admin's,
+	// so the player cannot cancel it. 0 rows = gone or already pending.
 	RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error)
 	// Self-service delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same

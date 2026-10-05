@@ -16,10 +16,41 @@ import (
 type Store struct {
 	pool   *db.Pool
 	pusher Pusher
+	limits CodeLimits
 }
 
+// CodeLimits bound wrong party-code guesses. A source IP gets IPFailures per
+// project and a player gets PlayerFailures within Cooldown before both are
+// blocked for Cooldown.
+type CodeLimits struct {
+	IPFailures     int
+	PlayerFailures int
+	Cooldown       time.Duration
+}
+
+// DefaultCodeLimits apply when no limits are configured.
+var DefaultCodeLimits = CodeLimits{IPFailures: 100, PlayerFailures: 10, Cooldown: 15 * time.Minute}
+
 // NewStore uses the primary database for recovery and mutations.
-func NewStore(pool *db.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *db.Pool) *Store { return &Store{pool: pool, limits: DefaultCodeLimits} }
+
+// WithCodeLimits replaces the party-code failure limits. A zero or negative
+// field keeps its default.
+func (s *Store) WithCodeLimits(l CodeLimits) *Store {
+	if l.IPFailures > 0 {
+		s.limits.IPFailures = l.IPFailures
+	}
+	if l.PlayerFailures > 0 {
+		s.limits.PlayerFailures = l.PlayerFailures
+	}
+	if l.Cooldown >= time.Second {
+		s.limits.Cooldown = l.Cooldown
+	}
+	return s
+}
+
+// CodeCooldown is how long a blocked code redeemer waits.
+func (s *Store) CodeCooldown() time.Duration { return s.limits.Cooldown }
 
 func load(ctx context.Context, tx pgx.Tx, project, id int64) (*Party, error) {
 	var raw []byte

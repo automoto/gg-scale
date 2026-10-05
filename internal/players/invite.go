@@ -96,9 +96,10 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			return errInviteExpired
 		}
 
-		// Resolve or create the invitee's global account. The invited email is
-		// the account email; the magic link proves ownership of it.
-		acc, aerr := q.FindAccountIDByEmail(r.Context(), row.Email)
+		// Resolve, create or claim the invitee's global account. The invited
+		// email is the account email; the magic link proves ownership of it,
+		// so an unverified row (never proven) is claimed with the new password.
+		acc, aerr := q.FindVerifiedAccountIDByEmail(r.Context(), row.Email)
 		switch {
 		case aerr == nil:
 			accountID = acc
@@ -110,10 +111,13 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 			if herr != nil {
 				return herr
 			}
-			accountID, aerr = q.CreateVerifiedPlayerAccount(r.Context(), sqlcgen.CreateVerifiedPlayerAccountParams{
+			if cerr := q.ClaimVerifiedPlayerAccount(r.Context(), sqlcgen.ClaimVerifiedPlayerAccountParams{
 				Email:        row.Email,
 				PasswordHash: hash,
-			})
+			}); cerr != nil {
+				return cerr
+			}
+			accountID, aerr = q.FindAccountIDByEmail(r.Context(), row.Email)
 			if aerr != nil {
 				return aerr
 			}
@@ -313,8 +317,8 @@ func (h *Handler) lookupPlayerInvite(ctx context.Context, projectID int64, code 
 		out.ProjectID = projectID
 		out.Email = row.Email
 		out.ProjectName = row.ProjectName
-		// A password field is only needed when no account exists yet.
-		if _, aerr := q.FindAccountIDByEmail(ctx, row.Email); errors.Is(aerr, pgx.ErrNoRows) {
+		// A password field is only needed when no verified account exists yet.
+		if _, aerr := q.FindVerifiedAccountIDByEmail(ctx, row.Email); errors.Is(aerr, pgx.ErrNoRows) {
 			out.NewAccount = true
 		} else if aerr != nil {
 			return aerr

@@ -236,10 +236,12 @@ func authLinkSteam(d Deps) func(context.Context, *linkSteamInput) (*struct{}, er
 }
 
 // attachVerifiedAccount links a just-verified player to the global account
-// layer: find-or-create the player_accounts row for the proven email, then
-// bind it. Runs inside the verify transaction. When the bind's own guards
-// refuse (the row is already linked to a different account), verification
-// still succeeds — the guards exist to protect that older link.
+// layer: create or claim the player_accounts row for the proven email, then
+// bind it. An unverified row is claimed with the player's password, so a
+// portal signup that never proved the email cannot keep the account. Runs
+// inside the verify transaction. When the bind's own guards refuse (the row
+// is already linked to a different account), verification still succeeds —
+// the guards exist to protect that older link.
 func attachVerifiedAccount(ctx context.Context, q *sqlcgen.Queries, projectID, playerID int64, email string) error {
 	acc, err := q.GetPlayerLinkedAccountID(ctx, playerID)
 	if err != nil {
@@ -248,21 +250,16 @@ func attachVerifiedAccount(ctx context.Context, q *sqlcgen.Queries, projectID, p
 	if acc.Valid {
 		return nil
 	}
-	accID, err := q.FindAccountIDByEmail(ctx, email)
-	if errors.Is(err, pgx.ErrNoRows) {
-		row, gerr := q.GetPlayerByEmail(ctx, sqlcgen.GetPlayerByEmailParams{ProjectID: projectID, Email: &email})
-		if gerr != nil {
-			return gerr
-		}
-		// Two-step find-or-create: the DO NOTHING insert never aborts the
-		// transaction, and the re-read picks up a concurrent creator's row.
-		if err := q.InsertVerifiedPlayerAccountIfAbsent(ctx, sqlcgen.InsertVerifiedPlayerAccountIfAbsentParams{
-			Email: email, PasswordHash: row.PasswordHash,
-		}); err != nil {
-			return err
-		}
-		accID, err = q.FindAccountIDByEmail(ctx, email)
+	row, err := q.GetPlayerByEmail(ctx, sqlcgen.GetPlayerByEmailParams{ProjectID: projectID, Email: &email})
+	if err != nil {
+		return err
 	}
+	if err := q.ClaimVerifiedPlayerAccount(ctx, sqlcgen.ClaimVerifiedPlayerAccountParams{
+		Email: email, PasswordHash: row.PasswordHash,
+	}); err != nil {
+		return err
+	}
+	accID, err := q.FindAccountIDByEmail(ctx, email)
 	if err != nil {
 		return err
 	}

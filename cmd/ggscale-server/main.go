@@ -46,6 +46,7 @@ import (
 	"github.com/automoto/gg-scale/internal/middleware"
 	migraterunner "github.com/automoto/gg-scale/internal/migrate"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/players"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
@@ -618,10 +619,15 @@ func run() error {
 		Matchmaker:            mmQueue,
 		MatchmakerTicketTTL:   cfg.MatchmakerTicketTTL,
 		PartyEnqueueEnabled:   cfg.PartyEnqueueEnabled,
-		GameSessions:          gameSessions,
-		ServerList:            serverListRegistry,
-		RelayIssuer:           relayIssuer,
-		RelayMeter:            relaymeter.New(appPool, m, cfg.MailFrom),
+		PartyCodeLimits: party.CodeLimits{
+			IPFailures:     cfg.PartyCodeIPMaxFailures,
+			PlayerFailures: cfg.PartyCodePlayerMaxFailures,
+			Cooldown:       cfg.PartyCodeCooldown,
+		},
+		GameSessions: gameSessions,
+		ServerList:   serverListRegistry,
+		RelayIssuer:  relayIssuer,
+		RelayMeter:   relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
 			CookieSecure:           cfg.ControlPanelCookieSecure,
@@ -672,17 +678,19 @@ func run() error {
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/players/account/sso",
 				cfg.PlayerSSOGoogleClientID, cfg.PlayerSSOGoogleClientSecret),
 		},
-		ControlPanelBootstrap:  controlPanelBootstrap,
-		ControlPanelPluginInfo: pluginInfo,
-		CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
-		MetricsAuthToken:       cfg.MetricsAuthToken,
-		EntitlementAPIToken:    entitlementToken,
-		MCPEnabled:             cfg.FeatureMCPEnabled,
-		MCPTokenRatePerSecond:  float64(cfg.MCPTokenRatePerSecond),
-		MCPTokenBurst:          float64(cfg.MCPTokenRateBurst),
-		MCPMaxProjectAPIKeys:   int64(cfg.MCPMaxProjectAPIKeys),
-		CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
-		BillingHandoffKey:      billingHandoffKey,
+		ControlPanelBootstrap:    controlPanelBootstrap,
+		ControlPanelPluginInfo:   pluginInfo,
+		CORSAllowedOrigins:       cfg.CORSAllowedOrigins,
+		MetricsAuthToken:         cfg.MetricsAuthToken,
+		EntitlementAPIToken:      entitlementToken,
+		MCPEnabled:               cfg.FeatureMCPEnabled,
+		MCPTokenRatePerSecond:    float64(cfg.MCPTokenRatePerSecond),
+		MCPTokenBurst:            float64(cfg.MCPTokenRateBurst),
+		MCPAuthFailuresPerMinute: float64(cfg.MCPAuthFailuresPerMinute),
+		MCPAuthFailureBurst:      float64(cfg.MCPAuthFailureBurst),
+		MCPMaxProjectAPIKeys:     int64(cfg.MCPMaxProjectAPIKeys),
+		CORSMaxProjectOrigins:    cfg.CORSMaxProjectOrigins,
+		BillingHandoffKey:        billingHandoffKey,
 	})
 
 	srv := &http.Server{

@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // v1Prefix is the path every /v1 operation carries in the OpenAPI document.
@@ -158,8 +160,13 @@ func groupAPI(r chi.Router, cfg huma.Config) huma.API {
 
 // serverError logs err (so an operator can locate the fault) and returns a
 // generic problem+json 500 that leaks no internals — the huma equivalent of
-// webutil.InternalError.
+// webutil.InternalError. Postgres rejects a NUL byte in a text value with
+// SQLSTATE 22021; that is always client input, so it is a 400 instead.
 func serverError(ctx context.Context, msg string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22021" {
+		return huma.Error400BadRequest("request contains invalid characters")
+	}
 	slog.ErrorContext(ctx, msg, "error", err)
 	return huma.Error500InternalServerError("internal error")
 }

@@ -33,6 +33,7 @@ const (
 	mcpTokenExpiryWarning = 7 * 24 * time.Hour
 	mcpTokenLabelMax      = 64
 	presetReadWrite       = "read_write"
+	presetCustom          = "custom"
 )
 
 var errMCPTokenLimit = errors.New("control panel: MCP token limit reached")
@@ -219,8 +220,14 @@ func (h *Handler) mcpTokenCreateHandler(w http.ResponseWriter, r *http.Request) 
 			scopes = append(scopes, s)
 		}
 	}
-	if r.Form.Get("preset") == presetReadWrite {
+	// Only the custom preset uses the checked scopes. Any other value,
+	// "read_only" included, gives a token with no write scopes.
+	switch r.Form.Get("preset") {
+	case presetReadWrite:
 		scopes = grantable
+	case presetCustom:
+	default:
+		scopes = []string{}
 	}
 
 	label := strings.TrimSpace(r.Form.Get("label"))

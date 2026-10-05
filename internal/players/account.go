@@ -1067,7 +1067,7 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 	var out []LinkedProject
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		rows, qerr := tx.Query(ctx,
-			`SELECT player_id, tenant_id, project_id, project_name, external_id, delete_requested_at
+			`SELECT player_id, tenant_id, project_id, project_name, external_id, delete_requested_at, delete_requested_by_admin
 			 FROM player_account_linked_projects($1)`, toPgUUID(accountID))
 		if qerr != nil {
 			return qerr
@@ -1076,7 +1076,7 @@ func (h *Handler) listAccountLinkedProjects(ctx context.Context, accountID uuid.
 		for rows.Next() {
 			var lp LinkedProject
 			var requestedAt pgtype.Timestamptz
-			if scanErr := rows.Scan(&lp.PlayerID, &lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID, &requestedAt); scanErr != nil {
+			if scanErr := rows.Scan(&lp.PlayerID, &lp.TenantID, &lp.ProjectID, &lp.ProjectName, &lp.ExternalID, &requestedAt, &lp.DeleteRequestedByAdmin); scanErr != nil {
 				return scanErr
 			}
 			if requestedAt.Valid {
@@ -1099,6 +1099,12 @@ func (h *Handler) deleteGrace() time.Duration {
 		return h.cfg.DeleteGracePeriod
 	}
 	return defaultDeleteGracePeriod
+}
+
+// purgeTimeLabel shows when a deletion runs. A date alone misleads when the
+// grace period is shorter than a day; UTC keeps the time unambiguous.
+func purgeTimeLabel(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04") + " UTC"
 }
 
 // graceLabel renders the grace period on the confirmation page without
@@ -1266,7 +1272,7 @@ func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	flash := "Deletion of your " + lp.ProjectName + " data is scheduled. You can cancel until the purge runs."
 	if !purgeAt.IsZero() {
-		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeAt.Format("2006-01-02") +
+		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeTimeLabel(purgeAt) +
 			". You can cancel until then."
 	}
 	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
@@ -1293,7 +1299,10 @@ func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	flash := "Deletion cancelled. Your " + lp.ProjectName + " data is kept."
-	if !cancelled {
+	switch {
+	case lp.DeleteRequestedByAdmin:
+		flash = "The " + lp.ProjectName + " team requested this deletion. Contact them to cancel it."
+	case !cancelled:
 		// The purge won the race, or the request was already cancelled.
 		flash = "No pending deletion for " + lp.ProjectName + "."
 	}

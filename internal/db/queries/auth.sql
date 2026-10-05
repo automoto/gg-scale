@@ -351,7 +351,7 @@ RETURNING delete_requested_at;
 -- Credential lookup for the pre-session delete-cancel endpoint: the request
 -- revoked every session and login filters disabled players, so cancel
 -- re-authenticates with email + password against the pending row directly.
-SELECT id, project_id, password_hash, delete_requested_at
+SELECT id, project_id, password_hash, delete_requested_at, delete_requested_by_admin
 FROM project_players
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
@@ -362,11 +362,13 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 -- name: CancelPlayerDeleteSelf :execrows
 -- Clears the pending request; lifts the disable only when the request created
 -- it (disabled_at = delete_requested_at), so a suspension that predates the
--- request survives the cancel. 0 rows = no pending request (or purged).
+-- request survives the cancel. An admin's request is not the player's to
+-- cancel. 0 rows = no pending player request (or purged).
 UPDATE project_players
 SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
     delete_requested_at = NULL
 WHERE id = sqlc.arg(id)
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
-  AND delete_requested_at IS NOT NULL;
+  AND delete_requested_at IS NOT NULL
+  AND NOT delete_requested_by_admin;

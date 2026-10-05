@@ -45,13 +45,17 @@ func TestControlPanelPlayerDelete_admin_request_and_cancel(t *testing.T) {
 	resp := postForm(t, noRedirectClient(), base+"/request-delete", url.Values{"_csrf": {csrf}}, cookie)
 	resp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	flash, err := url.QueryUnescape(resp.Header.Get("Location"))
+	require.NoError(t, err)
+	assert.Contains(t, flash, " UTC.", "the flash shows the purge time, not only the date")
 
-	var disabledMatches, pending bool
+	var disabledMatches, pending, byAdmin bool
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
-		`SELECT disabled_at = delete_requested_at, delete_requested_at IS NOT NULL
-		 FROM project_players WHERE id = $1`, playerID).Scan(&disabledMatches, &pending))
+		`SELECT disabled_at = delete_requested_at, delete_requested_at IS NOT NULL, delete_requested_by_admin
+		 FROM project_players WHERE id = $1`, playerID).Scan(&disabledMatches, &pending, &byAdmin))
 	assert.True(t, pending)
 	assert.True(t, disabledMatches)
+	assert.True(t, byAdmin, "an admin request must be marked so the player cannot cancel it")
 
 	var requestAudits int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
@@ -90,10 +94,11 @@ func TestControlPanelPlayerDelete_admin_request_and_cancel(t *testing.T) {
 
 	var disabled bool
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
-		`SELECT disabled_at IS NOT NULL, delete_requested_at IS NOT NULL
-		 FROM project_players WHERE id = $1`, playerID).Scan(&disabled, &pending))
+		`SELECT disabled_at IS NOT NULL, delete_requested_at IS NOT NULL, delete_requested_by_admin
+		 FROM project_players WHERE id = $1`, playerID).Scan(&disabled, &pending, &byAdmin))
 	assert.False(t, disabled, "cancel lifts the disable the request created")
 	assert.False(t, pending)
+	assert.False(t, byAdmin, "admin cancel must clear the mark")
 
 	var cancelAudits int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,

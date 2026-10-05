@@ -77,9 +77,11 @@ WHERE id = sqlc.arg(id)
 -- name: RequestPlayerDeleteInProject :one
 -- Admin-side delete request: disables the player (keeping an earlier
 -- suspension timestamp intact) and stamps delete_requested_at with the same
--- now() so cancel can tell the two apart. 0 rows = gone or already pending.
+-- now() so cancel can tell the two apart. Marks the request as the admin's,
+-- so the player cannot cancel it. 0 rows = gone or already pending.
 UPDATE project_players
 SET delete_requested_at = now(),
+    delete_requested_by_admin = true,
     disabled_at   = COALESCE(disabled_at, now()),
     session_epoch = session_epoch + 1
 WHERE id = sqlc.arg(id)
@@ -96,7 +98,8 @@ RETURNING delete_requested_at;
 -- sees delete_requested_at before it is cleared.
 UPDATE project_players
 SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
-    delete_requested_at = NULL
+    delete_requested_at = NULL,
+    delete_requested_by_admin = false
 WHERE id = sqlc.arg(id)
   AND project_id = sqlc.arg(project_id)
   AND tenant_id = sqlc.arg(tenant_id)

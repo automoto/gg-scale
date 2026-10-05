@@ -14,7 +14,8 @@ import (
 const cancelPlayerDeleteInProject = `-- name: CancelPlayerDeleteInProject :execrows
 UPDATE project_players
 SET disabled_at = CASE WHEN disabled_at = delete_requested_at THEN NULL ELSE disabled_at END,
-    delete_requested_at = NULL
+    delete_requested_at = NULL,
+    delete_requested_by_admin = false
 WHERE id = $1
   AND project_id = $2
   AND tenant_id = $3
@@ -220,6 +221,7 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 const requestPlayerDeleteInProject = `-- name: RequestPlayerDeleteInProject :one
 UPDATE project_players
 SET delete_requested_at = now(),
+    delete_requested_by_admin = true,
     disabled_at   = COALESCE(disabled_at, now()),
     session_epoch = session_epoch + 1
 WHERE id = $1
@@ -238,7 +240,8 @@ type RequestPlayerDeleteInProjectParams struct {
 
 // Admin-side delete request: disables the player (keeping an earlier
 // suspension timestamp intact) and stamps delete_requested_at with the same
-// now() so cancel can tell the two apart. 0 rows = gone or already pending.
+// now() so cancel can tell the two apart. Marks the request as the admin's,
+// so the player cannot cancel it. 0 rows = gone or already pending.
 func (q *Queries) RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, requestPlayerDeleteInProject, arg.ID, arg.ProjectID, arg.TenantID)
 	var delete_requested_at pgtype.Timestamptz

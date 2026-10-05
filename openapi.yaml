@@ -231,6 +231,7 @@ components:
             - PlayerTwo
           type: string
         email:
+          description: Set only for accepted friends.
           examples:
             - friend@example.com
           type: string
@@ -2101,7 +2102,7 @@ paths:
         - Authentication
   /v1/auth/delete/cancel:
     post:
-      description: Re-authenticates with credentials because the delete request revoked every session. Clears the pending deletion and re-enables sign-in. 404 covers unknown email, wrong password, and no pending deletion alike.
+      description: Re-authenticates with credentials because the delete request revoked every session. Clears the pending deletion and re-enables sign-in. 404 covers unknown email, wrong password, and no pending deletion alike. 403 means the project's team requested the deletion; only they can cancel it.
       operationId: authDeleteCancel
       requestBody:
         content:

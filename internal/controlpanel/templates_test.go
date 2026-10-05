@@ -752,8 +752,7 @@ func TestInviteTeamPage_should_explain_roles_at_selection(t *testing.T) {
 	assert.Contains(t, html, ">Tenant admin</option>")
 	assert.Contains(t, html, ">Tenant member</option>")
 	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
-	assert.Contains(t, html, "Tenant members have read-only access")
-	assert.Contains(t, html, "view Game Projects and players")
+	assert.Contains(t, html, "Tenant members can sign in but cannot open Account Tenant pages")
 }
 
 func TestHelpPage_should_document_team_roles(t *testing.T) {
@@ -764,8 +763,7 @@ func TestHelpPage_should_document_team_roles(t *testing.T) {
 	assert.Contains(t, html, "<dt>Game Project</dt>")
 	assert.Contains(t, html, "<dt>Tenant admin</dt>")
 	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
-	assert.Contains(t, html, "Tenant members have read-only access")
-	assert.Contains(t, html, "view Game Projects and players")
+	assert.Contains(t, html, "Tenant members can sign in but cannot open Account Tenant pages")
 }
 
 func TestRoleExplanation_uses_resource_names_and_preserves_role_names(t *testing.T) {
@@ -777,7 +775,7 @@ func TestRoleExplanation_uses_resource_names_and_preserves_role_names(t *testing
 	assert.Contains(t, admin, "As a tenant admin")
 	assert.Contains(t, admin, "in the Account Tenant: Game Projects")
 	assert.Contains(t, member, "As a tenant member")
-	assert.Contains(t, member, "view Game Projects and players")
+	assert.Contains(t, member, "cannot open Account Tenant pages")
 }
 
 func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {

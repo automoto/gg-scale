@@ -4244,7 +4244,7 @@ func HelpPage(vm HelpView) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 342, "<div class=\"page-header\"><div><p class=\"eyebrow\">Help</p><h1>Concepts &amp; quick start</h1><p class=\"subtitle\">A 2-minute tour of how ggscale fits together.</p></div></div><section class=\"card\"><h2>The 30-second version</h2><p class=\"card-subtitle\">What you need to put ggscale in front of players.</p><ol class=\"quick-steps\"><li><strong>Create an Account Tenant.</strong> The control panel sets up an Account Tenant, a starter Game Project, and a first API key in one step.</li><li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li><li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the Account Tenant&apos;s API key.</li></ol></section><section class=\"card\"><h2>The pieces</h2><p class=\"card-subtitle\">Each row is one row in the database, and one place in this control panel.</p><dl class=\"concept-list\"><dt>Account Tenant</dt><dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (Game Projects, API keys, player accounts, save data, leaderboards) belongs to exactly one Account Tenant. Account Tenants never see each other&apos;s data.</dd><dt>Game Project</dt><dd>A workload partition inside an Account Tenant. Most studios use one Game Project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting Game Projects keeps production and staging data separate while still rolling up to one Account Tenant for billing and administration.</dd><dt>API key</dt><dd>How your game authenticates to ggscale. Always scoped to an Account Tenant. Optionally pinned to a single Game Project; otherwise it can act on any Game Project in the Account Tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd><dt>Control panel user</dt><dd>You. Humans who log in here to manage Account Tenants, Game Projects, and keys. Control panel users are separate from players; they get Account Tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd><dt>Player</dt><dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the Account Tenant&apos;s API key. Players never touch this control panel.</dd></dl></section><section class=\"card\" id=\"roles\"><h2>Team roles</h2><p class=\"card-subtitle\">What a teammate can do depends on the role their invite carries.</p><dl class=\"concept-list\"><dt>Tenant admin</dt><dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd><dt>Tenant member</dt><dd>Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</dd><dt>Tenant owner</dt><dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd></dl></section><section class=\"card\"><h2>How a request flows</h2><p class=\"card-subtitle\">Why each piece matters at runtime.</p><pre class=\"flow-diagram\">your game ──► ggscale HTTP API │ ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to an Account Tenant (and maybe a Game Project) └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Account Tenant │ ▼ Postgres (Row-Level Security) Only rows belonging to that tenant_id are visible.</pre><p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses Account Tenant boundaries.</p></section><section class=\"card\"><h2>What to do next</h2><ul class=\"next-steps\"><li><a href=\"/v1/control-panel/tenants/new\">Create your first Account Tenant</a> — gets you an Account Tenant, a starter Game Project, and your first API key in one step.</li><li>Open the <a href=\"/v1/control-panel\">Control panel</a> to see Account Tenants you can manage.</li><li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li></ul></section>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 342, "<div class=\"page-header\"><div><p class=\"eyebrow\">Help</p><h1>Concepts &amp; quick start</h1><p class=\"subtitle\">A 2-minute tour of how ggscale fits together.</p></div></div><section class=\"card\"><h2>The 30-second version</h2><p class=\"card-subtitle\">What you need to put ggscale in front of players.</p><ol class=\"quick-steps\"><li><strong>Create an Account Tenant.</strong> The control panel sets up an Account Tenant, a starter Game Project, and a first API key in one step.</li><li><strong>Drop the API key into your game.</strong> Your game (or game server) uses the key to call ggscale&apos;s HTTP API or SDK.</li><li><strong>Players show up.</strong> ggscale handles their accounts, saves, leaderboards, and friends — gated by the Account Tenant&apos;s API key.</li></ol></section><section class=\"card\"><h2>The pieces</h2><p class=\"card-subtitle\">Each row is one row in the database, and one place in this control panel.</p><dl class=\"concept-list\"><dt>Account Tenant</dt><dd>The isolation boundary. Usually one studio, customer, or game brand. Every other resource (Game Projects, API keys, player accounts, save data, leaderboards) belongs to exactly one Account Tenant. Account Tenants never see each other&apos;s data.</dd><dt>Game Project</dt><dd>A workload partition inside an Account Tenant. Most studios use one Game Project per game (e.g. <code>arcade-prod</code>, <code>arcade-staging</code>). Splitting Game Projects keeps production and staging data separate while still rolling up to one Account Tenant for billing and administration.</dd><dt>API key</dt><dd>How your game authenticates to ggscale. Always scoped to an Account Tenant. Optionally pinned to a single Game Project; otherwise it can act on any Game Project in the Account Tenant. Generated once, hashed at rest — copy it when you create it. Revoke + replace if it leaks.</dd><dt>Control panel user</dt><dd>You. Humans who log in here to manage Account Tenants, Game Projects, and keys. Control panel users are separate from players; they get Account Tenant memberships with <code>owner</code>, <code>admin</code>, or <code>member</code> roles (see Team roles below).</dd><dt>Player</dt><dd>The people who actually play your game. They sign up, log in, and store data through ggscale&apos;s <code>/v1/auth/...</code> APIs — your game calls those on their behalf using the Account Tenant&apos;s API key. Players never touch this control panel.</dd></dl></section><section class=\"card\" id=\"roles\"><h2>Team roles</h2><p class=\"card-subtitle\">What a teammate can do depends on the role their invite carries.</p><dl class=\"concept-list\"><dt>Tenant admin</dt><dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd><dt>Tenant member</dt><dd>Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.</dd><dt>Tenant owner</dt><dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd></dl></section><section class=\"card\"><h2>How a request flows</h2><p class=\"card-subtitle\">Why each piece matters at runtime.</p><pre class=\"flow-diagram\">your game ──► ggscale HTTP API │ ├─ Authorization: Bearer &lt;api_key&gt;     → resolves to an Account Tenant (and maybe a Game Project) └─ X-Session-Token: &lt;player session&gt;   → resolves to a Player inside that Account Tenant │ ▼ Postgres (Row-Level Security) Only rows belonging to that tenant_id are visible.</pre><p>The API key tells ggscale <em>which game</em> is calling. The optional player session tells ggscale <em>which player</em>. The database enforces that nothing crosses Account Tenant boundaries.</p></section><section class=\"card\"><h2>What to do next</h2><ul class=\"next-steps\"><li><a href=\"/v1/control-panel/tenants/new\">Create your first Account Tenant</a> — gets you an Account Tenant, a starter Game Project, and your first API key in one step.</li><li>Open the <a href=\"/v1/control-panel\">Control panel</a> to see Account Tenants you can manage.</li><li>Read <code>docs/ARCHITECTURE.md</code> in the repo for the deeper story (RLS, middleware, auth headers).</li></ul></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -5470,7 +5470,7 @@ func InviteTeamPage(vm InviteTeamView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 446, "<small id=\"role-help\">Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings. Tenant members have read-only access: they can view Game Projects and players, but cannot change anything.</small></label><div class=\"form-actions\"><a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 446, "<small id=\"role-help\">Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings. Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.</small></label><div class=\"form-actions\"><a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -13403,7 +13403,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(vm.GrantableScopes) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1165, "<label><input type=\"radio\" name=\"preset\" value=\"read_write\"> Read and write (all scopes below)</label>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1165, "<label><input type=\"radio\" name=\"preset\" value=\"read_write\"> Read and write (all scopes below)</label> <label><input type=\"radio\" name=\"preset\" value=\"custom\"> Custom (only the scopes checked below)</label>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -13425,7 +13425,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var661 string
 					templ_7745c5c3_Var661, templ_7745c5c3_Err = templ.ResolveAttributeValue(s)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3267, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3268, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var661)
 					if templ_7745c5c3_Err != nil {
@@ -13438,7 +13438,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var662 string
 					templ_7745c5c3_Var662, templ_7745c5c3_Err = templ.JoinStringErrs(s)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3267, Col: 74}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3268, Col: 74}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var662))
 					if templ_7745c5c3_Err != nil {
@@ -13476,7 +13476,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var663 string
 					templ_7745c5c3_Var663, templ_7745c5c3_Err = templ.JoinStringErrs(t.Label)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3297, Col: 18}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3298, Col: 18}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var663))
 					if templ_7745c5c3_Err != nil {
@@ -13499,7 +13499,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var664 string
 					templ_7745c5c3_Var664, templ_7745c5c3_Err = templ.JoinStringErrs(t.Hint)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3302, Col: 29}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3303, Col: 29}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var664))
 					if templ_7745c5c3_Err != nil {
@@ -13523,7 +13523,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 							var templ_7745c5c3_Var665 string
 							templ_7745c5c3_Var665, templ_7745c5c3_Err = templ.JoinStringErrs(s)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3308, Col: 20}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3309, Col: 20}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var665))
 							if templ_7745c5c3_Err != nil {
@@ -13542,7 +13542,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var666 string
 					templ_7745c5c3_Var666, templ_7745c5c3_Err = templ.JoinStringErrs(t.CreatorEmail)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3312, Col: 28}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3313, Col: 28}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var666))
 					if templ_7745c5c3_Err != nil {
@@ -13555,7 +13555,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var667 string
 					templ_7745c5c3_Var667, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(t.ExpiresAt))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3314, Col: 34}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3315, Col: 34}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var667))
 					if templ_7745c5c3_Err != nil {
@@ -13584,7 +13584,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 						var templ_7745c5c3_Var668 string
 						templ_7745c5c3_Var668, templ_7745c5c3_Err = templ.JoinStringErrs(timeString(*t.LastUsedAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3323, Col: 37}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3324, Col: 37}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var668))
 						if templ_7745c5c3_Err != nil {
@@ -13603,7 +13603,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var669 templ.SafeURL
 					templ_7745c5c3_Var669, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke"))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3329, Col: 129}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3330, Col: 129}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var669))
 					if templ_7745c5c3_Err != nil {
@@ -13616,7 +13616,7 @@ func MCPTokensPage(vm MCPTokensView) templ.Component {
 					var templ_7745c5c3_Var670 string
 					templ_7745c5c3_Var670, templ_7745c5c3_Err = templ.ResolveAttributeValue(vm.CSRFToken)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3330, Col: 64}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3331, Col: 64}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var670)
 					if templ_7745c5c3_Err != nil {

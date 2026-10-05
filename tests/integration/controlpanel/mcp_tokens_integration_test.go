@@ -139,6 +139,32 @@ func TestMCPTokens_should_refuse_scope_the_creator_cannot_use(t *testing.T) {
 	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
 }
 
+func (p mcpPanel) onlyTokenScopes(t *testing.T) []string {
+	t.Helper()
+	var scopes []string
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT scopes FROM mcp_tokens WHERE project_id = $1`, p.project).Scan(&scopes))
+	return scopes
+}
+
+func TestMCPTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
+	p := newMCPPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	p.create(t, c, csrf, url.Values{"preset": {"read_only"}, "scopes": {"config:write"}})
+
+	assert.Empty(t, p.onlyTokenScopes(t))
+}
+
+func TestMCPTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
+	p := newMCPPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	p.create(t, c, csrf, url.Values{"preset": {"custom"}, "scopes": {"config:write"}})
+
+	assert.Equal(t, []string{"config:write"}, p.onlyTokenScopes(t))
+}
+
 func TestMCPTokens_should_refuse_unknown_scope(t *testing.T) {
 	p := newMCPPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")

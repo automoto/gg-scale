@@ -17,6 +17,7 @@ import (
 	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/matchmaker"
 	"github.com/automoto/gg-scale/internal/party"
+	"github.com/automoto/gg-scale/internal/realtime"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -164,6 +165,27 @@ func TestPartyCodesBlockAfterTenFailures(t *testing.T) {
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 
+func TestPartyCodeSecondRevokeIsNotFound(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "code-revoke", "leader")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := party.NewStore(db.NewPool(pool))
+	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
+	if !assert.NoError(t, err) {
+		return
+	}
+	code, err := store.CreateCode(ctx, projectID, p.ID, leader, p.Version, 1)
+	if !assert.NoError(t, err) {
+		return
+	}
+	p, err = store.RevokeCode(ctx, projectID, p.ID, leader, code.PartyVersion, code.ID)
+	if !assert.NoError(t, err) {
+		return
+	}
+	_, err = store.RevokeCode(ctx, projectID, p.ID, leader, p.Version, code.ID)
+	assert.ErrorIs(t, err, party.ErrInvite)
+}
+
 func TestPartyMutationsRequireVersionAndLeader(t *testing.T) {
 	pool := startMigratedDB(t)
 	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "controls", "leader")
@@ -207,6 +229,7 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 	pool := startMigratedDB(t)
 	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "friend-invite", "leader")
 	_, _, friend := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "friend")
+	_, _, outsider := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "outsider")
 	ctx := db.WithTenant(context.Background(), tenantID)
 	store := party.NewStore(db.NewPool(pool))
 	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
@@ -245,11 +268,60 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 		return
 	}
 	assert.Len(t, invites, 1)
+	// A player who is neither target nor leader sees the same error as for
+	// an unknown invite id, so invite ids cannot be enumerated.
+	for _, accept := range []bool{true, false} {
+		_, err = store.ResolveInvite(ctx, projectID, invite.ID, outsider, invite.PartyVersion, accept)
+		assert.ErrorIs(t, err, party.ErrInvite)
+	}
 	p, err = store.ResolveInvite(ctx, projectID, invite.ID, friend, invite.PartyVersion, true)
 	if !assert.NoError(t, err) {
 		return
 	}
 	assert.Len(t, p.Members, 2)
+}
+
+type invitePushCounter struct{ invites int }
+
+func (c *invitePushCounter) PushMany(_ context.Context, _ int64, _ []int64, msg realtime.Message) error {
+	if msg.Type == party.EventInvite {
+		c.invites++
+	}
+	return nil
+}
+
+func TestPartyReinviteDoesNotResendEvent(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "reinvite", "leader")
+	_, _, friend := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "friend")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	counter := &invitePushCounter{}
+	store := party.NewStore(db.NewPool(pool)).WithPusher(counter)
+	for _, player := range []int64{leader, friend} {
+		_, err := pool.Exec(ctx, `WITH account AS (INSERT INTO player_accounts(email,password_hash) VALUES('reinvite-'||$1::bigint::text||'@example.test','test'::bytea) RETURNING id) UPDATE project_players SET player_account_id=(SELECT id FROM account) WHERE id=$1`, player)
+		if !assert.NoError(t, err) {
+			return
+		}
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO friend_edges(from_account_id,to_account_id,status) SELECT a.player_account_id,b.player_account_id,'accepted' FROM project_players a,project_players b WHERE a.id=$1 AND b.id=$2`, leader, friend)
+	if !assert.NoError(t, err) {
+		return
+	}
+	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
+	if !assert.NoError(t, err) {
+		return
+	}
+	invite, err := store.InviteFriend(ctx, projectID, p.ID, leader, p.Version, friend)
+	if !assert.NoError(t, err) {
+		return
+	}
+	for range 5 {
+		if _, err := store.InviteFriend(ctx, projectID, p.ID, leader, invite.PartyVersion, friend); !assert.NoError(t, err) {
+			return
+		}
+	}
+
+	assert.Equal(t, 1, counter.invites, "only a new invite sends an event")
 }
 
 func TestPartyResolutionIsDurableBeforeBackendWork(t *testing.T) {
@@ -439,9 +511,9 @@ func TestPartyOrphanAllocationIsRecoveredAfterCrash(t *testing.T) {
 	assert.Equal(t, "shutdown", state)
 }
 
-func TestPartyCodeIPBudgetAppliesAcrossProjects(t *testing.T) {
+func TestPartyCodeIPBudgetIsPerProject(t *testing.T) {
 	pool := startMigratedDB(t)
-	tenantID, projectID, _ := seedTenantProjectPlayer(t, pool, "global-ip", "leader")
+	tenantID, projectID, _ := seedTenantProjectPlayer(t, pool, "ip-budget", "leader")
 	ctx := db.WithTenant(context.Background(), tenantID)
 	store := party.NewStore(db.NewPool(pool))
 	for i := range 10 {
@@ -453,8 +525,31 @@ func TestPartyCodeIPBudgetAppliesAcrossProjects(t *testing.T) {
 			}
 		}
 	}
-	otherTenant, otherProject, otherPlayer := seedTenantProjectPlayer(t, pool, "other-project", "player")
-	_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, "0000000000000000", "127.0.0.8")
+
+	t.Run("should_block_fresh_player_in_same_project", func(t *testing.T) {
+		_, _, fresh := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "fresh")
+		_, err := store.JoinCode(ctx, projectID, fresh, "0000000000000000", "127.0.0.8")
+		assert.ErrorIs(t, err, party.ErrCooldown)
+	})
+	t.Run("should_not_block_other_tenant_on_same_ip", func(t *testing.T) {
+		otherTenant, otherProject, otherPlayer := seedTenantProjectPlayer(t, pool, "other-project", "player")
+		_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, "0000000000000000", "127.0.0.8")
+		assert.ErrorIs(t, err, party.ErrInvite)
+	})
+}
+
+func TestPartyCodeLimitsAreConfigurable(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, player := seedTenantProjectPlayer(t, pool, "code-config", "player")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := party.NewStore(db.NewPool(pool)).WithCodeLimits(party.CodeLimits{IPFailures: 100, PlayerFailures: 2, Cooldown: time.Minute})
+	for range 2 {
+		_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.9")
+		if !assert.ErrorIs(t, err, party.ErrInvite) {
+			return
+		}
+	}
+	_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.9")
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 

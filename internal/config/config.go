@@ -55,6 +55,11 @@ type Config struct {
 	// can be N times the value. Defaults 5 / 20.
 	MCPTokenRatePerSecond int `env:"MCP_TOKEN_RATE_PER_SECOND" envDefault:"5"`
 	MCPTokenRateBurst     int `env:"MCP_TOKEN_RATE_BURST" envDefault:"20"`
+	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
+	// that only failed /mcp authentications use; valid tokens never use it.
+	// Defaults 10 / 10.
+	MCPAuthFailuresPerMinute int `env:"MCP_AUTH_FAILURES_PER_MINUTE" envDefault:"10"`
+	MCPAuthFailureBurst      int `env:"MCP_AUTH_FAILURE_BURST" envDefault:"10"`
 	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
 	// for each project. Default 20.
 	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`
@@ -134,6 +139,15 @@ type Config struct {
 	// false to stop new party queue entries; other party operations keep
 	// working. Default true.
 	PartyEnqueueEnabled bool `env:"PARTY_ENQUEUE_ENABLED" envDefault:"true"`
+	// PartyCodeIPMaxFailures is how many wrong party codes one source IP
+	// may send per project within PartyCodeCooldown. Default 100.
+	PartyCodeIPMaxFailures int `env:"PARTY_CODE_IP_MAX_FAILURES" envDefault:"100"`
+	// PartyCodePlayerMaxFailures is how many wrong party codes one player
+	// may send within PartyCodeCooldown. Default 10.
+	PartyCodePlayerMaxFailures int `env:"PARTY_CODE_PLAYER_MAX_FAILURES" envDefault:"10"`
+	// PartyCodeCooldown is both the failure window and the block length
+	// for party-code redemption. Default 15m.
+	PartyCodeCooldown time.Duration `env:"PARTY_CODE_COOLDOWN" envDefault:"15m"`
 	// MatchmakerTicketTTL is how long a queued ticket lives before the
 	// sweeper fails it. 0 disables expiry. Default 10m.
 	MatchmakerTicketTTL time.Duration `env:"MATCHMAKER_TICKET_TTL" envDefault:"10m"`
@@ -228,6 +242,8 @@ type Config struct {
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`
 	// PlayerDeleteGracePeriod is how long a requested per-project player
 	// deletion stays cancellable before the purge sweep hard-deletes the data.
+	// The sweep uses the current value, so shortening it also applies to
+	// deletions that are already pending.
 	PlayerDeleteGracePeriod time.Duration `env:"PLAYER_DELETE_GRACE_PERIOD" envDefault:"720h"`
 
 	// Single sign-on. Each surface has its own OAuth app for each provider.

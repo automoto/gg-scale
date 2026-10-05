@@ -249,6 +249,28 @@ func TestMCP_should_limit_wrong_tokens_by_ip(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, last)
 }
 
+func TestMCP_wrong_tokens_should_not_block_valid_token_from_same_ip(t *testing.T) {
+	f := newFixture(t)
+	tok := f.ownerToken()
+	for range 11 {
+		f.post("ggm_wrong", initialize)
+	}
+
+	resp, _ := f.post(tok, initialize)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestMCP_ip_failure_limit_is_configurable(t *testing.T) {
+	f := newFixtureWith(t, func(d *mcp.Deps) { d.AuthFailuresPerMinute, d.AuthFailureBurst = 1, 2 })
+	f.post("ggm_wrong", initialize)
+	f.post("ggm_wrong", initialize)
+
+	resp, _ := f.post("ggm_wrong", initialize)
+
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+}
+
 func TestMCP_should_refuse_request_from_another_origin(t *testing.T) {
 	f := newFixture(t)
 	req, err := http.NewRequest(http.MethodPost, f.srv.URL, bytes.NewBufferString(initialize))
