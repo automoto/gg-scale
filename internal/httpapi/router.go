@@ -33,6 +33,7 @@ import (
 	"github.com/automoto/gg-scale/internal/mcp"
 	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/players"
 	"github.com/automoto/gg-scale/internal/projectadmin"
@@ -60,8 +61,11 @@ type Deps struct {
 	// PartyEnqueueEnabled lets party leaders queue and rematch. When false,
 	// both return 503 party_enqueue_disabled.
 	PartyEnqueueEnabled bool
-	Version             string
-	Commit              string
+	// PartyCodeLimits bound wrong party-code guesses. Zero fields use
+	// party.DefaultCodeLimits.
+	PartyCodeLimits party.CodeLimits
+	Version         string
+	Commit          string
 
 	// RequestTimeout bounds non-streaming requests; 0 disables the deadline
 	// middleware (used by unit-test fixtures). WebSocket paths are exempt.

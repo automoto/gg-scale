@@ -48,6 +48,37 @@ func (q *Queries) BindPlayerLinkedEmail(ctx context.Context, arg BindPlayerLinke
 	return result.RowsAffected(), nil
 }
 
+const claimVerifiedPlayerAccount = `-- name: ClaimVerifiedPlayerAccount :exec
+INSERT INTO player_accounts (email, password_hash, email_verified_at)
+VALUES ($1, $2, now())
+ON CONFLICT (email) DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    email_verified_at = now(),
+    display_name = NULL,
+    email_verification_code_hash = NULL,
+    email_verification_salt = NULL,
+    email_verification_expires_at = NULL,
+    session_epoch = player_accounts.session_epoch + 1,
+    updated_at = now()
+WHERE player_accounts.email_verified_at IS NULL
+`
+
+type ClaimVerifiedPlayerAccountParams struct {
+	Email        string
+	PasswordHash []byte
+}
+
+// Race-safe half of find-or-create for a proven email (the caller re-reads
+// after this, so a concurrent creator's row is picked up); ON CONFLICT never
+// aborts the surrounding transaction. An unverified row is claimed: whoever
+// created it never proved the email, so the proven owner's password replaces
+// theirs and the row's pending code and display name are cleared. A verified
+// row is left alone.
+func (q *Queries) ClaimVerifiedPlayerAccount(ctx context.Context, arg ClaimVerifiedPlayerAccountParams) error {
+	_, err := q.db.Exec(ctx, claimVerifiedPlayerAccount, arg.Email, arg.PasswordHash)
+	return err
+}
+
 const consumePlayerAccountPasswordReset = `-- name: ConsumePlayerAccountPasswordReset :one
 UPDATE player_account_password_resets
 SET used_at = now()
@@ -230,6 +261,17 @@ func (q *Queries) DeleteExpiredPlayerAccountPasswordResets(ctx context.Context) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const findVerifiedAccountIDByEmail = `-- name: FindVerifiedAccountIDByEmail :one
+SELECT id FROM player_accounts WHERE email = $1 AND email_verified_at IS NOT NULL
+`
+
+func (q *Queries) FindVerifiedAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, findVerifiedAccountIDByEmail, email)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getPlayerAccountByEmail = `-- name: GetPlayerAccountByEmail :one
@@ -478,25 +520,6 @@ func (q *Queries) GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForA
 	var i GetPlayerForAccountLinkRow
 	err := row.Scan(&i.ID, &i.PlayerAccountID)
 	return i, err
-}
-
-const insertVerifiedPlayerAccountIfAbsent = `-- name: InsertVerifiedPlayerAccountIfAbsent :exec
-INSERT INTO player_accounts (email, password_hash, email_verified_at)
-VALUES ($1, $2, now())
-ON CONFLICT (email) DO NOTHING
-`
-
-type InsertVerifiedPlayerAccountIfAbsentParams struct {
-	Email        string
-	PasswordHash []byte
-}
-
-// Race-safe half of find-or-create for a proven email (the caller re-reads
-// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
-// NOTHING never aborts the surrounding transaction.
-func (q *Queries) InsertVerifiedPlayerAccountIfAbsent(ctx context.Context, arg InsertVerifiedPlayerAccountIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertVerifiedPlayerAccountIfAbsent, arg.Email, arg.PasswordHash)
-	return err
 }
 
 const invalidatePlayerAccountPasswordResets = `-- name: InvalidatePlayerAccountPasswordResets :exec

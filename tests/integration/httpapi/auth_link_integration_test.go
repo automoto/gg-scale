@@ -160,6 +160,34 @@ func TestAuthVerify_attaches_existing_global_account(t *testing.T) {
 		"a proven email must attach to the existing global account, not mint a duplicate")
 }
 
+func TestAuthVerify_proven_email_should_take_over_unverified_squatter_account(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "lk")
+	srv, rec := newFullStackServer(t, c)
+
+	// Someone else signed up with this email on the portal but never verified.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO player_accounts (email, password_hash, display_name)
+		 VALUES ('victim@example.com', '\x01'::bytea, 'squatter')`)
+	require.NoError(t, err)
+
+	tok, anonID := anonymousLoginWithID(t, srv.URL, "lk")
+	resp, body := linkEmail(t, srv.URL, "lk", tok, "victim@example.com", "supersecret")
+	require.Equal(t, http.StatusAccepted, resp.StatusCode, string(body))
+	code := extractVerifyToken(t, rec.Sent[len(rec.Sent)-1].Body)
+
+	resp, body = doJSON(t, http.MethodPost, srv.URL+"/v1/auth/verify", "lk",
+		map[string]string{"email": "victim@example.com", "code": code})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	var sameHash bool
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT a.password_hash = p.password_hash AND a.email_verified_at IS NOT NULL AND a.display_name IS NULL
+		   FROM project_players p JOIN player_accounts a ON a.id = p.player_account_id
+		  WHERE p.id = $1`, anonID).Scan(&sameHash))
+	assert.True(t, sameHash, "the proven owner's password must replace the squatter's, and the account must be verified")
+}
+
 // ── steam linking ───────────────────────────────────────────────────────────
 
 func TestAuthLinkSteam_upgrades_anonymous_identity(t *testing.T) {

@@ -46,6 +46,7 @@ import (
 	"github.com/automoto/gg-scale/internal/middleware"
 	migraterunner "github.com/automoto/gg-scale/internal/migrate"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/players"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
@@ -618,10 +619,15 @@ func run() error {
 		Matchmaker:            mmQueue,
 		MatchmakerTicketTTL:   cfg.MatchmakerTicketTTL,
 		PartyEnqueueEnabled:   cfg.PartyEnqueueEnabled,
-		GameSessions:          gameSessions,
-		ServerList:            serverListRegistry,
-		RelayIssuer:           relayIssuer,
-		RelayMeter:            relaymeter.New(appPool, m, cfg.MailFrom),
+		PartyCodeLimits: party.CodeLimits{
+			IPFailures:     cfg.PartyCodeIPMaxFailures,
+			PlayerFailures: cfg.PartyCodePlayerMaxFailures,
+			Cooldown:       cfg.PartyCodeCooldown,
+		},
+		GameSessions: gameSessions,
+		ServerList:   serverListRegistry,
+		RelayIssuer:  relayIssuer,
+		RelayMeter:   relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
 			CookieSecure:           cfg.ControlPanelCookieSecure,

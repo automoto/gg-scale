@@ -82,12 +82,16 @@ func join(ctx context.Context, tx pgx.Tx, w *writes, p *Party, player int64) err
 }
 
 // JoinCode checks durable player and IP failure windows before redemption.
+// The IP budget is per project: codes only resolve inside one project, so a
+// wider budget adds no protection and lets one project lock out another.
 func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip string) (*Party, error) {
 	var out *Party
 	var verdict error
+	ipKey := fmt.Sprintf("%d:%s", project, ip)
+	cooldown := int64(s.limits.Cooldown / time.Second)
 	err := s.write(ctx, false, func(tx pgx.Tx, w *writes) error {
 		var blocked bool
-		if err := tx.QueryRow(ctx, `SELECT party_code_ip_limit($1,false)`, ip).Scan(&blocked); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT party_code_ip_limit($1,false,$2,$3)`, ipKey, s.limits.IPFailures, cooldown).Scan(&blocked); err != nil {
 			return err
 		}
 		if blocked {
@@ -95,7 +99,6 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 			return nil
 		}
 		subjects := []string{fmt.Sprintf("player:%d", player)}
-		limits := []int{10}
 		for _, subject := range subjects {
 			if _, err := tx.Exec(ctx, `INSERT INTO party_code_attempts(tenant_id,project_id,subject) VALUES(current_setting('app.tenant_id')::bigint,$1,$2) ON CONFLICT DO NOTHING`, project, subject); err != nil {
 				return err
@@ -113,11 +116,11 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 		var id, codeID int64
 		err := tx.QueryRow(ctx, `SELECT party_id,id FROM party_invite_codes WHERE project_id=$1 AND code_hash=$2 AND revoked_at IS NULL AND expires_at>now() AND uses<max_uses`, project, codeHash(code)).Scan(&id, &codeID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			if err = tx.QueryRow(ctx, `SELECT party_code_ip_limit($1,true)`, ip).Scan(&blocked); err != nil {
+			if err = tx.QueryRow(ctx, `SELECT party_code_ip_limit($1,true,$2,$3)`, ipKey, s.limits.IPFailures, cooldown).Scan(&blocked); err != nil {
 				return err
 			}
-			for i, subject := range subjects {
-				_, err = tx.Exec(ctx, `UPDATE party_code_attempts SET failures=CASE WHEN window_start<=now()-interval '15 minutes' THEN 1 ELSE failures+1 END,window_start=CASE WHEN window_start<=now()-interval '15 minutes' THEN now() ELSE window_start END,blocked_until=CASE WHEN window_start>now()-interval '15 minutes' AND failures+1 >= $3 THEN now()+interval '15 minutes' ELSE NULL END WHERE project_id=$1 AND subject=$2`, project, subject, limits[i])
+			for _, subject := range subjects {
+				_, err = tx.Exec(ctx, `UPDATE party_code_attempts SET failures=CASE WHEN window_start<=now()-make_interval(secs=>$4) THEN 1 ELSE failures+1 END,window_start=CASE WHEN window_start<=now()-make_interval(secs=>$4) THEN now() ELSE window_start END,blocked_until=CASE WHEN window_start>now()-make_interval(secs=>$4) AND failures+1 >= $3 THEN now()+make_interval(secs=>$4) ELSE NULL END WHERE project_id=$1 AND subject=$2`, project, subject, s.limits.PlayerFailures, cooldown)
 				if err != nil {
 					return err
 				}

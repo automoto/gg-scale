@@ -134,6 +134,15 @@ type Config struct {
 	// false to stop new party queue entries; other party operations keep
 	// working. Default true.
 	PartyEnqueueEnabled bool `env:"PARTY_ENQUEUE_ENABLED" envDefault:"true"`
+	// PartyCodeIPMaxFailures is how many wrong party codes one source IP
+	// may send per project within PartyCodeCooldown. Default 100.
+	PartyCodeIPMaxFailures int `env:"PARTY_CODE_IP_MAX_FAILURES" envDefault:"100"`
+	// PartyCodePlayerMaxFailures is how many wrong party codes one player
+	// may send within PartyCodeCooldown. Default 10.
+	PartyCodePlayerMaxFailures int `env:"PARTY_CODE_PLAYER_MAX_FAILURES" envDefault:"10"`
+	// PartyCodeCooldown is both the failure window and the block length
+	// for party-code redemption. Default 15m.
+	PartyCodeCooldown time.Duration `env:"PARTY_CODE_COOLDOWN" envDefault:"15m"`
 	// MatchmakerTicketTTL is how long a queued ticket lives before the
 	// sweeper fails it. 0 disables expiry. Default 10m.
 	MatchmakerTicketTTL time.Duration `env:"MATCHMAKER_TICKET_TTL" envDefault:"10m"`

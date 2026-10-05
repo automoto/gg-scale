@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/automoto/gg-scale/internal/auth"
 	"github.com/automoto/gg-scale/internal/controlpanel"
@@ -145,71 +146,7 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	srv, rec := newControlPanelAndPlayerServer(t, c)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
 
-	// 1) Admin sends the invite.
-	form := url.Values{"_csrf": {csrf}, "email": {"newplayer@example.com"}}
-	invitePath := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantA, 10) +
-		"/projects/" + strconv.FormatInt(projectA, 10) + "/players/invite"
-	req, err := http.NewRequest(http.MethodPost, invitePath, strings.NewReader(form.Encode()))
-	require.NoError(t, err)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(cookie)
-	resp, err := noRedirectClient().Do(req)
-	require.NoError(t, err)
-	resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	require.Len(t, rec.Sent, 1)
-
-	// 2) Extract the magic-link URL from the email body.
-	body := rec.Sent[0].Body
-	const marker = "/v1/players/p/"
-	i := strings.Index(body, marker)
-	require.GreaterOrEqual(t, i, 0, "email body should contain the player invite URL: %q", body)
-	rest := body[i:]
-	end := strings.IndexAny(rest, " \n\r\t")
-	if end < 0 {
-		end = len(rest)
-	}
-	linkPath := rest[:end]
-	// The link is encoded as full URL; trim the scheme/host so we hit our test server.
-	if idx := strings.Index(linkPath, marker); idx > 0 {
-		linkPath = linkPath[idx:]
-	}
-
-	// 3) GET the invite-accept page (used to be 404 pre-fix). The same
-	// request sets the CSRF cookie; harvest it for the POST below.
-	jar, err := cookiejar.New(nil)
-	require.NoError(t, err)
-	getClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	getResp, err := getClient.Get(srv.URL + linkPath)
-	require.NoError(t, err)
-	getBody, _ := io.ReadAll(getResp.Body)
-	getResp.Body.Close()
-	require.Equal(t, http.StatusOK, getResp.StatusCode, string(getBody))
-	assert.Contains(t, string(getBody), "newplayer@example.com")
-
-	// Pull the CSRF token out of the rendered hidden field.
-	csrfToken := extractCSRFFromForm(t, string(getBody))
-
-	// 4) POST the password to accept (with CSRF cookie + field).
-	codeParam, err := url.ParseQuery(strings.SplitN(linkPath, "?", 2)[1])
-	require.NoError(t, err)
-	require.NotEmpty(t, codeParam.Get("code"))
-
-	acceptForm := url.Values{
-		"_csrf":    {csrfToken},
-		"code":     {codeParam.Get("code")},
-		"password": {"playerpass1"},
-	}
-	acceptPath := strings.SplitN(linkPath, "?", 2)[0]
-	acceptReq, err := http.NewRequest(http.MethodPost, srv.URL+acceptPath,
-		strings.NewReader(acceptForm.Encode()))
-	require.NoError(t, err)
-	acceptReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	acceptClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	acceptResp, err := acceptClient.Do(acceptReq)
-	require.NoError(t, err)
-	acceptResp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, acceptResp.StatusCode)
+	acceptResp := invitePlayerAndAccept(t, srv.URL, rec, cookie, csrf, tenantA, projectA, "newplayer@example.com", "playerpass1")
 
 	// 5) Player row exists and is verified.
 	var playerID int64
@@ -246,6 +183,99 @@ func TestPlayerInvite_happy_path_creates_account_and_logs_in(t *testing.T) {
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT email_verified_at::text FROM player_accounts WHERE email = 'newplayer@example.com'`).Scan(&acctVerified))
 	assert.NotNil(t, acctVerified)
+}
+
+func TestPlayerInvite_accept_should_take_over_unverified_squatter_account(t *testing.T) {
+	c := startCluster(t)
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO player_accounts (email, password_hash) VALUES ('invitee@example.com', '\x01'::bytea)`)
+	require.NoError(t, err)
+
+	srv, rec := newControlPanelAndPlayerServer(t, c)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	invitePlayerAndAccept(t, srv.URL, rec, cookie, csrf, tenantA, projectA, "invitee@example.com", "playerpass1")
+
+	var hash []byte
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT password_hash FROM player_accounts WHERE email = 'invitee@example.com' AND email_verified_at IS NOT NULL`).Scan(&hash))
+	assert.NoError(t, bcrypt.CompareHashAndPassword(hash, []byte("playerpass1")),
+		"the invitee's password must replace the squatter's")
+}
+
+// invitePlayerAndAccept sends a control-panel player invite for email and
+// accepts it through the magic link with password.
+func invitePlayerAndAccept(t *testing.T, baseURL string, rec *mailer.Recorder, cookie *http.Cookie, csrf string, tenantID, projectID int64, email, password string) *http.Response {
+	t.Helper()
+	// 1) Admin sends the invite.
+	form := url.Values{"_csrf": {csrf}, "email": {email}}
+	invitePath := baseURL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/players/invite"
+	req, err := http.NewRequest(http.MethodPost, invitePath, strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(cookie)
+	resp, err := noRedirectClient().Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.NotEmpty(t, rec.Sent)
+
+	// 2) Extract the magic-link URL from the email body.
+	body := rec.Sent[len(rec.Sent)-1].Body
+	const marker = "/v1/players/p/"
+	i := strings.Index(body, marker)
+	require.GreaterOrEqual(t, i, 0, "email body should contain the player invite URL: %q", body)
+	rest := body[i:]
+	end := strings.IndexAny(rest, " \n\r\t")
+	if end < 0 {
+		end = len(rest)
+	}
+	linkPath := rest[:end]
+	// The link is encoded as full URL; trim the scheme/host so we hit our test server.
+	if idx := strings.Index(linkPath, marker); idx > 0 {
+		linkPath = linkPath[idx:]
+	}
+
+	// 3) GET the invite-accept page (used to be 404 pre-fix). The same
+	// request sets the CSRF cookie; harvest it for the POST below.
+	jar, err := cookiejar.New(nil)
+	require.NoError(t, err)
+	getClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	getResp, err := getClient.Get(baseURL + linkPath)
+	require.NoError(t, err)
+	getBody, _ := io.ReadAll(getResp.Body)
+	getResp.Body.Close()
+	require.Equal(t, http.StatusOK, getResp.StatusCode, string(getBody))
+	require.Contains(t, string(getBody), email)
+
+	// Pull the CSRF token out of the rendered hidden field.
+	csrfToken := extractCSRFFromForm(t, string(getBody))
+
+	// 4) POST the password to accept (with CSRF cookie + field).
+	codeParam, err := url.ParseQuery(strings.SplitN(linkPath, "?", 2)[1])
+	require.NoError(t, err)
+	require.NotEmpty(t, codeParam.Get("code"))
+
+	acceptForm := url.Values{
+		"_csrf":    {csrfToken},
+		"code":     {codeParam.Get("code")},
+		"password": {password},
+	}
+	acceptPath := strings.SplitN(linkPath, "?", 2)[0]
+	acceptReq, err := http.NewRequest(http.MethodPost, baseURL+acceptPath,
+		strings.NewReader(acceptForm.Encode()))
+	require.NoError(t, err)
+	acceptReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	acceptClient := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	acceptResp, err := acceptClient.Do(acceptReq)
+	require.NoError(t, err)
+	acceptResp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, acceptResp.StatusCode)
+	return acceptResp
+
 }
 
 // csrfHiddenFieldRE matches the rendered `<input ... name="_csrf" value="…">`

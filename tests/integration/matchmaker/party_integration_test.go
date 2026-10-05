@@ -439,9 +439,9 @@ func TestPartyOrphanAllocationIsRecoveredAfterCrash(t *testing.T) {
 	assert.Equal(t, "shutdown", state)
 }
 
-func TestPartyCodeIPBudgetAppliesAcrossProjects(t *testing.T) {
+func TestPartyCodeIPBudgetIsPerProject(t *testing.T) {
 	pool := startMigratedDB(t)
-	tenantID, projectID, _ := seedTenantProjectPlayer(t, pool, "global-ip", "leader")
+	tenantID, projectID, _ := seedTenantProjectPlayer(t, pool, "ip-budget", "leader")
 	ctx := db.WithTenant(context.Background(), tenantID)
 	store := party.NewStore(db.NewPool(pool))
 	for i := range 10 {
@@ -453,8 +453,31 @@ func TestPartyCodeIPBudgetAppliesAcrossProjects(t *testing.T) {
 			}
 		}
 	}
-	otherTenant, otherProject, otherPlayer := seedTenantProjectPlayer(t, pool, "other-project", "player")
-	_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, "0000000000000000", "127.0.0.8")
+
+	t.Run("should_block_fresh_player_in_same_project", func(t *testing.T) {
+		_, _, fresh := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "fresh")
+		_, err := store.JoinCode(ctx, projectID, fresh, "0000000000000000", "127.0.0.8")
+		assert.ErrorIs(t, err, party.ErrCooldown)
+	})
+	t.Run("should_not_block_other_tenant_on_same_ip", func(t *testing.T) {
+		otherTenant, otherProject, otherPlayer := seedTenantProjectPlayer(t, pool, "other-project", "player")
+		_, err := store.JoinCode(db.WithTenant(ctx, otherTenant), otherProject, otherPlayer, "0000000000000000", "127.0.0.8")
+		assert.ErrorIs(t, err, party.ErrInvite)
+	})
+}
+
+func TestPartyCodeLimitsAreConfigurable(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, player := seedTenantProjectPlayer(t, pool, "code-config", "player")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := party.NewStore(db.NewPool(pool)).WithCodeLimits(party.CodeLimits{IPFailures: 100, PlayerFailures: 2, Cooldown: time.Minute})
+	for range 2 {
+		_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.9")
+		if !assert.ErrorIs(t, err, party.ErrInvite) {
+			return
+		}
+	}
+	_, err := store.JoinCode(ctx, projectID, player, "0000000000000000", "127.0.0.9")
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 

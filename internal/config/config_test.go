@@ -191,6 +191,17 @@ func TestLoad_party_queue_can_be_turned_off(t *testing.T) {
 	assert.False(t, cfg.PartyEnqueueEnabled)
 }
 
+func TestLoad_party_code_limits_default(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{100, 10, 15 * time.Minute},
+		[]any{cfg.PartyCodeIPMaxFailures, cfg.PartyCodePlayerMaxFailures, cfg.PartyCodeCooldown})
+}
+
 func TestLoad_defaults_two_factor_key_to_empty(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
@@ -408,6 +419,7 @@ func clearEnv(t *testing.T) {
 	for _, k := range []string{
 		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "APP_REGION", "LOG_LEVEL", "ENV",
 		"PARTY_ENQUEUE_ENABLED",
+		"PARTY_CODE_IP_MAX_FAILURES", "PARTY_CODE_PLAYER_MAX_FAILURES", "PARTY_CODE_COOLDOWN",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",
 		"EMAIL_VERIFY_SIGNING_KEY", "EMAIL_VERIFY_SIGNING_KEY_FILE",
 		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",

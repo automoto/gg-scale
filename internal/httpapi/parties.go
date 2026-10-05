@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/automoto/gg-scale/internal/matchmaker"
 	"github.com/automoto/gg-scale/internal/party"
@@ -78,7 +80,7 @@ type partyRematchInput struct {
 }
 type partyIPKey struct{}
 
-func partyError(err error) error {
+func partyError(err error, cooldown time.Duration) error {
 	if err == nil {
 		return nil
 	}
@@ -92,7 +94,7 @@ func partyError(err error) error {
 	case errors.Is(err, party.ErrNotLeader):
 		return huma.Error403Forbidden(err.Error())
 	case errors.Is(err, party.ErrCooldown):
-		return huma.ErrorWithHeaders(huma.Error429TooManyRequests(err.Error()), http.Header{"Retry-After": []string{"900"}})
+		return huma.ErrorWithHeaders(huma.Error429TooManyRequests(err.Error()), http.Header{"Retry-After": []string{strconv.Itoa(int(cooldown / time.Second))}})
 	case errors.Is(err, party.ErrFull), errors.Is(err, party.ErrBusy), errors.Is(err, party.ErrStale), errors.Is(err, party.ErrNotReady), errors.Is(err, party.ErrModeCapacity), errors.Is(err, party.ErrActive), errors.Is(err, party.ErrMembership):
 		return huma.Error409Conflict(err.Error())
 	default:
@@ -117,9 +119,10 @@ func registerPartyOperation[I, O any](api huma.API, d Deps, id, method, path, su
 		if d.Pool == nil {
 			return nil, huma.Error503ServiceUnavailable("parties unavailable")
 		}
-		result, err := fn(ctx, partyStore(d), mc, in)
+		s := partyStore(d)
+		result, err := fn(ctx, s, mc, in)
 		if err != nil {
-			return nil, partyError(err)
+			return nil, partyError(err, s.CodeCooldown())
 		}
 		return &partyOutput[O]{Body: result}, nil
 	})
@@ -128,7 +131,7 @@ func registerPartyOperation[I, O any](api huma.API, d Deps, id, method, path, su
 // partyStore sends party events through the hub, which relays them to
 // members on other hosts.
 func partyStore(d Deps) *party.Store {
-	s := party.NewStore(d.Pool)
+	s := party.NewStore(d.Pool).WithCodeLimits(d.PartyCodeLimits)
 	if d.Hub != nil {
 		s = s.WithPusher(d.Hub)
 	}

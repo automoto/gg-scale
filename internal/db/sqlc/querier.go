@@ -72,6 +72,13 @@ type Querier interface {
 	// Poll/realtime delivery claims only live matches. The expiry guard prevents a
 	// late poll from reviving an allocation after the GC lease has elapsed.
 	ClaimMatchmakerMatch(ctx context.Context, id string) (MatchmakerMatch, error)
+	// Race-safe half of find-or-create for a proven email (the caller re-reads
+	// after this, so a concurrent creator's row is picked up); ON CONFLICT never
+	// aborts the surrounding transaction. An unverified row is claimed: whoever
+	// created it never proved the email, so the proven owner's password replaces
+	// theirs and the row's pending code and display name are cleared. A verified
+	// row is left alone.
+	ClaimVerifiedPlayerAccount(ctx context.Context, arg ClaimVerifiedPlayerAccountParams) error
 	ClearControlPanelVerificationCode(ctx context.Context, id int64) error
 	// Runs when a confirm attempt arrives after the lockout expired: the lockout
 	// window is over, so the lifetime budget restarts with it.
@@ -329,6 +336,7 @@ type Querier interface {
 	// Exact display-name match. LIMIT 2 lets the caller detect ambiguity (display
 	// names are not unique) and refuse rather than friend the wrong person.
 	FindAccountIDsByDisplayName(ctx context.Context, displayName *string) ([]FindAccountIDsByDisplayNameRow, error)
+	FindVerifiedAccountIDByEmail(ctx context.Context, email string) (pgtype.UUID, error)
 	// Bootstrap query used by the tenant middleware to resolve a Bearer token
 	// to its tenant_id + project_id + tenant tier + key_type + optional realtime
 	// connection envelope. Resolving them in one authoritative query prevents a
@@ -586,10 +594,6 @@ type Querier interface {
 	// instances all insert, one wins, and everyone reads the winner back.
 	InsertServerSecret(ctx context.Context, arg InsertServerSecretParams) (int64, error)
 	InsertSettingsRevision(ctx context.Context, arg InsertSettingsRevisionParams) error
-	// Race-safe half of find-or-create for a proven email (the caller re-reads
-	// after this, so a concurrent creator's row is picked up): ON CONFLICT DO
-	// NOTHING never aborts the surrounding transaction.
-	InsertVerifiedPlayerAccountIfAbsent(ctx context.Context, arg InsertVerifiedPlayerAccountIfAbsentParams) error
 	// Burns every outstanding reset link for the user. Run in the same
 	// transaction as any password change so an older emailed link cannot reset
 	// the password again afterwards.
