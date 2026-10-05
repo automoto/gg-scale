@@ -2155,9 +2155,9 @@ func AccountHomePage(vm AccountHomeView) templ.Component {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var104 string
-						templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(p.ScheduledPurgeAt.Format("2006-01-02"))
+						templ_7745c5c3_Var104, templ_7745c5c3_Err = templ.JoinStringErrs(purgeTimeLabel(p.ScheduledPurgeAt))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 541, Col: 76}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 541, Col: 71}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var104))
 						if templ_7745c5c3_Err != nil {
@@ -2466,9 +2466,9 @@ func DeleteProjectDataPage(vm DeleteProjectDataView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var120 string
-				templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(vm.ScheduledPurgeAt.Format("2006-01-02"))
+				templ_7745c5c3_Var120, templ_7745c5c3_Err = templ.JoinStringErrs(purgeTimeLabel(vm.ScheduledPurgeAt))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 610, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/players/account_templates.templ`, Line: 610, Col: 84}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var120))
 				if templ_7745c5c3_Err != nil {

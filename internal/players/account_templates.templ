@@ -538,7 +538,7 @@ templ AccountHomePage(vm AccountHomeView) {
 								<td><code>{ p.ExternalID }</code></td>
 								<td class="actions-cell">
 									if !p.DeleteRequestedAt.IsZero() {
-										<span>Deletion scheduled { p.ScheduledPurgeAt.Format("2006-01-02") }</span>
+										<span>Deletion scheduled { purgeTimeLabel(p.ScheduledPurgeAt) }</span>
 										if p.DeleteRequestedByAdmin {
 											<span>Requested by the game's team. Contact them to cancel it.</span>
 										} else {
@@ -607,7 +607,7 @@ templ DeleteProjectDataPage(vm DeleteProjectDataView) {
 		<section class="card">
 			if !vm.ScheduledPurgeAt.IsZero() {
 				<p>
-					Deletion is already scheduled for <strong>{ vm.ScheduledPurgeAt.Format("2006-01-02") }</strong>.
+					Deletion is already scheduled for <strong>{ purgeTimeLabel(vm.ScheduledPurgeAt) }</strong>.
 					You can cancel it from the account page until then.
 				</p>
 				<p><a href="/v1/players/account/" role="button" class="secondary outline btn-inline">Back to account</a></p>

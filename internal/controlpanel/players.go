@@ -632,14 +632,20 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	enable := r.Form.Get("enable") == "true"
+	// Either direction changes state, so a missing or unknown value is
+	// refused rather than read as one of them.
+	enable, err := strconv.ParseBool(r.Form.Get("enable"))
+	if err != nil {
+		http.Error(w, "enable must be true or false", http.StatusBadRequest)
+		return
+	}
 	var disabledAt pgtype.Timestamptz
 	if !enable {
 		disabledAt = pgtype.Timestamptz{Time: h.now(), Valid: true}
 	}
 	ctx := db.WithTenant(r.Context(), tenantID)
 	var updated int64
-	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+	err = h.pool.Q(ctx, func(tx pgx.Tx) error {
 		var terr error
 		updated, terr = sqlcgen.New(tx).SetPlayerDisabledInProject(ctx, sqlcgen.SetPlayerDisabledInProjectParams{
 			ID:         playerID,
@@ -763,7 +769,7 @@ func (h *Handler) playerRequestDeleteHandler(w http.ResponseWriter, r *http.Requ
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
 		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash +
-		url.QueryEscape("Deletion scheduled for "+scheduledPurgeAt.Format("2006-01-02")+". Cancel until then to keep the data.")
+		url.QueryEscape("Deletion scheduled for "+timeString(scheduledPurgeAt)+". Cancel until then to keep the data.")
 	htmxRedirect(w, r, target)
 }
 
@@ -892,12 +898,16 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	ban := r.Form.Get("ban") == "true"
+	ban, err := strconv.ParseBool(r.Form.Get("ban"))
+	if err != nil {
+		http.Error(w, "ban must be true or false", http.StatusBadRequest)
+		return
+	}
 	reason := strings.TrimSpace(r.Form.Get("reason"))
 	session, _ := sessionFromContext(r.Context())
 	ctx := db.WithTenant(r.Context(), tenantID)
 
-	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
+	err = h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		row, err := q.GetPlayerForProject(ctx, sqlcgen.GetPlayerForProjectParams{
 			TenantID: tenantID, ProjectID: projectID, ID: playerID,

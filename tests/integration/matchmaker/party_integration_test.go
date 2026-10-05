@@ -17,6 +17,7 @@ import (
 	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/matchmaker"
 	"github.com/automoto/gg-scale/internal/party"
+	"github.com/automoto/gg-scale/internal/realtime"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
@@ -278,6 +279,49 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 		return
 	}
 	assert.Len(t, p.Members, 2)
+}
+
+type invitePushCounter struct{ invites int }
+
+func (c *invitePushCounter) PushMany(_ context.Context, _ int64, _ []int64, msg realtime.Message) error {
+	if msg.Type == party.EventInvite {
+		c.invites++
+	}
+	return nil
+}
+
+func TestPartyReinviteDoesNotResendEvent(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "reinvite", "leader")
+	_, _, friend := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "friend")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	counter := &invitePushCounter{}
+	store := party.NewStore(db.NewPool(pool)).WithPusher(counter)
+	for _, player := range []int64{leader, friend} {
+		_, err := pool.Exec(ctx, `WITH account AS (INSERT INTO player_accounts(email,password_hash) VALUES('reinvite-'||$1::bigint::text||'@example.test','test'::bytea) RETURNING id) UPDATE project_players SET player_account_id=(SELECT id FROM account) WHERE id=$1`, player)
+		if !assert.NoError(t, err) {
+			return
+		}
+	}
+	_, err := pool.Exec(ctx, `INSERT INTO friend_edges(from_account_id,to_account_id,status) SELECT a.player_account_id,b.player_account_id,'accepted' FROM project_players a,project_players b WHERE a.id=$1 AND b.id=$2`, leader, friend)
+	if !assert.NoError(t, err) {
+		return
+	}
+	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
+	if !assert.NoError(t, err) {
+		return
+	}
+	invite, err := store.InviteFriend(ctx, projectID, p.ID, leader, p.Version, friend)
+	if !assert.NoError(t, err) {
+		return
+	}
+	for range 5 {
+		if _, err := store.InviteFriend(ctx, projectID, p.ID, leader, invite.PartyVersion, friend); !assert.NoError(t, err) {
+			return
+		}
+	}
+
+	assert.Equal(t, 1, counter.invites, "only a new invite sends an event")
 }
 
 func TestPartyResolutionIsDurableBeforeBackendWork(t *testing.T) {

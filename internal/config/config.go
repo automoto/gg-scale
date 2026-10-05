@@ -242,6 +242,8 @@ type Config struct {
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`
 	// PlayerDeleteGracePeriod is how long a requested per-project player
 	// deletion stays cancellable before the purge sweep hard-deletes the data.
+	// The sweep uses the current value, so shortening it also applies to
+	// deletions that are already pending.
 	PlayerDeleteGracePeriod time.Duration `env:"PLAYER_DELETE_GRACE_PERIOD" envDefault:"720h"`
 
 	// Single sign-on. Each surface has its own OAuth app for each provider.

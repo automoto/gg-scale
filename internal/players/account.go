@@ -1101,6 +1101,12 @@ func (h *Handler) deleteGrace() time.Duration {
 	return defaultDeleteGracePeriod
 }
 
+// purgeTimeLabel shows when a deletion runs. A date alone misleads when the
+// grace period is shorter than a day; UTC keeps the time unambiguous.
+func purgeTimeLabel(t time.Time) string {
+	return t.UTC().Format("2006-01-02 15:04") + " UTC"
+}
+
 // graceLabel renders the grace period on the confirmation page without
 // truncation: whole days when even, whole hours otherwise, and the exact
 // duration for anything finer — the destructive-action warning must match
@@ -1266,7 +1272,7 @@ func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	flash := "Deletion of your " + lp.ProjectName + " data is scheduled. You can cancel until the purge runs."
 	if !purgeAt.IsZero() {
-		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeAt.Format("2006-01-02") +
+		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeTimeLabel(purgeAt) +
 			". You can cancel until then."
 	}
 	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)

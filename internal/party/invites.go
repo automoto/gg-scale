@@ -157,6 +157,7 @@ func (s *Store) JoinCode(ctx context.Context, project, player int64, code, ip st
 // InviteFriend sends an invitation only to an accepted, unblocked friend in this project.
 func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, target int64) (*Invite, error) {
 	out := &Invite{PartyID: id, TargetID: target}
+	created := false
 	p, err := s.mutate(ctx, project, id, player, version, true, func(tx pgx.Tx, p *Party) error {
 		if p.State != "idle" {
 			return ErrBusy
@@ -182,9 +183,12 @@ func (s *Store) InviteFriend(ctx context.Context, project, id, player, version, 
 		}
 		p.Version++
 		out.PartyVersion = p.Version
+		created = true
 		return tx.QueryRow(ctx, `INSERT INTO party_invites(tenant_id,project_id,party_id,target_id) VALUES(current_setting('app.tenant_id')::bigint,$1,$2,$3) ON CONFLICT(party_id,target_id) WHERE status='pending' DO UPDATE SET expires_at=EXCLUDED.expires_at RETURNING id,expires_at`, project, id, target).Scan(&out.ID, &out.ExpiresAt)
 	})
-	if err != nil {
+	if err != nil || !created {
+		// A re-invite only refreshes the expiry; the target already has the
+		// event, and GET /v1/party-invites lists the invite.
 		return out, err
 	}
 	push(ctx, s.pusher, p.TenantID, []int64{target}, EventInvite, map[string]int64{"invite_id": out.ID, "party_id": id, "from_player_id": player})
