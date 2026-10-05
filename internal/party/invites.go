@@ -53,7 +53,7 @@ func (s *Store) CreateCode(ctx context.Context, project, id, player, version int
 // RevokeCode invalidates a code under the party lock.
 func (s *Store) RevokeCode(ctx context.Context, project, id, player, version, codeID int64) (*Party, error) {
 	return s.mutate(ctx, project, id, player, version, true, func(tx pgx.Tx, p *Party) error {
-		result, err := tx.Exec(ctx, `UPDATE party_invite_codes SET revoked_at=now() WHERE party_id=$1 AND id=$2`, id, codeID)
+		result, err := tx.Exec(ctx, `UPDATE party_invite_codes SET revoked_at=now() WHERE party_id=$1 AND id=$2 AND revoked_at IS NULL`, id, codeID)
 		if err != nil {
 			return err
 		}
@@ -228,8 +228,9 @@ func (s *Store) ResolveInvite(ctx context.Context, project, id, player, version 
 		if err != nil {
 			return err
 		}
+		// Same error as an unknown id, so other players cannot probe ids.
 		if target != player && (accept || out.LeaderID != player) {
-			return ErrNotLeader
+			return ErrInvite
 		}
 		if out.Version != version {
 			return ErrStale

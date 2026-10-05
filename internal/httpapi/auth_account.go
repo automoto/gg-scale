@@ -301,6 +301,11 @@ func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct
 			if bcrypt.CompareHashAndPassword(row.PasswordHash, []byte(in.Body.Password)) != nil {
 				return errBadCredentials
 			}
+			// Told only after the password matched, so it reveals nothing
+			// to someone probing deletion state.
+			if row.DeleteRequestedByAdmin {
+				return errAdminDeleteRequest
+			}
 			n, qerr := q.CancelPlayerDeleteSelf(ctx, row.ID)
 			if qerr != nil {
 				return qerr
@@ -317,6 +322,8 @@ func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct
 			return nil, errNoPending
 		case errors.Is(err, errBadCredentials):
 			return nil, errNoPending
+		case errors.Is(err, errAdminDeleteRequest):
+			return nil, huma.Error403Forbidden("the game's team requested this deletion; contact them to cancel it")
 		case err != nil:
 			return nil, serverError(ctx, "delete cancel: tx", err)
 		}

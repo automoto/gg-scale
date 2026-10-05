@@ -72,6 +72,12 @@ func normalizeFriendCode(raw string) string {
 	return strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(raw))
 }
 
+// validFriendCode reports whether a normalized code has the minted shape. It
+// keeps junk such as NUL bytes away from the query.
+func validFriendCode(code string) bool {
+	return len(code) == friendCodeLen && strings.Trim(code, friendCodeAlphabet) == ""
+}
+
 // setFreshFriendCode mints codes until one lands without a unique collision
 // and applies it with set, which owns the write semantics (initialize-if-absent
 // vs unconditional overwrite). The collision-retry policy lives only here.
@@ -157,7 +163,8 @@ func friendCodeRegenerate(d Deps) func(context.Context, *struct{}) (*friendCodeO
 
 func friendCodeResolve(d Deps) func(context.Context, *friendCodeResolveInput) (*playerGetOutput, error) {
 	return func(ctx context.Context, in *friendCodeResolveInput) (*playerGetOutput, error) {
-		if _, ok := playerauth.IDFromContext(ctx); !ok {
+		me, ok := playerauth.IDFromContext(ctx)
+		if !ok {
 			return nil, huma.Error401Unauthorized("no player")
 		}
 		projectID, ok := db.ProjectFromContext(ctx)
@@ -166,10 +173,13 @@ func friendCodeResolve(d Deps) func(context.Context, *friendCodeResolveInput) (*
 		}
 
 		code := normalizeFriendCode(in.Code)
+		if !validFriendCode(code) {
+			return nil, huma.Error404NotFound("player not found")
+		}
 		var resp publicPlayerResponse
 		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
 			row, qerr := sqlcgen.New(tx).GetPublicPlayerByFriendCode(ctx, sqlcgen.GetPublicPlayerByFriendCodeParams{
-				FriendCode: &code, ProjectID: projectID,
+				FriendCode: &code, ProjectID: projectID, CallerID: me,
 			})
 			if qerr != nil {
 				return qerr

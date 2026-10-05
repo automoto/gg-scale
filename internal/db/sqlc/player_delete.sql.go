@@ -19,6 +19,7 @@ WHERE id = $1
   AND player_account_id = $2
   AND deleted_at IS NULL
   AND delete_requested_at IS NOT NULL
+  AND NOT delete_requested_by_admin
 `
 
 type CancelPlayerDeleteByAccountParams struct {
@@ -28,7 +29,8 @@ type CancelPlayerDeleteByAccountParams struct {
 
 // Clears the pending request; lifts the disable only when the request created
 // it (disabled_at = delete_requested_at), so a pre-existing admin suspension
-// survives the cancel. 0 rows = no pending request (or already purged).
+// survives the cancel. An admin's request is not the player's to cancel.
+// 0 rows = no pending player request (or already purged).
 func (q *Queries) CancelPlayerDeleteByAccount(ctx context.Context, arg CancelPlayerDeleteByAccountParams) (int64, error) {
 	result, err := q.db.Exec(ctx, cancelPlayerDeleteByAccount, arg.ID, arg.PlayerAccountID)
 	if err != nil {

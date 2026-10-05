@@ -39,6 +39,27 @@ func TestNormalizeFriendCode(t *testing.T) {
 	}
 }
 
+func TestValidFriendCode(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"valid", "XKCD4242", true},
+		{"too_short", "XKCD424", false},
+		{"too_long", "XKCD42422", false},
+		{"nul_byte", "XKCD\x00242", false},
+		{"ambiguous_rune", "XKCD4240", false},
+		{"lowercase_not_normalized", "xkcd4242", false},
+		{"non_ascii", "XKCDé242", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, validFriendCode(tt.in))
+		})
+	}
+}
+
 func TestFriendCodeAlphabet_has_no_ambiguous_runes(t *testing.T) {
 	for _, r := range "IO01" {
 		assert.False(t, strings.ContainsRune(friendCodeAlphabet, r))

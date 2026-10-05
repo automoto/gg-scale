@@ -187,6 +187,10 @@ type Deps struct {
 	MCPEnabled            bool
 	MCPTokenRatePerSecond float64
 	MCPTokenBurst         float64
+	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
+	// for failed /mcp authentications. Zero uses the mcp package default.
+	MCPAuthFailuresPerMinute float64
+	MCPAuthFailureBurst      float64
 	// MCPMaxProjectAPIKeys limits the create_api_key tool.
 	MCPMaxProjectAPIKeys int64
 	// CORSMaxProjectOrigins limits the set_allowed_origins tool.
@@ -329,20 +333,22 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 			}
 			r.Handle("/mcp", mcp.New(mcp.Deps{
-				Pool:               d.Pool,
-				RBAC:               d.RBAC,
-				Limiter:            d.Limiter,
-				ProxyTrust:         d.ProxyTrust,
-				Version:            d.Version,
-				TokenRatePerSecond: d.MCPTokenRatePerSecond,
-				TokenBurst:         d.MCPTokenBurst,
-				FleetEnabled:       d.ControlPanel.FleetEnabled,
-				RelayEnabled:       d.ControlPanel.RelayEnabled,
-				RelayConfigured:    d.RelayIssuer != nil,
-				CORSAllowedOrigins: d.CORSAllowedOrigins,
-				MaxProjectAPIKeys:  d.MCPMaxProjectAPIKeys,
-				MaxProjectOrigins:  d.CORSMaxProjectOrigins,
-				Now:                d.Now,
+				Pool:                  d.Pool,
+				RBAC:                  d.RBAC,
+				Limiter:               d.Limiter,
+				ProxyTrust:            d.ProxyTrust,
+				Version:               d.Version,
+				TokenRatePerSecond:    d.MCPTokenRatePerSecond,
+				TokenBurst:            d.MCPTokenBurst,
+				AuthFailuresPerMinute: d.MCPAuthFailuresPerMinute,
+				AuthFailureBurst:      d.MCPAuthFailureBurst,
+				FleetEnabled:          d.ControlPanel.FleetEnabled,
+				RelayEnabled:          d.ControlPanel.RelayEnabled,
+				RelayConfigured:       d.RelayIssuer != nil,
+				CORSAllowedOrigins:    d.CORSAllowedOrigins,
+				MaxProjectAPIKeys:     d.MCPMaxProjectAPIKeys,
+				MaxProjectOrigins:     d.CORSMaxProjectOrigins,
+				Now:                   d.Now,
 			}))
 		})
 	}

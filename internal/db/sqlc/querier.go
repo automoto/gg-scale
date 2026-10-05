@@ -49,7 +49,8 @@ type Querier interface {
 	CancelMatchmakingTicket(ctx context.Context, arg CancelMatchmakingTicketParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
-	// survives the cancel. 0 rows = no pending request (or already purged).
+	// survives the cancel. An admin's request is not the player's to cancel.
+	// 0 rows = no pending player request (or already purged).
 	CancelPlayerDeleteByAccount(ctx context.Context, arg CancelPlayerDeleteByAccountParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a pre-existing admin suspension
@@ -58,7 +59,8 @@ type Querier interface {
 	CancelPlayerDeleteInProject(ctx context.Context, arg CancelPlayerDeleteInProjectParams) (int64, error)
 	// Clears the pending request; lifts the disable only when the request created
 	// it (disabled_at = delete_requested_at), so a suspension that predates the
-	// request survives the cancel. 0 rows = no pending request (or purged).
+	// request survives the cancel. An admin's request is not the player's to
+	// cancel. 0 rows = no pending player request (or purged).
 	CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error)
 	// Bound the player count without splitting entries. The oldest entry can
 	// exceed a small budget so it is never starved. Their tickets
@@ -520,6 +522,8 @@ type Querier interface {
 	// account email.
 	GetPublicPlayer(ctx context.Context, arg GetPublicPlayerParams) (GetPublicPlayerRow, error)
 	// Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+	// Disabled (including pending-delete) players and a block in either direction
+	// with the caller look the same as an unknown code.
 	GetPublicPlayerByFriendCode(ctx context.Context, arg GetPublicPlayerByFriendCodeParams) (GetPublicPlayerByFriendCodeRow, error)
 	GetPublicSignupEnabled(ctx context.Context) (bool, error)
 	// The player's current queued ticket in the project, if any. Used to surface
@@ -889,7 +893,8 @@ type Querier interface {
 	RequestPlayerDeleteByAccount(ctx context.Context, arg RequestPlayerDeleteByAccountParams) (pgtype.Timestamptz, error)
 	// Admin-side delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same
-	// now() so cancel can tell the two apart. 0 rows = gone or already pending.
+	// now() so cancel can tell the two apart. Marks the request as the admin's,
+	// so the player cannot cancel it. 0 rows = gone or already pending.
 	RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error)
 	// Self-service delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same

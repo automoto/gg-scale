@@ -82,11 +82,21 @@ WHERE p.friend_code = $1
   AND p.project_id = $2
   AND p.tenant_id = current_setting('app.tenant_id', true)::bigint
   AND p.deleted_at IS NULL
+  AND p.disabled_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1
+      FROM project_players me
+      JOIN friend_edges e
+        ON (e.from_account_id = me.player_account_id AND e.to_account_id = p.player_account_id)
+        OR (e.from_account_id = p.player_account_id AND e.to_account_id = me.player_account_id)
+      WHERE me.id = $3 AND e.status = 'blocked'
+  )
 `
 
 type GetPublicPlayerByFriendCodeParams struct {
 	FriendCode *string
 	ProjectID  int64
+	CallerID   int64
 }
 
 type GetPublicPlayerByFriendCodeRow struct {
@@ -96,8 +106,10 @@ type GetPublicPlayerByFriendCodeRow struct {
 }
 
 // Friend-code resolve: same public shape and project scoping as GetPublicPlayer.
+// Disabled (including pending-delete) players and a block in either direction
+// with the caller look the same as an unknown code.
 func (q *Queries) GetPublicPlayerByFriendCode(ctx context.Context, arg GetPublicPlayerByFriendCodeParams) (GetPublicPlayerByFriendCodeRow, error) {
-	row := q.db.QueryRow(ctx, getPublicPlayerByFriendCode, arg.FriendCode, arg.ProjectID)
+	row := q.db.QueryRow(ctx, getPublicPlayerByFriendCode, arg.FriendCode, arg.ProjectID, arg.CallerID)
 	var i GetPublicPlayerByFriendCodeRow
 	err := row.Scan(&i.ID, &i.DisplayName, &i.CreatedAt)
 	return i, err

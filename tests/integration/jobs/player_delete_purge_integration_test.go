@@ -142,6 +142,38 @@ INSERT INTO audit_log (tenant_id, actor_user_id, action) VALUES (8101, 8111, 'au
 	assert.Equal(t, int64(0), countB)
 }
 
+// A per-project purge removes only that game's data. The player's global
+// account, its friends and its links to other games are kept.
+func TestSweepDuePlayerDeletes_keeps_linked_account(t *testing.T) {
+	_, raw := startJobsDB(t)
+	ctx := context.Background()
+
+	_, err := raw.Exec(ctx, `
+INSERT INTO tenants (id, name, player_count) VALUES (8201, 'keep-acc', 2);
+INSERT INTO projects (id, tenant_id, name) VALUES (8201, 8201, 'game-a'), (8202, 8201, 'game-b');
+INSERT INTO player_accounts (id, email, password_hash, email_verified_at)
+VALUES ('00000000-0000-0000-0000-000000008201', 'keep@example.test', '\x01', now()),
+       ('00000000-0000-0000-0000-000000008202', 'pal@example.test', '\x01', now());
+INSERT INTO project_players (id, tenant_id, project_id, external_id, player_account_id, disabled_at, delete_requested_at, delete_requested_by_admin)
+VALUES (8211, 8201, 8201, 'due', '00000000-0000-0000-0000-000000008201', now() - interval '31 days', now() - interval '31 days', true),
+       (8212, 8201, 8202, 'other-game', '00000000-0000-0000-0000-000000008201', NULL, NULL, false);
+INSERT INTO friend_edges (from_account_id, to_account_id, status)
+VALUES ('00000000-0000-0000-0000-000000008201', '00000000-0000-0000-0000-000000008202', 'accepted')`)
+	require.NoError(t, err)
+
+	require.NoError(t, jobs.SweepDuePlayerDeletes(ctx, appRolePool(t, raw), purgeGrace, time.Now()))
+
+	var purged, account, friends, otherLink int64
+	require.NoError(t, raw.QueryRow(ctx, `
+SELECT (SELECT count(*) FROM project_players WHERE id = 8211),
+       (SELECT count(*) FROM player_accounts WHERE id = '00000000-0000-0000-0000-000000008201'),
+       (SELECT count(*) FROM friend_edges WHERE from_account_id = '00000000-0000-0000-0000-000000008201'),
+       (SELECT count(*) FROM project_players WHERE id = 8212 AND player_account_id IS NOT NULL)`).
+		Scan(&purged, &account, &friends, &otherLink))
+	assert.Equal(t, []int64{0, 1, 1, 1}, []int64{purged, account, friends, otherLink},
+		"game row purged; account, friend edge and other-game link kept")
+}
+
 func TestSweepDuePlayerDeletes_drains_batches_larger_than_batch_size(t *testing.T) {
 	_, raw := startJobsDB(t)
 	ctx := context.Background()

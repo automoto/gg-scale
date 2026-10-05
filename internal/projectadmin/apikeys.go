@@ -24,8 +24,9 @@ var (
 	// ErrAPIKeyLimit means the project is at its active key limit.
 	ErrAPIKeyLimit = errors.New("projectadmin: the Game Project is at its API key limit")
 	// ErrScopeNotGrantable means a requested key scope is not enabled for the
-	// tenant or project, or its server switch is off.
-	ErrScopeNotGrantable = errors.New("projectadmin: scope cannot be granted")
+	// tenant or project, or its server switch is off. MCP clients see this
+	// text, so it has no package prefix.
+	ErrScopeNotGrantable = errors.New("scope cannot be granted")
 	// ErrProjectNotInTenant means the key's project is not in the tenant.
 	ErrProjectNotInTenant = errors.New("projectadmin: Game Project is not in the Account Tenant")
 )

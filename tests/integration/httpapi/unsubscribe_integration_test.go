@@ -84,7 +84,7 @@ func TestInviteEmails_name_the_tenant_and_game_and_unsubscribe_suppresses(t *tes
 	teamMail := sent[1]
 	assert.Equal(t, "You've been invited to Acme Games on ggscale", teamMail.Subject)
 	assert.Contains(t, teamMail.Body, "You were invited to join Acme Games on ggscale")
-	assert.Contains(t, teamMail.Body, "read-only access")
+	assert.Contains(t, teamMail.Body, "cannot open Account Tenant pages")
 	assert.NotEmpty(t, teamMail.ListUnsubscribe)
 
 	// T2: the one-click unsubscribe flow. GET shows a signed-out confirm

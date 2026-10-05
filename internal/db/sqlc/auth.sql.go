@@ -19,11 +19,13 @@ WHERE id = $1
   AND tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
   AND delete_requested_at IS NOT NULL
+  AND NOT delete_requested_by_admin
 `
 
 // Clears the pending request; lifts the disable only when the request created
 // it (disabled_at = delete_requested_at), so a suspension that predates the
-// request survives the cancel. 0 rows = no pending request (or purged).
+// request survives the cancel. An admin's request is not the player's to
+// cancel. 0 rows = no pending player request (or purged).
 func (q *Queries) CancelPlayerDeleteSelf(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, cancelPlayerDeleteSelf, id)
 	if err != nil {
@@ -354,7 +356,7 @@ func (q *Queries) GetPlayerPasswordResetState(ctx context.Context, arg GetPlayer
 }
 
 const getPlayerPendingDeleteByEmail = `-- name: GetPlayerPendingDeleteByEmail :one
-SELECT id, project_id, password_hash, delete_requested_at
+SELECT id, project_id, password_hash, delete_requested_at, delete_requested_by_admin
 FROM project_players
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
@@ -369,10 +371,11 @@ type GetPlayerPendingDeleteByEmailParams struct {
 }
 
 type GetPlayerPendingDeleteByEmailRow struct {
-	ID                int64
-	ProjectID         int64
-	PasswordHash      []byte
-	DeleteRequestedAt pgtype.Timestamptz
+	ID                     int64
+	ProjectID              int64
+	PasswordHash           []byte
+	DeleteRequestedAt      pgtype.Timestamptz
+	DeleteRequestedByAdmin bool
 }
 
 // Credential lookup for the pre-session delete-cancel endpoint: the request
@@ -386,6 +389,7 @@ func (q *Queries) GetPlayerPendingDeleteByEmail(ctx context.Context, arg GetPlay
 		&i.ProjectID,
 		&i.PasswordHash,
 		&i.DeleteRequestedAt,
+		&i.DeleteRequestedByAdmin,
 	)
 	return i, err
 }

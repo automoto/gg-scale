@@ -137,6 +137,42 @@ func TestDeleteCancel_credential_based(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestDeleteCancel_admin_requested_should_be_refused(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "admindel@example.com", "supersecret")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players
+		    SET delete_requested_at = now(), disabled_at = now(), delete_requested_by_admin = true
+		  WHERE id = $1`, sess.PlayerID)
+	require.NoError(t, err)
+
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/delete/cancel", "pw",
+		map[string]string{"email": "admindel@example.com", "password": "supersecret"})
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
+}
+
+func TestDeleteCancel_admin_requested_should_stay_pending(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "admindel@example.com", "supersecret")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players
+		    SET delete_requested_at = now(), disabled_at = now(), delete_requested_by_admin = true
+		  WHERE id = $1`, sess.PlayerID)
+	require.NoError(t, err)
+
+	doJSON(t, http.MethodPost, srv.URL+"/v1/auth/delete/cancel", "pw",
+		map[string]string{"email": "admindel@example.com", "password": "supersecret"})
+
+	var pending bool
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT delete_requested_at IS NOT NULL FROM project_players WHERE id = $1`, sess.PlayerID).Scan(&pending))
+	assert.True(t, pending)
+}
+
 func TestDeleteCancel_passwordless_pending_row_stays_opaque(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")

@@ -55,6 +55,11 @@ type Config struct {
 	// can be N times the value. Defaults 5 / 20.
 	MCPTokenRatePerSecond int `env:"MCP_TOKEN_RATE_PER_SECOND" envDefault:"5"`
 	MCPTokenRateBurst     int `env:"MCP_TOKEN_RATE_BURST" envDefault:"20"`
+	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
+	// that only failed /mcp authentications use; valid tokens never use it.
+	// Defaults 10 / 10.
+	MCPAuthFailuresPerMinute int `env:"MCP_AUTH_FAILURES_PER_MINUTE" envDefault:"10"`
+	MCPAuthFailureBurst      int `env:"MCP_AUTH_FAILURE_BURST" envDefault:"10"`
 	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
 	// for each project. Default 20.
 	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`

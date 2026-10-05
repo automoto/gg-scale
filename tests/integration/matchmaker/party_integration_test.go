@@ -164,6 +164,27 @@ func TestPartyCodesBlockAfterTenFailures(t *testing.T) {
 	assert.ErrorIs(t, err, party.ErrCooldown)
 }
 
+func TestPartyCodeSecondRevokeIsNotFound(t *testing.T) {
+	pool := startMigratedDB(t)
+	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "code-revoke", "leader")
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := party.NewStore(db.NewPool(pool))
+	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
+	if !assert.NoError(t, err) {
+		return
+	}
+	code, err := store.CreateCode(ctx, projectID, p.ID, leader, p.Version, 1)
+	if !assert.NoError(t, err) {
+		return
+	}
+	p, err = store.RevokeCode(ctx, projectID, p.ID, leader, code.PartyVersion, code.ID)
+	if !assert.NoError(t, err) {
+		return
+	}
+	_, err = store.RevokeCode(ctx, projectID, p.ID, leader, p.Version, code.ID)
+	assert.ErrorIs(t, err, party.ErrInvite)
+}
+
 func TestPartyMutationsRequireVersionAndLeader(t *testing.T) {
 	pool := startMigratedDB(t)
 	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "controls", "leader")
@@ -207,6 +228,7 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 	pool := startMigratedDB(t)
 	tenantID, projectID, leader := seedTenantProjectPlayer(t, pool, "friend-invite", "leader")
 	_, _, friend := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "friend")
+	_, _, outsider := seedTenantProjectPlayerInto(t, pool, tenantID, projectID, "outsider")
 	ctx := db.WithTenant(context.Background(), tenantID)
 	store := party.NewStore(db.NewPool(pool))
 	p, err := store.Create(ctx, projectID, leader, party.Settings{Mode: "match_only", MinCount: 2, MaxCount: 2, CountMultiple: 1})
@@ -245,6 +267,12 @@ func TestPartyInviteRequiresAcceptedFriend(t *testing.T) {
 		return
 	}
 	assert.Len(t, invites, 1)
+	// A player who is neither target nor leader sees the same error as for
+	// an unknown invite id, so invite ids cannot be enumerated.
+	for _, accept := range []bool{true, false} {
+		_, err = store.ResolveInvite(ctx, projectID, invite.ID, outsider, invite.PartyVersion, accept)
+		assert.ErrorIs(t, err, party.ErrInvite)
+	}
 	p, err = store.ResolveInvite(ctx, projectID, invite.ID, friend, invite.PartyVersion, true)
 	if !assert.NoError(t, err) {
 		return

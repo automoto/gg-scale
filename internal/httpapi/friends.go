@@ -43,7 +43,7 @@ type friendEntry struct {
 	AccountID   string          `json:"account_id" example:"6f9619ff-8b86-4d01-b42d-00cf4fc964ff"`
 	PlayerID    *int64          `json:"player_id,omitempty" example:"87"`
 	Status      string          `json:"status" example:"accepted"`
-	Email       *string         `json:"email,omitempty" example:"friend@example.com"`
+	Email       *string         `json:"email,omitempty" example:"friend@example.com" doc:"Set only for accepted friends."`
 	DisplayName *string         `json:"display_name,omitempty" example:"PlayerTwo"`
 	Presence    *friendPresence `json:"presence,omitempty"`
 	CreatedAt   string          `json:"created_at" example:"2026-01-02T15:04:05Z"`
@@ -517,7 +517,9 @@ func friendsList(d Deps) func(context.Context, *friendsListInput) (*friendsListO
 					UpdatedAt: row.UpdatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 				}
 				if ir, ok := idMap[other]; ok {
-					if ir.Email != "" {
+					// Email, like presence, is for accepted friends only:
+					// anyone can send a request to any player id.
+					if ir.Email != "" && status == "accepted" {
 						email := ir.Email
 						entry.Email = &email
 					}

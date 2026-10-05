@@ -50,6 +50,10 @@ type Deps struct {
 	// TokenRatePerSecond / TokenBurst set the per-token bucket.
 	TokenRatePerSecond float64
 	TokenBurst         float64
+	// AuthFailuresPerMinute / AuthFailureBurst set the per-IP bucket that
+	// only failed authentications use. Defaults 10 / 10.
+	AuthFailuresPerMinute float64
+	AuthFailureBurst      float64
 	// Facts for project_health_check. None of them is secret.
 	FleetEnabled       bool
 	RelayEnabled       bool
@@ -108,6 +112,12 @@ func newHandler(d Deps) *handler {
 	if d.MaxProjectOrigins <= 0 {
 		d.MaxProjectOrigins = 20
 	}
+	if d.AuthFailuresPerMinute <= 0 {
+		d.AuthFailuresPerMinute = 10
+	}
+	if d.AuthFailureBurst <= 0 {
+		d.AuthFailureBurst = 10
+	}
 	h := &handler{d: d}
 	srv := h.newServer()
 	streamable := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv },
@@ -157,6 +167,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, aerr := h.authenticate(r)
+	if aerr != nil && aerr.status != http.StatusInternalServerError {
+		aerr = h.chargeFailure(r, aerr)
+	}
 	if aerr != nil {
 		if aerr.status == http.StatusUnauthorized {
 			w.Header().Set("WWW-Authenticate", "Bearer")
@@ -178,32 +191,44 @@ func sameOrigin(r *http.Request) bool {
 	return err == nil && u.Host != "" && strings.EqualFold(u.Host, r.Host)
 }
 
-// authenticate runs the request checks in order and stops at the first
-// failure. The per-IP bucket is debited before the token lookup and refunded
-// only when the token passes every identity check, so a wrong token, and a
-// real token that no longer works, both use up the bucket. The per-token
-// limiter runs after the refund: an agent that only goes over its own rate
-// does not use up the per-IP bucket.
-func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
+// chargeFailure debits the per-IP bucket for a failed authentication: a wrong
+// token, and a real token that no longer works. Only failures use the bucket,
+// so clients that send bad tokens from a shared IP never block valid tokens.
+// A token cannot be guessed, and an unknown token costs one indexed lookup,
+// so letting an over-limit IP still reach the lookup is cheap.
+func (h *handler) chargeFailure(r *http.Request, aerr *authError) *authError {
+	if aerr.status == http.StatusTooManyRequests {
+		// The per-token limit: the token itself is valid.
+		return aerr
+	}
 	ctx := r.Context()
-	ipBucket := "ratelimit:ip:mcp:" + h.d.ProxyTrust.ClientIP(r)
-	decision, err := h.d.Limiter.Allow(ctx, ipBucket, ratelimit.AuthIPRate, ratelimit.AuthIPBurst)
+	decision, err := h.d.Limiter.Allow(ctx, "ratelimit:ip:mcp:"+h.d.ProxyTrust.ClientIP(r),
+		h.d.AuthFailuresPerMinute/60, h.d.AuthFailureBurst)
 	if err != nil {
-		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
+		slog.ErrorContext(ctx, "mcp: per-IP bucket", "err", err)
+		return &authError{http.StatusInternalServerError, "internal error"}
 	}
 	if !decision.Allowed {
-		return Principal{}, &authError{http.StatusTooManyRequests, "too many failed authentication attempts"}
+		return &authError{http.StatusTooManyRequests, "too many failed authentication attempts"}
 	}
+	return aerr
+}
 
+// authenticate runs the request checks in order and stops at the first
+// failure. The per-token limiter runs last, so an agent that only goes over
+// its own rate does not use up the per-IP failure bucket.
+func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
+	ctx := r.Context()
 	token, ok := bearerToken(r.Header.Get("Authorization"))
 	if !ok {
 		return Principal{}, &authError{http.StatusUnauthorized, "unauthorized"}
 	}
 	sum := sha256.Sum256([]byte(token))
 	var row sqlcgen.GetMCPTokenByHashRow
-	err = h.d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		row, err = sqlcgen.New(tx).GetMCPTokenByHash(ctx, sum[:])
-		return err
+	err := h.d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		row, qerr = sqlcgen.New(tx).GetMCPTokenByHash(ctx, sum[:])
+		return qerr
 	})
 	switch {
 	case errors.Is(err, pgx.ErrNoRows), err == nil && row.RevokedAt.Valid:
@@ -252,12 +277,7 @@ func (h *handler) authenticate(r *http.Request) (Principal, *authError) {
 		return Principal{}, &authError{http.StatusForbidden, "the person who created this token can no longer manage this Game Project"}
 	}
 
-	if refunder, ok := h.d.Limiter.(ratelimit.Refunder); ok {
-		if err := refunder.Refund(ctx, ipBucket, ratelimit.AuthIPRate, ratelimit.AuthIPBurst); err != nil {
-			slog.WarnContext(ctx, "mcp: refund per-IP bucket", "err", err)
-		}
-	}
-	decision, err = h.d.Limiter.Allow(ctx, "ratelimit:mcp:"+strconv.FormatInt(p.TokenID, 10), h.d.TokenRatePerSecond, h.d.TokenBurst)
+	decision, err := h.d.Limiter.Allow(ctx, "ratelimit:mcp:"+strconv.FormatInt(p.TokenID, 10), h.d.TokenRatePerSecond, h.d.TokenBurst)
 	if err != nil {
 		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
 	}

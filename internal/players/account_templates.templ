@@ -45,10 +45,12 @@ templ AccountLoginPage(vm AccountLoginView) {
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/login") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Email
+			<label>
+				Email
 				<input name="email" type="email" value={ vm.Email } autocomplete="username" required/>
 			</label>
-			<label>Password
+			<label>
+				Password
 				<input name="password" type="password" autocomplete="current-password" required/>
 			</label>
 			<button type="submit">Sign in</button>
@@ -81,7 +83,8 @@ templ AccountForgotPasswordPage(vm AccountForgotPasswordView) {
 			<p class="subtitle">Enter your email and we send you a reset link.</p>
 			<form method="post" action={ templ.URL("/v1/players/account/forgot-password") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label>Email
+				<label>
+					Email
 					<input name="email" type="email" autocomplete="username" required/>
 				</label>
 				<button type="submit">Send reset link</button>
@@ -97,7 +100,8 @@ templ AccountResetPasswordPage(vm AccountResetPasswordView) {
 		<form method="post" action={ templ.URL("/v1/players/account/reset-password") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 			<input type="hidden" name="token" value={ vm.Token }/>
-			<label>New password
+			<label>
+				New password
 				<input name="password" type="password" autocomplete="new-password" required/>
 			</label>
 			if msg, ok := vm.FieldErrors["password"]; ok {
@@ -142,16 +146,19 @@ templ AccountSignupPage(vm AccountSignupView) {
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/signup") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Email
+			<label>
+				Email
 				<input name="email" type="email" value={ vm.Email } autocomplete="email" required/>
 				if msg, ok := vm.FieldErrors["email"]; ok {
 					<small class="field-error">{ msg }</small>
 				}
 			</label>
-			<label>Display name (optional)
+			<label>
+				Display name (optional)
 				<input name="display_name" type="text" value={ vm.DisplayName } autocomplete="nickname" maxlength="64"/>
 			</label>
-			<label>Password (≥ 8 chars)
+			<label>
+				Password (≥ 8 chars)
 				<input name="password" type="password" autocomplete="new-password" minlength="8" required/>
 				if msg, ok := vm.FieldErrors["password"]; ok {
 					<small class="field-error">{ msg }</small>
@@ -173,13 +180,16 @@ type AccountVerifyView struct {
 templ AccountVerifyPage(vm AccountVerifyView) {
 	@playerAuthLayout("Verify email") {
 		<h1>Verify your email</h1>
-		<p class="subtitle">We sent a 6-digit code to <!--email_off--><code>{ vm.Email }</code><!--/email_off-->.</p>
+		<p class="subtitle">We sent a 6-digit code to <!--email_off-->
+<code>{ vm.Email }</code><!--/email_off-->
+.</p>
 		if vm.Error != "" {
 			<p role="alert">{ vm.Error }</p>
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/verify") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Verification code
+			<label>
+				Verification code
 				<input name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required autofocus/>
 			</label>
 			<button type="submit">Verify</button>
@@ -205,7 +215,8 @@ templ AccountTwoFactorChallengePage(vm AccountTwoFactorChallengeView) {
 		}
 		<form method="post" action={ templ.URL("/v1/players/account/login/2fa") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>Code
+			<label>
+				Code
 				<input name="code" type="text" autocomplete="one-time-code" required autofocus/>
 			</label>
 			<label>
@@ -255,14 +266,16 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 			<form method="post" action={ templ.URL("/v1/players/account/2fa/backup-codes") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				if vm.HasPassword {
-					<label>Current password
+					<label>
+						Current password
 						<input name="current_password" type="password" autocomplete="current-password" required/>
 						if msg, ok := vm.FieldErrors["regenerate_password"]; ok {
 							<small class="field-error">{ msg }</small>
 						}
 					</label>
 				}
-				<label>Authenticator code
+				<label>
+					Authenticator code
 					<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
 					if msg, ok := vm.FieldErrors["regenerate_code"]; ok {
 						<small class="field-error">{ msg }</small>
@@ -275,14 +288,16 @@ templ AccountTwoFactorPage(vm AccountTwoFactorView) {
 			<form method="post" action={ templ.URL("/v1/players/account/2fa/disable") }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				if vm.HasPassword {
-					<label>Current password
+					<label>
+						Current password
 						<input name="current_password" type="password" autocomplete="current-password" required/>
 						if msg, ok := vm.FieldErrors["disable_password"]; ok {
 							<small class="field-error">{ msg }</small>
 						}
 					</label>
 				}
-				<label>Authenticator or backup code
+				<label>
+					Authenticator or backup code
 					<input name="code" type="text" autocomplete="one-time-code" required/>
 					if msg, ok := vm.FieldErrors["disable_code"]; ok {
 						<small class="field-error">{ msg }</small>
@@ -315,7 +330,8 @@ templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
 		<p><code>{ vm.Secret }</code></p>
 		<form method="post" action={ templ.URL("/v1/players/account/2fa/confirm") }>
 			<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-			<label>6-digit code
+			<label>
+				6-digit code
 				<input name="code" type="text" inputmode="numeric" autocomplete="one-time-code" required/>
 			</label>
 			<button type="submit" class="btn-inline">Confirm and enable</button>
@@ -357,6 +373,9 @@ type LinkedProject struct {
 	// request is pending; zero otherwise.
 	DeleteRequestedAt time.Time
 	ScheduledPurgeAt  time.Time
+	// DeleteRequestedByAdmin means the game's team asked for the deletion,
+	// so the player cannot cancel it.
+	DeleteRequestedByAdmin bool
 }
 
 // UnlinkProjectView is the data for the unlink confirmation page.
@@ -400,11 +419,13 @@ type AccountHomeView struct {
 // code when two-factor authentication is on, else nothing.
 templ signInMethodConfirm(vm AccountHomeView) {
 	if vm.HasPassword {
-		<label>Current password
+		<label>
+			Current password
 			<input name="current_password" type="password" autocomplete="current-password" required/>
 		</label>
 	} else if vm.TwoFactorEnabled {
-		<label>Authenticator or backup code
+		<label>
+			Authenticator or backup code
 			<input name="code" type="text" autocomplete="one-time-code" required/>
 		</label>
 	}
@@ -481,9 +502,13 @@ templ AccountHomePage(vm AccountHomeView) {
 			<div>
 				<h1>Your ggscale account</h1>
 				if vm.DisplayName != "" {
-					<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<!--email_off--><code>{ vm.Email }</code><!--/email_off-->).</p>
+					<p class="subtitle">Signed in as <strong>{ vm.DisplayName }</strong> (<!--email_off-->
+<code>{ vm.Email }</code><!--/email_off-->
+).</p>
 				} else {
-					<p class="subtitle">Signed in as <!--email_off--><code>{ vm.Email }</code><!--/email_off-->.</p>
+					<p class="subtitle">Signed in as <!--email_off-->
+<code>{ vm.Email }</code><!--/email_off-->
+.</p>
 				}
 			</div>
 		</div>
@@ -514,10 +539,14 @@ templ AccountHomePage(vm AccountHomeView) {
 								<td class="actions-cell">
 									if !p.DeleteRequestedAt.IsZero() {
 										<span>Deletion scheduled { p.ScheduledPurgeAt.Format("2006-01-02") }</span>
-										<form method="post" action={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/delete/cancel") } class="inline-form">
-											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-											<button type="submit" class="secondary outline btn-inline">Cancel deletion</button>
-										</form>
+										if p.DeleteRequestedByAdmin {
+											<span>Requested by the game's team. Contact them to cancel it.</span>
+										} else {
+											<form method="post" action={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/delete/cancel") } class="inline-form">
+												<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+												<button type="submit" class="secondary outline btn-inline">Cancel deletion</button>
+											</form>
+										}
 									} else {
 										<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/unlink") } role="button" class="secondary outline btn-inline">Unlink</a>
 										<a href={ templ.URL("/v1/players/account/projects/" + strconv.FormatInt(p.PlayerID, 10) + "/delete") } role="button" class="secondary outline btn-inline">Delete data</a>
@@ -710,7 +739,8 @@ templ ConnectionAddressFormPage(vm ConnectionAddressFormView) {
 			}
 			<form method="post" action={ connectionAddressFormAction(vm) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<label>Type
+				<label>
+					Type
 					<select name="addr_type" aria-describedby="addr_type-error">
 						<option value="ip" selected?={ vm.TypeValue == "ip" || vm.TypeValue == "" }>IP address</option>
 						<option value="dns" selected?={ vm.TypeValue == "dns" }>DNS name</option>
@@ -720,7 +750,8 @@ templ ConnectionAddressFormPage(vm ConnectionAddressFormView) {
 						<small class="field-error" id="addr_type-error">{ msg }</small>
 					}
 				</label>
-				<label>Address
+				<label>
+					Address
 					<input name="addr_value" type="text" value={ vm.Value } maxlength="255" required aria-describedby="addr_value-error"/>
 					if msg, ok := vm.FieldErrors["addr_value"]; ok {
 						<small class="field-error" id="addr_value-error">{ msg }</small>
