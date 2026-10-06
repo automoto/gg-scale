@@ -27,7 +27,7 @@ const (
 	AxisOpenSessions  = "open_sessions"
 )
 
-const gb = int64(1) << 30
+const gb = int64(1073741824)
 
 // Limits is the per-class quota ladder. Projects is a small count; Players,
 // StorageBytes, and RelaySessionsPerMonth are int64. Unlimited (-1) marks an

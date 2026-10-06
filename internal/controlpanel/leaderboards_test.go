@@ -64,7 +64,7 @@ func TestParseLeaderboardForm_field_errors(t *testing.T) {
 		{"cap_not_a_number", url.Values{"name": {"b"}, "attempt_cap": {"lots"}}, "attempt_cap"},
 		{"metadata_not_object", url.Values{"name": {"b"}, "metadata": {`[1,2]`}}, "metadata"},
 		{"metadata_invalid_json", url.Values{"name": {"b"}, "metadata": {`{"a":`}}, "metadata"},
-		{"metadata_oversized", url.Values{"name": {"b"}, "metadata": {`{"pad":"` + strings.Repeat("x", 17<<10) + `"}`}}, "metadata"},
+		{"metadata_oversized", url.Values{"name": {"b"}, "metadata": {`{"pad":"` + strings.Repeat("x", 17408) + `"}`}}, "metadata"},
 		// PostgreSQL cannot store NUL in text, and the duplicate-name
 		// translator does not match that error, so an unscreened name renders
 		// a 500 instead of a field error.

@@ -16,7 +16,7 @@ func TestStorageWarnNotify_without_mailer_is_not_delivered(t *testing.T) {
 }
 
 func TestStorageThreshold_crossings(t *testing.T) {
-	const gb = int64(1) << 30
+	const gb = int64(1073741824)
 	limit := 5 * gb
 	cases := []struct {
 		name  string
@@ -37,18 +37,18 @@ func TestStorageThreshold_crossings(t *testing.T) {
 }
 
 func TestStorageThreshold_unlimited_never_warns(t *testing.T) {
-	assert.Equal(t, int16(0), storageThreshold(1<<40, -1), "unlimited sentinel")
+	assert.Equal(t, int16(0), storageThreshold(1099511627776, -1), "unlimited sentinel")
 }
 
 func TestStorageThreshold_zero_limit_is_a_hard_cap(t *testing.T) {
 	// A 0 override deliberately blocks every growing write, so the tenant is
 	// at 100% of its limit — that must warn, not read as "unknown".
-	assert.Equal(t, int16(100), storageThreshold(1<<40, 0), "usage over a zero limit")
+	assert.Equal(t, int16(100), storageThreshold(1099511627776, 0), "usage over a zero limit")
 	assert.Equal(t, int16(100), storageThreshold(0, 0), "empty usage still sits at the cap")
 }
 
 func TestHumanizeBytes(t *testing.T) {
-	const gb = int64(1) << 30
+	const gb = int64(1073741824)
 	assert.Equal(t, "5.0 GB", humanizeBytes(5*gb))
 	assert.Equal(t, "1.5 GB", humanizeBytes(gb+gb/2))
 	assert.Equal(t, "512.0 KB", humanizeBytes(512*1024))

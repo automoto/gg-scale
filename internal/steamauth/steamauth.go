@@ -29,7 +29,7 @@ const (
 	defaultTimeout = 5 * time.Second
 	// maxResponseBytes caps the Valve response read; the real payload is a
 	// few hundred bytes.
-	maxResponseBytes = 1 << 20
+	maxResponseBytes = 1048576
 )
 
 var (

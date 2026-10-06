@@ -247,7 +247,7 @@ func TestPlayersVerify_rejects_oversized_body(t *testing.T) {
 	srv := newServerForCluster(t, c)
 
 	// 16 KiB > the 8 KiB handler cap.
-	huge := strings.Repeat("a", 16<<10)
+	huge := strings.Repeat("a", 16384)
 	resp := postVerify(t, srv.URL, "verify-toobig", verifyBody(t, huge))
 	defer resp.Body.Close()
 	assertOpaqueInvalidSession(t, resp)

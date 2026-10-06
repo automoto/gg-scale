@@ -102,8 +102,29 @@ func partyError(err error, cooldown time.Duration) error {
 	}
 }
 
+// partyDescriptions documents the errors a client must handle, keyed by
+// operation ID.
+var partyDescriptions = map[string]string{
+	"getParty":           "404 when the party does not exist or the caller is not a member, for example after a kick.",
+	"updateParty":        "Leader only. A stale expected_version is 409.",
+	"disbandParty":       "Leader only. A stale expected_version is 409.",
+	"leaveParty":         "A stale expected_version is 409.",
+	"kickPartyMember":    "Leader only. A stale expected_version is 409.",
+	"readyPartyMember":   "properties.attributes are returned raw to the other members; escape them before you show them. A stale expected_version is 409.",
+	"heartbeatParty":     "Each member must call this within 30 seconds or the sweep removes the member. Returns the full party. A stale expected_version is 409.",
+	"invitePartyFriend":  "Leader only. The target must be an accepted friend. A re-invite of a pending invite only refreshes its expiry and sends no new party_invite event. A stale expected_version is 409.",
+	"acceptPartyInvite":  "404 when the invite is unknown, expired, or not for the caller. A stale expected_version is 409.",
+	"declinePartyInvite": "The invited player declines, or the leader revokes. 404 for any other player, and when the invite is unknown or expired. A stale expected_version is 409.",
+	"createPartyCode":    "Leader only. A stale expected_version is 409.",
+	"revokePartyCode":    "Leader only. 404 when the code is unknown or already revoked. A stale expected_version is 409.",
+	"joinPartyCode":      "404 when the code is unknown, expired, revoked, or used up. Wrong codes count against the player and against the source IP in this project; when either limit is reached, the call returns 429 code_redemption_cooldown with Retry-After in seconds.",
+	"queueParty":         "Leader only. Requires an Idempotency-Key header. 503 party_enqueue_disabled when the server turns party queue off. A stale expected_version is 409.",
+	"cancelPartyQueue":   "Leader only. A stale expected_version is 409.",
+	"rematchParty":       "Leader only. Requires an Idempotency-Key header. 503 party_enqueue_disabled when the server turns party queue off. A stale expected_version is 409.",
+}
+
 func registerPartyOperation[I, O any](api huma.API, d Deps, id, method, path, summary string, fn func(context.Context, *party.Store, matchmakerContext, *I) (O, error)) {
-	huma.Register(api, huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Tags: []string{"Parties"}, Security: playerSecurity, MaxBodyBytes: 64 << 10,
+	huma.Register(api, huma.Operation{OperationID: id, Method: method, Path: path, Summary: summary, Description: partyDescriptions[id], Tags: []string{"Parties"}, Security: playerSecurity, MaxBodyBytes: 65536,
 		Middlewares: huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
 			req, _ := humachi.Unwrap(ctx)
 			next(huma.WithValue(ctx, partyIPKey{}, d.ProxyTrust.ClientIP(req)))

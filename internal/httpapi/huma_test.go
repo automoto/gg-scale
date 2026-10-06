@@ -77,7 +77,7 @@ func TestHuma_malformed_json_rejected_400(t *testing.T) {
 }
 
 func TestHuma_oversize_body_rejected_413(t *testing.T) {
-	huge := `{"name":"` + strings.Repeat("x", 2<<20) + `"}`
+	huge := `{"name":"` + strings.Repeat("x", 2097152) + `"}`
 	rec := postSample(t, newHumaSampleServer(t), huge)
 
 	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code, rec.Body.String())

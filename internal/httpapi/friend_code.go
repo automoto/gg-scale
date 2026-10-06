@@ -56,7 +56,8 @@ func registerFriendCodeRoutes(api huma.API, d Deps) {
 			"fields only — use the resolved id with POST /v1/friends/{player_id}/request. " +
 			"Codes are 8 characters from a 32-letter alphabet and the endpoint sits " +
 			"behind the per-player rate limit, so code scanning is impractical. " +
-			"Unknown and cross-project codes are 404.",
+			"Unknown, malformed, and cross-project codes are 404. A player who is " +
+			"disabled, pending deletion, or blocked in either direction is also 404.",
 		Tags:     []string{"Friends & Presence"},
 		Security: playerSecurity,
 	}, friendCodeResolve(d))

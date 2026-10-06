@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	maxGameSessionSignalBytes = 64 << 10
+	maxGameSessionSignalBytes = 65536
 	maxSignalsPerMinute       = 30
 )
 

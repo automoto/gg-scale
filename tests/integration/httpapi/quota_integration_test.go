@@ -538,7 +538,7 @@ func TestBranchFollowup_quota_rejection_metrics_cover_all_axes_without_ids(t *te
 	fillPlayersTo(t, c, tenantID, projectID, branchPlayerLimit, "quota-metrics")
 	_, err = c.bootstrapPool.Exec(context.Background(), `
 		UPDATE tenant_storage_usage SET total_bytes = $2 WHERE tenant_id = $1`,
-		tenantID, int64(5)<<30)
+		tenantID, int64(5368709120))
 	require.NoError(t, err)
 
 	resp, projectBody := createProjectRequest(t, noRedirectClient(), tenantProjectCreateURL(srv.URL, tenantID),

@@ -19,7 +19,7 @@ import (
 // maxVerifyBodyBytes caps the verify request body. The body is a single
 // JWT (~500–1000 bytes); 8 KiB leaves slack for header verbosity without
 // inviting abuse.
-const maxVerifyBodyBytes = 8 << 10
+const maxVerifyBodyBytes = 8192
 
 type playerVerifyRequest struct {
 	SessionToken string `json:"session_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI0MiJ9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"`

@@ -11,7 +11,7 @@ import (
 )
 
 func TestLimitsForClass_ladder_values(t *testing.T) {
-	const gb = int64(1) << 30
+	const gb = int64(1073741824)
 	cases := []struct {
 		tier          tenant.Tier
 		projects      int
@@ -95,7 +95,7 @@ func TestCheckOpenSessions_unlimited_never_rejects(t *testing.T) {
 
 func TestCheckStorage_blocks_growing_write_over_limit(t *testing.T) {
 	l := quota.LimitsForClass(tenant.Tier0) // 5 GB
-	const gb = int64(1) << 30
+	const gb = int64(1073741824)
 
 	// At exactly the limit a further growing write is rejected.
 	err := l.CheckStorage(5*gb, 1)
@@ -106,7 +106,7 @@ func TestCheckStorage_blocks_growing_write_over_limit(t *testing.T) {
 
 func TestCheckStorage_allows_shrinking_and_within_limit(t *testing.T) {
 	l := quota.LimitsForClass(tenant.Tier0) // 5 GB
-	const gb = int64(1) << 30
+	const gb = int64(1073741824)
 
 	assert.NoError(t, l.CheckStorage(5*gb, -100), "shrink always allowed")
 	assert.NoError(t, l.CheckStorage(4*gb, 100), "growth within limit allowed")

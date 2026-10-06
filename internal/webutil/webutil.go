@@ -31,7 +31,7 @@ const (
 	PasswordResetTTL = time.Hour
 
 	// MaxFormBodyBytes caps the body size for HTML form POSTs.
-	MaxFormBodyBytes = 1 << 20
+	MaxFormBodyBytes = 1048576
 
 	controlPanelCSP = "default-src 'self'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 	playerCSP       = "default-src 'none'; script-src 'none'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; font-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"

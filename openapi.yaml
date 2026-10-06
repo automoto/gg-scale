@@ -3613,6 +3613,7 @@ paths:
         - Parties
   /v1/parties/join:
     post:
+      description: 404 when the code is unknown, expired, revoked, or used up. Wrong codes count against the player and against the source IP in this project; when either limit is reached, the call returns 429 code_redemption_cooldown with Retry-After in seconds.
       operationId: joinPartyCode
       requestBody:
         content:
@@ -3641,6 +3642,7 @@ paths:
         - Parties
   /v1/parties/{id}:
     delete:
+      description: Leader only. A stale expected_version is 409.
       operationId: disbandParty
       parameters:
         - in: path
@@ -3676,6 +3678,7 @@ paths:
       tags:
         - Parties
     get:
+      description: 404 when the party does not exist or the caller is not a member, for example after a kick.
       operationId: getParty
       parameters:
         - in: path
@@ -3705,6 +3708,7 @@ paths:
       tags:
         - Parties
     patch:
+      description: Leader only. A stale expected_version is 409.
       operationId: updateParty
       parameters:
         - in: path
@@ -3741,6 +3745,7 @@ paths:
         - Parties
   /v1/parties/{id}/heartbeat:
     post:
+      description: Each member must call this within 30 seconds or the sweep removes the member. Returns the full party. A stale expected_version is 409.
       operationId: heartbeatParty
       parameters:
         - in: path
@@ -3777,6 +3782,7 @@ paths:
         - Parties
   /v1/parties/{id}/invite-codes:
     post:
+      description: Leader only. A stale expected_version is 409.
       operationId: createPartyCode
       parameters:
         - in: path
@@ -3813,6 +3819,7 @@ paths:
         - Parties
   /v1/parties/{id}/invite-codes/{code_id}:
     delete:
+      description: Leader only. 404 when the code is unknown or already revoked. A stale expected_version is 409.
       operationId: revokePartyCode
       parameters:
         - in: path
@@ -3856,6 +3863,7 @@ paths:
         - Parties
   /v1/parties/{id}/invites:
     post:
+      description: Leader only. The target must be an accepted friend. A re-invite of a pending invite only refreshes its expiry and sends no new party_invite event. A stale expected_version is 409.
       operationId: invitePartyFriend
       parameters:
         - in: path
@@ -3892,6 +3900,7 @@ paths:
         - Parties
   /v1/parties/{id}/members/me:
     delete:
+      description: A stale expected_version is 409.
       operationId: leaveParty
       parameters:
         - in: path
@@ -3928,6 +3937,7 @@ paths:
         - Parties
   /v1/parties/{id}/members/me/ready:
     put:
+      description: properties.attributes are returned raw to the other members; escape them before you show them. A stale expected_version is 409.
       operationId: readyPartyMember
       parameters:
         - in: path
@@ -3964,6 +3974,7 @@ paths:
         - Parties
   /v1/parties/{id}/members/{player_id}:
     delete:
+      description: Leader only. A stale expected_version is 409.
       operationId: kickPartyMember
       parameters:
         - in: path
@@ -4007,6 +4018,7 @@ paths:
         - Parties
   /v1/parties/{id}/queue:
     delete:
+      description: Leader only. A stale expected_version is 409.
       operationId: cancelPartyQueue
       parameters:
         - in: path
@@ -4042,6 +4054,7 @@ paths:
       tags:
         - Parties
     post:
+      description: Leader only. Requires an Idempotency-Key header. 503 party_enqueue_disabled when the server turns party queue off. A stale expected_version is 409.
       operationId: queueParty
       parameters:
         - in: path
@@ -4085,6 +4098,7 @@ paths:
         - Parties
   /v1/parties/{id}/rematch:
     post:
+      description: Leader only. Requires an Idempotency-Key header. 503 party_enqueue_disabled when the server turns party queue off. A stale expected_version is 409.
       operationId: rematchParty
       parameters:
         - in: path
@@ -4154,6 +4168,7 @@ paths:
         - Parties
   /v1/party-invites/{id}:
     delete:
+      description: The invited player declines, or the leader revokes. 404 for any other player, and when the invite is unknown or expired. A stale expected_version is 409.
       operationId: declinePartyInvite
       parameters:
         - in: path
@@ -4190,6 +4205,7 @@ paths:
         - Parties
   /v1/party-invites/{id}/accept:
     post:
+      description: 404 when the invite is unknown, expired, or not for the caller. A stale expected_version is 409.
       operationId: acceptPartyInvite
       parameters:
         - in: path
@@ -4257,7 +4273,7 @@ paths:
         - Player Profiles
   /v1/players/by-code/{code}:
     get:
-      description: Case-insensitive; dashes and spaces are ignored. Returns public fields only — use the resolved id with POST /v1/friends/{player_id}/request. Codes are 8 characters from a 32-letter alphabet and the endpoint sits behind the per-player rate limit, so code scanning is impractical. Unknown and cross-project codes are 404.
+      description: Case-insensitive; dashes and spaces are ignored. Returns public fields only — use the resolved id with POST /v1/friends/{player_id}/request. Codes are 8 characters from a 32-letter alphabet and the endpoint sits behind the per-player rate limit, so code scanning is impractical. Unknown, malformed, and cross-project codes are 404. A player who is disabled, pending deletion, or blocked in either direction is also 404.
       operationId: resolveFriendCode
       parameters:
         - in: path

@@ -145,7 +145,7 @@ func TestBranchFollowup_storage_failed_writes_roll_back_object_and_counter(t *te
 	assert.Equal(t, http.StatusBadRequest, invalid.status, invalid.body)
 	assert.Equal(t, baseline, assertTenantStorageUsageMatches(t, c, tenantID))
 
-	oversize := append([]byte(`{"blob":"`), bytes.Repeat([]byte{'x'}, (1<<20)+1)...)
+	oversize := append([]byte(`{"blob":"`), bytes.Repeat([]byte{'x'}, 1048577)...)
 	oversize = append(oversize, []byte(`"}`)...)
 	tooLarge := storageRequestStatus(http.MethodPut, srv.URL+"/v1/storage/objects/too-large",
 		"storage-rollback", access, oversize, "")

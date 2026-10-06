@@ -39,7 +39,7 @@ const (
 const (
 	stateTTL        = 10 * time.Minute
 	providerTimeout = 5 * time.Second
-	maxProfileBytes = 1 << 20
+	maxProfileBytes = 1048576
 )
 
 var (

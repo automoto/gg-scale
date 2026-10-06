@@ -15,10 +15,10 @@ import (
 // Size limits for the JSON objects that the dashboard and the MCP tools
 // write. The database allows more; these are the editor limits.
 const (
-	RemoteConfigMaxBytes = 64 << 10
+	RemoteConfigMaxBytes = 65536
 	// LeaderboardMetadataMaxBytes is smaller than remote config: every
 	// /v1/leaderboards reply carries the metadata of every board.
-	LeaderboardMetadataMaxBytes = 16 << 10
+	LeaderboardMetadataMaxBytes = 16384
 	LeaderboardNameMax          = 120
 )
 

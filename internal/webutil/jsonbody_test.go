@@ -20,7 +20,7 @@ func TestDecodeJSONHappyPath(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"alice"}`))
 	w := httptest.NewRecorder()
 
-	got, err := webutil.DecodeJSON[body](w, r, 1<<20)
+	got, err := webutil.DecodeJSON[body](w, r, 1048576)
 	require.NoError(t, err)
 	assert.Equal(t, "alice", got.Name)
 }
@@ -29,7 +29,7 @@ func TestDecodeJSONRejectsUnknownFields(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"alice","oops":1}`))
 	w := httptest.NewRecorder()
 
-	_, err := webutil.DecodeJSON[body](w, r, 1<<20)
+	_, err := webutil.DecodeJSON[body](w, r, 1048576)
 	assert.Error(t, err)
 }
 
@@ -37,7 +37,7 @@ func TestDecodeJSONRejectsTrailingJunk(t *testing.T) {
 	r := httptest.NewRequest("POST", "/", strings.NewReader(`{"name":"a"} {"name":"b"}`))
 	w := httptest.NewRecorder()
 
-	_, err := webutil.DecodeJSON[body](w, r, 1<<20)
+	_, err := webutil.DecodeJSON[body](w, r, 1048576)
 	assert.Error(t, err)
 }
 

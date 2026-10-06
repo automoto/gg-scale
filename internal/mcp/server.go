@@ -35,7 +35,7 @@ import (
 const TokenPrefix = "ggm_"
 
 const (
-	maxBodyBytes      = 128 << 10
+	maxBodyBytes      = 131072
 	lastUsedPrecision = time.Minute
 	serverName        = "ggscale"
 )

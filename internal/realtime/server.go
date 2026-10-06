@@ -70,7 +70,7 @@ type Options struct {
 // revalidation) cadence when Options.HeartbeatInterval is zero.
 const DefaultHeartbeatInterval = 30 * time.Second
 
-const maxReadSize = 1 << 20 // 1 MiB per inbound message
+const maxReadSize = 1048576 // 1 MiB per inbound message
 
 // ServeWS returns the HTTP handler that upgrades to a WebSocket and ties
 // the connection into the Hub. The tenant + player middlewares must run

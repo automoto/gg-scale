@@ -73,7 +73,7 @@ func TestValidateOverrideLimit_open_sessions_bounded_by_hard_cap(t *testing.T) {
 func TestValidateOverrideLimit_other_axes_allow_unlimited(t *testing.T) {
 	assert.NoError(t, validateOverrideLimit("players", -1))
 	assert.NoError(t, validateOverrideLimit("relay_sessions", 0))
-	assert.NoError(t, validateOverrideLimit("storage", 1<<40))
+	assert.NoError(t, validateOverrideLimit("storage", 1099511627776))
 }
 
 func TestIsQuotaAxis(t *testing.T) {
