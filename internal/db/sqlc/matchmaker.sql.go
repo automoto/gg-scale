@@ -71,6 +71,11 @@ SET claim_id         = $1::uuid,
 FROM budgeted c
 WHERE t.entry_id = c.id
   AND (c.player_count <= $3::int OR c.position = 1)
+  -- The candidates snapshot can predate another worker's committed claim.
+  -- Postgres re-checks only this WHERE against the newest row version, so
+  -- the claim conditions must be here too, or a waiting claim overwrites it.
+  AND t.status = 'queued'
+  AND t.claim_id IS NULL
 RETURNING t.id, t.entry_id, t.party_id, t.tenant_id, t.project_id, t.fleet_id, t.player_id, t.region,
           t.game_mode, t.attributes, t.status::text AS status,
           t.match_address, t.match_protocol, t.mode, t.min_count, t.max_count,

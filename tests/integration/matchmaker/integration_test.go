@@ -450,6 +450,66 @@ func TestPGQueueNotifyWakesWorkerForSecondSameBucketPlayer(t *testing.T) {
 // queues compete for the same bucket; FOR UPDATE SKIP LOCKED guarantees only
 // one claim succeeds. The losing claim returns nil instead of stranding
 // rows in 'matched' as the previous PopBucket pattern did.
+// A claim whose snapshot predates another worker's committed claim must not
+// overwrite it. The ticket row lock makes the second claim wait between its
+// entry lock and its ticket update, which is the window CI hit by chance.
+func TestPGQueueClaimDoesNotOverwriteClaimCommittedMeanwhile(t *testing.T) {
+	pool := startMigratedDB(t)
+	appPool := db.NewPool(pool)
+	ctx := context.Background()
+
+	var tenantID, projectID, fleetID, playerID int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO tenants (name) VALUES ('mm-claim-overwrite') RETURNING id`).Scan(&tenantID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO projects (tenant_id, name) VALUES ($1, 'p') RETURNING id`, tenantID).Scan(&projectID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1, $2, 'p1') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	require.NoError(t, pool.QueryRow(ctx,
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'test-fleet', 'fake', '{}'::jsonb) RETURNING id`,
+		tenantID, projectID).Scan(&fleetID))
+	queue := matchmaker.NewPGQueue(appPool)
+	ticket, err := queue.Enqueue(db.WithTenant(ctx, tenantID), matchmaker.EnqueueRequest{
+		TenantID: tenantID, ProjectID: projectID, FleetID: fleetID,
+		PlayerID: playerID, Region: "us-east-1", GameMode: "1v1",
+	})
+	require.NoError(t, err)
+	bucket := matchmaker.Bucket{TenantID: tenantID, ProjectID: projectID, Mode: matchmaker.ModeFleetAllocation, FleetID: fleetID, Region: "us-east-1", GameMode: "1v1"}
+
+	other, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = other.Rollback(ctx) }()
+	_, err = other.Exec(ctx, `SELECT 1 FROM matchmaking_tickets WHERE id = $1 FOR UPDATE`, ticket.ID)
+	require.NoError(t, err)
+
+	type result struct {
+		claim *matchmaker.Claim
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		c, err := queue.ClaimBucket(ctx, bucket, 1, time.Minute)
+		done <- result{c, err}
+	}()
+	require.Eventually(t, func() bool {
+		var waiting int
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%matchmaking_entries%'`).Scan(&waiting)
+		return waiting > 0
+	}, 5*time.Second, 10*time.Millisecond, "the claim must block on the ticket row")
+
+	// Another worker's claim commits while this claim waits.
+	_, err = other.Exec(ctx, `UPDATE matchmaking_tickets SET claim_id = gen_random_uuid(), claimed_at = now(),
+		claim_expires_at = now() + interval '1 minute' WHERE id = $1`, ticket.ID)
+	require.NoError(t, err)
+	require.NoError(t, other.Commit(ctx))
+
+	res := <-done
+	require.NoError(t, res.err)
+	assert.Nil(t, res.claim, "a ticket another worker claimed must not be claimed again")
+}
+
 func TestPGQueueConcurrentClaimsCannotStrandTickets(t *testing.T) {
 	pool := startMigratedDB(t)
 	appPool := db.NewPool(pool)
