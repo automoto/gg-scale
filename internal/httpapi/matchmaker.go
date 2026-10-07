@@ -120,7 +120,7 @@ const (
 	// maxAttributesBytes caps the opaque per-ticket attributes blob. It is
 	// echoed to every matched peer via the roster, so bound it well below the
 	// 64 KiB request-body ceiling (which is not a per-field limit).
-	maxAttributesBytes = 4 << 10
+	maxAttributesBytes = 4096
 )
 
 // validateTicketCriteria checks the query expression and property maps.
@@ -224,7 +224,7 @@ func registerMatchmakerRoutes(api huma.API, d Deps) {
 		Tags:          []string{"Matchmaking"},
 		Security:      playerSecurity,
 		DefaultStatus: http.StatusCreated,
-		MaxBodyBytes:  64 << 10,
+		MaxBodyBytes:  65536,
 	}, matchmakerCreateTicket(d))
 
 	huma.Register(api, huma.Operation{

@@ -8,6 +8,7 @@
 - Handle errors explicitly. Avoid panics unless failure is truly unrecoverable at startup.
 - Add comments only where extra context is useful.
 - Prefer standard-library helpers such as `unicode.IsControl`, `unicode.IsSpace`, and `net/mail.ParseAddress` over bare ASCII numeric literals or hex constants like `0x20`.
+- Write sizes and limits as whole numbers, for example `65536` or `int64(1073741824)`. Do not use bit-shift expressions such as `64 << 10` or `1 << 20`. Do not use string tricks such as `note[1:]` to reuse a constant. Write the plain value.
 - Run `make lint` (`golangci-lint`) after significant new code. All code must pass it.
 
 ## Testing Conventions

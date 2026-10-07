@@ -441,9 +441,9 @@ func (h *Handler) serverSettingsPage(w http.ResponseWriter, r *http.Request) {
 // storage-usage display.
 func formatBytes(b int64) string {
 	const (
-		kb = int64(1) << 10
-		mb = int64(1) << 20
-		gb = int64(1) << 30
+		kb = int64(1024)
+		mb = int64(1048576)
+		gb = int64(1073741824)
 	)
 	switch {
 	case b >= gb:

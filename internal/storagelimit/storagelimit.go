@@ -24,7 +24,7 @@ var ErrUnavailable = errors.New("storagelimit: store unavailable")
 // object's value when config supplies no default (e.g. unit tests). Config
 // (STORAGE_MAX_VALUE_BYTES) sets the platform default; per-tenant and
 // per-project rows in storage_limits override it.
-const DefaultMaxValueBytes = 1 << 20
+const DefaultMaxValueBytes = 1048576
 
 // Store reads and writes storage-size overrides.
 type Store struct {

@@ -210,7 +210,7 @@ func TestFlow_should_fail_when_code_was_issued_for_a_different_verifier(t *testi
 
 func TestFlow_should_reject_profile_body_over_limit(t *testing.T) {
 	fake := ssotest.New(t)
-	fake.SetProfile(`{"sub":"g-123","name":"` + strings.Repeat("a", 1<<20) + `"}`)
+	fake.SetProfile(`{"sub":"g-123","name":"` + strings.Repeat("a", 1048576) + `"}`)
 	flow := newFlow(t, fake)
 	_, callback := start(t, flow, sso.ModeSignIn, "", "")
 

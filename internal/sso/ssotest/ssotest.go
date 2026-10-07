@@ -90,7 +90,7 @@ func (f *Fake) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *Fake) token(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+	r.Body = http.MaxBytesReader(w, r.Body, 65536)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form", http.StatusBadRequest)
 		return

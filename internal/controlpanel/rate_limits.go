@@ -420,8 +420,8 @@ func countNum(n int64) string {
 }
 
 const (
-	bytesPerMiB = int64(1) << 20
-	bytesPerGiB = int64(1) << 30
+	bytesPerMiB = int64(1048576)
+	bytesPerGiB = int64(1073741824)
 )
 
 // storageMB renders a byte count as megabytes (MiB) without trailing zeros.

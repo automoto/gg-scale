@@ -53,7 +53,7 @@ func registerFleetHeartbeat(api huma.API, d Deps) {
 		Tags:          []string{"Game Server Fleet"},
 		Security:      secretKeySecurity,
 		DefaultStatus: http.StatusNoContent,
-		MaxBodyBytes:  8 << 10,
+		MaxBodyBytes:  8192,
 	}, fleetHeartbeat(d))
 }
 

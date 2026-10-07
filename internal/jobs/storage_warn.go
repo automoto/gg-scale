@@ -152,9 +152,9 @@ func storageWarnEmail(name string, total, limit int64, threshold int16) (subject
 // and the settings page.
 func humanizeBytes(b int64) string {
 	const (
-		kb = int64(1) << 10
-		mb = int64(1) << 20
-		gb = int64(1) << 30
+		kb = int64(1024)
+		mb = int64(1048576)
+		gb = int64(1073741824)
 	)
 	switch {
 	case b >= gb:

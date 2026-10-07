@@ -74,7 +74,7 @@ func TestStorage_value_size_overrides_work_above_huma_default(t *testing.T) {
 	overriddenTenantID, overriddenProjectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-large-override")
 	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "storage-default-limit")
 	store := storagelimit.NewStore(db.NewPool(c.appPool))
-	const overrideBytes = 2 << 20
+	const overrideBytes = 2097152
 	require.NoError(t, store.Set(context.Background(), 0, overriddenTenantID, nil, overrideBytes))
 	require.NoError(t, store.Set(context.Background(), 0, overriddenTenantID, &overriddenProjectID, overrideBytes))
 
@@ -82,7 +82,7 @@ func TestStorage_value_size_overrides_work_above_huma_default(t *testing.T) {
 	defaultServer, _ := newFullStackServer(t, c)
 	overrideAccess := anonymousLogin(t, overrideServer.URL, "storage-large-override")
 	defaultAccess := anonymousLogin(t, defaultServer.URL, "storage-default-limit")
-	allowedBody := map[string]string{"blob": strings.Repeat("a", (3<<20)/2)}
+	allowedBody := map[string]string{"blob": strings.Repeat("a", 1572864)}
 	overrideTarget := overrideServer.URL + "/v1/storage/objects/large"
 
 	resp, body := authedReq(t, http.MethodPut, overrideTarget,
@@ -114,7 +114,7 @@ func TestStorage_value_size_overrides_work_above_huma_default(t *testing.T) {
 	frameworkRejected := storageRequestStatus(http.MethodPut,
 		defaultServer.URL+"/v1/storage/objects/framework-limit",
 		"storage-default-limit", defaultAccess,
-		[]byte(strings.Repeat("x", (3<<20)/2)), "")
+		[]byte(strings.Repeat("x", 1572864)), "")
 	require.NoError(t, frameworkRejected.err)
 	require.Equal(t, http.StatusRequestEntityTooLarge, frameworkRejected.status, frameworkRejected.body)
 

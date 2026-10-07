@@ -38,7 +38,7 @@ type playerAllocLimiter struct {
 // allocCells is the fixed number of token-bucket cells. At 32 bytes per cell
 // this is 2 MiB per relay VM, allocated once at startup. Sized well above the
 // player count a single relay node serves, so sharing is rare in practice.
-const allocCells = 1 << 16
+const allocCells = 65536
 
 // allocCell is one token bucket. A zero cell self-initialises on first use:
 // the elapsed time since the zero instant is enormous, so the refill below
