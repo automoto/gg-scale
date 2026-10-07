@@ -172,8 +172,8 @@ func registerAuthPasswordRoutes(api huma.API, d Deps) {
 		Description: "Re-authenticates with credentials because the delete request " +
 			"revoked every session. Clears the pending deletion and re-enables " +
 			"sign-in. 404 covers unknown email, wrong password, and no pending " +
-			"deletion alike. 403 means the project's team requested the " +
-			"deletion; only they can cancel it.",
+			"deletion alike. 403 with detail delete_requested_by_team means the " +
+			"project's team requested the deletion; only they can cancel it.",
 		Tags:          []string{"Authentication"},
 		Security:      apiKeySecurity,
 		DefaultStatus: http.StatusNoContent,
