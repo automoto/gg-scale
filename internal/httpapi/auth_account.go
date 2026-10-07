@@ -323,7 +323,8 @@ func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct
 		case errors.Is(err, errBadCredentials):
 			return nil, errNoPending
 		case errors.Is(err, errAdminDeleteRequest):
-			return nil, huma.Error403Forbidden("the game's team requested this deletion; contact them to cancel it")
+			// A stable slug: a revoked key or a disabled tenant is also 403.
+			return nil, huma.Error403Forbidden("delete_requested_by_team")
 		case err != nil:
 			return nil, serverError(ctx, "delete cancel: tx", err)
 		}

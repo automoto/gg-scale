@@ -153,6 +153,28 @@ func TestDeleteCancel_admin_requested_should_be_refused(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode, string(body))
 }
 
+// SDKs match the slug, because a revoked key or a disabled tenant is also 403.
+func TestDeleteCancel_admin_requested_should_send_stable_slug(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "admindel@example.com", "supersecret")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE project_players
+		    SET delete_requested_at = now(), disabled_at = now(), delete_requested_by_admin = true
+		  WHERE id = $1`, sess.PlayerID)
+	require.NoError(t, err)
+
+	_, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/delete/cancel", "pw",
+		map[string]string{"email": "admindel@example.com", "password": "supersecret"})
+
+	var problem struct {
+		Detail string `json:"detail"`
+	}
+	require.NoError(t, json.Unmarshal(body, &problem))
+	assert.Equal(t, "delete_requested_by_team", problem.Detail)
+}
+
 func TestDeleteCancel_admin_requested_should_stay_pending(t *testing.T) {
 	c := startCluster(t)
 	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
