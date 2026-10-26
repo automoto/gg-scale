@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -16,14 +17,24 @@ import (
 // SDK reconnects through the load balancer to another node.
 const drainRetryAfter = 1 * time.Second
 
+// drainPollInterval is how often CloseAll checks whether every socket handler
+// has finished.
+const drainPollInterval = 10 * time.Millisecond
+
 // Drain tracks this process's open realtime sockets for the lifecycle
 // contract. While draining, Guard refuses new upgrades with 503; sockets
 // already open keep working until CloseAll. Safe for concurrent use.
 type Drain struct {
 	lifecycle.Gate
 
-	mu    sync.Mutex
-	conns map[*wsWriter]struct{}
+	// active counts admitted upgrades from Guard until their handler returns,
+	// so a socket is counted while it authenticates and while its deferred
+	// cleanup (slot and tenant cap release, hub unregister) runs.
+	active atomic.Int64
+
+	mu      sync.Mutex
+	conns   map[*wsWriter]struct{}
+	closing bool
 }
 
 // NewDrain returns a Drain that admits upgrades.
@@ -40,21 +51,27 @@ func (d *Drain) Guard(next http.Handler) http.Handler {
 			http.Error(w, "server draining", http.StatusServiceUnavailable)
 			return
 		}
+		d.active.Add(1)
+		defer d.active.Add(-1)
 		next.ServeHTTP(w, r)
 	})
 }
 
-// Count reports the number of open sockets.
+// Count reports the number of sockets that are open or still being set up.
 func (d *Drain) Count() int64 {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return int64(len(d.conns))
+	return d.active.Load()
 }
 
+// track registers an open socket for CloseAll. A socket that opens after
+// CloseAll has run is closed with 1001 Going Away at once.
 func (d *Drain) track(w *wsWriter) func() {
 	d.mu.Lock()
 	d.conns[w] = struct{}{}
+	closing := d.closing
 	d.mu.Unlock()
+	if closing {
+		go func() { _ = w.closeWith(websocket.StatusGoingAway, "server shutting down") }()
+	}
 	return func() {
 		d.mu.Lock()
 		delete(d.conns, w)
@@ -63,26 +80,26 @@ func (d *Drain) track(w *wsWriter) func() {
 }
 
 // CloseAll closes every open socket with 1001 Going Away, in parallel, and
-// returns when all close handshakes finish or ctx is done.
+// returns once every socket handler has finished its cleanup or ctx is done.
 func (d *Drain) CloseAll(ctx context.Context) {
 	d.mu.Lock()
+	d.closing = true
 	writers := make([]*wsWriter, 0, len(d.conns))
 	for w := range d.conns {
 		writers = append(writers, w)
 	}
 	d.mu.Unlock()
 
-	var wg sync.WaitGroup
 	for _, w := range writers {
-		wg.Go(func() { _ = w.closeWith(websocket.StatusGoingAway, "server shutting down") })
+		go func() { _ = w.closeWith(websocket.StatusGoingAway, "server shutting down") }()
 	}
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-ctx.Done():
+	ticker := time.NewTicker(drainPollInterval)
+	defer ticker.Stop()
+	for d.Count() > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,6 +128,72 @@ func TestDrainCloseAll_should_close_sockets_with_going_away(t *testing.T) {
 	}()
 
 	drain.CloseAll(context.Background())
+
+	select {
+	case err := <-readErr:
+		assert.Equal(t, websocket.StatusGoingAway, websocket.CloseStatus(err))
+	case <-time.After(5 * time.Second):
+		t.Fatal("socket was not closed")
+	}
+}
+
+// readUntilClosed reads conn in the background, the way a client does to
+// answer a close frame, and reports the read error.
+func readUntilClosed(conn *websocket.Conn) <-chan error {
+	readErr := make(chan error, 1)
+	go func() {
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				readErr <- err
+				return
+			}
+		}
+	}()
+	return readErr
+}
+
+func TestDrain_should_count_admitted_upgrade_before_socket_opens(t *testing.T) {
+	drain := realtime.NewDrain()
+	var during int64
+	h := drain.Guard(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		during = drain.Count()
+	}))
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/v1/ws", nil))
+
+	assert.Equal(t, int64(1), during)
+}
+
+func TestDrainCloseAll_should_return_after_socket_handlers_finish(t *testing.T) {
+	drain := realtime.NewDrain()
+	var cleanedUp atomic.Bool
+	ws := realtime.ServeWS(realtime.Options{Hub: realtime.NewHub(), Drain: drain, HeartbeatInterval: time.Hour})
+	// Stands in for ServeWS's deferred slot and tenant cap releases.
+	slowCleanup := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws.ServeHTTP(w, r)
+		time.Sleep(100 * time.Millisecond)
+		cleanedUp.Store(true)
+	})
+	srv := httptest.NewServer(drain.Guard(wrap(1, 42, slowCleanup)))
+	t.Cleanup(srv.Close)
+	conn, _, err := dialWS(t, "ws"+strings.TrimPrefix(srv.URL, "http"))
+	require.NoError(t, err)
+	waitForCount(t, drain, 1)
+	readUntilClosed(conn)
+
+	drain.CloseAll(context.Background())
+
+	assert.True(t, cleanedUp.Load())
+}
+
+func TestDrainCloseAll_should_close_socket_opened_after_it_ran(t *testing.T) {
+	drain := realtime.NewDrain()
+	url := newDrainServer(t, realtime.NewHub(), drain, 42)
+	drain.CloseAll(context.Background())
+	conn, _, err := dialWS(t, url)
+	require.NoError(t, err)
+
+	readErr := readUntilClosed(conn)
 
 	select {
 	case err := <-readErr:
