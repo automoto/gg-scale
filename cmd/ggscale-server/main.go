@@ -366,8 +366,9 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// appCtx scopes the long-lived background loops. It outlives the signal so
-	// sockets and jobs keep working during the SIGTERM drain wait, and is
-	// cancelled once the HTTP server has shut down.
+	// sockets keep working during the SIGTERM drain wait, and is cancelled once
+	// the HTTP server has shut down, which releases the hub's LISTEN connection
+	// before the pool closes.
 	appCtx, cancelApp := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelApp()
 
@@ -577,7 +578,9 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		BaseURL:  cfg.ControlPanelBaseURL,
 	}
-	riverClient, stopRiver := startRiverJobs(appCtx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
+	// River stops only through its graceful Stop in stopRiver, so its context
+	// never cancels.
+	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
 	if stopRiver != nil {
 		defer stopRiver()
 	}
