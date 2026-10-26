@@ -39,6 +39,7 @@ import (
 	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/lifecycle"
 	"github.com/automoto/gg-scale/internal/mailer"
 	_ "github.com/automoto/gg-scale/internal/mailer/noop"
 	_ "github.com/automoto/gg-scale/internal/mailer/smtp"
@@ -205,17 +206,43 @@ func runRelayCommand() error {
 		"relay_min_port", rc.MinPort, "relay_max_port", rc.MaxPort,
 		"max_allocations", rc.MaxAllocations)
 
-	stopHealth, err := startRelayHealth(rc, srv, logger)
+	lc := newRelayLifecycle(rc, srv)
+	stopHealth, err := startRelayHealth(rc, srv, lc, logger)
 	if err != nil {
 		return err
 	}
 	if stopHealth != nil {
 		defer stopHealth()
 	}
+	lc.MarkReady()
 
 	<-ctx.Done()
-	logger.Info("relay shutting down")
+	// Restore default signal handling: a second SIGTERM or SIGINT kills the
+	// process at once and skips the rest of shutdown.
+	stop()
+	logger.Info("relay draining", "drain_timeout", rc.DrainTimeout.String(), "active_allocations", srv.ActiveAllocations())
+	remaining := lc.Shutdown(rc.DrainTimeout)
+	logger.Info("relay shutting down", "remaining_allocations", remaining)
 	return nil
+}
+
+// newRelayLifecycle builds the relay node's lifecycle controller: draining
+// refuses new TURN allocations, and the work a drain waits on is the live
+// allocations.
+func newRelayLifecycle(rc *config.RelayConfig, srv *relay.Server) *lifecycle.Controller {
+	return lifecycle.New(lifecycle.Config{
+		Role:   "relay",
+		Commit: buildCommit(),
+		Token:  rc.LifecycleToken,
+		Work:   srv,
+		Details: func() map[string]any {
+			return map[string]any{
+				"active_allocations": srv.ActiveAllocations(),
+				"public_ip":          srv.PublicIP(),
+				"transports":         srv.Transports(),
+			}
+		},
+	})
 }
 
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
@@ -246,33 +273,19 @@ func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 	}, func() float64 { return float64(srv.PeerRejected()) }))
 }
 
-// startRelayHealth serves /healthz and /metrics for the monitoring host to
-// scrape the relay node over the tailnet. Returns (nil, nil) when no address is
-// configured, and a non-nil error if the listener can't bind — so a bad or
-// in-use RELAY_HEALTH_ADDR fails the process fast rather than silently leaving
-// the scrape target down. When rc.MetricsToken is set, /metrics requires a
-// matching bearer token.
-func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, logger *slog.Logger) (func(), error) {
+// startRelayHealth serves /healthz, /metrics and the lifecycle routes for the
+// monitoring host and deploy tooling to reach the relay node over the tailnet.
+// Returns (nil, nil) when no address is configured, and a non-nil error if the
+// listener can't bind — so a bad or in-use RELAY_HEALTH_ADDR fails the process
+// fast rather than silently leaving the scrape target down.
+func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Controller, logger *slog.Logger) (func(), error) {
 	if rc.HealthAddr == "" {
 		return nil, nil
 	}
-	reg := prometheus.NewRegistry()
-	reg.MustRegister(collectors.NewGoCollector())
-	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-	up := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ggscale_relay_up",
-		Help: "1 while the standalone relay process is serving.",
-	})
-	up.Set(1)
-	reg.MustRegister(up)
-	registerRelayServerMetrics(reg, srv)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "ok\n")
-	})
-	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	mux, err := relayHealthMux(rc, srv, lc)
+	if err != nil {
+		return nil, err
+	}
 
 	ln, err := net.Listen("tcp", rc.HealthAddr)
 	if err != nil {
@@ -295,6 +308,34 @@ func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, logger *slog.Lo
 		defer cancel()
 		_ = srvHTTP.Shutdown(shutdownCtx)
 	}, nil
+}
+
+// relayHealthMux builds the relay health listener's routes: /healthz
+// (liveness, open), /metrics (behind rc.MetricsToken when set), and the
+// shared lifecycle routes.
+func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Controller) (*http.ServeMux, error) {
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collectors.NewGoCollector())
+	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	up := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "ggscale_relay_up",
+		Help: "1 while the standalone relay process is serving.",
+	})
+	up.Set(1)
+	reg.MustRegister(up)
+	registerRelayServerMetrics(reg, srv)
+	if err := lc.Register(reg); err != nil {
+		return nil, fmt.Errorf("relay lifecycle metrics: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	lc.Mount(mux)
+	return mux, nil
 }
 
 // bearerGuard wraps h to require "Authorization: Bearer <token>" when token is
@@ -325,6 +366,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// appCtx scopes the long-lived background loops. It outlives the signal so
+	// sockets keep working during the SIGTERM drain wait, and is cancelled once
+	// the HTTP server has shut down, which releases the hub's LISTEN connection
+	// before the pool closes.
+	appCtx, cancelApp := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelApp()
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector())
@@ -469,12 +516,12 @@ func run() error {
 	if fleetCloser != nil {
 		defer func() { _ = fleetCloser.Close() }()
 	}
-	pluginInfo := pluginInfoFromCloser(ctx, fleetMgr, fleetCloser)
+	pluginInfo := pluginInfoFromCloser(appCtx, fleetMgr, fleetCloser)
 
 	// The relay carries realtime messages to players whose socket is on
 	// another server host.
 	hub := realtime.NewHub().WithRelay(appPool)
-	go hub.RunRelay(ctx)
+	go hub.RunRelay(appCtx)
 
 	var relayIssuer *relay.Issuer
 	if !cfg.FeatureP2PRelayEnabled {
@@ -518,7 +565,7 @@ func run() error {
 	var serverListRegistry *serverlist.Registry
 	if cfg.FeatureFleetEnabled {
 		serverListRegistry = serverlist.New(15 * time.Second)
-		go serverListRegistry.RunGC(ctx, 10*time.Second)
+		go serverListRegistry.RunGC(appCtx, 10*time.Second)
 	}
 
 	// Background jobs (River). Expired game-session/invite cleanup runs as a
@@ -532,7 +579,9 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		BaseURL:  cfg.ControlPanelBaseURL,
 	}
-	riverClient, stopRiver := startRiverJobs(ctx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
+	// River stops only through its graceful Stop in stopRiver, so its context
+	// never cancels.
+	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
 	if stopRiver != nil {
 		defer stopRiver()
 	}
@@ -550,7 +599,7 @@ func run() error {
 		WithMaxUnclaimedFleetAllocations(cfg.MatchmakerMaxUnclaimedFleetAllocs).
 		WithPartyEvents(hub)
 	workerDone := make(chan struct{})
-	workerCtx, cancelWorker := context.WithCancel(ctx)
+	workerCtx, cancelWorker := context.WithCancel(appCtx)
 	defer cancelWorker()
 	// The matchmaker worker always runs: match-only tickets need no fleet.
 	// Without a fleet backend the allocator stays nil and fleet buckets
@@ -583,6 +632,21 @@ func run() error {
 		defer close(workerDone)
 		worker.Run(workerCtx)
 	}()
+
+	// Lifecycle contract: draining refuses new realtime upgrades and a drain
+	// waits on open sockets plus in-flight HTTP requests.
+	realtimeDrain := realtime.NewDrain()
+	apiWork := httpapi.APIWork{Realtime: realtimeDrain, Inflight: &lifecycle.Inflight{}}
+	lc := lifecycle.New(lifecycle.Config{
+		Role:    "api",
+		Commit:  buildCommit(),
+		Token:   cfg.LifecycleToken,
+		Work:    apiWork,
+		Details: apiWork.Details,
+	})
+	if err := lc.Register(registry); err != nil {
+		return fmt.Errorf("lifecycle metrics: %w", err)
+	}
 
 	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
 		ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL)
@@ -691,11 +755,13 @@ func run() error {
 		MCPMaxProjectAPIKeys:     int64(cfg.MCPMaxProjectAPIKeys),
 		CORSMaxProjectOrigins:    cfg.CORSMaxProjectOrigins,
 		BillingHandoffKey:        billingHandoffKey,
+		Lifecycle:                lc,
+		RealtimeDrain:            realtimeDrain,
 	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           router,
+		Handler:           apiWork.Inflight.Middleware(router),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -703,13 +769,18 @@ func run() error {
 		MaxHeaderBytes:    1048576,
 	}
 
+	ln, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		return fmt.Errorf("http listen %s: %w", cfg.HTTPAddr, err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("starting ggscale-server", "addr", cfg.HTTPAddr, "env", cfg.Env, "commit", buildCommit())
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
+	lc.MarkReady()
 
 	select {
 	case <-ctx.Done():
@@ -717,17 +788,38 @@ func run() error {
 	case err := <-errCh:
 		return err
 	}
+	// Restore default signal handling: a second SIGTERM or SIGINT kills the
+	// process at once and skips the rest of shutdown.
+	stop()
+
+	drainRealtime(lc, apiWork, cfg.DrainTimeout)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	shutdownErr := srv.Shutdown(shutdownCtx)
 	cancelWorker()
+	cancelApp()
 	select {
 	case <-workerDone:
 	case <-time.After(30 * time.Second):
 		slog.Warn("matchmaker worker did not drain in 30s; forcing shutdown")
 	}
 	return shutdownErr
+}
+
+// drainRealtime is the API server's SIGTERM drain: refuse new realtime
+// upgrades, wait for open sockets and in-flight requests to finish or the
+// drain timeout to elapse, then close the remaining sockets with 1001 Going
+// Away so clients reconnect elsewhere before http.Server.Shutdown runs.
+func drainRealtime(lc *lifecycle.Controller, work httpapi.APIWork, timeout time.Duration) {
+	slog.Info("draining", "drain_timeout", timeout.String(), "active_work", work.ActiveWork())
+	if remaining := lc.Shutdown(timeout); remaining > 0 {
+		slog.Warn("drain timeout elapsed; closing remaining realtime sockets",
+			"remaining_work", remaining, "realtime_connections", work.Realtime.Count())
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	work.Realtime.CloseAll(closeCtx)
 }
 
 // matchCounter adapts *observability.Metrics to matchmaker.Counter so the

@@ -63,6 +63,11 @@ type RelayConfig struct {
 	// MetricsToken, when set, requires a "Bearer <token>" header on /metrics.
 	// Empty keeps the endpoint open (tailnet-only deployment is the default).
 	MetricsToken string `env:"RELAY_METRICS_TOKEN"`
+
+	// LifecycleToken and DrainTimeout are the process lifecycle settings
+	// shared with Config; see internal/lifecycle.
+	LifecycleToken string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
+	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"30s"`
 }
 
 // LoadRelay reads the relay-node environment and returns a validated
@@ -95,6 +100,9 @@ func (rc *RelayConfig) validate() error {
 	}
 	if rc.SharedSecretNext != "" && len(rc.SharedSecretNext) < 32 {
 		return fmt.Errorf("RELAY_SHARED_SECRET_NEXT must be >= 32 bytes when set (got %d)", len(rc.SharedSecretNext))
+	}
+	if err := validateLifecycle(rc.LifecycleToken, rc.DrainTimeout); err != nil {
+		return err
 	}
 	if err := validateRelayPublicIP(rc.PublicIP); err != nil {
 		return err

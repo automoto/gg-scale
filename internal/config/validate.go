@@ -44,6 +44,7 @@ func nonEmpty(vals ...string) []string {
 func (c *Config) Validate() error {
 	checks := []func() error{
 		c.checkSecretLengths,
+		func() error { return validateLifecycle(c.LifecycleToken, c.DrainTimeout) },
 		c.checkFeatureSwitches,
 		c.checkRelay,
 		c.checkDBPool,

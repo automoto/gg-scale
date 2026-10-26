@@ -28,6 +28,7 @@ import (
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/lifecycle"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/matchmaker"
 	"github.com/automoto/gg-scale/internal/mcp"
@@ -202,6 +203,14 @@ type Deps struct {
 	// default) leaves the surface unmounted entirely.
 	EntitlementAPIToken string
 
+	// Lifecycle, when non-nil, mounts /readyz and the /lifecycle routes at
+	// root next to /metrics. Operators keep them off the public edge the same
+	// way they keep /metrics off it.
+	Lifecycle *lifecycle.Controller
+	// RealtimeDrain, when non-nil, tracks open /v1/ws sockets and refuses new
+	// upgrades with 503 while the process drains.
+	RealtimeDrain *realtime.Drain
+
 	// origins is built by NewRouter from CORSAllowedOrigins and the project
 	// origin lists; it serves the CORS handler and the WebSocket upgrade.
 	origins *originSet
@@ -319,6 +328,9 @@ func NewRouter(d Deps) http.Handler {
 		metricsHandler = requireMetricsToken(d.MetricsAuthToken, metricsHandler)
 	}
 	r.Handle("/metrics", metricsHandler)
+	if d.Lifecycle != nil {
+		d.Lifecycle.Mount(r)
+	}
 	r.Get("/favicon.ico", webassets.FaviconHandler())
 	mountInternalAPI(r, d)
 
@@ -423,7 +435,13 @@ func NewRouter(d Deps) http.Handler {
 			// clients) or a one-time ticket (browsers), so it carries its own
 			// authentication instead of the group middleware below.
 			if ws := realtimeHandler(d); ws != nil {
-				r.Get("/ws", realtimeRoute(d, ws, reg))
+				var route http.Handler = realtimeRoute(d, ws, reg)
+				if d.RealtimeDrain != nil {
+					// Ahead of authentication, so a refused client spends no
+					// one-time ticket.
+					route = d.RealtimeDrain.Guard(route)
+				}
+				r.Get("/ws", route.ServeHTTP)
 			}
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.New(d.Lookup))
