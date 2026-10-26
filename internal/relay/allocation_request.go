@@ -43,6 +43,18 @@ func (g *playerAllocationGenerator) Validate() error { return g.inner.Validate()
 func (g *playerAllocationGenerator) AllocatePacketConn(
 	conf pionturn.AllocateListenerConfig,
 ) (net.PacketConn, net.Addr, error) {
+	if conf.UserID == "" {
+		return nil, nil, errAllocationSubjectUnavailable
+	}
+	// Checked before the player budget so a refused allocation spends no
+	// token. An admitted Allocate counts as drain work until the node
+	// allocator's live count owns it.
+	if g.drain != nil {
+		if !g.drain.Enter() {
+			return nil, nil, errRelayDraining
+		}
+		defer g.drain.Leave()
+	}
 	if err := g.allow(conf.UserID); err != nil {
 		return nil, nil, err
 	}
@@ -60,14 +72,6 @@ func (g *playerAllocationGenerator) AllocateConn(pionturn.AllocateConnConfig) (n
 }
 
 func (g *playerAllocationGenerator) allow(userID string) error {
-	if userID == "" {
-		return errAllocationSubjectUnavailable
-	}
-	// Checked before the player budget so a refused allocation spends no
-	// token.
-	if g.drain != nil && !g.drain.Admit() {
-		return errRelayDraining
-	}
 	if g.limiter == nil {
 		return nil
 	}

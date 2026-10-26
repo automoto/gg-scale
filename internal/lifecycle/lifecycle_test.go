@@ -387,6 +387,46 @@ func TestRequireBearer_should_accept_lowercase_scheme(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rec.Code)
 }
 
+func TestMetrics_should_report_exactly_one_state_during_transitions(t *testing.T) {
+	c := newController(testToken, &fakeWork{})
+	reg := prometheus.NewRegistry()
+	require.NoError(t, c.Register(reg))
+	c.MarkReady()
+	stop := make(chan struct{})
+	flipped := make(chan struct{})
+	go func() {
+		defer close(flipped)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				c.Drain()
+				c.Resume()
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		close(stop)
+		<-flipped
+	})
+
+	for range 500 {
+		families, err := reg.Gather()
+		require.NoError(t, err)
+		var current float64
+		for _, family := range families {
+			if family.GetName() != "ggscale_lifecycle_state" {
+				continue
+			}
+			for _, m := range family.GetMetric() {
+				current += m.GetGauge().GetValue()
+			}
+		}
+		require.Equal(t, float64(1), current)
+	}
+}
+
 func TestMetrics_should_report_current_state(t *testing.T) {
 	c := newController(testToken, &fakeWork{})
 	reg := prometheus.NewRegistry()
@@ -437,6 +477,32 @@ func TestGate_should_admit_again_after_drain_ends(t *testing.T) {
 	g.EndDrain()
 
 	assert.True(t, g.Admit())
+}
+
+func TestGateEnter_should_count_admitted_work_until_leave(t *testing.T) {
+	var g lifecycle.Gate
+
+	g.Enter()
+
+	assert.Equal(t, int64(1), g.Entered())
+}
+
+func TestGateEnter_should_not_count_refused_work(t *testing.T) {
+	var g lifecycle.Gate
+	g.BeginDrain()
+
+	g.Enter()
+
+	assert.Equal(t, int64(0), g.Entered())
+}
+
+func TestGateLeave_should_release_entered_work(t *testing.T) {
+	var g lifecycle.Gate
+	g.Enter()
+
+	g.Leave()
+
+	assert.Equal(t, int64(0), g.Entered())
 }
 
 func TestInflight_should_count_request_in_progress(t *testing.T) {

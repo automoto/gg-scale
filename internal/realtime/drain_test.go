@@ -102,7 +102,9 @@ func TestDrain_should_keep_delivering_to_existing_socket_while_draining(t *testi
 	url := newDrainServer(t, hub, drain, 42)
 	conn, _, err := dialWS(t, url)
 	require.NoError(t, err)
-	waitForCount(t, drain, 1)
+	// The drain counts the socket from admission, before the hub registers
+	// it, so wait for the hub before sending.
+	require.Eventually(t, func() bool { return hub.Count() == 1 }, 2*time.Second, 5*time.Millisecond)
 	drain.BeginDrain()
 
 	require.NoError(t, hub.Send(context.Background(), 1, 42, realtime.Message{Type: "ping"}))

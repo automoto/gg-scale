@@ -108,3 +108,58 @@ func TestPlayerAllocationGenerator_should_refuse_without_spending_player_token_w
 	assert.ErrorIs(t, refusedErr, errRelayDraining)
 	assert.NoError(t, err, "the single-token budget is still available after the refusal")
 }
+
+// blockingRelayGenerator holds AllocatePacketConn open until release closes,
+// so a test can observe an Allocate that is still being set up.
+type blockingRelayGenerator struct {
+	recordingRelayGenerator
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (g *blockingRelayGenerator) AllocatePacketConn(pionturn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
+	close(g.entered)
+	<-g.release
+	return nil, &net.UDPAddr{}, nil
+}
+
+func TestPlayerAllocationGenerator_should_count_allocate_in_progress_as_drain_work(t *testing.T) {
+	inner := &blockingRelayGenerator{entered: make(chan struct{}), release: make(chan struct{})}
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(inner, &drain, nil, nil)
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
+		close(done)
+	}()
+	<-inner.entered
+	t.Cleanup(func() {
+		close(inner.release)
+		<-done
+	})
+
+	drain.BeginDrain()
+
+	assert.Equal(t, int64(1), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_release_drain_work_when_allocate_returns(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(inner, &drain, nil, nil)
+
+	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_not_count_missing_subject_as_refused_work(t *testing.T) {
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(&recordingRelayGenerator{}, &drain, nil, nil)
+	drain.BeginDrain()
+
+	_, _, _ = generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4"})
+
+	assert.Equal(t, int64(0), drain.RefusedWork())
+}

@@ -342,8 +342,9 @@ func (s *Server) BeginDrain() { s.drain.BeginDrain() }
 // EndDrain accepts new TURN Allocate requests again.
 func (s *Server) EndDrain() { s.drain.EndDrain() }
 
-// ActiveWork reports the live allocations a drain waits on.
-func (s *Server) ActiveWork() int64 { return s.ActiveAllocations() }
+// ActiveWork reports the work a drain waits on: live allocations plus
+// admitted Allocate requests that are still being set up.
+func (s *Server) ActiveWork() int64 { return s.ActiveAllocations() + s.drain.Entered() }
 
 // RefusedWork reports the cumulative count of Allocate requests refused
 // while draining.

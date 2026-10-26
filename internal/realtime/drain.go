@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
@@ -27,11 +26,6 @@ const drainPollInterval = 10 * time.Millisecond
 type Drain struct {
 	lifecycle.Gate
 
-	// active counts admitted upgrades from Guard until their handler returns,
-	// so a socket is counted while it authenticates and while its deferred
-	// cleanup (slot and tenant cap release, hub unregister) runs.
-	active atomic.Int64
-
 	mu      sync.Mutex
 	conns   map[*wsWriter]struct{}
 	closing bool
@@ -46,20 +40,22 @@ func NewDrain() *Drain {
 // authentication so a refused client spends no one-time ticket.
 func (d *Drain) Guard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !d.Admit() {
+		if !d.Enter() {
 			w.Header().Set("Retry-After", strconv.Itoa(int(drainRetryAfter.Seconds())))
 			http.Error(w, "server draining", http.StatusServiceUnavailable)
 			return
 		}
-		d.active.Add(1)
-		defer d.active.Add(-1)
+		defer d.Leave()
 		next.ServeHTTP(w, r)
 	})
 }
 
-// Count reports the number of sockets that are open or still being set up.
+// Count reports the number of sockets that are open or still being set up. An
+// admitted upgrade counts until its handler returns, so a socket is counted
+// while it authenticates and while its deferred cleanup (slot and tenant cap
+// release, hub unregister) runs.
 func (d *Drain) Count() int64 {
-	return d.active.Load()
+	return d.Entered()
 }
 
 // track registers an open socket for CloseAll. A socket that opens after

@@ -11,6 +11,7 @@ import (
 type Gate struct {
 	draining atomic.Bool
 	refused  atomic.Int64
+	entered  atomic.Int64
 }
 
 // BeginDrain makes Admit refuse new work.
@@ -30,6 +31,26 @@ func (g *Gate) Admit() bool {
 	g.refused.Add(1)
 	return false
 }
+
+// Enter admits one unit of new work, like Admit, and counts it as in progress
+// until Leave. The count is raised before the drain flag is read, and the
+// Controller sets the flag before it reads the work count. Go's atomics are
+// sequentially consistent, so a drain either refuses the work here or sees it
+// in Entered. It never misses admitted work.
+func (g *Gate) Enter() bool {
+	g.entered.Add(1)
+	if g.Admit() {
+		return true
+	}
+	g.entered.Add(-1)
+	return false
+}
+
+// Leave ends one unit of work admitted by Enter.
+func (g *Gate) Leave() { g.entered.Add(-1) }
+
+// Entered reports the work admitted by Enter that has not left yet.
+func (g *Gate) Entered() int64 { return g.entered.Load() }
 
 // RefusedWork reports the cumulative count of refused work.
 func (g *Gate) RefusedWork() int64 { return g.refused.Load() }
