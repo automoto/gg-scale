@@ -14,7 +14,9 @@ If you prefer a managed service, run your game on ggscale Cloud and leave the ho
 
 Full documentation is in the [ggscale wiki](https://github.com/automoto/gg-scale/wiki): architecture, features, API routes, and onboarding guides.
 
-The [HTTP API reference doc](https://automoto.github.io/ggscale-api-docs/)
+The [HTTP API reference](https://automoto.github.io/ggscale-api-docs/) is generated from [`openapi.yaml`](openapi.yaml).
+
+Operators running relay nodes or rolling deploys should read [Relay Operations](https://github.com/automoto/gg-scale/wiki/Relay-Operations), [Process Lifecycle](https://github.com/automoto/gg-scale/wiki/Process-Lifecycle), and [Operator Tokens](https://github.com/automoto/gg-scale/wiki/Operator-Tokens) in the wiki. Developers changing `/v1` routes should read [OpenAPI spec generation](docs/openapi-generation.md).
 
 For more technical detail, ask DeepWiki:
 
@@ -27,7 +29,7 @@ For more technical detail, ask DeepWiki:
 
 ## Local development and quickstart
 
-You need Docker and make. The tests also need Go 1.26.
+You need Docker and make. The tests also need Go 1.26.10 or later, the version in `go.mod`.
 
 ```bash
 git clone https://github.com/automoto/gg-scale.git
@@ -60,7 +62,7 @@ Run `make help` for the full list.
 | `make test` | Unit tests with `-race`. |
 | `make coverage` | Create `coverage/coverage.out` and `coverage/coverage.html`. |
 | `make test-integration` | Integration tests (Postgres via Testcontainers). |
-| `make e2e` | End-to-end suite against the running `make up` stack. |
+| `make test-e2e` | End-to-end suite against the running `make up` stack. |
 | `make check` | Lint and unit tests, the same gate as CI. |
 
 ## Testing

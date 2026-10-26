@@ -10,7 +10,7 @@ contributing you agree your contribution is licensed under the same terms.
 All make targets use plain `docker` / `docker compose`; any Docker engine works
 (Docker Desktop, a Linux daemon, Colima).
 
-1. Install Go 1.26.10+, Docker, `golangci-lint`, `govulncheck`.
+1. Install Go 1.26.10+, Docker and `golangci-lint`.
 2. `cp .env.example .env`
 3. `make test-integration` runs the fast Testcontainers suite.
 4. `make up` brings the basic stack up.
@@ -21,7 +21,7 @@ All make targets use plain `docker` / `docker compose`; any Docker engine works
 a separate repo. This repo's dev tooling covers the GA features; the fleet
 feature ships only via the Agones and plugin backends.
 
-See `docs/ARCHITECTURE.md` for what's actually running.
+The [wiki](https://github.com/automoto/gg-scale/wiki) covers the architecture.
 
 ### Troubleshooting
 

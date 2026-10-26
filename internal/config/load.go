@@ -72,7 +72,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if _, ok := envMap["RELAY_URLS"]; ok {
-		return nil, errors.New("RELAY_URLS was removed: register relay nodes with POST /v1/admin/relay-nodes instead (see docs/relay-ops.md), then unset RELAY_URLS")
+		return nil, errors.New("RELAY_URLS was removed: register relay nodes with POST /v1/admin/relay-nodes instead (see https://github.com/automoto/gg-scale/wiki/Relay-Operations), then unset RELAY_URLS")
 	}
 	cfg := &Config{}
 	if err := env.ParseWithOptions(cfg, env.Options{Environment: envMap}); err != nil {
