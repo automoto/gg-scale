@@ -46,7 +46,7 @@ func newDrainServer(t *testing.T, c *cluster) drainServer {
 	t.Cleanup(authorizer.Close)
 
 	hub := realtime.NewHub()
-	work := httpapi.APIWork{Realtime: realtime.NewDrain(), Inflight: &lifecycle.Inflight{}}
+	work := httpapi.NewAPIWork()
 	lc := lifecycle.New(lifecycle.Config{Role: "api", Token: drainIntegrationToken, Work: work, Details: work.Details})
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version: "v1", Commit: "test",

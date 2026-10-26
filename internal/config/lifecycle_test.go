@@ -23,13 +23,49 @@ func TestLoad_should_default_drain_timeout_to_30s(t *testing.T) {
 	assert.Equal(t, 30*time.Second, cfg.DrainTimeout)
 }
 
-func TestLoadRelay_should_default_drain_timeout_to_30s(t *testing.T) {
+func TestLoadRelay_should_default_drain_timeout_to_zero(t *testing.T) {
 	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
 
 	rc, err := config.LoadRelay()
 
 	require.NoError(t, err)
-	assert.Equal(t, 30*time.Second, rc.DrainTimeout)
+	assert.Equal(t, time.Duration(0), rc.DrainTimeout)
+}
+
+func TestLoad_should_refuse_removed_relay_urls(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("RELAY_URLS", "turn:relay.example.com:3478?transport=udp")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "RELAY_URLS was removed")
+}
+
+func TestLoad_should_read_relay_probe_token_from_file(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	path := filepath.Join(t.TempDir(), "probe-token")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("p", 32)+"\n"), 0o600))
+	t.Setenv("RELAY_PROBE_TOKEN_FILE", path)
+
+	cfg, err := config.Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("p", 32), cfg.RelayProbeToken)
+}
+
+func TestLoad_should_read_platform_admin_token_from_file(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	path := filepath.Join(t.TempDir(), "admin-token")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("a", 32)+"\n"), 0o600))
+	t.Setenv("PLATFORM_ADMIN_TOKEN_FILE", path)
+
+	cfg, err := config.Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("a", 32), cfg.PlatformAdminToken)
 }
 
 func TestLoad_should_parse_drain_timeout_as_go_duration(t *testing.T) {

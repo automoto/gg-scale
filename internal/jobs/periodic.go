@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/riverqueue/river"
+
+	"github.com/automoto/gg-scale/internal/relaynode"
 )
 
 // PeriodicRegistration pairs a periodic job's args with its recurrence
@@ -33,5 +35,8 @@ func PeriodicRegistrations() []PeriodicRegistration {
 		// calendar boundary, and the sweep is one indexed query per tenant
 		// when nothing is due.
 		{Args: LeaderboardPeriodResetArgs{}, Interval: 5 * time.Minute},
+		// Registered relay nodes stop being advertised within a few probes of
+		// failing or draining, so this must stay short.
+		{Args: RelayNodeProbeArgs{}, Interval: relaynode.ProbeInterval},
 	}
 }

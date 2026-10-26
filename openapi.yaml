@@ -63,6 +63,39 @@ components:
         - expires_at
         - party_version
       type: object
+    CreateRelayNodeInputBody:
+      additionalProperties: false
+      properties:
+        lifecycle_url:
+          description: The node's GET /lifecycle URL, reachable from the API servers.
+          examples:
+            - http://10.0.0.5:9091/lifecycle
+          maxLength: 2048
+          minLength: 1
+          type: string
+        region:
+          description: Region clients ask for with ?region=. Lowercase letters, digits and dashes.
+          examples:
+            - us-east
+          maxLength: 64
+          minLength: 1
+          type: string
+        turn_urls:
+          description: "turn: or turns: URIs clients dial, in preference order."
+          examples:
+            - - turn:relay-1.example.com:3478?transport=udp
+          items:
+            type: string
+          maxItems: 16
+          minItems: 1
+          type:
+            - array
+            - "null"
+      required:
+        - region
+        - turn_urls
+        - lifecycle_url
+      type: object
     Credentials:
       additionalProperties: false
       properties:
@@ -73,6 +106,10 @@ components:
         realm:
           examples:
             - ggscale
+          type: string
+        region:
+          examples:
+            - us-east
           type: string
         stun_urls:
           examples:
@@ -104,6 +141,7 @@ components:
         - password
         - ttl
         - realm
+        - region
       type: object
     CustomTokenRequest:
       additionalProperties: false
@@ -918,6 +956,18 @@ components:
             - correct-horse-battery-staple
           type: string
       type: object
+    ListRelayNodesOutputBody:
+      additionalProperties: false
+      properties:
+        nodes:
+          items:
+            $ref: "#/components/schemas/Node"
+          type:
+            - array
+            - "null"
+      required:
+        - nodes
+      type: object
     ListServersResponse:
       additionalProperties: false
       properties:
@@ -1175,6 +1225,96 @@ components:
         - joined_at
         - last_seen_at
         - disconnect_deadline
+      type: object
+    Node:
+      additionalProperties: false
+      properties:
+        created_at:
+          examples:
+            - "2026-10-26T11:00:00Z"
+          format: date-time
+          type: string
+        eligible:
+          examples:
+            - true
+          type: boolean
+        id:
+          examples:
+            - 7
+          format: int64
+          type: integer
+        last_active_allocations:
+          examples:
+            - 12
+          format: int64
+          type:
+            - integer
+            - "null"
+        last_lifecycle_state:
+          examples:
+            - active
+          type:
+            - string
+            - "null"
+        last_probe_at:
+          examples:
+            - "2026-10-26T12:00:00Z"
+          format: date-time
+          type:
+            - string
+            - "null"
+        last_probe_error:
+          examples:
+            - timeout
+          type:
+            - string
+            - "null"
+        last_probe_ok:
+          examples:
+            - true
+          type: boolean
+        lifecycle_url:
+          examples:
+            - http://10.0.0.5:9091/lifecycle
+          type: string
+        region:
+          examples:
+            - us-east
+          type: string
+        state:
+          enum:
+            - known
+            - retired
+          examples:
+            - known
+          type: string
+        turn_urls:
+          examples:
+            - - turn:relay-1.example.com:3478?transport=udp
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        updated_at:
+          examples:
+            - "2026-10-26T12:00:00Z"
+          format: date-time
+          type: string
+      required:
+        - id
+        - region
+        - turn_urls
+        - lifecycle_url
+        - state
+        - eligible
+        - last_probe_at
+        - last_probe_ok
+        - last_probe_error
+        - last_lifecycle_state
+        - last_active_allocations
+        - created_at
+        - updated_at
       type: object
     OkResult:
       additionalProperties: false
@@ -1951,6 +2091,10 @@ components:
         - verified
       type: object
   securitySchemes:
+    PlatformAdminToken:
+      description: The server's PLATFORM_ADMIN_TOKEN, held by the platform operator. Game Project keys are refused. The /v1/admin routes are not mounted when the token is unset.
+      scheme: bearer
+      type: http
     PlayerSession:
       description: Player session JWT issued by the /v1/auth endpoints.
       in: header
@@ -2022,6 +2166,87 @@ paths:
       summary: Replace the caller's remote addresses
       tags:
         - Remote Addresses
+  /v1/admin/relay-nodes:
+    get:
+      description: Lists every registered relay node, retired ones included, with its last probe result.
+      operationId: listRelayNodes
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListRelayNodesOutputBody"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - PlatformAdminToken: []
+      summary: List relay nodes
+      tags:
+        - Platform Admin
+    post:
+      description: Registers a relay node as known. Credentials list it once a probe records it as active, usually within about 15 seconds.
+      operationId: createRelayNode
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRelayNodeInputBody"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+          description: Created
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - PlatformAdminToken: []
+      summary: Register a relay node
+      tags:
+        - Platform Admin
+  /v1/admin/relay-nodes/{id}/retire:
+    post:
+      description: Stops advertising and probing a node. The row is kept. Retiring a retired node is a no-op.
+      operationId: retireRelayNode
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            examples:
+              - 7
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Node"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - PlatformAdminToken: []
+      summary: Retire a relay node
+      tags:
+        - Platform Admin
   /v1/auth/anonymous:
     post:
       operationId: authAnonymous
@@ -4436,6 +4661,7 @@ paths:
         - Friends & Presence
   /v1/relay/credentials:
     post:
+      description: Returns credentials plus the TURN URLs of the relay nodes that are currently eligible, preferring the requested region. Responds 503 when no relay node is eligible.
       operationId: issueRelayCredentials
       parameters:
         - explode: false
@@ -4444,6 +4670,16 @@ paths:
           schema:
             examples:
               - mm_5f3a9c1d2e4b6a70
+            type: string
+        - description: Preferred relay region, matched case-insensitively. With no eligible relay node in it, or when omitted, every eligible node is listed.
+          explode: false
+          in: query
+          name: region
+          schema:
+            description: Preferred relay region, matched case-insensitively. With no eligible relay node in it, or when omitted, every eligible node is listed.
+            examples:
+              - us-east
+            maxLength: 64
             type: string
       responses:
         "200":
@@ -4936,3 +5172,5 @@ tags:
     name: Session Verification
   - description: Liveness probe.
     name: Health
+  - description: Operator API for the platform itself, such as relay node registration. Not for game clients or servers.
+    name: Platform Admin

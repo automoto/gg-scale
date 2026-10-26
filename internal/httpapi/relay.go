@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/relay"
+	"github.com/automoto/gg-scale/internal/relaynode"
 )
 
 // Per-player relay credential issuance is rate limited so a single player
@@ -30,9 +33,11 @@ const (
 // is set the server verifies the caller is in that match's roster before
 // issuing, so a peer-to-peer client can prove match membership when asking for
 // relay credentials. Unqualified requests stay valid for non-matchmade P2P
-// (server browser, direct invites).
+// (server browser, direct invites). Region prefers the relay nodes of one
+// region.
 type relayCredentialsInput struct {
 	MatchID string `query:"match_id" example:"mm_5f3a9c1d2e4b6a70"`
+	Region  string `query:"region" maxLength:"64" example:"us-east" doc:"Preferred relay region, matched case-insensitively. With no eligible relay node in it, or when omitted, every eligible node is listed."`
 }
 
 // relayCredentialsOutput carries the TURN-REST credentials. The password field
@@ -48,8 +53,10 @@ func registerRelay(api huma.API, d Deps) {
 		Method:      http.MethodPost,
 		Path:        "/v1/relay/credentials",
 		Summary:     "Issue short-lived TURN-REST relay credentials",
-		Tags:        []string{"P2P & TURN Relay"},
-		Security:    playerSecurity,
+		Description: "Returns credentials plus the TURN URLs of the relay nodes that are currently eligible, " +
+			"preferring the requested region. Responds 503 when no relay node is eligible.",
+		Tags:     []string{"P2P & TURN Relay"},
+		Security: playerSecurity,
 	}, relayCredentials(d))
 }
 
@@ -116,6 +123,12 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 				return nil, merr
 			}
 		}
+		// Picked before metering so a request with nowhere to dial never
+		// consumes the allowance.
+		sel, err := selectRelayNodes(ctx, d, in.Region)
+		if err != nil {
+			return nil, err
+		}
 		// Monthly session allowance: refuses only new issuance — in-flight
 		// TURN sessions are unaffected.
 		if d.RelayMeter != nil {
@@ -132,9 +145,37 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 		if err != nil {
 			return nil, huma.Error500InternalServerError("internal error")
 		}
+		creds.URLs = sel.URLs
+		creds.Region = sel.Region
 		d.Metrics.RelayCredentialIssued()
 		return &relayCredentialsOutput{Body: *creds}, nil
 	}
+}
+
+// selectRelayNodes picks the relay URLs for one credential set. No eligible
+// node is a 503 with Retry-After of one probe interval, the soonest a node can
+// become eligible.
+func selectRelayNodes(ctx context.Context, d Deps, region string) (relaynode.Selection, error) {
+	if d.RelayNodes == nil {
+		d.Metrics.RelayNoEligibleNodes()
+		return relaynode.Selection{}, noEligibleRelayNodes()
+	}
+	sel, err := d.RelayNodes.Select(ctx, region)
+	if errors.Is(err, relaynode.ErrNoEligibleNodes) {
+		d.Metrics.RelayNoEligibleNodes()
+		return relaynode.Selection{}, noEligibleRelayNodes()
+	}
+	if err != nil {
+		return relaynode.Selection{}, huma.Error500InternalServerError("internal error")
+	}
+	return sel, nil
+}
+
+func noEligibleRelayNodes() error {
+	return huma.ErrorWithHeaders(
+		huma.Error503ServiceUnavailable("no relay node is available; retry shortly"),
+		http.Header{"Retry-After": []string{strconv.Itoa(int(relaynode.ProbeInterval / time.Second))}},
+	)
 }
 
 // verifyRelayMatchMembership confirms the caller belongs to the given match's

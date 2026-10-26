@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/automoto/gg-scale/internal/relay"
 )
 
 // IsProduction reports whether the deployment environment is production, accepting
@@ -61,6 +63,7 @@ func (c *Config) Validate() error {
 	}
 	c.warnLowDBPool()
 	c.warnRequestTimeout()
+	c.warnSharedProbeToken()
 	return nil
 }
 
@@ -92,6 +95,12 @@ func (c *Config) checkSecretLengths() error {
 	if c.EntitlementAPIToken != "" && len(c.EntitlementAPIToken) < 32 {
 		return fmt.Errorf("ENTITLEMENT_API_TOKEN must be >= 32 bytes when set (got %d)", len(c.EntitlementAPIToken))
 	}
+	if c.PlatformAdminToken != "" && len(c.PlatformAdminToken) < 32 {
+		return fmt.Errorf("PLATFORM_ADMIN_TOKEN must be >= 32 bytes when set (got %d)", len(c.PlatformAdminToken))
+	}
+	if c.RelayProbeToken != "" && len(c.RelayProbeToken) < 32 {
+		return fmt.Errorf("RELAY_PROBE_TOKEN must be >= 32 bytes when set (got %d)", len(c.RelayProbeToken))
+	}
 	return nil
 }
 
@@ -113,12 +122,14 @@ func (c *Config) checkFeatureSwitches() error {
 	return nil
 }
 
-// checkRelay enforces the relay-issuer invariant: a node that mints relay
-// credentials must tell clients where to dial. The issuer is built only when
-// the feature is on and a shared secret is set (cmd/ggscale-server), so the
-// RELAY_URLS requirement is scoped to exactly that case — a feature-enabled
-// node without a secret issues nothing and needs no URLs.
+// checkRelay validates the relay settings of a node that issues relay
+// credentials. The issuer is built only when the feature is on and a shared
+// secret is set (cmd/ggscale-server), so the checks are scoped to that case.
+// The relay URLs clients dial come from the relay node registry, not config.
 func (c *Config) checkRelay() error {
+	if len(c.RelayEmbeddedURLs) > 0 && c.RelayPublicIP == "" {
+		return fmt.Errorf("RELAY_EMBEDDED_URLS set without RELAY_PUBLIC_IP; it only applies to the relay embedded in this server")
+	}
 	if !c.FeatureP2PRelayEnabled || c.RelaySharedSecret == "" {
 		return nil
 	}
@@ -127,12 +138,9 @@ func (c *Config) checkRelay() error {
 			return err
 		}
 	}
-	if len(c.RelayURLs) == 0 {
-		return fmt.Errorf("RELAY_URLS must list at least one turn:/turns: URI when the relay credential issuer is enabled; clients receive credentials but no address to dial without it")
-	}
-	for _, raw := range c.RelayURLs {
-		if err := validateTURNURI(raw); err != nil {
-			return fmt.Errorf("RELAY_URLS %q: %w", raw, err)
+	for _, raw := range c.RelayEmbeddedURLs {
+		if err := relay.ValidateTURNURI(raw); err != nil {
+			return fmt.Errorf("RELAY_EMBEDDED_URLS %q: %w", raw, err)
 		}
 	}
 	for _, raw := range c.RelaySTUNURLs {
@@ -156,27 +164,6 @@ func validateSTUNURI(raw string) error {
 		return fmt.Errorf("must use the stun: or stuns: scheme")
 	}
 	if u.Opaque == "" && u.Host == "" {
-		return fmt.Errorf("missing host")
-	}
-	return nil
-}
-
-// validateTURNURI accepts the turn:/turns: URI forms clients dial. TURN URIs
-// are opaque (turn:host:port?transport=udp), so the host lands in Opaque
-// rather than Host after url.Parse.
-func validateTURNURI(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return err
-	}
-	if u.Scheme != "turn" && u.Scheme != "turns" {
-		return fmt.Errorf("must use the turn: or turns: scheme")
-	}
-	host := u.Opaque
-	if host == "" {
-		host = u.Host
-	}
-	if host == "" {
 		return fmt.Errorf("missing host")
 	}
 	return nil
@@ -340,6 +327,17 @@ func (c *Config) checkAgonesAuth() error {
 // is not — riverpgxv5 does Acquire() then Hijack(), removing that connection
 // from pgxpool tracking, so actual Postgres connections per process are
 // DB_MAX_CONNS + 1 when River is running. Size max_connections accordingly.
+// warnSharedProbeToken flags a probe token equal to this server's own
+// LIFECYCLE_TOKEN. The probe sends its token to every registered
+// lifecycle_url, so that value then reaches every relay host and anyone who
+// can register a node, and it can drain the API servers.
+func (c *Config) warnSharedProbeToken() {
+	if c.RelayProbeToken != "" && c.RelayProbeToken == c.LifecycleToken {
+		slog.Warn("RELAY_PROBE_TOKEN equals LIFECYCLE_TOKEN; give relay nodes their own LIFECYCLE_TOKEN",
+			"hint", "the probe sends RELAY_PROBE_TOKEN to every registered lifecycle_url, so relay hosts and platform admins would hold a token that drains the API servers")
+	}
+}
+
 func (c *Config) warnLowDBPool() {
 	if c.DBMaxConns < 8 && c.FleetBackend != "" {
 		slog.Warn("DB_MAX_CONNS is low for an enabled matchmaker", "value", c.DBMaxConns,

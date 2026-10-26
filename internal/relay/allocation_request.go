@@ -46,19 +46,29 @@ func (g *playerAllocationGenerator) AllocatePacketConn(
 	if conf.UserID == "" {
 		return nil, nil, errAllocationSubjectUnavailable
 	}
-	// Checked before the player budget so a refused allocation spends no
-	// token. An admitted Allocate counts as drain work until the node
-	// allocator's live count owns it.
-	if g.drain != nil {
-		if !g.drain.Enter() {
-			return nil, nil, errRelayDraining
+	if g.drain == nil {
+		if err := g.allow(conf.UserID); err != nil {
+			return nil, nil, err
 		}
-		defer g.drain.Leave()
+		return g.inner.AllocatePacketConn(conf)
+	}
+	// Checked before the player budget so a refused allocation spends no
+	// token. An admitted Allocate counts as one unit of drain work from here
+	// until its relayed socket closes, so setup and the live allocation are
+	// never counted twice or not at all.
+	if !g.drain.Enter() {
+		return nil, nil, errRelayDraining
 	}
 	if err := g.allow(conf.UserID); err != nil {
+		g.drain.Leave()
 		return nil, nil, err
 	}
-	return g.inner.AllocatePacketConn(conf)
+	conn, addr, err := g.inner.AllocatePacketConn(conf)
+	if err != nil {
+		g.drain.Leave()
+		return nil, nil, err
+	}
+	return &countedPacketConn{PacketConn: conn, release: g.drain.Leave}, addr, nil
 }
 
 func (g *playerAllocationGenerator) AllocateListener(

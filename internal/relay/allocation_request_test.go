@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -143,14 +144,82 @@ func TestPlayerAllocationGenerator_should_count_allocate_in_progress_as_drain_wo
 	assert.Equal(t, int64(1), drain.Entered())
 }
 
-func TestPlayerAllocationGenerator_should_release_drain_work_when_allocate_returns(t *testing.T) {
-	inner := &recordingRelayGenerator{}
+// socketRelayGenerator hands out real loopback sockets, so a test can close
+// the relayed socket the way Pion does when an allocation ends.
+type socketRelayGenerator struct {
+	recordingRelayGenerator
+	t *testing.T
+}
+
+func (g *socketRelayGenerator) AllocatePacketConn(pionturn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
+	conn, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	require.NoError(g.t, err)
+	g.t.Cleanup(func() { _ = conn.Close() })
+	return conn, conn.LocalAddr(), nil
+}
+
+// failingRelayGenerator refuses every allocation.
+type failingRelayGenerator struct{ recordingRelayGenerator }
+
+func (*failingRelayGenerator) AllocatePacketConn(pionturn.AllocateListenerConfig) (net.PacketConn, net.Addr, error) {
+	return nil, nil, errors.New("bind failed")
+}
+
+func TestPlayerAllocationGenerator_should_count_live_allocation_once_after_handoff(t *testing.T) {
+	limiter := newAllocationLimiter(&socketRelayGenerator{t: t}, 0)
 	var drain lifecycle.Gate
-	generator := newPlayerAllocationGenerator(inner, &drain, nil, nil)
+	generator := newPlayerAllocationGenerator(limiter, &drain, nil, nil)
 
 	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
 
 	require.NoError(t, err)
+	assert.Equal(t, int64(1), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_release_drain_work_when_relayed_socket_closes(t *testing.T) {
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(&socketRelayGenerator{t: t}, &drain, nil, nil)
+	conn, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
+	require.NoError(t, err)
+
+	require.NoError(t, conn.Close())
+
+	assert.Equal(t, int64(0), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_release_drain_work_once_when_closed_twice(t *testing.T) {
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(&socketRelayGenerator{t: t}, &drain, nil, nil)
+	conn, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
+	require.NoError(t, err)
+
+	_ = conn.Close()
+	_ = conn.Close()
+
+	assert.Equal(t, int64(0), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_release_drain_work_when_allocate_fails(t *testing.T) {
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(&failingRelayGenerator{}, &drain, nil, nil)
+
+	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)})
+
+	require.Error(t, err)
+	assert.Equal(t, int64(0), drain.Entered())
+}
+
+func TestPlayerAllocationGenerator_should_release_drain_work_when_throttled(t *testing.T) {
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(&socketRelayGenerator{t: t}, &drain, newPlayerAllocLimiter(6, 1), nil)
+	conf := pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)}
+	conn, _, err := generator.AllocatePacketConn(conf)
+	require.NoError(t, err)
+	require.NoError(t, conn.Close())
+
+	_, _, err = generator.AllocatePacketConn(conf)
+
+	require.ErrorIs(t, err, errPlayerAllocationThrottled)
 	assert.Equal(t, int64(0), drain.Entered())
 }
 

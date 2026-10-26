@@ -6,13 +6,10 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -156,6 +153,15 @@ type Deps struct {
 
 	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
 	RelayIssuer *relay.Issuer
+	// RelayNodes picks the relay URLs each credential set lists. nil lists
+	// none, so credential requests get 503.
+	RelayNodes RelayNodeSelector
+	// RelayNodeAdmin backs the platform-admin relay node routes. They mount
+	// only when it and PlatformAdminToken are both set.
+	RelayNodeAdmin RelayNodeAdmin
+	// PlatformAdminToken guards the platform-admin API (/v1/admin/*). Empty
+	// leaves it unmounted.
+	PlatformAdminToken string
 	// RelayMeter enforces the per-class monthly relay-session allowance at
 	// credential issuance. nil disables metering (unit tests).
 	RelayMeter *relaymeter.Meter
@@ -238,40 +244,6 @@ func panicRecover() func(http.Handler) http.Handler {
 	}
 }
 
-// requireMetricsToken gates a handler behind a static bearer token. This is a
-// shared-secret guard for Prometheus scraping — deliberately separate from the
-// DB-backed tenant API keys (internal/tenant), since a scraper is not a tenant.
-//
-// Both sides are SHA-256'd before the constant-time compare so the comparison
-// always runs over equal-length (32-byte) digests: subtle.ConstantTimeCompare
-// short-circuits on a length mismatch, which would otherwise leak the token
-// length via timing. Same idiom as tenant key hashing.
-func requireMetricsToken(token string, next http.Handler) http.Handler {
-	want := sha256.Sum256([]byte(token))
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		presented, ok := bearerCredential(r.Header.Get("Authorization"))
-		got := sha256.Sum256([]byte(presented))
-		if !ok || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// bearerCredential extracts the token from an "Authorization: Bearer <token>"
-// header. The scheme match is case-insensitive (RFC 7235) and the token is
-// whitespace-trimmed — matching the tenant middleware's parser and Prometheus,
-// which trims the credentials_file it sends.
-func bearerCredential(header string) (string, bool) {
-	const prefix = "Bearer "
-	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return "", false
-	}
-	return strings.TrimSpace(header[len(prefix):]), true
-}
-
 // NewRouter builds the ggscale-server HTTP handler.
 func NewRouter(d Deps) http.Handler {
 	reg := d.Registry
@@ -324,10 +296,9 @@ func NewRouter(d Deps) http.Handler {
 		MaxAge:           300,
 	}))
 	metricsHandler := promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})
-	if d.MetricsAuthToken != "" {
-		metricsHandler = requireMetricsToken(d.MetricsAuthToken, metricsHandler)
-	}
-	r.Handle("/metrics", metricsHandler)
+	// A shared-secret guard for Prometheus scraping, deliberately separate
+	// from the tenant API keys: a scraper is not a tenant.
+	r.Handle("/metrics", lifecycle.RequireBearer(d.MetricsAuthToken, metricsHandler))
 	if d.Lifecycle != nil {
 		d.Lifecycle.Mount(r)
 	}
@@ -373,6 +344,13 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 		}
 		registerHealthz(groupAPI(r, humaCfg), d)
+		// Platform-admin API: a static operator token, not a tenant key.
+		if d.PlatformAdminToken != "" && d.RelayNodeAdmin != nil {
+			r.Group(func(r chi.Router) {
+				r.Use(func(next http.Handler) http.Handler { return lifecycle.RequireBearer(d.PlatformAdminToken, next) })
+				registerAdminRelayNodes(groupAPI(r, humaCfg), d)
+			})
+		}
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
 		// control panel and player surfaces. Mounted unconditionally so player
 		// pages stay styled even when the control panel is disabled.

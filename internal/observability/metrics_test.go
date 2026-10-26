@@ -136,6 +136,7 @@ func TestMetrics_nil_is_noop(t *testing.T) {
 		m.MatchmakerTimeToMatch(2.0)
 		m.SetMatchmakerQueueStats([]observability.MatchmakerBucketSample{{Mode: "match_only"}})
 		m.RelayCredentialIssued()
+		m.RelayNoEligibleNodes()
 		m.MailSend(observability.MailOK)
 	})
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/relay"
+	"github.com/automoto/gg-scale/internal/relaynode"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -211,6 +212,8 @@ func newRelayServerForCluster(t *testing.T, c *cluster) *httptest.Server {
 		Cache:       c.cache,
 		RBAC:        authorizer,
 		RelayIssuer: relay.NewIssuer("shared-relay-secret", "relay.test", time.Minute),
+		RelayNodes: relaynode.NewSelector(relaynode.NewStore(pool).Eligible,
+			&relaynode.Node{TURNURLs: []string{"turn:127.0.0.1:3478?transport=udp"}}),
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)

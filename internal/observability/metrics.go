@@ -29,6 +29,7 @@ type Metrics struct {
 	matchmakerOldestTicket   *prometheus.GaugeVec
 	relayCreds               prometheus.Counter
 	relayIssueThrottled      prometheus.Counter
+	relayNoEligibleNodes     prometheus.Counter
 	mailSends                *prometheus.CounterVec
 	quotaRejections          *prometheus.CounterVec
 	entitlementApplies       *prometheus.CounterVec
@@ -204,6 +205,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "ggscale_relay_issue_throttled_total",
 			Help: "Relay credential requests rejected by the per-player issuance rate limit.",
 		}),
+		relayNoEligibleNodes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ggscale_relay_no_eligible_nodes_total",
+			Help: "Relay credential requests refused with 503 because no relay node was eligible.",
+		}),
 		mailSends: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "ggscale_mail_sends_total",
 			Help: "Transactional mail sends by result.",
@@ -230,7 +235,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.bansIssued, m.playerSessions, m.matchmakerTicket, m.matchmakerMatch,
 		m.matchmakerShortCommit, m.matchmakerCapacityReturn, m.matchmakerQueryReject, m.matchmakerTicketFailures,
 		m.matchmakerTimeToMatch, m.matchmakerQueueDepth, m.matchmakerOldestTicket,
-		m.relayCreds, m.relayIssueThrottled, m.mailSends, m.quotaRejections, m.entitlementApplies,
+		m.relayCreds, m.relayIssueThrottled, m.relayNoEligibleNodes, m.mailSends, m.quotaRejections, m.entitlementApplies,
 		m.realtimeSweepFailures, m.realtimeLifecycleCloses,
 	)
 	return m
@@ -391,6 +396,15 @@ func (m *Metrics) RelayIssueThrottled() {
 		return
 	}
 	m.relayIssueThrottled.Inc()
+}
+
+// RelayNoEligibleNodes counts one relay credential request refused because
+// no relay node was eligible.
+func (m *Metrics) RelayNoEligibleNodes() {
+	if m == nil {
+		return
+	}
+	m.relayNoEligibleNodes.Inc()
 }
 
 // MailSend counts a mail send by result (see MailOK / MailError).

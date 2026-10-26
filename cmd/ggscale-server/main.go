@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -54,6 +53,7 @@ import (
 	"github.com/automoto/gg-scale/internal/realtime"
 	"github.com/automoto/gg-scale/internal/relay"
 	"github.com/automoto/gg-scale/internal/relaymeter"
+	"github.com/automoto/gg-scale/internal/relaynode"
 	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/serverlist"
 	"github.com/automoto/gg-scale/internal/sso"
@@ -245,6 +245,18 @@ func newRelayLifecycle(rc *config.RelayConfig, srv *relay.Server) *lifecycle.Con
 	})
 }
 
+// embeddedRelayNode is the relay running inside the API server, advertised
+// with no region. It advertises urls (RELAY_EMBEDDED_URLS) when set, and
+// otherwise its UDP listener at the public IP.
+func embeddedRelayNode(urls []string, publicIP string, udpPort int) *relaynode.Node {
+	if len(urls) > 0 {
+		return &relaynode.Node{TURNURLs: urls}
+	}
+	return &relaynode.Node{
+		TURNURLs: []string{"turn:" + net.JoinHostPort(publicIP, strconv.Itoa(udpPort)) + "?transport=udp"},
+	}
+}
+
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
 // and the rejected-allocation / auth-failure / peer-filter counters on reg.
 // These are the signals the ops runbook alerts on (port-range exhaustion,
@@ -333,26 +345,9 @@ func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Con
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
-	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	mux.Handle("/metrics", lifecycle.RequireBearer(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
 	lc.Mount(mux)
 	return mux, nil
-}
-
-// bearerGuard wraps h to require "Authorization: Bearer <token>" when token is
-// non-empty; an empty token leaves h open (tailnet-only default).
-func bearerGuard(token string, h http.Handler) http.Handler {
-	if token == "" {
-		return h
-	}
-	want := "Bearer " + token
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(want)) != 1 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
 }
 
 func run() error {
@@ -523,14 +518,18 @@ func run() error {
 	hub := realtime.NewHub().WithRelay(appPool)
 	go hub.RunRelay(appCtx)
 
+	// Relay credentials list the registered relay nodes the probe job last
+	// saw active, plus the relay embedded here, if any.
+	relayNodes := relaynode.NewStore(appPool)
 	var relayIssuer *relay.Issuer
+	var relaySelector httpapi.RelayNodeSelector
 	if !cfg.FeatureP2PRelayEnabled {
 		logger.Warn("p2p relay disabled: FEATURE_P2P_RELAY_ENABLED=false")
 	}
 	if cfg.FeatureP2PRelayEnabled && cfg.RelaySharedSecret != "" {
 		relayIssuer = relay.NewIssuerWithSecrets(cfg.RelaySecrets(), cfg.RelayRealm, cfg.RelayCredTTL)
-		relayIssuer.SetURLs(cfg.RelayURLs)
 		relayIssuer.SetSTUNURLs(cfg.RelaySTUNURLs)
+		var embedded *relaynode.Node
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
 				PublicIP:             cfg.RelayPublicIP,
@@ -551,9 +550,9 @@ func run() error {
 			defer func() { _ = relayServer.Close() }()
 			registerRelayServerMetrics(registry, relayServer)
 			logger.Info("relay server listening", "addr", cfg.RelayBindAddr, "port", cfg.RelayUDPPort, "public_ip", cfg.RelayPublicIP)
-		} else {
-			logger.Warn("relay credentials issued but no UDP listener: RELAY_PUBLIC_IP unset")
+			embedded = embeddedRelayNode(cfg.RelayEmbeddedURLs, cfg.RelayPublicIP, cfg.RelayUDPPort)
 		}
+		relaySelector = relaynode.NewSelector(relayNodes.Eligible, embedded)
 	}
 
 	// Server-browser heartbeat registry. TTL=15s tolerates a missed
@@ -581,9 +580,16 @@ func run() error {
 	}
 	// River stops only through its graceful Stop in stopRiver, so its context
 	// never cancels.
-	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
+	relayMonitor := relaynode.NewMonitor(relayNodes, relaynode.NewProber(cfg.RelayProbeToken, relaynode.DefaultProbeTimeout), logger)
+	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, relayMonitor, logger)
 	if stopRiver != nil {
 		defer stopRiver()
+	}
+	if riverClient == nil {
+		// Relay credentials list only probed nodes, so the probe must run
+		// even without River. Each API server then probes on its own.
+		logger.Warn("river unavailable: probing relay nodes in-process")
+		go relayMonitor.Run(appCtx, relaynode.ProbeInterval)
 	}
 	// enqueuePasswordReset inserts the durable delivery job; nil when River
 	// is unavailable so the HTTP layer can fall back.
@@ -635,8 +641,8 @@ func run() error {
 
 	// Lifecycle contract: draining refuses new realtime upgrades and a drain
 	// waits on open sockets plus in-flight HTTP requests.
-	realtimeDrain := realtime.NewDrain()
-	apiWork := httpapi.APIWork{Realtime: realtimeDrain, Inflight: &lifecycle.Inflight{}}
+	apiWork := httpapi.NewAPIWork()
+	realtimeDrain := apiWork.Realtime
 	lc := lifecycle.New(lifecycle.Config{
 		Role:    "api",
 		Commit:  buildCommit(),
@@ -691,6 +697,7 @@ func run() error {
 		GameSessions: gameSessions,
 		ServerList:   serverListRegistry,
 		RelayIssuer:  relayIssuer,
+		RelayNodes:   relaySelector,
 		RelayMeter:   relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
 			Mount:                  cfg.ControlPanelEnabled,
@@ -747,6 +754,8 @@ func run() error {
 		CORSAllowedOrigins:       cfg.CORSAllowedOrigins,
 		MetricsAuthToken:         cfg.MetricsAuthToken,
 		EntitlementAPIToken:      entitlementToken,
+		PlatformAdminToken:       cfg.PlatformAdminToken,
+		RelayNodeAdmin:           relayNodes,
 		MCPEnabled:               cfg.FeatureMCPEnabled,
 		MCPTokenRatePerSecond:    float64(cfg.MCPTokenRatePerSecond),
 		MCPTokenBurst:            float64(cfg.MCPTokenRateBurst),
@@ -884,7 +893,7 @@ func riverPeriodicJobs() []*river.PeriodicJob {
 // nil if River couldn't start. River runs under the app DB role via the
 // pool's SET ROLE; its tables are granted in migration 0055. Failures are
 // logged and swallowed so a River problem never blocks boot.
-func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, matchReleaser jobs.MatchmakerAllocationReleaser, m mailer.Mailer, mailFrom string, resetDeps jobs.PasswordResetDeps, deleteGrace time.Duration, logger *slog.Logger) (*river.Client[pgx.Tx], func()) {
+func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, matchReleaser jobs.MatchmakerAllocationReleaser, m mailer.Mailer, mailFrom string, resetDeps jobs.PasswordResetDeps, deleteGrace time.Duration, relayProber jobs.RelayNodeProber, logger *slog.Logger) (*river.Client[pgx.Tx], func()) {
 	workers := river.NewWorkers()
 	river.AddWorker(workers, jobs.NewGameSessionGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewTrustedDeviceGCWorker(appPool))
@@ -896,12 +905,16 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	river.AddWorker(workers, jobs.NewPasswordResetGCWorker(appPool))
 	river.AddWorker(workers, jobs.NewLeaderboardPeriodResetWorker(appPool))
 	river.AddWorker(workers, jobs.NewPlayerDeletePurgeWorker(appPool, deleteGrace))
+	river.AddWorker(workers, jobs.NewRelayNodeProbeWorker(relayProber))
 
 	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 		Logger:  logger,
 		Workers: workers,
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 2},
+			// The relay probe gets its own worker so slow jobs on the
+			// default queue cannot delay it past the eligibility window.
+			jobs.RelayNodeProbeQueue: {MaxWorkers: 1},
 		},
 		PeriodicJobs: riverPeriodicJobs(),
 	})

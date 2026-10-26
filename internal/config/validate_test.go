@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -182,18 +184,70 @@ func TestValidateAcceptsRelayConfiguredWithFeatureOn(t *testing.T) {
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
 	assert.NoError(t, c.Validate())
 }
 
-func TestValidateRejectsRelayIssuerWithoutURLs(t *testing.T) {
+func TestValidate_should_accept_relay_issuer_without_relay_urls(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+
+	err := c.Validate()
+
+	assert.NoError(t, err)
+}
+
+func TestValidate_should_accept_embedded_relay_urls(t *testing.T) {
 	c := baseProd()
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = nil
+	c.RelayEmbeddedURLs = []string{"turn:relay.example.com:3479?transport=udp"}
+
 	err := c.Validate()
-	assert.ErrorContains(t, err, "RELAY_URLS")
+
+	assert.NoError(t, err)
+}
+
+func TestValidate_should_reject_malformed_embedded_relay_urls(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayEmbeddedURLs = []string{"https://relay.example.com"}
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_EMBEDDED_URLS")
+}
+
+func TestValidate_should_reject_embedded_relay_urls_without_public_ip(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayEmbeddedURLs = []string{"turn:relay.example.com:3479?transport=udp"}
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_PUBLIC_IP")
+}
+
+func TestValidate_should_reject_short_platform_admin_token(t *testing.T) {
+	c := baseProd()
+	c.PlatformAdminToken = "short"
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "PLATFORM_ADMIN_TOKEN")
+}
+
+func TestValidate_should_reject_short_relay_probe_token(t *testing.T) {
+	c := baseProd()
+	c.RelayProbeToken = "short"
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_PROBE_TOKEN")
 }
 
 func TestValidateRejectsRelayHalfPortRange(t *testing.T) {
@@ -201,7 +255,6 @@ func TestValidateRejectsRelayHalfPortRange(t *testing.T) {
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
 	c.RelayMinPort = 49200 // max unset
 	err := c.Validate()
 	assert.ErrorContains(t, err, "RELAY_MAX_PORT")
@@ -212,20 +265,9 @@ func TestValidateAcceptsRelayPortRange(t *testing.T) {
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
 	c.RelayMinPort = 49200
 	c.RelayMaxPort = 49300
 	assert.NoError(t, c.Validate())
-}
-
-func TestValidateRejectsRelayMalformedURL(t *testing.T) {
-	c := baseProd()
-	c.FeatureP2PRelayEnabled = true
-	c.RelaySharedSecret = strings.Repeat("a", 32)
-	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{"https://relay.example.com"}
-	err := c.Validate()
-	assert.ErrorContains(t, err, "RELAY_URLS")
 }
 
 func TestValidateAcceptsSTUNSchemes(t *testing.T) {
@@ -235,7 +277,6 @@ func TestValidateAcceptsSTUNSchemes(t *testing.T) {
 			c.FeatureP2PRelayEnabled = true
 			c.RelaySharedSecret = strings.Repeat("a", 32)
 			c.RelayPublicIP = "203.0.113.10"
-			c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
 			c.RelaySTUNURLs = []string{stun}
 			assert.NoError(t, c.Validate())
 		})
@@ -247,32 +288,9 @@ func TestValidateRejectsRelayMalformedSTUNURL(t *testing.T) {
 	c.FeatureP2PRelayEnabled = true
 	c.RelaySharedSecret = strings.Repeat("a", 32)
 	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{"turn:relay.example.com:3478?transport=udp"}
 	c.RelaySTUNURLs = []string{"https://relay.example.com"}
 	err := c.Validate()
 	assert.ErrorContains(t, err, "RELAY_STUN_URLS")
-}
-
-func TestValidateAcceptsTURNSAndTCPURLs(t *testing.T) {
-	c := baseProd()
-	c.FeatureP2PRelayEnabled = true
-	c.RelaySharedSecret = strings.Repeat("a", 32)
-	c.RelayPublicIP = "203.0.113.10"
-	c.RelayURLs = []string{
-		"turn:relay.example.com:3478?transport=udp",
-		"turns:relay.example.com:5349?transport=tcp",
-	}
-	assert.NoError(t, c.Validate())
-}
-
-// A feature-enabled node with no shared secret does not build the issuer, so
-// RELAY_URLS is not required of it.
-func TestValidateRelayURLsNotRequiredWithoutSecret(t *testing.T) {
-	c := baseProd()
-	c.FeatureP2PRelayEnabled = true
-	c.RelaySharedSecret = ""
-	c.RelayURLs = nil
-	assert.NoError(t, c.Validate())
 }
 
 func TestValidateRejectsFleetBackendWhileFeatureOff(t *testing.T) {
@@ -355,4 +373,35 @@ func TestValidateSSO(t *testing.T) {
 			assert.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+func captureDefaultLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestValidate_should_warn_when_probe_token_equals_lifecycle_token(t *testing.T) {
+	logs := captureDefaultLog(t)
+	c := baseProd()
+	c.LifecycleToken = strings.Repeat("l", 32)
+	c.RelayProbeToken = strings.Repeat("l", 32)
+
+	require.NoError(t, c.Validate())
+
+	assert.Contains(t, logs.String(), "RELAY_PROBE_TOKEN equals LIFECYCLE_TOKEN")
+}
+
+func TestValidate_should_not_warn_when_probe_token_differs(t *testing.T) {
+	logs := captureDefaultLog(t)
+	c := baseProd()
+	c.LifecycleToken = strings.Repeat("l", 32)
+	c.RelayProbeToken = strings.Repeat("p", 32)
+
+	require.NoError(t, c.Validate())
+
+	assert.NotContains(t, logs.String(), "RELAY_PROBE_TOKEN equals")
 }

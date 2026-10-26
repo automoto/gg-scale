@@ -17,6 +17,18 @@ type APIWork struct {
 	Inflight *lifecycle.Inflight
 }
 
+// RealtimePath is the realtime WebSocket route.
+const RealtimePath = v1Prefix + "/ws"
+
+// NewAPIWork returns the API server's work, with in-flight counting that
+// leaves realtime upgrades to the realtime drain.
+func NewAPIWork() APIWork {
+	return APIWork{
+		Realtime: realtime.NewDrain(),
+		Inflight: &lifecycle.Inflight{UpgradePath: RealtimePath},
+	}
+}
+
 // BeginDrain refuses new realtime upgrades.
 func (w APIWork) BeginDrain() { w.Realtime.BeginDrain() }
 
