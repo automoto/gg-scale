@@ -131,6 +131,48 @@ func TestController_should_refuse_resume_when_stopping(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestController_should_refuse_resume_during_shutdown_wait(t *testing.T) {
+	work := &fakeWork{}
+	work.active.Store(1)
+	c := newController(testToken, work)
+	c.MarkReady()
+	done := make(chan struct{})
+	go func() {
+		c.Shutdown(time.Minute)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		work.active.Store(0)
+		<-done
+	})
+	require.Eventually(t, func() bool { return c.State() == lifecycle.StateDraining }, time.Second, time.Millisecond)
+
+	ok := c.Resume()
+
+	assert.False(t, ok)
+}
+
+func TestController_should_keep_refusing_work_when_resumed_during_shutdown_wait(t *testing.T) {
+	work := &fakeWork{}
+	work.active.Store(1)
+	c := newController(testToken, work)
+	c.MarkReady()
+	done := make(chan struct{})
+	go func() {
+		c.Shutdown(time.Minute)
+		close(done)
+	}()
+	t.Cleanup(func() {
+		work.active.Store(0)
+		<-done
+	})
+	require.Eventually(t, func() bool { return c.State() == lifecycle.StateDraining }, time.Second, time.Millisecond)
+
+	c.Resume()
+
+	assert.False(t, work.Admit())
+}
+
 func TestShutdown_should_return_immediately_when_no_work_is_active(t *testing.T) {
 	c := newController(testToken, &fakeWork{})
 	c.MarkReady()
@@ -430,4 +472,20 @@ func TestInflight_should_skip_websocket_upgrades(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), req)
 
 	assert.Equal(t, int64(0), during)
+}
+
+func TestInflight_should_skip_lifecycle_routes(t *testing.T) {
+	for _, path := range []string{"/readyz", "/lifecycle", "/lifecycle/drain", "/lifecycle/resume"} {
+		t.Run(path, func(t *testing.T) {
+			var inflight lifecycle.Inflight
+			var during int64
+			h := inflight.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				during = inflight.Count()
+			}))
+
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+
+			assert.Equal(t, int64(0), during)
+		})
+	}
 }

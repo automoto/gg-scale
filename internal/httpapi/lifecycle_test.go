@@ -91,9 +91,20 @@ func TestAPILifecycle_should_report_api_role_and_details(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, "api", got.Role)
-	// The /lifecycle request itself is the one request in flight.
-	assert.Equal(t, int64(1), got.ActiveWork)
-	assert.Equal(t, map[string]any{"realtime_connections": float64(0), "inflight_requests": float64(1)}, got.Details)
+	assert.Equal(t, map[string]any{"realtime_connections": float64(0), "inflight_requests": float64(0)}, got.Details)
+}
+
+func TestAPILifecycle_should_report_zero_active_work_when_idle(t *testing.T) {
+	f := newAPILifecycleFixture(t)
+	f.lc.MarkReady()
+
+	rec := f.do(http.MethodGet, "/lifecycle", apiLifecycleTestToken)
+
+	var got struct {
+		ActiveWork int64 `json:"active_work"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, int64(0), got.ActiveWork)
 }
 
 func TestAPILifecycle_should_refuse_lifecycle_without_token(t *testing.T) {

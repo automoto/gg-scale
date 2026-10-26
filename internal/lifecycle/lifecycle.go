@@ -80,9 +80,12 @@ type Controller struct {
 	pollInterval time.Duration
 	startedAt    time.Time
 
-	mu             sync.Mutex
-	state          State
-	ready          bool
+	mu    sync.Mutex
+	state State
+	ready bool
+	// shuttingDown is set when Shutdown starts, before its drain wait, so a
+	// resume during the wait cannot put an exiting process back in service.
+	shuttingDown   bool
 	drainStartedAt time.Time
 }
 
@@ -147,15 +150,16 @@ func (c *Controller) beginDrainLocked() {
 }
 
 // Resume returns a draining process to StateActive, or to StateStarting when
-// it never finished starting. It is idempotent. It returns false once the
-// process is stopping, because a stopping process cannot take work again.
+// it never finished starting. It is idempotent. It returns false once
+// Shutdown has started, because a process that is exiting cannot take work
+// again.
 func (c *Controller) Resume() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	switch c.state {
-	case StateStopping:
+	if c.shuttingDown {
 		return false
-	case StateDraining:
+	}
+	if c.state == StateDraining {
 		c.work.EndDrain()
 		c.drainStartedAt = time.Time{}
 		c.state = StateStarting
@@ -171,7 +175,10 @@ func (c *Controller) Resume() bool {
 // It returns the work still in flight when the wait ended. The caller runs
 // its existing shutdown path afterwards.
 func (c *Controller) Shutdown(timeout time.Duration) int64 {
-	c.Drain()
+	c.mu.Lock()
+	c.shuttingDown = true
+	c.beginDrainLocked()
+	c.mu.Unlock()
 	remaining := c.waitForIdle(timeout)
 	c.mu.Lock()
 	c.state = StateStopping

@@ -15,6 +15,14 @@ type Router interface {
 	Handle(pattern string, h http.Handler)
 }
 
+const (
+	readyzPath  = "/readyz"
+	statusPath  = "/lifecycle"
+	drainPath   = "/lifecycle/drain"
+	resumePath  = "/lifecycle/resume"
+	routePrefix = statusPath + "/"
+)
+
 // Mount registers the lifecycle routes on r:
 //
 //   - GET /readyz, always open;
@@ -23,13 +31,18 @@ type Router interface {
 //     set, so an unconfigured process cannot be drained by anyone (fail
 //     closed: the routes return 404).
 func (c *Controller) Mount(r Router) {
-	r.Handle("/readyz", allowMethod(http.MethodGet, http.HandlerFunc(c.serveReadyz)))
-	r.Handle("/lifecycle", allowMethod(http.MethodGet, RequireBearer(c.token, http.HandlerFunc(c.serveStatus))))
+	r.Handle(readyzPath, allowMethod(http.MethodGet, http.HandlerFunc(c.serveReadyz)))
+	r.Handle(statusPath, allowMethod(http.MethodGet, RequireBearer(c.token, http.HandlerFunc(c.serveStatus))))
 	if c.token == "" {
 		return
 	}
-	r.Handle("/lifecycle/drain", allowMethod(http.MethodPost, RequireBearer(c.token, http.HandlerFunc(c.serveDrain))))
-	r.Handle("/lifecycle/resume", allowMethod(http.MethodPost, RequireBearer(c.token, http.HandlerFunc(c.serveResume))))
+	r.Handle(drainPath, allowMethod(http.MethodPost, RequireBearer(c.token, http.HandlerFunc(c.serveDrain))))
+	r.Handle(resumePath, allowMethod(http.MethodPost, RequireBearer(c.token, http.HandlerFunc(c.serveResume))))
+}
+
+// isLifecycleRoute reports whether path is one of the routes Mount registers.
+func isLifecycleRoute(path string) bool {
+	return path == readyzPath || path == statusPath || strings.HasPrefix(path, routePrefix)
 }
 
 func (c *Controller) serveReadyz(w http.ResponseWriter, _ *http.Request) {

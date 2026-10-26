@@ -36,7 +36,8 @@ func (g *Gate) RefusedWork() int64 { return g.refused.Load() }
 
 // Inflight counts plain HTTP requests in progress. WebSocket upgrades are not
 // counted: a socket outlives its upgrade request, and the process that owns
-// sockets counts them itself.
+// sockets counts them itself. The lifecycle routes are not counted either, so
+// a deploy tool polling GET /lifecycle can see active_work reach 0.
 type Inflight struct {
 	n atomic.Int64
 }
@@ -47,7 +48,7 @@ func (i *Inflight) Count() int64 { return i.n.Load() }
 // Middleware counts each request that passes through next.
 func (i *Inflight) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isWebSocketUpgrade(r) {
+		if isWebSocketUpgrade(r) || isLifecycleRoute(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
