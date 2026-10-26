@@ -29,6 +29,7 @@
 - Features must work with minimal config for self-hosters.
 - Maintain derived and counter state in the Go write paths, not in database triggers.
 - `make openapi` regenerates `openapi.yaml`. Do not edit it by hand.
+- `make templ-generate` regenerates the `*_templ.go` files. Do not edit them by hand. Run it and commit the output after changing a `.templ` file and whenever the `github.com/a-h/templ` version in `go.mod` changes, including Dependabot bumps. CI fails when they are out of date.
 - Frontend (control panel and player UI): self-hosted assets only. No CDN, no Tailwind or Alpine, no inline `<script>` or `<style>`.
 - After completing a task, update the planning document that tracks it so completed work is marked done.
 
