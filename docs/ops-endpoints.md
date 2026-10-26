@@ -92,7 +92,7 @@ supports `LIFECYCLE_TOKEN_FILE` for file-mounted secrets.
 |---|---|---|
 | Draining refuses | New TURN Allocate requests. | New realtime WebSocket upgrades on `/v1/ws`, with `503` and `Retry-After`. |
 | Keeps working | Existing allocations: Refresh, CreatePermission, ChannelBind, and relayed data. | Open WebSockets keep receiving messages. Plain HTTP requests are still served: the load balancer stops sending them once `/readyz` is `503`, and any that still arrive succeed. |
-| `active_work` | Live allocations, plus admitted Allocate requests still being set up. | Realtime WebSockets, counted from admission until their cleanup finishes, plus in-flight HTTP requests. The lifecycle routes are not counted. |
+| `active_work` | Admitted Allocate requests, each counted once from admission until its allocation closes. | Realtime WebSockets, counted from admission until their cleanup finishes, plus in-flight HTTP requests. The lifecycle routes are not counted. |
 | `details` | `active_allocations`, `public_ip`, `transports` | `realtime_connections`, `inflight_requests` |
 
 On the API server the drain check on `/v1/ws` runs before authentication, so a
@@ -102,8 +102,10 @@ node.
 River jobs and the matchmaker worker are not affected by drain. River's queue
 pause is cluster-wide state, not per node, and both already stop cleanly in the
 normal shutdown path. A relay embedded in the API server, enabled by setting
-`RELAY_PUBLIC_IP` on the API host, is not drained either. Run relays as
-dedicated `ggscale-server relay` nodes when you need to drain them.
+`RELAY_PUBLIC_IP` on the API host, is not drained either, and it cannot be
+registered in the relay node registry. The API server advertises it itself; see
+[relay-ops.md](relay-ops.md). Run relays as dedicated `ggscale-server relay`
+nodes when you need to drain them.
 
 ## `SIGTERM`
 
@@ -123,7 +125,11 @@ A second `SIGTERM` (or `SIGINT`) during the wait kills the process at once.
 The rest of shutdown is skipped: open sockets get no `1001` and deferred
 cleanup does not run.
 
-`DRAIN_TIMEOUT` is a Go duration such as `30s` or `2m`. The default is `30s`.
+`DRAIN_TIMEOUT` is a Go duration such as `30s` or `2m`. The default is `30s`
+on the API server and `0s` on a relay node. A relay is drained through
+`POST /lifecycle/drain` before it is stopped (see
+[relay-ops.md](relay-ops.md)), and TURN allocations usually outlive any short
+wait, so by default an undrained relay closes its allocations and exits at once.
 
 ### Container stop timeout
 
@@ -132,7 +138,8 @@ shutdown path that follows. Otherwise the runtime kills the process in the
 middle of the drain or before its cleanup runs. The runtime default (10s in
 Docker) is too short for either process.
 
-The relay node needs `DRAIN_TIMEOUT` plus a few seconds. The API server runs
+The relay node needs `DRAIN_TIMEOUT` plus a few seconds, which is within the
+runtime default while `DRAIN_TIMEOUT` is `0s`. The API server runs
 these bounded steps one after another once the drain wait ends:
 
 | Step | Bound |
@@ -186,4 +193,6 @@ curl -fsS -H "Authorization: Bearer $TOKEN" "$NODE/lifecycle" | jq .active_work
 curl -fsS -X POST -H "Authorization: Bearer $TOKEN" "$NODE/lifecycle/resume"
 ```
 
-For relay nodes, see also [relay-ops.md](relay-ops.md).
+For relay nodes, use the blue/green sequence in [relay-ops.md](relay-ops.md):
+it also takes the node out of the relay node registry, so new credentials stop
+listing it.
