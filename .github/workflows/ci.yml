@@ -63,6 +63,20 @@ jobs:
       - name: Unit tests
         run: make test-ci
 
+      - name: Write unit test coverage summary
+        run: |
+          total="$(go tool cover -func=coverage/coverage.out | awk '/^total:/ {print $3}')"
+          printf '## Unit test coverage\n\nTotal: **%s**\n' "$total" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unit test coverage
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unit-test-coverage-attempt-${{ github.run_attempt }}
+          path: coverage/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Upload unit test results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
