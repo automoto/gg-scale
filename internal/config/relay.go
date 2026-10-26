@@ -65,9 +65,12 @@ type RelayConfig struct {
 	MetricsToken string `env:"RELAY_METRICS_TOKEN"`
 
 	// LifecycleToken and DrainTimeout are the process lifecycle settings
-	// shared with Config; see internal/lifecycle.
+	// shared with Config; see internal/lifecycle. The relay's DrainTimeout
+	// defaults to 0: a relay is drained through POST /lifecycle/drain before
+	// it is stopped, and TURN allocations outlive any short SIGTERM wait, so
+	// an undrained relay exits at once instead of being killed mid-wait.
 	LifecycleToken string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
-	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"30s"`
+	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"0s"`
 }
 
 // LoadRelay reads the relay-node environment and returns a validated

@@ -23,13 +23,13 @@ func TestLoad_should_default_drain_timeout_to_30s(t *testing.T) {
 	assert.Equal(t, 30*time.Second, cfg.DrainTimeout)
 }
 
-func TestLoadRelay_should_default_drain_timeout_to_30s(t *testing.T) {
+func TestLoadRelay_should_default_drain_timeout_to_zero(t *testing.T) {
 	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
 
 	rc, err := config.LoadRelay()
 
 	require.NoError(t, err)
-	assert.Equal(t, 30*time.Second, rc.DrainTimeout)
+	assert.Equal(t, time.Duration(0), rc.DrainTimeout)
 }
 
 func TestLoad_should_refuse_removed_relay_urls(t *testing.T) {
