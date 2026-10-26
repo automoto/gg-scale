@@ -98,32 +98,34 @@ through a key id and `RELAY_SHARED_SECRET_NEXT`; a global allocation cap,
 per-player issuance and allocation limits, and a private-peer filter
 (`RELAY_ALLOW_PRIVATE_PEERS`). Metrics: `active_allocations`,
 `allocations_rejected_total`, `auth_failures_total`, `alloc_throttled_total`,
-`peer_rejected_total`, `issue_throttled_total`, `up`. See `docs/relay-ga.md`
-and `docs/relay-ops.md`.
+`peer_rejected_total`, `issue_throttled_total`, `up`. See
+[P2P Connectivity and TURN Relay](https://github.com/automoto/gg-scale/wiki/P2P-Connectivity-and-TURN-Relay) and
+[Relay Operations](https://github.com/automoto/gg-scale/wiki/Relay-Operations).
 
 **Auth and identity** — display names with public and batch player lookup;
 in-client password reset by emailed code, verification resend, change-password
 and self-disable; anonymous-to-registered linking by email or Steam; native
 Steam sign-in verified against Valve; friend codes with regenerate and resolve.
 Provider credentials are sealed at rest (`CREDENTIAL_ENC_KEY`, auto-generated
-when unset). See `docs/account-linking.md` and `docs/steam-auth.md`.
+when unset). See [Account Linking](https://github.com/automoto/gg-scale/wiki/Account-Linking) and
+[Steam Sign-In](https://github.com/automoto/gg-scale/wiki/Steam-Sign-In).
 
 **Discovery and live-ops** — `GET /v1/game-sessions` public session browser
 (cursor paged, heartbeat-driven liveness, private sessions never listed);
 per-project remote config on `GET /v1/config` with ETag/304, readable with a
 project key before login; peer-to-peer signaling on
-`/v1/game-session/{id}/signals`. See `docs/session-browser.md` and
-`docs/remote-config.md`.
+`/v1/game-session/{id}/signals`. See [Session Browser](https://github.com/automoto/gg-scale/wiki/Session-Browser)
+and [Remote Config](https://github.com/automoto/gg-scale/wiki/Remote-Config).
 
 **Leaderboards** — score operators (`best`/`set`/`incr`), per-score and
 per-board metadata, calendar-aligned periods with a leader-elected archive job
 and history endpoints, optional per-period attempt caps, opt-in client
 submissions with a per-player rate limit and score bounds, plus board discovery
-and friends views. See `docs/leaderboards.md`.
+and friends views. See [Leaderboards](https://github.com/automoto/gg-scale/wiki/Leaderboards).
 
 **Server tier** — secret-key routes to submit a score for a player and to
 read, write and list a player's storage with no player session. See
-`docs/server-tier.md`.
+[Server-Tier API](https://github.com/automoto/gg-scale/wiki/Server-Tier-API).
 
 **Administration** — tenant self-disable and platform disable; forgot-password
 for control-panel and player web sessions; player-initiated account unlink;

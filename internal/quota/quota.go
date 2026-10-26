@@ -3,7 +3,6 @@
 // enforce_quotas=true; zero-config self-host stays uncapped. Numbered classes
 // carry no price judgment — the ladder is deliberately generous, and projects,
 // registered players, and object storage are the upgrade levers (CCU is not).
-// See docs/temp/tier-rework.md.
 package quota
 
 import (

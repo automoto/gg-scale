@@ -50,8 +50,8 @@ services:
       dockerfile: Dockerfile
     image: ggscale-server:latest
     # Covers DRAIN_TIMEOUT (default 30s) plus the 70s of bounded shutdown steps
-    # after it, with headroom for the unbounded closers. See
-    # docs/ops-endpoints.md.
+    # after it, with headroom for the unbounded closers. See the Process-Lifecycle
+    # wiki page.
     stop_grace_period: 120s
     depends_on:
       postgres:

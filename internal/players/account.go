@@ -2,7 +2,7 @@ package players
 
 // Global player-account auth for the player site. Accounts are
 // platform-global (no tenant): every query runs through BootstrapQ against
-// player_accounts / player_account_sessions. See docs/temp/player-accounts.md.
+// player_accounts / player_account_sessions.
 
 import (
 	"context"

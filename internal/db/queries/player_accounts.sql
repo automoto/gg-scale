@@ -1,5 +1,5 @@
 -- Global player accounts. Platform-global (no tenant RLS): every query here is
--- run through db.Pool.BootstrapQ. See docs/temp/player-accounts.md.
+-- run through db.Pool.BootstrapQ.
 
 -- name: CreatePlayerAccount :one
 -- Creates an unverified account with its first verification code inlined

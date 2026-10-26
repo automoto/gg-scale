@@ -115,7 +115,6 @@ func New(d Deps) http.Handler {
 
 	// Global player-account routes (project-agnostic) — the platform-wide
 	// account identity: signup / login / verify / friends / account home.
-	// See docs/temp/player-accounts.md.
 	r.Route("/account", func(r chi.Router) {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))

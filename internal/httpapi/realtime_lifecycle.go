@@ -1,8 +1,8 @@
 package httpapi
 
 // Lifecycle sweeping for live WebSockets. The per-connection heartbeat check
-// is pure in-memory (an idle socket never touches Postgres — see
-// docs/capacity-and-launch.md); a single per-process sweeper batches the
+// is pure in-memory (an idle socket never touches Postgres); a single
+// per-process sweeper batches the
 // database work into one small query per tenant with open sockets per
 // interval, O(tenants) rather than O(sockets). Definitive answers (revoked
 // epoch, disabled/missing tenant, deleted player) mark the connection stale

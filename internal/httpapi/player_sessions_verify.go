@@ -52,8 +52,6 @@ type playerVerifyResponse struct {
 // RequireKeyType(KeyTypeSecret) gate on the route keeps publishable
 // keys (embedded in shipped game binaries) off this oracle entirely.
 //
-// See docs/temp/gameserver-auth.md for the design rationale.
-//
 // This is registered as a huma operation for the spec, but its handler uses a
 // body-callback (verifyOutput.Body func) so it takes full manual control of the
 // request body and response: huma never parses the body (which would surface a

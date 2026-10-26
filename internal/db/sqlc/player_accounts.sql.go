@@ -163,7 +163,7 @@ type CreatePlayerAccountRow struct {
 }
 
 // Global player accounts. Platform-global (no tenant RLS): every query here is
-// run through db.Pool.BootstrapQ. See docs/temp/player-accounts.md.
+// run through db.Pool.BootstrapQ.
 // Creates an unverified account with its first verification code inlined
 // (mirrors CreatePlayer). Fails on the UNIQUE email constraint if an
 // account already exists.

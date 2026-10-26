@@ -21,7 +21,7 @@ import (
 // Friends are between GLOBAL player_accounts. The JSON API caller is an
 // player with a session; the operation resolves the caller's linked account
 // (403 if the player is anonymous / unlinked) and the target player's
-// account, then works on account-to-account edges. See docs/temp/player-accounts.md.
+// account, then works on account-to-account edges.
 
 var (
 	errFriendIllegalTransition = errors.New("friend: illegal status transition")

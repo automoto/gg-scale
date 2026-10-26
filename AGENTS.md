@@ -19,7 +19,7 @@
 - Name tests for behavior, for example `should_return_empty_when_no_items`.
 - Use `github.com/stretchr/testify/assert` for test assertions.
 - Use table-driven tests where they keep coverage concise.
-- Testing: `make test` for unit tests, `make test-integration` for the fast Testcontainers suite, `make test-e2e` for the full suite against `make up`. End to end tests take longer to run so dont run them as frequently as unit tests.
+- Testing: `make test` for unit tests, `make test-integration` for the fast Testcontainers suite, `make test-e2e` for the full suite against `make up`. End to end tests take longer to run so don't run them as frequently as unit tests.
 
 ## Repository Rules
 
@@ -36,5 +36,5 @@
 
 - `.cursor/Dockerfile` provides pinned Go, Docker Engine/CLI, and `golangci-lint` versions plus Compose. It configures the `fuse-overlayfs` storage driver and Docker access for the Cloud Agent user.
 - `.cursor/install.sh` creates `.env` and warms Go caches during environment builds. `.cursor/start.sh` boots `dockerd` (there is no systemd), opens the legacy iptables `FORWARD` policy so container-to-container traffic works, and prepares `./data` for the server bind mount.
-- The start hook leaves the Docker daemon ready. Use `make up`, `make test-integration`, `make e2e`, etc.
+- The start hook leaves the Docker daemon ready. Use `make up`, `make test-integration`, `make test-e2e`, etc.
 - The server container runs as the distroless `nonroot` uid, so the control-panel bootstrap token is written `0600` as uid 65532 and stays owned by that uid so the server can overwrite it on restart. Read it with `make bootstrap-token`. Server logs report the token file path but never the token value.
