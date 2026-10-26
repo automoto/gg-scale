@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createRelayNode = `-- name: CreateRelayNode :one
@@ -177,16 +179,26 @@ func (q *Queries) ListRelayNodes(ctx context.Context, maxAgeSeconds float64) ([]
 	return items, nil
 }
 
-const recordRelayNodeProbe = `-- name: RecordRelayNodeProbe :exec
-UPDATE relay_nodes
+const recordRelayNodeProbe = `-- name: RecordRelayNodeProbe :one
+WITH prev AS (
+    SELECT n.id, n.last_probe_at, n.last_probe_ok, n.last_probe_error
+    FROM relay_nodes AS n
+    WHERE n.id = $5
+      AND n.state = 'known'
+    FOR UPDATE
+)
+UPDATE relay_nodes AS r
 SET last_probe_at = now(),
     last_probe_ok = $1,
     last_probe_error = $2,
     last_lifecycle_state = $3,
     last_active_allocations = $4,
     updated_at = now()
-WHERE id = $5
-  AND state = 'known'
+FROM prev
+WHERE r.id = prev.id
+RETURNING prev.last_probe_at AS prev_probe_at,
+          prev.last_probe_ok AS prev_probe_ok,
+          prev.last_probe_error AS prev_probe_error
 `
 
 type RecordRelayNodeProbeParams struct {
@@ -194,21 +206,30 @@ type RecordRelayNodeProbeParams struct {
 	ProbeError        *string
 	LifecycleState    *string
 	ActiveAllocations *int64
-	ID                int64
+	NodeID            int64
+}
+
+type RecordRelayNodeProbeRow struct {
+	PrevProbeAt    pgtype.Timestamptz
+	PrevProbeOk    bool
+	PrevProbeError *string
 }
 
 // Stores what the probe read; a probe that read nothing clears the lifecycle
-// columns. The state filter keeps a probe that raced a retire from touching
-// the retired row.
-func (q *Queries) RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) error {
-	_, err := q.db.Exec(ctx, recordRelayNodeProbe,
+// columns. It returns the previous probe result, read under a row lock, so
+// concurrent probers each see the result the other wrote and a change is
+// logged once. No row when the node was retired since it was listed.
+func (q *Queries) RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) (RecordRelayNodeProbeRow, error) {
+	row := q.db.QueryRow(ctx, recordRelayNodeProbe,
 		arg.Ok,
 		arg.ProbeError,
 		arg.LifecycleState,
 		arg.ActiveAllocations,
-		arg.ID,
+		arg.NodeID,
 	)
-	return err
+	var i RecordRelayNodeProbeRow
+	err := row.Scan(&i.PrevProbeAt, &i.PrevProbeOk, &i.PrevProbeError)
+	return i, err
 }
 
 const retireRelayNode = `-- name: RetireRelayNode :one

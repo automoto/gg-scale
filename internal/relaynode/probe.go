@@ -31,6 +31,7 @@ const relayRole = "relay"
 // changing details, such as an error with an ephemeral port, go to the log.
 const (
 	FailureInvalidURL   = "invalid lifecycle_url"
+	FailureBlocked      = "destination not allowed"
 	FailureTimeout      = "timeout"
 	FailureConnection   = "connection failed"
 	FailureUnauthorized = "unauthorized"
@@ -74,12 +75,22 @@ type Prober struct {
 }
 
 // NewProber returns a Prober that sends "Authorization: Bearer <token>" when
-// token is set and gives up on a node after timeout.
+// token is set and gives up on a node after timeout. Every connection passes
+// the destination policy in checkProbeTarget.
 func NewProber(token string, timeout time.Duration) *Prober {
+	dialer := &net.Dialer{Timeout: timeout, Control: controlDial}
 	return &Prober{
 		token: token,
 		client: &http.Client{
 			Timeout: timeout,
+			Transport: &http.Transport{
+				// No proxy: the policy must see the node's own address.
+				Proxy:               nil,
+				DialContext:         dialer.DialContext,
+				TLSHandshakeTimeout: timeout,
+				MaxIdleConnsPerHost: 1,
+				IdleConnTimeout:     2 * ProbeInterval,
+			},
 			// A redirect is a misconfigured lifecycle_url, not a healthy node.
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
@@ -125,6 +136,9 @@ func (p *Prober) Probe(ctx context.Context, lifecycleURL string) Result {
 }
 
 func transportFailure(err error) string {
+	if errors.Is(err, errBlockedDestination) {
+		return FailureBlocked
+	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 		return FailureTimeout
@@ -135,13 +149,14 @@ func transportFailure(err error) string {
 // ProbeStore is the part of Store the Monitor needs.
 type ProbeStore interface {
 	Known(ctx context.Context) ([]Node, error)
-	RecordProbe(ctx context.Context, id int64, r Result) error
+	RecordProbe(ctx context.Context, id int64, r Result) (prior PriorProbe, recorded bool, err error)
 }
 
 // Monitor probes every known node and records the results. It logs a
 // failure when the node's stored last_probe_error changes, and a recovery
-// when a failing node succeeds, so the log follows the database rather than
-// one process's memory: any API server can run the probe.
+// when a failing node succeeds. The comparison uses the result each write
+// replaced, so the log follows the database rather than one process's
+// memory: any API server can run the probe.
 type Monitor struct {
 	store  ProbeStore
 	prober *Prober
@@ -165,9 +180,13 @@ func (m *Monitor) ProbeAll(ctx context.Context) error {
 	for i, n := range nodes {
 		wg.Go(func() {
 			r := m.prober.Probe(ctx, n.LifecycleURL)
-			m.logTransition(ctx, n, r)
-			if err := m.store.RecordProbe(ctx, n.ID, r); err != nil {
+			prior, recorded, err := m.store.RecordProbe(ctx, n.ID, r)
+			if err != nil {
 				errs[i] = fmt.Errorf("record probe for relay node %d: %w", n.ID, err)
+				return
+			}
+			if recorded {
+				m.logTransition(ctx, n, prior, r)
 			}
 		})
 	}
@@ -192,23 +211,25 @@ func (m *Monitor) Run(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// logTransition compares r with prev, the node as it was before this probe.
-func (m *Monitor) logTransition(ctx context.Context, prev Node, r Result) {
-	failing := prev.LastProbeAt != nil && !prev.LastProbeOK
+// logTransition compares r with prior, the result it replaced in the store.
+// The store hands each prior to exactly one writer, so a change is logged
+// once even when several API servers probe the same node.
+func (m *Monitor) logTransition(ctx context.Context, n Node, prior PriorProbe, r Result) {
+	failing := prior.At != nil && !prior.OK
 	if r.OK {
 		if failing {
-			m.logger.InfoContext(ctx, "relay node probe recovered", "node_id", prev.ID, "lifecycle_url", prev.LifecycleURL)
+			m.logger.InfoContext(ctx, "relay node probe recovered", "node_id", n.ID, "lifecycle_url", n.LifecycleURL)
 		}
 		return
 	}
-	if failing && prev.LastProbeError != nil && *prev.LastProbeError == r.Failure {
+	if failing && prior.Error != nil && *prior.Error == r.Failure {
 		return
 	}
 	if r.Unauthorized {
 		m.logger.WarnContext(ctx, "relay node probe unauthorized: RELAY_PROBE_TOKEN does not match the node's LIFECYCLE_TOKEN",
-			"node_id", prev.ID, "lifecycle_url", prev.LifecycleURL)
+			"node_id", n.ID, "lifecycle_url", n.LifecycleURL)
 		return
 	}
 	m.logger.WarnContext(ctx, "relay node probe failed",
-		"node_id", prev.ID, "lifecycle_url", prev.LifecycleURL, "reason", r.Failure, "detail", r.Detail)
+		"node_id", n.ID, "lifecycle_url", n.LifecycleURL, "reason", r.Failure, "detail", r.Detail)
 }

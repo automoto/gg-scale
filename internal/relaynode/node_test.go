@@ -37,6 +37,12 @@ func TestSpecValidate_should_reject_bad_fields(t *testing.T) {
 		"relative lifecycle url":  func(s *relaynode.Spec) { s.LifecycleURL = "/lifecycle" },
 		"ftp lifecycle url":       func(s *relaynode.Spec) { s.LifecycleURL = "ftp://10.0.0.5/lifecycle" },
 		"lifecycle url with user": func(s *relaynode.Spec) { s.LifecycleURL = "http://user:pw@10.0.0.5:9091/lifecycle" },
+		"metadata address":        func(s *relaynode.Spec) { s.LifecycleURL = "http://169.254.169.254/latest/meta-data/" },
+		"link-local ipv6":         func(s *relaynode.Spec) { s.LifecycleURL = "http://[fe80::1]:9091/lifecycle" },
+		"aws ipv6 metadata":       func(s *relaynode.Spec) { s.LifecycleURL = "http://[fd00:ec2::254]/lifecycle" },
+		"ipv4-mapped metadata":    func(s *relaynode.Spec) { s.LifecycleURL = "http://[::ffff:169.254.169.254]/lifecycle" },
+		"unspecified address":     func(s *relaynode.Spec) { s.LifecycleURL = "http://0.0.0.0:9091/lifecycle" },
+		"multicast address":       func(s *relaynode.Spec) { s.LifecycleURL = "http://224.0.0.1:9091/lifecycle" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -57,4 +63,21 @@ func TestSpecValidate_should_accept_turns_urls(t *testing.T) {
 	err := spec.Validate()
 
 	assert.NoError(t, err)
+}
+
+func TestSpecValidate_should_accept_loopback_and_private_lifecycle_urls(t *testing.T) {
+	for _, raw := range []string{
+		"http://127.0.0.1:9091/lifecycle",
+		"http://[::1]:9091/lifecycle",
+		"http://10.0.0.5:9091/lifecycle",
+		"http://100.64.0.5:9091/lifecycle",
+		"https://relay-1.internal:9091/lifecycle",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			spec := validSpec()
+			spec.LifecycleURL = raw
+
+			assert.NoError(t, spec.Validate())
+		})
+	}
 }

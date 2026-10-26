@@ -2189,7 +2189,7 @@ paths:
       tags:
         - Platform Admin
     post:
-      description: Registers a relay node as known. Credentials list it once a probe sees it active, within one probe interval.
+      description: Registers a relay node as known. Credentials list it once a probe records it as active, usually within about 15 seconds.
       operationId: createRelayNode
       requestBody:
         content:

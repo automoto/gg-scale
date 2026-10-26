@@ -125,10 +125,20 @@ func (s *Store) Retire(ctx context.Context, id int64) (Node, error) {
 	return toNode(row), nil
 }
 
-// RecordProbe stores one probe result. A node retired since it was listed is
-// left alone.
-func (s *Store) RecordProbe(ctx context.Context, id int64, r Result) error {
-	params := sqlcgen.RecordRelayNodeProbeParams{ID: id, Ok: r.OK, ActiveAllocations: r.ActiveWork}
+// PriorProbe is a node's stored probe result just before a new one replaced
+// it.
+type PriorProbe struct {
+	At    *time.Time
+	OK    bool
+	Error *string
+}
+
+// RecordProbe stores one probe result and returns the result it replaced,
+// read under a row lock so concurrent probers each see the other's write.
+// recorded is false when the node was retired since it was listed; such a
+// row is left alone.
+func (s *Store) RecordProbe(ctx context.Context, id int64, r Result) (prior PriorProbe, recorded bool, err error) {
+	params := sqlcgen.RecordRelayNodeProbeParams{NodeID: id, Ok: r.OK, ActiveAllocations: r.ActiveWork}
 	if !r.OK {
 		failure := r.Failure
 		params.ProbeError = &failure
@@ -137,9 +147,19 @@ func (s *Store) RecordProbe(ctx context.Context, id int64, r Result) error {
 		state := r.State
 		params.LifecycleState = &state
 	}
-	return s.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).RecordRelayNodeProbe(ctx, params)
+	var row sqlcgen.RecordRelayNodeProbeRow
+	err = s.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		row, qerr = sqlcgen.New(tx).RecordRelayNodeProbe(ctx, params)
+		return qerr
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PriorProbe{}, false, nil
+	}
+	if err != nil {
+		return PriorProbe{}, false, err
+	}
+	return PriorProbe{At: timePtr(row.PrevProbeAt), OK: row.PrevProbeOk, Error: row.PrevProbeError}, true, nil
 }
 
 // toNode converts a row. Eligible is left false: only a query that computes

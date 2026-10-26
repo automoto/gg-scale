@@ -864,9 +864,10 @@ type Querier interface {
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordControlPanelLoginSuccess(ctx context.Context, id int64) error
 	// Stores what the probe read; a probe that read nothing clears the lifecycle
-	// columns. The state filter keeps a probe that raced a retire from touching
-	// the retired row.
-	RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) error
+	// columns. It returns the previous probe result, read under a row lock, so
+	// concurrent probers each see the result the other wrote and a change is
+	// logged once. No row when the node was retired since it was listed.
+	RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) (RecordRelayNodeProbeRow, error)
 	// Single use: the row is deleted as it is read. Runs with no tenant set.
 	RedeemRealtimeTicket(ctx context.Context, ticketHash []byte) (RedeemRealtimeTicketRow, error)
 	ReleaseAllocation(ctx context.Context, id int64) error

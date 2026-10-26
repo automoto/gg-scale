@@ -29,19 +29,30 @@ SET state = 'retired',
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
--- name: RecordRelayNodeProbe :exec
+-- name: RecordRelayNodeProbe :one
 -- Stores what the probe read; a probe that read nothing clears the lifecycle
--- columns. The state filter keeps a probe that raced a retire from touching
--- the retired row.
-UPDATE relay_nodes
+-- columns. It returns the previous probe result, read under a row lock, so
+-- concurrent probers each see the result the other wrote and a change is
+-- logged once. No row when the node was retired since it was listed.
+WITH prev AS (
+    SELECT n.id, n.last_probe_at, n.last_probe_ok, n.last_probe_error
+    FROM relay_nodes AS n
+    WHERE n.id = sqlc.arg(node_id)
+      AND n.state = 'known'
+    FOR UPDATE
+)
+UPDATE relay_nodes AS r
 SET last_probe_at = now(),
     last_probe_ok = sqlc.arg(ok),
     last_probe_error = sqlc.narg(probe_error),
     last_lifecycle_state = sqlc.narg(lifecycle_state),
     last_active_allocations = sqlc.narg(active_allocations),
     updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND state = 'known';
+FROM prev
+WHERE r.id = prev.id
+RETURNING prev.last_probe_at AS prev_probe_at,
+          prev.last_probe_ok AS prev_probe_ok,
+          prev.last_probe_error AS prev_probe_error;
 
 -- name: ListEligibleRelayNodes :many
 -- Eligible: known, last probe succeeded, reported active, and probed within

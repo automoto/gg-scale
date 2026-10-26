@@ -3,11 +3,14 @@
 package jobs_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,4 +47,48 @@ func TestRelayNodeProbeWorker_should_record_probe_results_without_removing_rows(
 	require.NoError(t, err)
 	require.Len(t, nodes, 2)
 	assert.Equal(t, []bool{true, false}, []bool{nodes[0].Eligible, nodes[1].Eligible})
+}
+
+// syncBuffer is a log sink that several monitors share.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Several API servers probe in-process when River is down. The row lock in
+// RecordRelayNodeProbe hands each stored result to one writer, so the
+// mismatch is logged once in total, not once per server.
+func TestRelayNodeMonitors_should_log_a_token_mismatch_once_across_servers(t *testing.T) {
+	_, raw := startJobsDB(t)
+	ctx := context.Background()
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(node.Close)
+	store := relaynode.NewStore(appRolePool(t, raw))
+	_, err := store.Create(ctx, relaynode.Spec{Region: "us-east", TURNURLs: []string{"turn:a.example.com:3478"}, LifecycleURL: node.URL})
+	require.NoError(t, err)
+	var logs syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	var wg sync.WaitGroup
+
+	for range 16 {
+		m := relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), logger)
+		wg.Go(func() { assert.NoError(t, m.ProbeAll(ctx)) })
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, strings.Count(logs.String(), "RELAY_PROBE_TOKEN"))
 }

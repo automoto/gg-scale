@@ -164,7 +164,7 @@ func (s *fakeProbeStore) Known(context.Context) ([]relaynode.Node, error) {
 	return slices.Clone(s.nodes), nil
 }
 
-func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Result) error {
+func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Result) (relaynode.PriorProbe, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.results == nil {
@@ -175,6 +175,7 @@ func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Re
 		if s.nodes[i].ID != id {
 			continue
 		}
+		prior := relaynode.PriorProbe{At: s.nodes[i].LastProbeAt, OK: s.nodes[i].LastProbeOK, Error: s.nodes[i].LastProbeError}
 		at := time.Now()
 		s.nodes[i].LastProbeAt = &at
 		s.nodes[i].LastProbeOK = r.OK
@@ -183,8 +184,9 @@ func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Re
 			failure := r.Failure
 			s.nodes[i].LastProbeError = &failure
 		}
+		return prior, true, nil
 	}
-	return nil
+	return relaynode.PriorProbe{}, false, nil
 }
 
 func TestProbeAll_should_record_a_result_for_every_known_node(t *testing.T) {
@@ -314,4 +316,77 @@ func TestMonitorRun_should_probe_at_once_and_stop_with_its_context(t *testing.T)
 			return false
 		}
 	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestProbe_should_refuse_a_metadata_address_at_dial_time(t *testing.T) {
+	p := relaynode.NewProber(probeTestToken, time.Second)
+
+	got := p.Probe(t.Context(), "http://169.254.169.254/latest/meta-data/")
+
+	assert.Equal(t, relaynode.FailureBlocked, got.Failure)
+}
+
+func TestProbe_should_refuse_an_unspecified_address_at_dial_time(t *testing.T) {
+	p := relaynode.NewProber(probeTestToken, time.Second)
+
+	got := p.Probe(t.Context(), "http://0.0.0.0:9/lifecycle")
+
+	assert.Equal(t, relaynode.FailureBlocked, got.Failure)
+}
+
+// syncBuffer is a log sink that several monitors share.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestProbeAll_should_log_a_shared_transition_once_across_concurrent_monitors(t *testing.T) {
+	srv := lifecycleServer(t, http.StatusUnauthorized, "unauthorized")
+	store := &fakeProbeStore{nodes: []relaynode.Node{{ID: 1, LifecycleURL: srv.URL}}}
+	var logs syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	monitors := []*relaynode.Monitor{
+		relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), logger),
+		relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), logger),
+		relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), logger),
+	}
+	var wg sync.WaitGroup
+
+	for _, m := range monitors {
+		wg.Go(func() { assert.NoError(t, m.ProbeAll(t.Context())) })
+	}
+	wg.Wait()
+
+	assert.Equal(t, 1, strings.Count(logs.String(), "RELAY_PROBE_TOKEN"))
+}
+
+func TestProbeAll_should_not_log_for_a_node_retired_before_its_result_was_recorded(t *testing.T) {
+	srv := lifecycleServer(t, http.StatusServiceUnavailable, "")
+	store := &retiringProbeStore{fakeProbeStore{nodes: []relaynode.Node{{ID: 1, LifecycleURL: srv.URL}}}}
+	var logs bytes.Buffer
+	m := relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), slog.New(slog.NewTextHandler(&logs, nil)))
+
+	require.NoError(t, m.ProbeAll(t.Context()))
+
+	assert.Empty(t, logs.String())
+}
+
+// retiringProbeStore lists its nodes but records nothing, as if each was
+// retired between the listing and the write.
+type retiringProbeStore struct{ fakeProbeStore }
+
+func (*retiringProbeStore) RecordProbe(context.Context, int64, relaynode.Result) (relaynode.PriorProbe, bool, error) {
+	return relaynode.PriorProbe{}, false, nil
 }

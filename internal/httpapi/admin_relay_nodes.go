@@ -56,7 +56,7 @@ func registerAdminRelayNodes(api huma.API, d Deps) {
 		Method:        http.MethodPost,
 		Path:          "/v1/admin/relay-nodes",
 		Summary:       "Register a relay node",
-		Description:   "Registers a relay node as known. Credentials list it once a probe sees it active, within one probe interval.",
+		Description:   "Registers a relay node as known. Credentials list it once a probe records it as active, usually within about 15 seconds.",
 		Tags:          []string{"Platform Admin"},
 		Security:      platformAdminSecurity,
 		DefaultStatus: http.StatusCreated,

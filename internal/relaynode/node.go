@@ -103,7 +103,7 @@ func validateLifecycleURL(raw string) error {
 	if u.User != nil {
 		return errors.New("must not carry credentials; set RELAY_PROBE_TOKEN instead")
 	}
-	return nil
+	return checkLiteralHost(u.Hostname())
 }
 
 // Node is one registered relay node as the admin API reports it.

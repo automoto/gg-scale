@@ -98,8 +98,15 @@ across the API-server cluster, so slow jobs on River's default queue cannot
 delay it. If River fails to start, each API server logs a warning and probes
 the nodes itself every 10 seconds instead. The admin list shows why a node's
 last probe failed in `last_probe_error`, for example `timeout`, `status 503`
-or `unauthorized`. API servers read the eligible set at most once every 2
-seconds.
+or `unauthorized`.
+
+A change on a node reaches credentials in two steps. First a probe has to
+record it: the next probe starts within 10 seconds and can take up to 3
+seconds to time out. Then each API server keeps using the eligible set it last
+read for up to 2 seconds. Under normal scheduling that is about 15 seconds in
+total, and any delay in running the probe job comes on top. Rather than waiting
+a fixed time, watch the node in the admin list: once its `eligible` flag and
+`last_probe_at` show the change, wait 2 more seconds.
 
 ### Admin API
 
@@ -130,6 +137,11 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN" "$API/v1/admin/relay-nodes/7
 
 A region is lowercase letters, digits and dashes. Only one registered node may
 use a given `lifecycle_url`; a retired node's URL can be registered again.
+`lifecycle_url` may point at a loopback or private address. Link-local
+addresses (including `169.254.169.254`), cloud metadata addresses, multicast
+and unspecified addresses are refused when a node is registered and again when
+the probe connects, after DNS resolution. The probe ignores proxy settings and
+does not follow redirects.
 
 ### The relay embedded in an API server
 
@@ -159,10 +171,12 @@ TOKEN=...                           # LIFECYCLE_TOKEN
 
 1. **Register** the new node through the admin API, as above.
 2. **Wait for the new node to be ready**: `GET $NEW/readyz` returns `200`, and
-   the node shows `"eligible": true` in `GET /v1/admin/relay-nodes`, which
-   takes at most one probe interval (10s).
-3. **Drain the old node**: `POST $OLD/lifecycle/drain`. Its next probe sees
-   `draining`, so new credentials stop listing it within 10 seconds.
+   the node shows `"eligible": true` in `GET /v1/admin/relay-nodes`. Then wait
+   2 seconds for the API servers' cached eligible set.
+3. **Drain the old node**: `POST $OLD/lifecycle/drain`. Wait until the admin
+   list shows it with `"eligible": false` and `last_lifecycle_state`
+   `draining`, then 2 more seconds. From then on new credentials do not list
+   it.
 4. **Wait for `active_allocations` to reach `0`** in `GET $OLD/lifecycle`
    (`.details.active_allocations`). Credentials issued before the drain still
    list the old node until they expire after `RELAY_CRED_TTL`. The draining
@@ -179,7 +193,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" "$OLD/lifecycle" | jq .details.activ
 
 **Rollback**, at any point before step 5: `POST $OLD/lifecycle/resume` puts
 the old node back into service, and `POST $NEW/lifecycle/drain` takes the new
-one out. Each change reaches credentials on the next probe. Retire the new node
+one out. Each change reaches credentials once a probe records it, as above. Retire the new node
 once it reports `active_allocations` of `0`. After step 5, register the old
 node again instead of resuming it.
 
