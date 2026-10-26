@@ -1,4 +1,4 @@
-.PHONY: help build fmt test install-test-reporter test-ci check-test-suites check-e2e-buckets \
+.PHONY: help build fmt test coverage coverage-reports install-test-reporter test-ci check-test-suites check-e2e-buckets \
 	test-integration test-integration-ci test-e2e test-e2e-a test-e2e-b test-e2e-ci \
 	test-plugins e2e e2e-agones \
 	lint check sqlc-gen templ-generate openapi \
@@ -69,12 +69,22 @@ fmt: ## go fmt all packages
 test: ## Unit tests with -race
 	go test -race ./...
 
+coverage: install-test-reporter ## Unit tests with HTML and Cobertura coverage reports
+	mkdir -p coverage
+	go test -race -covermode=atomic -coverprofile=coverage/coverage.out ./...
+	$(MAKE) coverage-reports
+
+coverage-reports:
+	./bin/gocover-cobertura < coverage/coverage.out > coverage/coverage.xml
+	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
+
 install-test-reporter:
 	GOBIN="$(CURDIR)/bin" go -C tools install tool
 
 test-ci: install-test-reporter ## Unit tests with CI-readable JSON and JUnit reports
-	mkdir -p test-results
-	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race ./...
+	mkdir -p test-results coverage
+	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -covermode=atomic -coverprofile=coverage/coverage.out ./...
+	$(MAKE) coverage-reports
 
 check-test-suites: ## Verify every tagged test package belongs to a CI lane
 	@actual="$$(go list -tags='integration e2e' ./tests/integration/... ./tests/e2e/... | LC_ALL=C sort)"; \

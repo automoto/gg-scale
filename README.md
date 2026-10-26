@@ -58,6 +58,7 @@ Run `make help` for the full list.
 | `make up` / `make down` / `make clean` | Basic dev stack (server, Postgres, SMTP). |
 | `make bootstrap-token` | Print the control panel bootstrap token from `./data/bootstrap.token`. |
 | `make test` | Unit tests with `-race`. |
+| `make coverage` | Create HTML and Cobertura XML reports in `coverage/`. |
 | `make test-integration` | Integration tests (Postgres via Testcontainers). |
 | `make e2e` | End-to-end suite against the running `make up` stack. |
 | `make check` | Lint and unit tests, the same gate as CI. |
