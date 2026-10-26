@@ -2,14 +2,10 @@ module github.com/automoto/gg-scale/tools
 
 go 1.26.10
 
-tool (
-	github.com/boumenot/gocover-cobertura
-	gotest.tools/gotestsum
-)
+tool gotest.tools/gotestsum
 
 require (
 	github.com/bitfield/gotestdox v0.2.2 // indirect
-	github.com/boumenot/gocover-cobertura v1.4.0 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect

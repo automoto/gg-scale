@@ -71,15 +71,14 @@ fmt: ## go fmt all packages
 test: ## Unit tests with -race
 	go test -race ./...
 
-coverage: install-test-reporter ## Unit tests with HTML and Cobertura coverage reports
+coverage: install-test-reporter ## Unit tests with native Go and HTML coverage reports
 	mkdir -p coverage
 	go test $(UNIT_TEST_FLAGS) ./...
 	$(MAKE) coverage-reports
 
-coverage-reports: ## Generate HTML and Cobertura reports from the filtered coverage profile
+coverage-reports: ## Generate an HTML report from the filtered native Go coverage profile
 	grep -Ev '(_templ\.go|internal/db/sqlc/|\.pb\.go):' coverage/coverage.out > coverage/coverage.filtered
 	mv coverage/coverage.filtered coverage/coverage.out
-	./bin/gocover-cobertura < coverage/coverage.out > coverage/coverage.xml
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
 install-test-reporter:
