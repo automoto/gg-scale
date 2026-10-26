@@ -1,7 +1,7 @@
 package players
 
 // Player-site friends UI, operating on the global account session. Friends are
-// account-to-account (see docs/temp/player-accounts.md). Actions are plain
+// account-to-account. Actions are plain
 // form POSTs that redirect back to the friends page — matching the rest of the
 // player site, which does not load HTMX/JS assets.
 
