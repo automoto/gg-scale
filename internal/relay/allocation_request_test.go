@@ -8,6 +8,8 @@ import (
 	pionturn "github.com/pion/turn/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/automoto/gg-scale/internal/lifecycle"
 )
 
 type recordingRelayGenerator struct {
@@ -36,7 +38,7 @@ func (g *recordingRelayGenerator) AllocateConn(conf pionturn.AllocateConnConfig)
 func TestPlayerAllocationGeneratorThrottlesStableAuthenticatedSubject(t *testing.T) {
 	inner := &recordingRelayGenerator{}
 	var throttled atomic.Int64
-	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), &throttled)
+	generator := newPlayerAllocationGenerator(inner, nil, newPlayerAllocLimiter(6, 1), &throttled)
 	conf := pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)}
 
 	_, _, err := generator.AllocatePacketConn(conf)
@@ -51,7 +53,7 @@ func TestPlayerAllocationGeneratorThrottlesStableAuthenticatedSubject(t *testing
 func TestPlayerAllocationGeneratorRejectsMissingAuthenticatedSubject(t *testing.T) {
 	inner := &recordingRelayGenerator{}
 	var throttled atomic.Int64
-	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), &throttled)
+	generator := newPlayerAllocationGenerator(inner, nil, newPlayerAllocLimiter(6, 1), &throttled)
 
 	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{Network: "udp4"})
 
@@ -62,7 +64,7 @@ func TestPlayerAllocationGeneratorRejectsMissingAuthenticatedSubject(t *testing.
 
 func TestPlayerAllocationGeneratorRejectsMalformedUserID(t *testing.T) {
 	inner := &recordingRelayGenerator{}
-	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), nil)
+	generator := newPlayerAllocationGenerator(inner, nil, newPlayerAllocLimiter(6, 1), nil)
 
 	_, _, err := generator.AllocatePacketConn(pionturn.AllocateListenerConfig{
 		Network: "udp4",
@@ -75,7 +77,7 @@ func TestPlayerAllocationGeneratorRejectsMalformedUserID(t *testing.T) {
 
 func TestPlayerAllocationGeneratorRejectsRFC6062(t *testing.T) {
 	inner := &recordingRelayGenerator{}
-	generator := newPlayerAllocationGenerator(inner, newPlayerAllocLimiter(6, 1), nil)
+	generator := newPlayerAllocationGenerator(inner, nil, newPlayerAllocLimiter(6, 1), nil)
 
 	_, _, listenerErr := generator.AllocateListener(pionturn.AllocateListenerConfig{
 		Network: "tcp4",
@@ -90,4 +92,19 @@ func TestPlayerAllocationGeneratorRejectsRFC6062(t *testing.T) {
 	assert.ErrorIs(t, connErr, errTCPRelayUnsupported)
 	assert.Empty(t, inner.listenerConfigs)
 	assert.Empty(t, inner.connConfigs)
+}
+
+func TestPlayerAllocationGenerator_should_refuse_without_spending_player_token_when_draining(t *testing.T) {
+	inner := &recordingRelayGenerator{}
+	var drain lifecycle.Gate
+	generator := newPlayerAllocationGenerator(inner, &drain, newPlayerAllocLimiter(6, 1), nil)
+	conf := pionturn.AllocateListenerConfig{Network: "udp4", UserID: allocationUserID(1, 42)}
+	drain.BeginDrain()
+	_, _, refusedErr := generator.AllocatePacketConn(conf)
+	drain.EndDrain()
+
+	_, _, err := generator.AllocatePacketConn(conf)
+
+	assert.ErrorIs(t, refusedErr, errRelayDraining)
+	assert.NoError(t, err, "the single-token budget is still available after the refusal")
 }

@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 
 	pionturn "github.com/pion/turn/v5"
+
+	"github.com/automoto/gg-scale/internal/lifecycle"
 )
 
 // ServerConfig wires NewServer. PublicIP is the address peers connect to;
@@ -56,6 +58,9 @@ type Server struct {
 	listeners      []net.Listener
 	alloc          *allocationLimiter
 	playerLimiter  *playerAllocLimiter
+	drain          lifecycle.Gate
+	publicIP       string
+	transports     []string
 	authFailures   atomic.Int64
 	allocThrottled atomic.Int64
 	peerRejected   atomic.Int64
@@ -92,7 +97,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		bindPort = 3478
 	}
 
-	s := &Server{}
+	s := &Server{publicIP: cfg.PublicIP, transports: []string{"udp"}}
 	s.alloc = newAllocationLimiter(relayGenerator(ip, bindAddr, cfg.RelayMinPort, cfg.RelayMaxPort), cfg.MaxAllocations)
 	s.playerLimiter = newPlayerAllocLimiter(cfg.PlayerAllocPerMinute, cfg.PlayerAllocBurst)
 
@@ -109,7 +114,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		}
 		logger.Warn("relay: private peer addresses are allowed; the relay can proxy UDP to loopback/RFC1918/link-local peers")
 	}
-	relayGen := newPlayerAllocationGenerator(s.alloc, s.playerLimiter, &s.allocThrottled)
+	relayGen := newPlayerAllocationGenerator(s.alloc, &s.drain, s.playerLimiter, &s.allocThrottled)
 	packetConns := []pionturn.PacketConnConfig{{
 		PacketConn:            conn,
 		RelayAddressGenerator: relayGen,
@@ -166,6 +171,7 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tcp %s:%d: %w", bindAddr, cfg.TCPPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
+		s.transports = append(s.transports, "tcp")
 		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
@@ -182,6 +188,7 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 			return nil, fmt.Errorf("relay: bind tls %s:%d: %w", bindAddr, cfg.TLSPort, err)
 		}
 		s.listeners = append(s.listeners, ln)
+		s.transports = append(s.transports, "tls")
 		configs = append(configs, pionturn.ListenerConfig{Listener: ln, RelayAddressGenerator: relayGen, PermissionHandler: permission})
 	}
 
@@ -327,3 +334,24 @@ func (s *Server) AllocThrottled() int64 { return s.allocThrottled.Load() }
 // attempts refused because the peer address was private and private peers are
 // disallowed.
 func (s *Server) PeerRejected() int64 { return s.peerRejected.Load() }
+
+// BeginDrain refuses new TURN Allocate requests. Existing allocations keep
+// refreshing, binding permissions, and relaying data.
+func (s *Server) BeginDrain() { s.drain.BeginDrain() }
+
+// EndDrain accepts new TURN Allocate requests again.
+func (s *Server) EndDrain() { s.drain.EndDrain() }
+
+// ActiveWork reports the live allocations a drain waits on.
+func (s *Server) ActiveWork() int64 { return s.ActiveAllocations() }
+
+// RefusedWork reports the cumulative count of Allocate requests refused
+// while draining.
+func (s *Server) RefusedWork() int64 { return s.drain.RefusedWork() }
+
+// PublicIP reports the address peers reach this relay on.
+func (s *Server) PublicIP() string { return s.publicIP }
+
+// Transports lists the client transports this relay listens on: "udp",
+// then "tcp" and "tls" when enabled.
+func (s *Server) Transports() []string { return append([]string(nil), s.transports...) }

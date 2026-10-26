@@ -39,6 +39,7 @@ import (
 	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/lifecycle"
 	"github.com/automoto/gg-scale/internal/mailer"
 	_ "github.com/automoto/gg-scale/internal/mailer/noop"
 	_ "github.com/automoto/gg-scale/internal/mailer/smtp"
@@ -205,17 +206,42 @@ func runRelayCommand() error {
 		"relay_min_port", rc.MinPort, "relay_max_port", rc.MaxPort,
 		"max_allocations", rc.MaxAllocations)
 
-	stopHealth, err := startRelayHealth(rc, srv, logger)
+	lc := newRelayLifecycle(rc, srv)
+	stopHealth, err := startRelayHealth(rc, srv, lc, logger)
 	if err != nil {
 		return err
 	}
 	if stopHealth != nil {
 		defer stopHealth()
 	}
+	lc.MarkReady()
 
 	<-ctx.Done()
-	logger.Info("relay shutting down")
+	// Restore default signal handling so a second SIGTERM ends the drain wait.
+	stop()
+	logger.Info("relay draining", "drain_timeout", rc.DrainTimeout.String(), "active_allocations", srv.ActiveAllocations())
+	remaining := lc.Shutdown(rc.DrainTimeout)
+	logger.Info("relay shutting down", "remaining_allocations", remaining)
 	return nil
+}
+
+// newRelayLifecycle builds the relay node's lifecycle controller: draining
+// refuses new TURN allocations, and the work a drain waits on is the live
+// allocations.
+func newRelayLifecycle(rc *config.RelayConfig, srv *relay.Server) *lifecycle.Controller {
+	return lifecycle.New(lifecycle.Config{
+		Role:   "relay",
+		Commit: buildCommit(),
+		Token:  rc.LifecycleToken,
+		Work:   srv,
+		Details: func() map[string]any {
+			return map[string]any{
+				"active_allocations": srv.ActiveAllocations(),
+				"public_ip":          srv.PublicIP(),
+				"transports":         srv.Transports(),
+			}
+		},
+	})
 }
 
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
@@ -246,33 +272,19 @@ func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 	}, func() float64 { return float64(srv.PeerRejected()) }))
 }
 
-// startRelayHealth serves /healthz and /metrics for the monitoring host to
-// scrape the relay node over the tailnet. Returns (nil, nil) when no address is
-// configured, and a non-nil error if the listener can't bind — so a bad or
-// in-use RELAY_HEALTH_ADDR fails the process fast rather than silently leaving
-// the scrape target down. When rc.MetricsToken is set, /metrics requires a
-// matching bearer token.
-func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, logger *slog.Logger) (func(), error) {
+// startRelayHealth serves /healthz, /metrics and the lifecycle routes for the
+// monitoring host and deploy tooling to reach the relay node over the tailnet.
+// Returns (nil, nil) when no address is configured, and a non-nil error if the
+// listener can't bind — so a bad or in-use RELAY_HEALTH_ADDR fails the process
+// fast rather than silently leaving the scrape target down.
+func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Controller, logger *slog.Logger) (func(), error) {
 	if rc.HealthAddr == "" {
 		return nil, nil
 	}
-	reg := prometheus.NewRegistry()
-	reg.MustRegister(collectors.NewGoCollector())
-	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-	up := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "ggscale_relay_up",
-		Help: "1 while the standalone relay process is serving.",
-	})
-	up.Set(1)
-	reg.MustRegister(up)
-	registerRelayServerMetrics(reg, srv)
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "ok\n")
-	})
-	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	mux, err := relayHealthMux(rc, srv, lc)
+	if err != nil {
+		return nil, err
+	}
 
 	ln, err := net.Listen("tcp", rc.HealthAddr)
 	if err != nil {
@@ -295,6 +307,34 @@ func startRelayHealth(rc *config.RelayConfig, srv *relay.Server, logger *slog.Lo
 		defer cancel()
 		_ = srvHTTP.Shutdown(shutdownCtx)
 	}, nil
+}
+
+// relayHealthMux builds the relay health listener's routes: /healthz
+// (liveness, open), /metrics (behind rc.MetricsToken when set), and the
+// shared lifecycle routes.
+func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Controller) (*http.ServeMux, error) {
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(collectors.NewGoCollector())
+	reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	up := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "ggscale_relay_up",
+		Help: "1 while the standalone relay process is serving.",
+	})
+	up.Set(1)
+	reg.MustRegister(up)
+	registerRelayServerMetrics(reg, srv)
+	if err := lc.Register(reg); err != nil {
+		return nil, fmt.Errorf("relay lifecycle metrics: %w", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
+	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	lc.Mount(mux)
+	return mux, nil
 }
 
 // bearerGuard wraps h to require "Authorization: Bearer <token>" when token is
