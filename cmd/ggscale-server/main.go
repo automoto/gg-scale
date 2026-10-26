@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -333,26 +332,9 @@ func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Con
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
-	mux.Handle("/metrics", bearerGuard(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
+	mux.Handle("/metrics", lifecycle.RequireBearer(rc.MetricsToken, promhttp.HandlerFor(reg, promhttp.HandlerOpts{})))
 	lc.Mount(mux)
 	return mux, nil
-}
-
-// bearerGuard wraps h to require "Authorization: Bearer <token>" when token is
-// non-empty; an empty token leaves h open (tailnet-only default).
-func bearerGuard(token string, h http.Handler) http.Handler {
-	if token == "" {
-		return h
-	}
-	want := "Bearer " + token
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(want)) != 1 {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
 }
 
 func run() error {

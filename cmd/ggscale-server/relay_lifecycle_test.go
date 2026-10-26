@@ -127,3 +127,28 @@ func TestRelayHealthMux_should_drain_through_post_route(t *testing.T) {
 
 	assert.Equal(t, http.StatusServiceUnavailable, relayGet(t, mux, "/readyz", "").Code)
 }
+
+func TestRelayHealthMux_should_accept_metrics_token_with_lowercase_scheme(t *testing.T) {
+	srv := newTestRelayServer(t)
+	rc := &config.RelayConfig{MetricsToken: relayLifecycleTestToken}
+	mux, err := relayHealthMux(rc, srv, newRelayLifecycle(rc, srv))
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "bearer "+relayLifecycleTestToken)
+	rec := httptest.NewRecorder()
+
+	mux.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestRelayHealthMux_should_refuse_metrics_without_token(t *testing.T) {
+	srv := newTestRelayServer(t)
+	rc := &config.RelayConfig{MetricsToken: relayLifecycleTestToken}
+	mux, err := relayHealthMux(rc, srv, newRelayLifecycle(rc, srv))
+	require.NoError(t, err)
+
+	rec := relayGet(t, mux, "/metrics", "")
+
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
