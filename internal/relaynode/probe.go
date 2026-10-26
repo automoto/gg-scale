@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -25,6 +26,19 @@ const maxStatusBytes = 65536
 // relayRole is the role a relay node reports in its /lifecycle JSON.
 const relayRole = "relay"
 
+// Probe failure reasons. They are stable strings, so a repeated failure can
+// be recognised and the admin list can show why a node is unhealthy; the
+// changing details, such as an error with an ephemeral port, go to the log.
+const (
+	FailureInvalidURL   = "invalid lifecycle_url"
+	FailureTimeout      = "timeout"
+	FailureConnection   = "connection failed"
+	FailureUnauthorized = "unauthorized"
+	FailureInvalidJSON  = "invalid /lifecycle JSON"
+	FailureUnknownState = "unknown lifecycle state"
+	FailureNotRelay     = "role is not relay"
+)
+
 // Result is one probe of a node's GET /lifecycle.
 type Result struct {
 	// OK is true when the node answered 2xx with a valid relay status. A
@@ -37,8 +51,11 @@ type Result struct {
 	// Unauthorized is true when the node answered 401: RELAY_PROBE_TOKEN does
 	// not match the node's LIFECYCLE_TOKEN.
 	Unauthorized bool
-	// Failure says why OK is false.
+	// Failure is the stable reason OK is false: one of the Failure constants
+	// or "status <code>".
 	Failure string
+	// Detail is the underlying error or value, for the log only.
+	Detail string
 }
 
 // status is the shared top-level part of the /lifecycle JSON. The prober
@@ -74,36 +91,45 @@ func NewProber(token string, timeout time.Duration) *Prober {
 func (p *Prober) Probe(ctx context.Context, lifecycleURL string) Result {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, lifecycleURL, nil)
 	if err != nil {
-		return Result{Failure: err.Error()}
+		return Result{Failure: FailureInvalidURL, Detail: err.Error()}
 	}
 	if p.token != "" {
 		req.Header.Set("Authorization", "Bearer "+p.token)
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return Result{Failure: err.Error()}
+		return Result{Failure: transportFailure(err), Detail: err.Error()}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return Result{Unauthorized: true, Failure: "401 unauthorized"}
+		return Result{Unauthorized: true, Failure: FailureUnauthorized}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return Result{Failure: fmt.Sprintf("status %d", resp.StatusCode)}
 	}
 	var st status
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxStatusBytes)).Decode(&st); err != nil {
-		return Result{Failure: "decode /lifecycle: " + err.Error()}
+		return Result{Failure: FailureInvalidJSON, Detail: err.Error()}
 	}
 	if !slices.Contains(lifecycle.States, st.State) {
-		return Result{Failure: fmt.Sprintf("unknown lifecycle state %q", st.State)}
+		return Result{Failure: FailureUnknownState, Detail: fmt.Sprintf("state %q", st.State)}
 	}
 	r := Result{State: string(st.State), ActiveWork: st.ActiveWork}
 	if st.Role != relayRole {
-		r.Failure = fmt.Sprintf("role %q is not %q", st.Role, relayRole)
+		r.Failure = FailureNotRelay
+		r.Detail = fmt.Sprintf("role %q", st.Role)
 		return r
 	}
 	r.OK = true
 	return r
+}
+
+func transportFailure(err error) string {
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
+		return FailureTimeout
+	}
+	return FailureConnection
 }
 
 // ProbeStore is the part of Store the Monitor needs.
@@ -112,22 +138,19 @@ type ProbeStore interface {
 	RecordProbe(ctx context.Context, id int64, r Result) error
 }
 
-// Monitor probes every known node and records the results. It logs a node's
-// failure when it starts or changes, not on every probe. Safe for concurrent
-// use, though the probe job runs it on one worker at a time.
+// Monitor probes every known node and records the results. It logs a
+// failure when the node's stored last_probe_error changes, and a recovery
+// when a failing node succeeds, so the log follows the database rather than
+// one process's memory: any API server can run the probe.
 type Monitor struct {
 	store  ProbeStore
 	prober *Prober
 	logger *slog.Logger
-
-	mu sync.Mutex
-	// failures holds each failing node's last logged failure.
-	failures map[int64]string
 }
 
 // NewMonitor returns a Monitor.
 func NewMonitor(store ProbeStore, prober *Prober, logger *slog.Logger) *Monitor {
-	return &Monitor{store: store, prober: prober, logger: logger, failures: map[int64]string{}}
+	return &Monitor{store: store, prober: prober, logger: logger}
 }
 
 // ProbeAll probes every known node concurrently and records each result. It
@@ -152,25 +175,40 @@ func (m *Monitor) ProbeAll(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (m *Monitor) logTransition(ctx context.Context, n Node, r Result) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	prev, failing := m.failures[n.ID]
+// Run probes every interval until ctx ends, starting at once. It is the
+// fallback when River, which normally schedules the probe, is unavailable.
+func (m *Monitor) Run(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		if err := m.ProbeAll(ctx); err != nil && ctx.Err() == nil {
+			m.logger.WarnContext(ctx, "relay node probe", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// logTransition compares r with prev, the node as it was before this probe.
+func (m *Monitor) logTransition(ctx context.Context, prev Node, r Result) {
+	failing := prev.LastProbeAt != nil && !prev.LastProbeOK
 	if r.OK {
 		if failing {
-			delete(m.failures, n.ID)
-			m.logger.InfoContext(ctx, "relay node probe recovered", "node_id", n.ID, "lifecycle_url", n.LifecycleURL)
+			m.logger.InfoContext(ctx, "relay node probe recovered", "node_id", prev.ID, "lifecycle_url", prev.LifecycleURL)
 		}
 		return
 	}
-	if failing && prev == r.Failure {
+	if failing && prev.LastProbeError != nil && *prev.LastProbeError == r.Failure {
 		return
 	}
-	m.failures[n.ID] = r.Failure
 	if r.Unauthorized {
 		m.logger.WarnContext(ctx, "relay node probe unauthorized: RELAY_PROBE_TOKEN does not match the node's LIFECYCLE_TOKEN",
-			"node_id", n.ID, "lifecycle_url", n.LifecycleURL)
+			"node_id", prev.ID, "lifecycle_url", prev.LifecycleURL)
 		return
 	}
-	m.logger.WarnContext(ctx, "relay node probe failed", "node_id", n.ID, "lifecycle_url", n.LifecycleURL, "reason", r.Failure)
+	m.logger.WarnContext(ctx, "relay node probe failed",
+		"node_id", prev.ID, "lifecycle_url", prev.LifecycleURL, "reason", r.Failure, "detail", r.Detail)
 }

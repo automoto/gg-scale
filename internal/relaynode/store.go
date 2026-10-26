@@ -20,12 +20,11 @@ const uniqueViolation = "23505"
 // so every query runs outside a tenant context.
 type Store struct {
 	pool *db.Pool
-	now  func() time.Time
 }
 
 // NewStore returns a Store on pool.
 func NewStore(pool *db.Pool) *Store {
-	return &Store{pool: pool, now: time.Now}
+	return &Store{pool: pool}
 }
 
 // Create validates spec and registers a known node. It returns a wrapped
@@ -51,12 +50,28 @@ func (s *Store) Create(ctx context.Context, spec Spec) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	return s.toNode(row), nil
+	return toNode(row), nil
 }
 
-// List returns every node, retired ones included, oldest first.
+// List returns every node, retired ones included, oldest first. Eligible is
+// computed by the database, with the same rule and clock as Eligible.
 func (s *Store) List(ctx context.Context) ([]Node, error) {
-	return s.list(ctx, func(q *sqlcgen.Queries) ([]sqlcgen.RelayNode, error) { return q.ListRelayNodes(ctx) })
+	var rows []sqlcgen.ListRelayNodesRow
+	err := s.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		rows, qerr = sqlcgen.New(tx).ListRelayNodes(ctx, FreshnessWindow.Seconds())
+		return qerr
+	})
+	if err != nil {
+		return nil, err
+	}
+	nodes := make([]Node, 0, len(rows))
+	for _, row := range rows {
+		n := toNode(row.RelayNode)
+		n.Eligible = row.Eligible
+		nodes = append(nodes, n)
+	}
+	return nodes, nil
 }
 
 // Known returns the nodes the probe job reads.
@@ -66,9 +81,13 @@ func (s *Store) Known(ctx context.Context) ([]Node, error) {
 
 // Eligible returns the nodes relay credentials may advertise.
 func (s *Store) Eligible(ctx context.Context) ([]Node, error) {
-	return s.list(ctx, func(q *sqlcgen.Queries) ([]sqlcgen.RelayNode, error) {
+	nodes, err := s.list(ctx, func(q *sqlcgen.Queries) ([]sqlcgen.RelayNode, error) {
 		return q.ListEligibleRelayNodes(ctx, FreshnessWindow.Seconds())
 	})
+	for i := range nodes {
+		nodes[i].Eligible = true
+	}
+	return nodes, err
 }
 
 func (s *Store) list(ctx context.Context, query func(*sqlcgen.Queries) ([]sqlcgen.RelayNode, error)) ([]Node, error) {
@@ -83,7 +102,7 @@ func (s *Store) list(ctx context.Context, query func(*sqlcgen.Queries) ([]sqlcge
 	}
 	nodes := make([]Node, 0, len(rows))
 	for _, row := range rows {
-		nodes = append(nodes, s.toNode(row))
+		nodes = append(nodes, toNode(row))
 	}
 	return nodes, nil
 }
@@ -103,13 +122,17 @@ func (s *Store) Retire(ctx context.Context, id int64) (Node, error) {
 	if err != nil {
 		return Node{}, err
 	}
-	return s.toNode(row), nil
+	return toNode(row), nil
 }
 
 // RecordProbe stores one probe result. A node retired since it was listed is
 // left alone.
 func (s *Store) RecordProbe(ctx context.Context, id int64, r Result) error {
 	params := sqlcgen.RecordRelayNodeProbeParams{ID: id, Ok: r.OK, ActiveAllocations: r.ActiveWork}
+	if !r.OK {
+		failure := r.Failure
+		params.ProbeError = &failure
+	}
 	if r.State != "" {
 		state := r.State
 		params.LifecycleState = &state
@@ -119,8 +142,10 @@ func (s *Store) RecordProbe(ctx context.Context, id int64, r Result) error {
 	})
 }
 
-func (s *Store) toNode(row sqlcgen.RelayNode) Node {
-	n := Node{
+// toNode converts a row. Eligible is left false: only a query that computes
+// eligibility sets it.
+func toNode(row sqlcgen.RelayNode) Node {
+	return Node{
 		ID:                    row.ID,
 		Region:                row.Region,
 		TURNURLs:              row.TurnUrls,
@@ -128,13 +153,12 @@ func (s *Store) toNode(row sqlcgen.RelayNode) Node {
 		State:                 row.State,
 		LastProbeAt:           timePtr(row.LastProbeAt),
 		LastProbeOK:           row.LastProbeOk,
+		LastProbeError:        row.LastProbeError,
 		LastLifecycleState:    row.LastLifecycleState,
 		LastActiveAllocations: row.LastActiveAllocations,
 		CreatedAt:             row.CreatedAt.Time,
 		UpdatedAt:             row.UpdatedAt.Time,
 	}
-	n.Eligible = n.eligibleAt(s.now())
-	return n
 }
 
 func timePtr(ts pgtype.Timestamptz) *time.Time {

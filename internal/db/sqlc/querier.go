@@ -759,7 +759,9 @@ type Querier interface {
 	// be placed in a concrete region); non-fleet modes mix regions inside one
 	// bucket and the worker applies the soft-region grouping rules in Go.
 	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
-	ListRelayNodes(ctx context.Context) ([]RelayNode, error)
+	// eligible uses the same rule and clock as ListEligibleRelayNodes, so the
+	// admin list agrees with what credentials serve.
+	ListRelayNodes(ctx context.Context, maxAgeSeconds float64) ([]ListRelayNodesRow, error)
 	ListSettingsRevisions(ctx context.Context, arg ListSettingsRevisionsParams) ([]ListSettingsRevisionsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Verified emails of a tenant's owner/admin members, for operational notices

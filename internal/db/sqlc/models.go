@@ -815,6 +815,7 @@ type RelayNode struct {
 	State                 string
 	LastProbeAt           pgtype.Timestamptz
 	LastProbeOk           bool
+	LastProbeError        *string
 	LastLifecycleState    *string
 	LastActiveAllocations *int64
 	CreatedAt             pgtype.Timestamptz

@@ -114,22 +114,17 @@ type Node struct {
 	LifecycleURL string   `json:"lifecycle_url" example:"http://10.0.0.5:9091/lifecycle"`
 	State        string   `json:"state" enum:"known,retired" example:"known"`
 	// Eligible reports whether credentials currently advertise this node.
-	Eligible           bool       `json:"eligible" example:"true"`
-	LastProbeAt        *time.Time `json:"last_probe_at" example:"2026-10-26T12:00:00Z"`
-	LastProbeOK        bool       `json:"last_probe_ok" example:"true"`
-	LastLifecycleState *string    `json:"last_lifecycle_state" example:"active"`
-	// LastActiveAllocations is the active_work the node reported on its last
-	// probe that read one.
+	Eligible    bool       `json:"eligible" example:"true"`
+	LastProbeAt *time.Time `json:"last_probe_at" example:"2026-10-26T12:00:00Z"`
+	LastProbeOK bool       `json:"last_probe_ok" example:"true"`
+	// LastProbeError is why the last probe failed, such as "timeout" or
+	// "status 503". nil when it succeeded or has not run.
+	LastProbeError *string `json:"last_probe_error" example:"timeout"`
+	// LastLifecycleState and LastActiveAllocations are the state and
+	// active_work the last probe read. nil when it read no valid /lifecycle
+	// document.
+	LastLifecycleState    *string   `json:"last_lifecycle_state" example:"active"`
 	LastActiveAllocations *int64    `json:"last_active_allocations" example:"12"`
 	CreatedAt             time.Time `json:"created_at" example:"2026-10-26T11:00:00Z"`
 	UpdatedAt             time.Time `json:"updated_at" example:"2026-10-26T12:00:00Z"`
-}
-
-// eligibleAt reports whether the node is advertised at now: known, last probe
-// good, reporting active, and probed within the freshness window.
-func (n Node) eligibleAt(now time.Time) bool {
-	return n.State == StateKnown &&
-		n.LastProbeOK &&
-		n.LastLifecycleState != nil && *n.LastLifecycleState == "active" &&
-		n.LastProbeAt != nil && now.Sub(*n.LastProbeAt) < FreshnessWindow
 }

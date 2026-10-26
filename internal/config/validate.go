@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/automoto/gg-scale/internal/relay"
 )
 
 // IsProduction reports whether the deployment environment is production, accepting
@@ -124,12 +126,20 @@ func (c *Config) checkFeatureSwitches() error {
 // secret is set (cmd/ggscale-server), so the checks are scoped to that case.
 // The relay URLs clients dial come from the relay node registry, not config.
 func (c *Config) checkRelay() error {
+	if len(c.RelayEmbeddedURLs) > 0 && c.RelayPublicIP == "" {
+		return fmt.Errorf("RELAY_EMBEDDED_URLS set without RELAY_PUBLIC_IP; it only applies to the relay embedded in this server")
+	}
 	if !c.FeatureP2PRelayEnabled || c.RelaySharedSecret == "" {
 		return nil
 	}
 	if c.RelayPublicIP != "" {
 		if err := validateRelayPublicIP(c.RelayPublicIP); err != nil {
 			return err
+		}
+	}
+	for _, raw := range c.RelayEmbeddedURLs {
+		if err := relay.ValidateTURNURI(raw); err != nil {
+			return fmt.Errorf("RELAY_EMBEDDED_URLS %q: %w", raw, err)
 		}
 	}
 	for _, raw := range c.RelaySTUNURLs {

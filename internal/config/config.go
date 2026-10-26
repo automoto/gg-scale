@@ -190,8 +190,13 @@ type Config struct {
 	// RelayProbeToken is sent as "Authorization: Bearer <token>" when the
 	// relay node probe reads a registered node's GET /lifecycle. It must
 	// match the relay nodes' LIFECYCLE_TOKEN. Empty sends no header.
-	RelayProbeToken string   `env:"RELAY_PROBE_TOKEN" envFile:"true"`
-	RelaySTUNURLs   []string `env:"RELAY_STUN_URLS"`
+	RelayProbeToken string `env:"RELAY_PROBE_TOKEN" envFile:"true"`
+	// RelayEmbeddedURLs overrides the TURN URIs advertised for the relay
+	// embedded through RELAY_PUBLIC_IP, for example when its UDP port is
+	// published on another host port or behind a hostname. Empty advertises
+	// turn:<RELAY_PUBLIC_IP>:<RELAY_UDP_PORT>?transport=udp.
+	RelayEmbeddedURLs []string `env:"RELAY_EMBEDDED_URLS"`
+	RelaySTUNURLs     []string `env:"RELAY_STUN_URLS"`
 
 	DatabaseURL string `env:"DATABASE_URL,required" envFile:"true"`
 	// DBMigrateURL is an elevated DSN used only to apply schema

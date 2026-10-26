@@ -80,7 +80,7 @@ A node is **eligible** when all of these hold:
 - that probe ran less than 30 seconds (three probe intervals) ago.
 
 `POST /v1/relay/credentials?region=<name>` lists the `turn_urls` of every
-eligible node in that region, in shuffled node order. Each node's own URLs keep
+eligible node in that region (matched case-insensitively), in shuffled node order. Each node's own URLs keep
 the order they were registered in. When the region has no eligible node, or the
 client sends no region, the response lists every eligible node instead. The
 response's `region` field names the region served, or is `""` when the nodes
@@ -93,9 +93,13 @@ stop entirely drops out once its last good probe is 30 seconds old. A `401`
 means `RELAY_PROBE_TOKEN` does not match the node's `LIFECYCLE_TOKEN`. The API
 server logs that once per node, not on every probe.
 
-The probe runs as the River job `relay_node_probe`, once across the API-server
-cluster. If River is down, no probe runs, every node goes stale, and credential
-requests get `503` after 30 seconds.
+The probe runs as the River job `relay_node_probe` on its own queue, once
+across the API-server cluster, so slow jobs on River's default queue cannot
+delay it. If River fails to start, each API server logs a warning and probes
+the nodes itself every 10 seconds instead. The admin list shows why a node's
+last probe failed in `last_probe_error`, for example `timeout`, `status 503`
+or `unauthorized`. API servers read the eligible set at most once every 2
+seconds.
 
 ### Admin API
 
@@ -132,8 +136,11 @@ use a given `lifecycle_url`; a retired node's URL can be registered again.
 Setting `RELAY_PUBLIC_IP` on an API server runs a TURN relay inside it. That
 server lists its own relay, `turn:<RELAY_PUBLIC_IP>:<RELAY_UDP_PORT>?transport=udp`.
 It has no region, so it is listed only when a response falls back to every
-eligible node, which includes the case where no registered node is eligible. A
-single-host install therefore needs no registration. It is not
+eligible node, which includes the case where no registered node is eligible,
+and when the registry cannot be read. A single-host install therefore needs no
+registration. When clients reach it at another port or through a hostname, for
+example because the UDP port is published on a different host port, list the
+URIs to advertise in `RELAY_EMBEDDED_URLS`. It is not
 probed and cannot be drained. Do not register it as a node: its
 `GET /lifecycle` reports `role: "api"`, so the probe marks it unhealthy. To
 stop listing it, unset `RELAY_PUBLIC_IP` on that API server.

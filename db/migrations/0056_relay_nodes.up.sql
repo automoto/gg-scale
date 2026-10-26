@@ -10,8 +10,12 @@ CREATE TABLE relay_nodes (
     state                   TEXT NOT NULL DEFAULT 'known' CHECK (state IN ('known', 'retired')),
     last_probe_at           TIMESTAMPTZ,
     last_probe_ok           BOOLEAN NOT NULL DEFAULT false,
+    -- Why the last probe failed, as a stable reason such as "timeout" or
+    -- "status 503". NULL when it succeeded or has not run.
+    last_probe_error        TEXT,
+    -- The state and active_work the last probe read. NULL when the last probe
+    -- read no valid /lifecycle document.
     last_lifecycle_state    TEXT,
-    -- active_work from the node's last good probe.
     last_active_allocations BIGINT,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -166,6 +166,7 @@ func (c *Config) normalize() {
 	c.ControlPanelEnabled = !c.ControlPanelDisabled
 	c.CORSAllowedOrigins = normalizeCSV(c.CORSAllowedOrigins)
 	c.TrustedProxyCIDRs = normalizeCSV(c.TrustedProxyCIDRs)
+	c.RelayEmbeddedURLs = normalizeCSV(c.RelayEmbeddedURLs)
 	c.RelaySTUNURLs = normalizeCSV(c.RelaySTUNURLs)
 }
 

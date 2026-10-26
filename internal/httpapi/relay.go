@@ -37,7 +37,7 @@ const (
 // region.
 type relayCredentialsInput struct {
 	MatchID string `query:"match_id" example:"mm_5f3a9c1d2e4b6a70"`
-	Region  string `query:"region" maxLength:"64" example:"us-east" doc:"Preferred relay region. With no eligible relay node in it, or when omitted, every eligible node is listed."`
+	Region  string `query:"region" maxLength:"64" example:"us-east" doc:"Preferred relay region, matched case-insensitively. With no eligible relay node in it, or when omitted, every eligible node is listed."`
 }
 
 // relayCredentialsOutput carries the TURN-REST credentials. The password field

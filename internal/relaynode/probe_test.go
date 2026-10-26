@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -66,7 +67,7 @@ func TestProbe_should_fail_for_an_unknown_state(t *testing.T) {
 
 	got := p.Probe(t.Context(), srv.URL)
 
-	assert.Equal(t, relaynode.Result{Failure: `unknown lifecycle state "sleeping"`}, got)
+	assert.Equal(t, relaynode.Result{Failure: relaynode.FailureUnknownState, Detail: `state "sleeping"`}, got)
 }
 
 func TestProbe_should_fail_for_a_non_2xx_status(t *testing.T) {
@@ -149,14 +150,19 @@ func TestProbe_should_send_no_authorization_without_a_token(t *testing.T) {
 	assert.Empty(t, auth)
 }
 
-// fakeProbeStore is an in-memory ProbeStore.
+// fakeProbeStore is an in-memory ProbeStore that keeps the last probe on
+// each node, like the relay_nodes columns.
 type fakeProbeStore struct {
 	mu      sync.Mutex
 	nodes   []relaynode.Node
 	results map[int64]relaynode.Result
 }
 
-func (s *fakeProbeStore) Known(context.Context) ([]relaynode.Node, error) { return s.nodes, nil }
+func (s *fakeProbeStore) Known(context.Context) ([]relaynode.Node, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.nodes), nil
+}
 
 func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Result) error {
 	s.mu.Lock()
@@ -165,6 +171,19 @@ func (s *fakeProbeStore) RecordProbe(_ context.Context, id int64, r relaynode.Re
 		s.results = map[int64]relaynode.Result{}
 	}
 	s.results[id] = r
+	for i := range s.nodes {
+		if s.nodes[i].ID != id {
+			continue
+		}
+		at := time.Now()
+		s.nodes[i].LastProbeAt = &at
+		s.nodes[i].LastProbeOK = r.OK
+		s.nodes[i].LastProbeError = nil
+		if !r.OK {
+			failure := r.Failure
+			s.nodes[i].LastProbeError = &failure
+		}
+	}
 	return nil
 }
 
@@ -230,4 +249,69 @@ func TestProbeAll_should_log_a_repeated_failure_once(t *testing.T) {
 	}
 
 	assert.Equal(t, 1, strings.Count(logs.String(), "relay node probe failed"))
+}
+
+func TestProbeAll_should_not_log_a_repeated_failure_seen_by_another_process(t *testing.T) {
+	srv := lifecycleServer(t, http.StatusServiceUnavailable, "")
+	store := &fakeProbeStore{nodes: []relaynode.Node{{ID: 1, LifecycleURL: srv.URL}}}
+	require.NoError(t, relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), slog.New(slog.DiscardHandler)).ProbeAll(t.Context()))
+	var logs bytes.Buffer
+	other := relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), slog.New(slog.NewTextHandler(&logs, nil)))
+
+	require.NoError(t, other.ProbeAll(t.Context()))
+
+	assert.Empty(t, logs.String())
+}
+
+func TestProbe_should_report_a_refused_connection_with_a_stable_reason(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	p := relaynode.NewProber("", time.Second)
+
+	got := p.Probe(t.Context(), url)
+
+	assert.Equal(t, relaynode.FailureConnection, got.Failure)
+}
+
+func TestProbe_should_report_a_timeout_with_a_stable_reason(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() {
+		close(release)
+		srv.Close()
+	})
+	p := relaynode.NewProber("", 50*time.Millisecond)
+
+	got := p.Probe(t.Context(), srv.URL)
+
+	assert.Equal(t, relaynode.FailureTimeout, got.Failure)
+}
+
+func TestMonitorRun_should_probe_at_once_and_stop_with_its_context(t *testing.T) {
+	srv := lifecycleServer(t, http.StatusOK, activeRelayBody)
+	store := &fakeProbeStore{nodes: []relaynode.Node{{ID: 1, LifecycleURL: srv.URL}}}
+	m := relaynode.NewMonitor(store, relaynode.NewProber("", time.Second), slog.New(slog.DiscardHandler))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		m.Run(ctx, time.Hour)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		return store.results[1].OK
+	}, 5*time.Second, 10*time.Millisecond)
+	cancel()
+
+	assert.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, 5*time.Second, 10*time.Millisecond)
 }

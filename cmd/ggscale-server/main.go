@@ -246,8 +246,12 @@ func newRelayLifecycle(rc *config.RelayConfig, srv *relay.Server) *lifecycle.Con
 }
 
 // embeddedRelayNode is the relay running inside the API server, advertised
-// with no region. It listens on UDP only.
-func embeddedRelayNode(publicIP string, udpPort int) *relaynode.Node {
+// with no region. It advertises urls (RELAY_EMBEDDED_URLS) when set, and
+// otherwise its UDP listener at the public IP.
+func embeddedRelayNode(urls []string, publicIP string, udpPort int) *relaynode.Node {
+	if len(urls) > 0 {
+		return &relaynode.Node{TURNURLs: urls}
+	}
 	return &relaynode.Node{
 		TURNURLs: []string{"turn:" + net.JoinHostPort(publicIP, strconv.Itoa(udpPort)) + "?transport=udp"},
 	}
@@ -546,7 +550,7 @@ func run() error {
 			defer func() { _ = relayServer.Close() }()
 			registerRelayServerMetrics(registry, relayServer)
 			logger.Info("relay server listening", "addr", cfg.RelayBindAddr, "port", cfg.RelayUDPPort, "public_ip", cfg.RelayPublicIP)
-			embedded = embeddedRelayNode(cfg.RelayPublicIP, cfg.RelayUDPPort)
+			embedded = embeddedRelayNode(cfg.RelayEmbeddedURLs, cfg.RelayPublicIP, cfg.RelayUDPPort)
 		}
 		relaySelector = relaynode.NewSelector(relayNodes.Eligible, embedded)
 	}
@@ -580,6 +584,12 @@ func run() error {
 	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, relayMonitor, logger)
 	if stopRiver != nil {
 		defer stopRiver()
+	}
+	if riverClient == nil {
+		// Relay credentials list only probed nodes, so the probe must run
+		// even without River. Each API server then probes on its own.
+		logger.Warn("river unavailable: probing relay nodes in-process")
+		go relayMonitor.Run(appCtx, relaynode.ProbeInterval)
 	}
 	// enqueuePasswordReset inserts the durable delivery job; nil when River
 	// is unavailable so the HTTP layer can fall back.
@@ -902,6 +912,9 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 		Workers: workers,
 		Queues: map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 2},
+			// The relay probe gets its own worker so slow jobs on the
+			// default queue cannot delay it past the eligibility window.
+			jobs.RelayNodeProbeQueue: {MaxWorkers: 1},
 		},
 		PeriodicJobs: riverPeriodicJobs(),
 	})

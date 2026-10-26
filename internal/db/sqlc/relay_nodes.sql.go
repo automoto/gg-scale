@@ -12,7 +12,7 @@ import (
 const createRelayNode = `-- name: CreateRelayNode :one
 INSERT INTO relay_nodes (region, turn_urls, lifecycle_url)
 VALUES ($1, $2::text[], $3)
-RETURNING id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_lifecycle_state, last_active_allocations, created_at, updated_at
+RETURNING id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_probe_error, last_lifecycle_state, last_active_allocations, created_at, updated_at
 `
 
 type CreateRelayNodeParams struct {
@@ -32,6 +32,7 @@ func (q *Queries) CreateRelayNode(ctx context.Context, arg CreateRelayNodeParams
 		&i.State,
 		&i.LastProbeAt,
 		&i.LastProbeOk,
+		&i.LastProbeError,
 		&i.LastLifecycleState,
 		&i.LastActiveAllocations,
 		&i.CreatedAt,
@@ -41,7 +42,7 @@ func (q *Queries) CreateRelayNode(ctx context.Context, arg CreateRelayNodeParams
 }
 
 const listEligibleRelayNodes = `-- name: ListEligibleRelayNodes :many
-SELECT id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_lifecycle_state, last_active_allocations, created_at, updated_at
+SELECT id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_probe_error, last_lifecycle_state, last_active_allocations, created_at, updated_at
 FROM relay_nodes
 WHERE state = 'known'
   AND last_probe_ok
@@ -69,6 +70,7 @@ func (q *Queries) ListEligibleRelayNodes(ctx context.Context, maxAgeSeconds floa
 			&i.State,
 			&i.LastProbeAt,
 			&i.LastProbeOk,
+			&i.LastProbeError,
 			&i.LastLifecycleState,
 			&i.LastActiveAllocations,
 			&i.CreatedAt,
@@ -85,7 +87,7 @@ func (q *Queries) ListEligibleRelayNodes(ctx context.Context, maxAgeSeconds floa
 }
 
 const listKnownRelayNodes = `-- name: ListKnownRelayNodes :many
-SELECT id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_lifecycle_state, last_active_allocations, created_at, updated_at
+SELECT id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_probe_error, last_lifecycle_state, last_active_allocations, created_at, updated_at
 FROM relay_nodes
 WHERE state = 'known'
 ORDER BY id
@@ -108,6 +110,7 @@ func (q *Queries) ListKnownRelayNodes(ctx context.Context) ([]RelayNode, error) 
 			&i.State,
 			&i.LastProbeAt,
 			&i.LastProbeOk,
+			&i.LastProbeError,
 			&i.LastLifecycleState,
 			&i.LastActiveAllocations,
 			&i.CreatedAt,
@@ -124,32 +127,45 @@ func (q *Queries) ListKnownRelayNodes(ctx context.Context) ([]RelayNode, error) 
 }
 
 const listRelayNodes = `-- name: ListRelayNodes :many
-SELECT id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_lifecycle_state, last_active_allocations, created_at, updated_at
+SELECT relay_nodes.id, relay_nodes.region, relay_nodes.turn_urls, relay_nodes.lifecycle_url, relay_nodes.state, relay_nodes.last_probe_at, relay_nodes.last_probe_ok, relay_nodes.last_probe_error, relay_nodes.last_lifecycle_state, relay_nodes.last_active_allocations, relay_nodes.created_at, relay_nodes.updated_at,
+       (state = 'known'
+        AND last_probe_ok
+        AND last_lifecycle_state = 'active'
+        AND last_probe_at > now() - make_interval(secs => $1::double precision))::boolean AS eligible
 FROM relay_nodes
 ORDER BY id
 `
 
-func (q *Queries) ListRelayNodes(ctx context.Context) ([]RelayNode, error) {
-	rows, err := q.db.Query(ctx, listRelayNodes)
+type ListRelayNodesRow struct {
+	RelayNode RelayNode
+	Eligible  bool
+}
+
+// eligible uses the same rule and clock as ListEligibleRelayNodes, so the
+// admin list agrees with what credentials serve.
+func (q *Queries) ListRelayNodes(ctx context.Context, maxAgeSeconds float64) ([]ListRelayNodesRow, error) {
+	rows, err := q.db.Query(ctx, listRelayNodes, maxAgeSeconds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []RelayNode
+	var items []ListRelayNodesRow
 	for rows.Next() {
-		var i RelayNode
+		var i ListRelayNodesRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Region,
-			&i.TurnUrls,
-			&i.LifecycleUrl,
-			&i.State,
-			&i.LastProbeAt,
-			&i.LastProbeOk,
-			&i.LastLifecycleState,
-			&i.LastActiveAllocations,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.RelayNode.ID,
+			&i.RelayNode.Region,
+			&i.RelayNode.TurnUrls,
+			&i.RelayNode.LifecycleUrl,
+			&i.RelayNode.State,
+			&i.RelayNode.LastProbeAt,
+			&i.RelayNode.LastProbeOk,
+			&i.RelayNode.LastProbeError,
+			&i.RelayNode.LastLifecycleState,
+			&i.RelayNode.LastActiveAllocations,
+			&i.RelayNode.CreatedAt,
+			&i.RelayNode.UpdatedAt,
+			&i.Eligible,
 		); err != nil {
 			return nil, err
 		}
@@ -165,15 +181,17 @@ const recordRelayNodeProbe = `-- name: RecordRelayNodeProbe :exec
 UPDATE relay_nodes
 SET last_probe_at = now(),
     last_probe_ok = $1,
-    last_lifecycle_state = $2,
-    last_active_allocations = $3,
+    last_probe_error = $2,
+    last_lifecycle_state = $3,
+    last_active_allocations = $4,
     updated_at = now()
-WHERE id = $4
+WHERE id = $5
   AND state = 'known'
 `
 
 type RecordRelayNodeProbeParams struct {
 	Ok                bool
+	ProbeError        *string
 	LifecycleState    *string
 	ActiveAllocations *int64
 	ID                int64
@@ -185,6 +203,7 @@ type RecordRelayNodeProbeParams struct {
 func (q *Queries) RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) error {
 	_, err := q.db.Exec(ctx, recordRelayNodeProbe,
 		arg.Ok,
+		arg.ProbeError,
 		arg.LifecycleState,
 		arg.ActiveAllocations,
 		arg.ID,
@@ -197,7 +216,7 @@ UPDATE relay_nodes
 SET state = 'retired',
     updated_at = CASE WHEN state = 'retired' THEN updated_at ELSE now() END
 WHERE id = $1
-RETURNING id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_lifecycle_state, last_active_allocations, created_at, updated_at
+RETURNING id, region, turn_urls, lifecycle_url, state, last_probe_at, last_probe_ok, last_probe_error, last_lifecycle_state, last_active_allocations, created_at, updated_at
 `
 
 // Retiring is idempotent and keeps the row. A retired node is never probed
@@ -213,6 +232,7 @@ func (q *Queries) RetireRelayNode(ctx context.Context, id int64) (RelayNode, err
 		&i.State,
 		&i.LastProbeAt,
 		&i.LastProbeOk,
+		&i.LastProbeError,
 		&i.LastLifecycleState,
 		&i.LastActiveAllocations,
 		&i.CreatedAt,

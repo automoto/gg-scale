@@ -195,6 +195,41 @@ func TestValidate_should_accept_relay_issuer_without_relay_urls(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidate_should_accept_embedded_relay_urls(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayEmbeddedURLs = []string{"turn:relay.example.com:3479?transport=udp"}
+
+	err := c.Validate()
+
+	assert.NoError(t, err)
+}
+
+func TestValidate_should_reject_malformed_embedded_relay_urls(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayEmbeddedURLs = []string{"https://relay.example.com"}
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_EMBEDDED_URLS")
+}
+
+func TestValidate_should_reject_embedded_relay_urls_without_public_ip(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayEmbeddedURLs = []string{"turn:relay.example.com:3479?transport=udp"}
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_PUBLIC_IP")
+}
+
 func TestValidate_should_reject_short_platform_admin_token(t *testing.T) {
 	c := baseProd()
 	c.PlatformAdminToken = "short"

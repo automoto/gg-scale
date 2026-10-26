@@ -38,6 +38,16 @@ func TestRelayNodeProbeArgs_should_not_retry(t *testing.T) {
 	assert.Equal(t, 1, RelayNodeProbeArgs{}.InsertOpts().MaxAttempts)
 }
 
+func TestRelayNodeProbeArgs_should_use_its_own_queue(t *testing.T) {
+	assert.Equal(t, RelayNodeProbeQueue, RelayNodeProbeArgs{}.InsertOpts().Queue)
+}
+
+func TestRelayNodeProbeWorker_should_time_out_within_one_interval(t *testing.T) {
+	w := NewRelayNodeProbeWorker(nil)
+
+	assert.Equal(t, 10*time.Second, w.Timeout(nil))
+}
+
 func TestPeriodicRegistrations_player_delete_purge_runs_hourly(t *testing.T) {
 	assert.Equal(t, time.Hour, intervalFor(t, PlayerDeletePurgeKind))
 }

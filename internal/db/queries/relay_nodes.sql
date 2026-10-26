@@ -4,7 +4,13 @@ VALUES (sqlc.arg(region), sqlc.arg(turn_urls)::text[], sqlc.arg(lifecycle_url))
 RETURNING *;
 
 -- name: ListRelayNodes :many
-SELECT *
+-- eligible uses the same rule and clock as ListEligibleRelayNodes, so the
+-- admin list agrees with what credentials serve.
+SELECT sqlc.embed(relay_nodes),
+       (state = 'known'
+        AND last_probe_ok
+        AND last_lifecycle_state = 'active'
+        AND last_probe_at > now() - make_interval(secs => sqlc.arg(max_age_seconds)::double precision))::boolean AS eligible
 FROM relay_nodes
 ORDER BY id;
 
@@ -30,6 +36,7 @@ RETURNING *;
 UPDATE relay_nodes
 SET last_probe_at = now(),
     last_probe_ok = sqlc.arg(ok),
+    last_probe_error = sqlc.narg(probe_error),
     last_lifecycle_state = sqlc.narg(lifecycle_state),
     last_active_allocations = sqlc.narg(active_allocations),
     updated_at = now()

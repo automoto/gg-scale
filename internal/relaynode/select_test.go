@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -157,4 +158,83 @@ func TestSelect_should_include_the_embedded_relay_in_the_fallback(t *testing.T) 
 
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"turn:a:3478", "turn:203.0.113.10:3478?transport=udp"}, got.URLs)
+}
+
+func TestSelect_should_match_the_region_case_insensitively(t *testing.T) {
+	sel := relaynode.NewSelector(fixedSource(
+		node("us-east", "turn:a:3478"),
+		node("eu-west", "turn:b:3478"),
+	), nil)
+
+	got, err := sel.Select(t.Context(), " US-East ")
+
+	require.NoError(t, err)
+	assert.Equal(t, relaynode.Selection{URLs: []string{"turn:a:3478"}, Region: "us-east"}, got)
+}
+
+func TestSelect_should_serve_the_embedded_relay_when_the_source_fails(t *testing.T) {
+	embedded := node("", "turn:203.0.113.10:3478?transport=udp")
+	sel := relaynode.NewSelector(func(context.Context) ([]relaynode.Node, error) { return nil, errors.New("db down") }, &embedded)
+
+	got, err := sel.Select(t.Context(), "us-east")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"turn:203.0.113.10:3478?transport=udp"}, got.URLs)
+}
+
+// countingSource counts its reads.
+type countingSource struct {
+	calls int
+	nodes []relaynode.Node
+}
+
+func (c *countingSource) eligible(context.Context) ([]relaynode.Node, error) {
+	c.calls++
+	return c.nodes, nil
+}
+
+func TestSelect_should_reuse_a_recent_read_of_the_eligible_nodes(t *testing.T) {
+	src := &countingSource{nodes: []relaynode.Node{node("us-east", "turn:a:3478")}}
+	sel := relaynode.NewSelector(src.eligible, nil)
+	now := time.Unix(1000, 0)
+	sel.SetClock(func() time.Time { return now })
+
+	for range 3 {
+		_, err := sel.Select(t.Context(), "us-east")
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 1, src.calls)
+}
+
+func TestSelect_should_read_the_eligible_nodes_again_after_the_cache_expires(t *testing.T) {
+	src := &countingSource{nodes: []relaynode.Node{node("us-east", "turn:a:3478")}}
+	sel := relaynode.NewSelector(src.eligible, nil)
+	now := time.Unix(1000, 0)
+	sel.SetClock(func() time.Time { return now })
+	_, err := sel.Select(t.Context(), "us-east")
+	require.NoError(t, err)
+	now = now.Add(3 * time.Second)
+
+	_, err = sel.Select(t.Context(), "us-east")
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, src.calls)
+}
+
+func TestSelect_should_not_cache_a_failed_read(t *testing.T) {
+	calls := 0
+	sel := relaynode.NewSelector(func(context.Context) ([]relaynode.Node, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("db down")
+		}
+		return []relaynode.Node{node("us-east", "turn:a:3478")}, nil
+	}, nil)
+	_, _ = sel.Select(t.Context(), "us-east")
+
+	got, err := sel.Select(t.Context(), "us-east")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"turn:a:3478"}, got.URLs)
 }

@@ -100,7 +100,15 @@ func TestServer_listens_and_responds_to_v1_healthz(t *testing.T) {
 }
 
 func TestEmbeddedRelayNode_should_advertise_the_udp_listener_without_a_region(t *testing.T) {
-	n := embeddedRelayNode("203.0.113.10", 3478)
+	n := embeddedRelayNode(nil, "203.0.113.10", 3478)
 
 	assert.Equal(t, relaynode.Node{TURNURLs: []string{"turn:203.0.113.10:3478?transport=udp"}}, *n)
+}
+
+func TestEmbeddedRelayNode_should_advertise_the_configured_urls(t *testing.T) {
+	urls := []string{"turn:relay.example.com:3479?transport=udp"}
+
+	n := embeddedRelayNode(urls, "203.0.113.10", 3478)
+
+	assert.Equal(t, urls, n.TURNURLs)
 }

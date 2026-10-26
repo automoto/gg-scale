@@ -326,7 +326,39 @@ func TestRelayNodes_should_mark_a_node_unhealthy_on_401(t *testing.T) {
 	nodes, err := f.store.List(t.Context())
 	require.NoError(t, err)
 	require.Len(t, nodes, 1)
-	assert.Equal(t, []any{id, false}, []any{nodes[0].ID, nodes[0].LastProbeOK})
+	require.NotNil(t, nodes[0].LastProbeError)
+	assert.Equal(t, []any{id, false, relaynode.FailureUnauthorized}, []any{nodes[0].ID, nodes[0].LastProbeOK, *nodes[0].LastProbeError})
+}
+
+func TestRelayNodes_should_clear_the_probe_error_after_a_good_probe(t *testing.T) {
+	f := newRelayNodesFixture(t, "relay-nodes-recover")
+	lc := newFakeLifecycle(t, "active")
+	lc.code.Store(http.StatusServiceUnavailable)
+	f.register(t, "us-east", lc.url(), "turn:a.example.com:3478")
+	f.probe(t)
+	lc.code.Store(http.StatusOK)
+
+	f.probe(t)
+
+	nodes, err := f.store.List(t.Context())
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.Nil(t, nodes[0].LastProbeError)
+}
+
+func TestRelayNodes_should_report_a_stale_node_as_ineligible_in_the_admin_list(t *testing.T) {
+	f := newRelayNodesFixture(t, "relay-nodes-stale-list")
+	id := f.register(t, "us-east", newFakeLifecycle(t, "active").url(), "turn:a.example.com:3478")
+	f.probe(t)
+	_, err := f.c.bootstrapPool.Exec(context.Background(),
+		`UPDATE relay_nodes SET last_probe_at = now() - interval '31 seconds' WHERE id = $1`, id)
+	require.NoError(t, err)
+
+	nodes, err := f.store.List(t.Context())
+
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	assert.False(t, nodes[0].Eligible)
 }
 
 func TestRelayNodes_should_stop_advertising_a_node_whose_last_probe_is_stale(t *testing.T) {
