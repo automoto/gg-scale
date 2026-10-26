@@ -60,6 +60,8 @@ help: ## List available targets
 
 # ─── Go ─────────────────────────────────────────────────────────────────
 
+UNIT_TEST_FLAGS = -race -covermode=atomic -coverprofile=coverage/coverage.out
+
 build: ## Compile all packages
 	go build ./...
 
@@ -71,10 +73,12 @@ test: ## Unit tests with -race
 
 coverage: install-test-reporter ## Unit tests with HTML and Cobertura coverage reports
 	mkdir -p coverage
-	go test -race -covermode=atomic -coverprofile=coverage/coverage.out ./...
+	go test $(UNIT_TEST_FLAGS) ./...
 	$(MAKE) coverage-reports
 
-coverage-reports:
+coverage-reports: ## Generate HTML and Cobertura reports from the filtered coverage profile
+	grep -Ev '(_templ\.go|internal/db/sqlc/|\.pb\.go):' coverage/coverage.out > coverage/coverage.filtered
+	mv coverage/coverage.filtered coverage/coverage.out
 	./bin/gocover-cobertura < coverage/coverage.out > coverage/coverage.xml
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
@@ -83,7 +87,7 @@ install-test-reporter:
 
 test-ci: install-test-reporter ## Unit tests with CI-readable JSON and JUnit reports
 	mkdir -p test-results coverage
-	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- -race -covermode=atomic -coverprofile=coverage/coverage.out ./...
+	./bin/gotestsum --format github-actions --junitfile test-results/junit.xml --jsonfile test-results/go-test.json -- $(UNIT_TEST_FLAGS) ./...
 	$(MAKE) coverage-reports
 
 check-test-suites: ## Verify every tagged test package belongs to a CI lane
