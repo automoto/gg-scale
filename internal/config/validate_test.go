@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -371,4 +373,35 @@ func TestValidateSSO(t *testing.T) {
 			assert.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+func captureDefaultLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &buf
+}
+
+func TestValidate_should_warn_when_probe_token_equals_lifecycle_token(t *testing.T) {
+	logs := captureDefaultLog(t)
+	c := baseProd()
+	c.LifecycleToken = strings.Repeat("l", 32)
+	c.RelayProbeToken = strings.Repeat("l", 32)
+
+	require.NoError(t, c.Validate())
+
+	assert.Contains(t, logs.String(), "RELAY_PROBE_TOKEN equals LIFECYCLE_TOKEN")
+}
+
+func TestValidate_should_not_warn_when_probe_token_differs(t *testing.T) {
+	logs := captureDefaultLog(t)
+	c := baseProd()
+	c.LifecycleToken = strings.Repeat("l", 32)
+	c.RelayProbeToken = strings.Repeat("p", 32)
+
+	require.NoError(t, c.Validate())
+
+	assert.NotContains(t, logs.String(), "RELAY_PROBE_TOKEN equals")
 }

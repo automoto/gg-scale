@@ -5,16 +5,6 @@ import (
 	"time"
 )
 
-// ProbeToken is the bearer token the relay node probe sends: RELAY_PROBE_TOKEN
-// when set, otherwise this server's own LIFECYCLE_TOKEN. Empty sends no
-// header.
-func (c *Config) ProbeToken() string {
-	if c.RelayProbeToken != "" {
-		return c.RelayProbeToken
-	}
-	return c.LifecycleToken
-}
-
 // validateLifecycle checks the lifecycle settings both processes read. The
 // token can drain a node out of its load-balancer pool, so it gets the same
 // length floor as the other shared bearer tokens.

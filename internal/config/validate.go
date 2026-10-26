@@ -63,6 +63,7 @@ func (c *Config) Validate() error {
 	}
 	c.warnLowDBPool()
 	c.warnRequestTimeout()
+	c.warnSharedProbeToken()
 	return nil
 }
 
@@ -326,6 +327,17 @@ func (c *Config) checkAgonesAuth() error {
 // is not — riverpgxv5 does Acquire() then Hijack(), removing that connection
 // from pgxpool tracking, so actual Postgres connections per process are
 // DB_MAX_CONNS + 1 when River is running. Size max_connections accordingly.
+// warnSharedProbeToken flags a probe token equal to this server's own
+// LIFECYCLE_TOKEN. The probe sends its token to every registered
+// lifecycle_url, so that value then reaches every relay host and anyone who
+// can register a node, and it can drain the API servers.
+func (c *Config) warnSharedProbeToken() {
+	if c.RelayProbeToken != "" && c.RelayProbeToken == c.LifecycleToken {
+		slog.Warn("RELAY_PROBE_TOKEN equals LIFECYCLE_TOKEN; give relay nodes their own LIFECYCLE_TOKEN",
+			"hint", "the probe sends RELAY_PROBE_TOKEN to every registered lifecycle_url, so relay hosts and platform admins would hold a token that drains the API servers")
+	}
+}
+
 func (c *Config) warnLowDBPool() {
 	if c.DBMaxConns < 8 && c.FleetBackend != "" {
 		slog.Warn("DB_MAX_CONNS is low for an enabled matchmaker", "value", c.DBMaxConns,

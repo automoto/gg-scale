@@ -25,14 +25,14 @@ On the API servers:
 
 ```sh
 PLATFORM_ADMIN_TOKEN=...            # >= 32 bytes, enables /v1/admin/relay-nodes
-LIFECYCLE_TOKEN=...                 # the same value as the relay nodes
+RELAY_PROBE_TOKEN=...               # the relay nodes' LIFECYCLE_TOKEN
 ```
 
 `RELAY_HEALTH_ADDR` must be reachable from the API servers, because the probe
-reads `GET /lifecycle` there. The probe sends the API server's
-`LIFECYCLE_TOKEN`, so one value across the fleet is enough. To give relay nodes
-their own `LIFECYCLE_TOKEN`, set `RELAY_PROBE_TOKEN` on the API servers to it.
-[operator-tokens.md](operator-tokens.md) lists every token and what it guards.
+reads `GET /lifecycle` there. Use a relay `LIFECYCLE_TOKEN` that differs from
+the API servers' own: the probe sends it to every registered node.
+[operator-tokens.md](operator-tokens.md) lists every token, what it guards and
+what a leak exposes.
 
 ## Ports
 
@@ -93,9 +93,7 @@ span regions. With no eligible node anywhere, the request fails with `503` and
 A node that stops answering, answers non-`2xx`, reports another `role`, or
 reports `draining` stops being listed after its next probe. A node whose probes
 stop entirely drops out once its last good probe is 30 seconds old. A `401`
-means the probe token (`RELAY_PROBE_TOKEN`, or the API server's
-`LIFECYCLE_TOKEN` when that is unset) does not match the node's
-`LIFECYCLE_TOKEN`. The API
+means `RELAY_PROBE_TOKEN` does not match the node's `LIFECYCLE_TOKEN`. The API
 server logs that once per node, not on every probe.
 
 The probe runs as the River job `relay_node_probe` on its own queue, once
@@ -215,10 +213,9 @@ timeout above it.
 `RELAY_URLS` is removed. An API server with it set refuses to start and says
 so. To upgrade:
 
-1. Set `PLATFORM_ADMIN_TOKEN` on the API servers and remove `RELAY_URLS`.
-   Give each relay node a `RELAY_HEALTH_ADDR` the API servers can reach, and
-   the same `LIFECYCLE_TOKEN` as the API servers (or set `RELAY_PROBE_TOKEN`
-   on the API servers to the relay nodes' token).
+1. Set `PLATFORM_ADMIN_TOKEN` and `RELAY_PROBE_TOKEN` on the API servers and
+   remove `RELAY_URLS`. Give each relay node a `RELAY_HEALTH_ADDR` the API
+   servers can reach, and a `LIFECYCLE_TOKEN` equal to `RELAY_PROBE_TOKEN`.
 2. Deploy. Until a node is registered and probed, relay credential requests
    get `503` unless an API server runs an embedded relay.
 3. Register every relay node that used to be in `RELAY_URLS`.

@@ -101,7 +101,7 @@ func validateLifecycleURL(raw string) error {
 		return errors.New("missing host")
 	}
 	if u.User != nil {
-		return errors.New("must not carry credentials; the probe sends LIFECYCLE_TOKEN or RELAY_PROBE_TOKEN")
+		return errors.New("must not carry credentials; set RELAY_PROBE_TOKEN instead")
 	}
 	return checkLiteralHost(u.Hostname())
 }

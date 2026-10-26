@@ -580,7 +580,7 @@ func run() error {
 	}
 	// River stops only through its graceful Stop in stopRiver, so its context
 	// never cancels.
-	relayMonitor := relaynode.NewMonitor(relayNodes, relaynode.NewProber(cfg.ProbeToken(), relaynode.DefaultProbeTimeout), logger)
+	relayMonitor := relaynode.NewMonitor(relayNodes, relaynode.NewProber(cfg.RelayProbeToken, relaynode.DefaultProbeTimeout), logger)
 	riverClient, stopRiver := startRiverJobs(context.WithoutCancel(ctx), pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, relayMonitor, logger)
 	if stopRiver != nil {
 		defer stopRiver()

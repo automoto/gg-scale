@@ -49,7 +49,7 @@ type Result struct {
 	State string
 	// ActiveWork is the active_work read, or nil when none could be read.
 	ActiveWork *int64
-	// Unauthorized is true when the node answered 401: the probe token does
+	// Unauthorized is true when the node answered 401: RELAY_PROBE_TOKEN does
 	// not match the node's LIFECYCLE_TOKEN.
 	Unauthorized bool
 	// Failure is the stable reason OK is false: one of the Failure constants
@@ -226,7 +226,7 @@ func (m *Monitor) logTransition(ctx context.Context, n Node, prior PriorProbe, r
 		return
 	}
 	if r.Unauthorized {
-		m.logger.WarnContext(ctx, "relay node probe unauthorized: the probe token (RELAY_PROBE_TOKEN, or this server's LIFECYCLE_TOKEN when unset) does not match the node's LIFECYCLE_TOKEN",
+		m.logger.WarnContext(ctx, "relay node probe unauthorized: RELAY_PROBE_TOKEN does not match the node's LIFECYCLE_TOKEN",
 			"node_id", n.ID, "lifecycle_url", n.LifecycleURL)
 		return
 	}
