@@ -49,10 +49,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ggscale-server:latest
-    # Covers DRAIN_TIMEOUT (default 30s) plus the shutdown bounds after it:
-    # socket close, HTTP shutdown, matchmaker worker and River. See
+    # Covers DRAIN_TIMEOUT (default 30s) plus the 70s of bounded shutdown steps
+    # after it, with headroom for the unbounded closers. See
     # docs/ops-endpoints.md.
-    stop_grace_period: 90s
+    stop_grace_period: 120s
     depends_on:
       postgres:
         condition: service_healthy

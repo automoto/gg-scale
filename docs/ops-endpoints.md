@@ -92,7 +92,7 @@ supports `LIFECYCLE_TOKEN_FILE` for file-mounted secrets.
 |---|---|---|
 | Draining refuses | New TURN Allocate requests. | New realtime WebSocket upgrades on `/v1/ws`, with `503` and `Retry-After`. |
 | Keeps working | Existing allocations: Refresh, CreatePermission, ChannelBind, and relayed data. | Open WebSockets keep receiving messages. Plain HTTP requests are still served: the load balancer stops sending them once `/readyz` is `503`, and any that still arrive succeed. |
-| `active_work` | Live allocations. | Open realtime WebSockets plus in-flight HTTP requests. |
+| `active_work` | Live allocations, plus admitted Allocate requests still being set up. | Realtime WebSockets, counted from admission until their cleanup finishes, plus in-flight HTTP requests. The lifecycle routes are not counted. |
 | `details` | `active_allocations`, `public_ip`, `transports` | `realtime_connections`, `inflight_requests` |
 
 On the API server the drain check on `/v1/ws` runs before authentication, so a
@@ -132,21 +132,32 @@ shutdown path that follows. Otherwise the runtime kills the process in the
 middle of the drain or before its cleanup runs. The runtime default (10s in
 Docker) is too short for either process.
 
-The relay node needs `DRAIN_TIMEOUT` plus a few seconds. The API server's
-worst case after the drain is up to 5s to close realtime sockets, 10s for
-`http.Server.Shutdown`, 30s for the matchmaker worker and 10s for River, so
-with the default `DRAIN_TIMEOUT=30s` allow about 90s:
+The relay node needs `DRAIN_TIMEOUT` plus a few seconds. The API server runs
+these bounded steps one after another once the drain wait ends:
+
+| Step | Bound |
+|---|---|
+| Close remaining realtime sockets | 5s |
+| `http.Server.Shutdown` | 10s |
+| Matchmaker worker | 30s |
+| River graceful stop | 10s |
+| Realtime connection-cap close | 5s |
+| Rate-limit store close | 10s |
+
+That is 70s after the drain, or 100s with the default `DRAIN_TIMEOUT=30s`. The
+database pool and other closers after that have no bound of their own, so
+leave headroom and allow about 120s:
 
 ```yaml
 # docker compose
 services:
   server:
-    stop_grace_period: 90s
+    stop_grace_period: 120s
 ```
 
 ```yaml
 # Kubernetes pod spec
-terminationGracePeriodSeconds: 90
+terminationGracePeriodSeconds: 120
 ```
 
 ## Metrics
