@@ -526,8 +526,8 @@ func TestInflight_should_release_count_when_request_ends(t *testing.T) {
 	assert.Equal(t, int64(0), inflight.Count())
 }
 
-func TestInflight_should_skip_websocket_upgrades(t *testing.T) {
-	var inflight lifecycle.Inflight
+func TestInflight_should_skip_websocket_upgrades_to_the_socket_route(t *testing.T) {
+	inflight := lifecycle.Inflight{UpgradePath: "/v1/ws"}
 	var during int64
 	h := inflight.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		during = inflight.Count()
@@ -554,4 +554,18 @@ func TestInflight_should_skip_lifecycle_routes(t *testing.T) {
 			assert.Equal(t, int64(0), during)
 		})
 	}
+}
+
+func TestInflight_should_count_upgrade_header_on_other_routes(t *testing.T) {
+	inflight := lifecycle.Inflight{UpgradePath: "/v1/ws"}
+	var during int64
+	h := inflight.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		during = inflight.Count()
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/v1/storage/objects", nil)
+	req.Header.Set("Upgrade", "websocket")
+
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	assert.Equal(t, int64(1), during)
 }

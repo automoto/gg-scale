@@ -21,7 +21,7 @@ import (
 
 func newAPIDrainFixture(t *testing.T) (httpapi.APIWork, *lifecycle.Controller, string) {
 	t.Helper()
-	work := httpapi.APIWork{Realtime: realtime.NewDrain(), Inflight: &lifecycle.Inflight{}}
+	work := httpapi.NewAPIWork()
 	lc := lifecycle.New(lifecycle.Config{Role: "api", Work: work, PollInterval: 5 * time.Millisecond})
 	lc.MarkReady()
 	ws := realtime.ServeWS(realtime.Options{Hub: realtime.NewHub(), Drain: work.Realtime, HeartbeatInterval: time.Hour})

@@ -13,7 +13,6 @@ import (
 
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/lifecycle"
-	"github.com/automoto/gg-scale/internal/realtime"
 )
 
 const apiLifecycleTestToken = "api-lifecycle-token-0123456789abcdef"
@@ -28,7 +27,7 @@ type apiLifecycleFixture struct {
 
 func newAPILifecycleFixture(t *testing.T) apiLifecycleFixture {
 	t.Helper()
-	work := httpapi.APIWork{Realtime: realtime.NewDrain(), Inflight: &lifecycle.Inflight{}}
+	work := httpapi.NewAPIWork()
 	lc := lifecycle.New(lifecycle.Config{
 		Role: "api", Commit: "test", Token: apiLifecycleTestToken, Work: work, Details: work.Details,
 	})
@@ -135,7 +134,7 @@ func TestAPILifecycle_should_not_mount_routes_without_controller(t *testing.T) {
 }
 
 func TestAPIWork_should_drain_realtime_upgrades(t *testing.T) {
-	work := httpapi.APIWork{Realtime: realtime.NewDrain(), Inflight: &lifecycle.Inflight{}}
+	work := httpapi.NewAPIWork()
 
 	work.BeginDrain()
 
@@ -143,7 +142,7 @@ func TestAPIWork_should_drain_realtime_upgrades(t *testing.T) {
 }
 
 func TestAPIWork_should_resume_realtime_upgrades(t *testing.T) {
-	work := httpapi.APIWork{Realtime: realtime.NewDrain(), Inflight: &lifecycle.Inflight{}}
+	work := httpapi.NewAPIWork()
 	work.BeginDrain()
 
 	work.EndDrain()
