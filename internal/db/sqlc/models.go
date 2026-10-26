@@ -807,6 +807,20 @@ type RealtimeTicket struct {
 	ExpiresAt    pgtype.Timestamptz
 }
 
+type RelayNode struct {
+	ID                    int64
+	Region                string
+	TurnUrls              []string
+	LifecycleUrl          string
+	State                 string
+	LastProbeAt           pgtype.Timestamptz
+	LastProbeOk           bool
+	LastLifecycleState    *string
+	LastActiveAllocations *int64
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+}
+
 type RelaySessionUsage struct {
 	TenantID    int64
 	Month       pgtype.Date

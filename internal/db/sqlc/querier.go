@@ -207,6 +207,7 @@ type Querier interface {
 	CreatePlayerSession(ctx context.Context, arg CreatePlayerSessionParams) (int64, error)
 	CreateProjectForTenant(ctx context.Context, name string) (CreateProjectForTenantRow, error)
 	CreateRealtimeTicket(ctx context.Context, arg CreateRealtimeTicketParams) error
+	CreateRelayNode(ctx context.Context, arg CreateRelayNodeParams) (RelayNode, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (CreateSessionRow, error)
 	// Submit a tenant change request. The pending-unique index rejects a second
 	// open request of the same kind/feature (surfaced as a friendly message).
@@ -674,6 +675,9 @@ type Querier interface {
 	// job's clock — the same instant it computes the next boundary from, so the
 	// due filter and the new boundary can never disagree.
 	ListDueLeaderboardResets(ctx context.Context, asOf pgtype.Timestamptz) ([]ListDueLeaderboardResetsRow, error)
+	// Eligible: known, last probe succeeded, reported active, and probed within
+	// the freshness window.
+	ListEligibleRelayNodes(ctx context.Context, maxAgeSeconds float64) ([]RelayNode, error)
 	// Name, usage, class, quota overrides, and last-notified threshold for every
 	// quota-enforced tenant. Read cross-tenant by the storage-warn River job
 	// (bootstrap tx).
@@ -696,6 +700,7 @@ type Querier interface {
 	// plus RLS ensure a player only ever reads signals addressed to them, and the
 	// id > after_id cursor makes repeat polls return only new signals.
 	ListGameSessionSignalsForRecipient(ctx context.Context, arg ListGameSessionSignalsForRecipientParams) ([]ListGameSessionSignalsForRecipientRow, error)
+	ListKnownRelayNodes(ctx context.Context) ([]RelayNode, error)
 	// Finished periods, newest first, keyset-paginated on the period number.
 	ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboardPeriodsParams) ([]ListLeaderboardPeriodsRow, error)
 	ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error)
@@ -754,6 +759,7 @@ type Querier interface {
 	// be placed in a concrete region); non-fleet modes mix regions inside one
 	// bucket and the worker applies the soft-region grouping rules in Go.
 	ListReadyMatchmakerBuckets(ctx context.Context) ([]ListReadyMatchmakerBucketsRow, error)
+	ListRelayNodes(ctx context.Context) ([]RelayNode, error)
 	ListSettingsRevisions(ctx context.Context, arg ListSettingsRevisionsParams) ([]ListSettingsRevisionsRow, error)
 	ListStorageObjects(ctx context.Context, arg ListStorageObjectsParams) ([]ListStorageObjectsRow, error)
 	// Verified emails of a tenant's owner/admin members, for operational notices
@@ -855,6 +861,10 @@ type Querier interface {
 	// version matches expected. RETURNING NULL row on mismatch.
 	PutStorageObjectIfMatch(ctx context.Context, arg PutStorageObjectIfMatchParams) (PutStorageObjectIfMatchRow, error)
 	RecordControlPanelLoginSuccess(ctx context.Context, id int64) error
+	// Stores what the probe read; a probe that read nothing clears the lifecycle
+	// columns. The state filter keeps a probe that raced a retire from touching
+	// the retired row.
+	RecordRelayNodeProbe(ctx context.Context, arg RecordRelayNodeProbeParams) error
 	// Single use: the row is deleted as it is read. Runs with no tenant set.
 	RedeemRealtimeTicket(ctx context.Context, ticketHash []byte) (RedeemRealtimeTicketRow, error)
 	ReleaseAllocation(ctx context.Context, id int64) error
@@ -941,6 +951,9 @@ type Querier interface {
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error
+	// Retiring is idempotent and keeps the row. A retired node is never probed
+	// or advertised again.
+	RetireRelayNode(ctx context.Context, id int64) (RelayNode, error)
 	// Un-claim whatever the claim still holds without penalty: tickets that
 	// didn't fit a group this pass simply go back to waiting.
 	ReturnMatchmakerClaim(ctx context.Context, claimID pgtype.UUID) (int64, error)
