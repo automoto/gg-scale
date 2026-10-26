@@ -43,7 +43,7 @@ See `docs/ARCHITECTURE.md` for what's actually running.
 - Run `make templ-generate` and commit the regenerated `*_templ.go` files
   after changing a `.templ` file, and whenever the `github.com/a-h/templ`
   version in `go.mod` changes. Dependabot bumps it without regenerating, so
-  regenerate on its branch before merging.
+  regenerate on its branch before merging. CI fails when they are out of date.
 - Open a PR; CI runs lint and unit tests first, then runs integration and
   end-to-end tests concurrently on separate Linux runners.
 

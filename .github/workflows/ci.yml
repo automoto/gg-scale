@@ -41,6 +41,15 @@ jobs:
       - name: Verify end-to-end buckets
         run: make check-e2e-buckets
 
+      - name: Verify generated templ files
+        run: |
+          make templ-generate
+          if [ -n "$(git status --porcelain -- '*_templ.go')" ]; then
+            git status --short -- '*_templ.go'
+            echo "::error::Generated templ files are out of date. Run make templ-generate and commit the result."
+            exit 1
+          fi
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
