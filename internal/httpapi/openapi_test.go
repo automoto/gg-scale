@@ -15,6 +15,8 @@ import (
 // guarding the generated spec against silent drift from the handlers.
 var expectedV1Paths = []string{
 	"/v1/account/remote-addrs",
+	"/v1/admin/relay-nodes",
+	"/v1/admin/relay-nodes/{id}/retire",
 	"/v1/auth/anonymous",
 	"/v1/auth/custom-token",
 	"/v1/auth/delete",

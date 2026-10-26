@@ -187,16 +187,13 @@ type Config struct {
 	// link-local/ULA peers. Default false (refuse private peers); enable only
 	// for a trusted self-host relay bridging private peers.
 	RelayAllowPrivatePeers bool `env:"RELAY_ALLOW_PRIVATE_PEERS" envDefault:"false"`
-	// RelayURLs is the comma-separated list of TURN/TURNS URIs clients dial,
-	// reported verbatim in every issued credential set. Required when the relay
-	// credential issuer is enabled (FEATURE_P2P_RELAY_ENABLED with a shared
-	// secret): without it clients receive credentials but no address to reach.
-	// Points at the relay VM(s); list every transport so client ICE can fall
-	// back when UDP is blocked, e.g.
-	// "turn:relay-us-east.ggscale.io:3478?transport=udp,turns:relay-us-east.ggscale.io:5349?transport=tcp".
-	RelayURLs     []string `env:"RELAY_URLS"`
-	RelaySTUNURLs []string `env:"RELAY_STUN_URLS"`
-	DatabaseURL   string   `env:"DATABASE_URL,required" envFile:"true"`
+	// RelayProbeToken is sent as "Authorization: Bearer <token>" when the
+	// relay node probe reads a registered node's GET /lifecycle. It must
+	// match the relay nodes' LIFECYCLE_TOKEN. Empty sends no header.
+	RelayProbeToken string   `env:"RELAY_PROBE_TOKEN" envFile:"true"`
+	RelaySTUNURLs   []string `env:"RELAY_STUN_URLS"`
+
+	DatabaseURL string `env:"DATABASE_URL,required" envFile:"true"`
 	// DBMigrateURL is an elevated DSN used only to apply schema
 	// migrations at startup (DDL, CREATE ROLE, FORCE RLS, CREATE POLICY).
 	// It is required in production; outside production, empty falls back to
@@ -286,6 +283,11 @@ type Config struct {
 	// exist on a self-host deployment. Deploys that enable it must
 	// bind/firewall it to a private network.
 	EntitlementAPIEnabled bool `env:"ENTITLEMENT_API_ENABLED" envDefault:"false"`
+	// PlatformAdminToken, when set (>= 32 bytes), mounts the platform-admin
+	// API (/v1/admin/*) behind "Authorization: Bearer <token>". Empty leaves
+	// those routes unmounted.
+	PlatformAdminToken string `env:"PLATFORM_ADMIN_TOKEN" envFile:"true"`
+
 	// EntitlementAPIToken pins the entitlement API bearer token (>= 32 chars).
 	// Empty auto-generates one into server_secrets on first boot (zero-config
 	// pattern shared with TWO_FACTOR_ENC_KEY). Supports the _FILE convention.

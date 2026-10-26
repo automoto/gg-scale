@@ -82,20 +82,6 @@ func TestVerifyRejectsExpiredAndMalformed(t *testing.T) {
 	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid, "non-numeric expiry rejected")
 }
 
-func TestIssueIncludesConfiguredURLs(t *testing.T) {
-	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
-	urls := []string{
-		"turn:relay.example.com:3478?transport=udp",
-		"turns:relay.example.com:5349?transport=tcp",
-	}
-	issuer.SetURLs(urls)
-
-	creds, err := issuer.Issue(1, 42)
-
-	require.NoError(t, err)
-	assert.Equal(t, urls, creds.URLs)
-}
-
 func TestIssueIncludesConfiguredSTUNURLs(t *testing.T) {
 	issuer := relay.NewIssuer(strings.Repeat("a", 32), "realm", time.Minute)
 	issuer.SetSTUNURLs([]string{"stun:relay.example.com:3478"})

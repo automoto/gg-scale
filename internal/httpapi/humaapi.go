@@ -93,6 +93,12 @@ func newHumaConfig(version string) huma.Config {
 			Name:        "X-Session-Token",
 			Description: "Player session JWT issued by the /v1/auth endpoints.",
 		},
+		"PlatformAdminToken": {
+			Type:   "http",
+			Scheme: "bearer",
+			Description: "The server's PLATFORM_ADMIN_TOKEN, held by the platform operator. Game Project keys are refused. " +
+				"The /v1/admin routes are not mounted when the token is unset.",
+		},
 	}
 	// Tags group the operations into feature sections in the rendered docs.
 	// The order here is the order a reader sees them.
@@ -111,6 +117,7 @@ func newHumaConfig(version string) huma.Config {
 		{Name: "Game Server Fleet", Description: "Dedicated-server heartbeat and fleet listing. Beta."},
 		{Name: "Session Verification", Description: "Server-tier check of a player session token."},
 		{Name: "Health", Description: "Liveness probe."},
+		{Name: "Platform Admin", Description: "Operator API for the platform itself, such as relay node registration. Not for game clients or servers."},
 	}
 	return cfg
 }

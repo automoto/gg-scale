@@ -153,6 +153,15 @@ type Deps struct {
 
 	// RelayIssuer mints TURN-REST credentials. nil disables /v1/relay/*.
 	RelayIssuer *relay.Issuer
+	// RelayNodes picks the relay URLs each credential set lists. nil lists
+	// none, so credential requests get 503.
+	RelayNodes RelayNodeSelector
+	// RelayNodeAdmin backs the platform-admin relay node routes. They mount
+	// only when it and PlatformAdminToken are both set.
+	RelayNodeAdmin RelayNodeAdmin
+	// PlatformAdminToken guards the platform-admin API (/v1/admin/*). Empty
+	// leaves it unmounted.
+	PlatformAdminToken string
 	// RelayMeter enforces the per-class monthly relay-session allowance at
 	// credential issuance. nil disables metering (unit tests).
 	RelayMeter *relaymeter.Meter
@@ -335,6 +344,13 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
 		}
 		registerHealthz(groupAPI(r, humaCfg), d)
+		// Platform-admin API: a static operator token, not a tenant key.
+		if d.PlatformAdminToken != "" && d.RelayNodeAdmin != nil {
+			r.Group(func(r chi.Router) {
+				r.Use(func(next http.Handler) http.Handler { return lifecycle.RequireBearer(d.PlatformAdminToken, next) })
+				registerAdminRelayNodes(groupAPI(r, humaCfg), d)
+			})
+		}
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
 		// control panel and player surfaces. Mounted unconditionally so player
 		// pages stay styled even when the control panel is disabled.

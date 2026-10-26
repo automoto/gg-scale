@@ -71,6 +71,9 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, ok := envMap["RELAY_URLS"]; ok {
+		return nil, errors.New("RELAY_URLS was removed: register relay nodes with POST /v1/admin/relay-nodes instead (see docs/relay-ops.md), then unset RELAY_URLS")
+	}
 	cfg := &Config{}
 	if err := env.ParseWithOptions(cfg, env.Options{Environment: envMap}); err != nil {
 		return nil, renameParseErrors(err)
@@ -163,7 +166,6 @@ func (c *Config) normalize() {
 	c.ControlPanelEnabled = !c.ControlPanelDisabled
 	c.CORSAllowedOrigins = normalizeCSV(c.CORSAllowedOrigins)
 	c.TrustedProxyCIDRs = normalizeCSV(c.TrustedProxyCIDRs)
-	c.RelayURLs = normalizeCSV(c.RelayURLs)
 	c.RelaySTUNURLs = normalizeCSV(c.RelaySTUNURLs)
 }
 

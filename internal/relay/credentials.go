@@ -32,14 +32,17 @@ var ErrCredentialsExpired = errors.New("relay: credentials expired")
 // (unparseable username, unknown key id, HMAC mismatch).
 var ErrCredentialsInvalid = errors.New("relay: credentials invalid")
 
-// Credentials are the values returned to a client. URLs is the operator-
-// provided list of TURN URI strings the client should dial.
+// Credentials are the values returned to a client. URLs are the TURN URIs of
+// the relay nodes the client should dial, and Region is the region they were
+// chosen from, or "" when they span regions. The API server fills both from
+// the relay node registry; Issue leaves them empty.
 type Credentials struct {
 	Username   string   `json:"username" example:"1767225600:3:42:k1"`
 	Password   string   `json:"password" example:"dGVzdC1obWFjLXNhbXBsZS12YWx1ZQ=="`
 	TTLSeconds int64    `json:"ttl" example:"600"`
 	Realm      string   `json:"realm" example:"ggscale"`
 	URLs       []string `json:"urls,omitempty" example:"turn:relay.example.com:3478?transport=udp"`
+	Region     string   `json:"region" example:"us-east"`
 	STUNURLs   []string `json:"stun_urls,omitempty" example:"stun:stun.example.com:3478"`
 }
 
@@ -56,7 +59,6 @@ type Issuer struct {
 	byKID    map[string]secretEntry
 	realm    string
 	ttl      time.Duration
-	urls     []string
 	stunURLs []string
 	now      func() time.Time
 }
@@ -96,9 +98,6 @@ func kidFor(secret string) string {
 	return hex.EncodeToString(sum[:4])
 }
 
-// SetURLs sets the list of TURN URIs reported in issued credentials.
-func (i *Issuer) SetURLs(urls []string) { i.urls = urls }
-
 // SetSTUNURLs sets the discovery-only STUN URIs returned alongside TURN
 // credentials so WebRTC clients can gather direct server-reflexive candidates.
 func (i *Issuer) SetSTUNURLs(urls []string) { i.stunURLs = urls }
@@ -117,7 +116,6 @@ func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
 		Password:   passwordWith(active.key, username),
 		TTLSeconds: int64(i.ttl.Seconds()),
 		Realm:      i.realm,
-		URLs:       i.urls,
 		STUNURLs:   i.stunURLs,
 	}, nil
 }

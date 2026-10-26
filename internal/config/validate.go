@@ -92,6 +92,12 @@ func (c *Config) checkSecretLengths() error {
 	if c.EntitlementAPIToken != "" && len(c.EntitlementAPIToken) < 32 {
 		return fmt.Errorf("ENTITLEMENT_API_TOKEN must be >= 32 bytes when set (got %d)", len(c.EntitlementAPIToken))
 	}
+	if c.PlatformAdminToken != "" && len(c.PlatformAdminToken) < 32 {
+		return fmt.Errorf("PLATFORM_ADMIN_TOKEN must be >= 32 bytes when set (got %d)", len(c.PlatformAdminToken))
+	}
+	if c.RelayProbeToken != "" && len(c.RelayProbeToken) < 32 {
+		return fmt.Errorf("RELAY_PROBE_TOKEN must be >= 32 bytes when set (got %d)", len(c.RelayProbeToken))
+	}
 	return nil
 }
 
@@ -113,11 +119,10 @@ func (c *Config) checkFeatureSwitches() error {
 	return nil
 }
 
-// checkRelay enforces the relay-issuer invariant: a node that mints relay
-// credentials must tell clients where to dial. The issuer is built only when
-// the feature is on and a shared secret is set (cmd/ggscale-server), so the
-// RELAY_URLS requirement is scoped to exactly that case — a feature-enabled
-// node without a secret issues nothing and needs no URLs.
+// checkRelay validates the relay settings of a node that issues relay
+// credentials. The issuer is built only when the feature is on and a shared
+// secret is set (cmd/ggscale-server), so the checks are scoped to that case.
+// The relay URLs clients dial come from the relay node registry, not config.
 func (c *Config) checkRelay() error {
 	if !c.FeatureP2PRelayEnabled || c.RelaySharedSecret == "" {
 		return nil
@@ -125,14 +130,6 @@ func (c *Config) checkRelay() error {
 	if c.RelayPublicIP != "" {
 		if err := validateRelayPublicIP(c.RelayPublicIP); err != nil {
 			return err
-		}
-	}
-	if len(c.RelayURLs) == 0 {
-		return fmt.Errorf("RELAY_URLS must list at least one turn:/turns: URI when the relay credential issuer is enabled; clients receive credentials but no address to dial without it")
-	}
-	for _, raw := range c.RelayURLs {
-		if err := validateTURNURI(raw); err != nil {
-			return fmt.Errorf("RELAY_URLS %q: %w", raw, err)
 		}
 	}
 	for _, raw := range c.RelaySTUNURLs {
@@ -156,27 +153,6 @@ func validateSTUNURI(raw string) error {
 		return fmt.Errorf("must use the stun: or stuns: scheme")
 	}
 	if u.Opaque == "" && u.Host == "" {
-		return fmt.Errorf("missing host")
-	}
-	return nil
-}
-
-// validateTURNURI accepts the turn:/turns: URI forms clients dial. TURN URIs
-// are opaque (turn:host:port?transport=udp), so the host lands in Opaque
-// rather than Host after url.Parse.
-func validateTURNURI(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return err
-	}
-	if u.Scheme != "turn" && u.Scheme != "turns" {
-		return fmt.Errorf("must use the turn: or turns: scheme")
-	}
-	host := u.Opaque
-	if host == "" {
-		host = u.Host
-	}
-	if host == "" {
 		return fmt.Errorf("missing host")
 	}
 	return nil
