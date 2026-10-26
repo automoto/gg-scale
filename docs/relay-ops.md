@@ -66,6 +66,13 @@ full contract is in [ops-endpoints.md](ops-endpoints.md).
    allocations, then closes them and exits `0`. Set the container stop timeout
    above `DRAIN_TIMEOUT`.
 
+> **Upgrading an existing relay:** the relay used to exit as soon as it got
+> `SIGTERM`. It now waits up to `DRAIN_TIMEOUT` (default `30s`) while any
+> allocation is live, which is almost always. With the runtime's default stop
+> timeout (10s in Docker) the process is killed during that wait. Raise the
+> stop timeout above `DRAIN_TIMEOUT`, or set `DRAIN_TIMEOUT` lower if you
+> drain relays through `POST /lifecycle/drain` before stopping them.
+
 To cancel instead, `POST /lifecycle/resume` puts the node back into service
 without a restart.
 

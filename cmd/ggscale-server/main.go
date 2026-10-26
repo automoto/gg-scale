@@ -217,7 +217,8 @@ func runRelayCommand() error {
 	lc.MarkReady()
 
 	<-ctx.Done()
-	// Restore default signal handling so a second SIGTERM ends the drain wait.
+	// Restore default signal handling: a second SIGTERM or SIGINT kills the
+	// process at once and skips the rest of shutdown.
 	stop()
 	logger.Info("relay draining", "drain_timeout", rc.DrainTimeout.String(), "active_allocations", srv.ActiveAllocations())
 	remaining := lc.Shutdown(rc.DrainTimeout)
@@ -787,7 +788,8 @@ func run() error {
 	case err := <-errCh:
 		return err
 	}
-	// Restore default signal handling so a second SIGTERM ends the drain wait.
+	// Restore default signal handling: a second SIGTERM or SIGINT kills the
+	// process at once and skips the rest of shutdown.
 	stop()
 
 	drainRealtime(lc, apiWork, cfg.DrainTimeout)

@@ -49,10 +49,10 @@ services:
       context: .
       dockerfile: Dockerfile
     image: ggscale-server:latest
-    # Above DRAIN_TIMEOUT (default 30s) so SIGTERM can finish draining open
-    # realtime sockets before the runtime kills the process. See
+    # Covers DRAIN_TIMEOUT (default 30s) plus the shutdown bounds after it:
+    # socket close, HTTP shutdown, matchmaker worker and River. See
     # docs/ops-endpoints.md.
-    stop_grace_period: 45s
+    stop_grace_period: 90s
     depends_on:
       postgres:
         condition: service_healthy

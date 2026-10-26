@@ -30,7 +30,7 @@ starting ──▶ active ◀──▶ draining ──▶ stopping
 | `starting` | The process is booting and is not ready for traffic. |
 | `active` | Ready. Accepts new work. |
 | `draining` | Refuses new work. Work already in flight continues. Entered by `POST /lifecycle/drain` or by `SIGTERM`. |
-| `stopping` | The `SIGTERM` drain wait ended and the process is shutting down. It cannot be resumed. |
+| `stopping` | The `SIGTERM` drain wait ended and the process is shutting down. |
 
 State lives in memory only. A restarted process starts in `starting` and
 becomes `active` once its listeners are up, even if it was draining before.
@@ -42,7 +42,7 @@ becomes `active` once its listeners are up, even if it was draining before.
 | `GET /readyz` | open | `200` in `active`. `503` in `starting`, `draining` and `stopping`. The body is the state name. |
 | `GET /lifecycle` | bearer `LIFECYCLE_TOKEN` when set, else open | The JSON document below. |
 | `POST /lifecycle/drain` | bearer `LIFECYCLE_TOKEN`, required | Moves to `draining`. Idempotent: a repeat returns `200` and changes nothing. |
-| `POST /lifecycle/resume` | bearer `LIFECYCLE_TOKEN`, required | Moves back to `active`. Idempotent. Returns `409` once the process is `stopping`. |
+| `POST /lifecycle/resume` | bearer `LIFECYCLE_TOKEN`, required | Moves back to `active`. Idempotent. Returns `409` once `SIGTERM` has been received, including during the drain wait. |
 | `GET /healthz` (relay), `GET /v1/healthz` (API) | open | Liveness only. `200` while the process runs, in every state. |
 
 Both `POST` routes return the same JSON as `GET /lifecycle`.
@@ -119,7 +119,9 @@ WebSockets with close code `1001 Going Away` before `http.Server.Shutdown`
 runs, so clients reconnect to another node. The relay node closes its remaining
 TURN allocations when the TURN server shuts down.
 
-A second `SIGTERM` during the wait ends the process immediately.
+A second `SIGTERM` (or `SIGINT`) during the wait kills the process at once.
+The rest of shutdown is skipped: open sockets get no `1001` and deferred
+cleanup does not run.
 
 `DRAIN_TIMEOUT` is a Go duration such as `30s` or `2m`. The default is `30s`.
 
@@ -127,18 +129,24 @@ A second `SIGTERM` during the wait ends the process immediately.
 
 Set the container stop timeout above `DRAIN_TIMEOUT`, with room for the
 shutdown path that follows. Otherwise the runtime kills the process in the
-middle of the drain. For example, with the default `DRAIN_TIMEOUT=30s`:
+middle of the drain or before its cleanup runs. The runtime default (10s in
+Docker) is too short for either process.
+
+The relay node needs `DRAIN_TIMEOUT` plus a few seconds. The API server's
+worst case after the drain is up to 5s to close realtime sockets, 10s for
+`http.Server.Shutdown`, 30s for the matchmaker worker and 10s for River, so
+with the default `DRAIN_TIMEOUT=30s` allow about 90s:
 
 ```yaml
 # docker compose
 services:
   server:
-    stop_grace_period: 45s
+    stop_grace_period: 90s
 ```
 
 ```yaml
 # Kubernetes pod spec
-terminationGracePeriodSeconds: 45
+terminationGracePeriodSeconds: 90
 ```
 
 ## Metrics
