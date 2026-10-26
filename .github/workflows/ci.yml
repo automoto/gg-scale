@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    # Release tags run the full suite; publish-image then pushes to GHCR.
+    # Release tags only run publish-image (to GHCR); the suites run on main and PRs.
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -23,6 +23,7 @@ jobs:
 
   lint:
     name: golangci-lint
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -47,6 +48,7 @@ jobs:
 
   test:
     name: Unit tests
+    if: github.ref_type != 'tag'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,6 +74,7 @@ jobs:
 
   integration:
     name: Integration tests
+    if: github.ref_type != 'tag'
     needs: [lint, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -99,6 +102,7 @@ jobs:
 
   end-to-end:
     name: End-to-end tests (${{ matrix.bucket }})
+    if: github.ref_type != 'tag'
     needs: [lint, test]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -148,10 +152,8 @@ jobs:
 
   publish-image:
     name: Publish release image
-    # Skipped automatically when any needed job fails or is skipped, so a red suite
-    # or a non-release ref never reaches GHCR. workflow_dispatch on a tag ref does
-    # not publish.
-    needs: [lint, test, integration, end-to-end]
+    # Runs on stable release tags only, without the test suites (they run on main
+    # and PRs). workflow_dispatch on a tag ref does not publish.
     if: >-
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/v') &&
