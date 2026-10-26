@@ -77,8 +77,7 @@ coverage: install-test-reporter ## Unit tests with native Go and HTML coverage r
 	$(MAKE) coverage-reports
 
 coverage-reports: ## Generate an HTML report from the filtered native Go coverage profile
-	grep -Ev '(_templ\.go|internal/db/sqlc/|\.pb\.go):' coverage/coverage.out > coverage/coverage.filtered
-	mv coverage/coverage.filtered coverage/coverage.out
+	./scripts/filter-coverage.sh coverage/coverage.out
 	go tool cover -html=coverage/coverage.out -o coverage/coverage.html
 
 install-test-reporter:
