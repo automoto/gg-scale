@@ -35,6 +35,11 @@ type Config struct {
 	// production; without it, an empty MetricsAuthToken refuses to boot.
 	MetricsAuthDisabled bool `env:"METRICS_AUTH_DISABLED" envDefault:"false"`
 
+	// LifecycleToken and DrainTimeout are the process lifecycle settings
+	// shared with RelayConfig; see internal/lifecycle.
+	LifecycleToken string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
+	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"30s"`
+
 	// FeatureFleetEnabled is the startup kill switch for dedicated game-server
 	// fleets. Defaults false: no fleet manager is built and every fleet entry
 	// point refuses regardless of FleetBackend. Must be true for FleetBackend
