@@ -187,9 +187,11 @@ type Config struct {
 	// link-local/ULA peers. Default false (refuse private peers); enable only
 	// for a trusted self-host relay bridging private peers.
 	RelayAllowPrivatePeers bool `env:"RELAY_ALLOW_PRIVATE_PEERS" envDefault:"false"`
-	// RelayProbeToken is sent as "Authorization: Bearer <token>" when the
-	// relay node probe reads a registered node's GET /lifecycle. It must
-	// match the relay nodes' LIFECYCLE_TOKEN. Empty sends no header.
+	// RelayProbeToken overrides the bearer token the relay node probe sends
+	// to a registered node's GET /lifecycle. Empty sends LifecycleToken, so
+	// one LIFECYCLE_TOKEN serves the whole fleet; set this only to give the
+	// relay nodes a different LIFECYCLE_TOKEN from the API servers. See
+	// ProbeToken.
 	RelayProbeToken string `env:"RELAY_PROBE_TOKEN" envFile:"true"`
 	// RelayEmbeddedURLs overrides the TURN URIs advertised for the relay
 	// embedded through RELAY_PUBLIC_IP, for example when its UDP port is

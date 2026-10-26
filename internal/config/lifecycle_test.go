@@ -149,3 +149,27 @@ func TestLoad_should_read_lifecycle_token(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, strings.Repeat("t", 32), cfg.LifecycleToken)
 }
+
+func TestProbeToken_should_default_to_the_lifecycle_token(t *testing.T) {
+	c := config.Config{LifecycleToken: strings.Repeat("l", 32)}
+
+	got := c.ProbeToken()
+
+	assert.Equal(t, strings.Repeat("l", 32), got)
+}
+
+func TestProbeToken_should_prefer_the_relay_probe_token(t *testing.T) {
+	c := config.Config{LifecycleToken: strings.Repeat("l", 32), RelayProbeToken: strings.Repeat("p", 32)}
+
+	got := c.ProbeToken()
+
+	assert.Equal(t, strings.Repeat("p", 32), got)
+}
+
+func TestProbeToken_should_be_empty_without_either_token(t *testing.T) {
+	var c config.Config
+
+	got := c.ProbeToken()
+
+	assert.Empty(t, got)
+}

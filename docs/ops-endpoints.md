@@ -56,7 +56,9 @@ Both `POST` routes return the same JSON as `GET /lifecycle`.
   unconfigured node cannot be drained by anyone.
 
 The token must be at least 32 bytes, for example `openssl rand -hex 32`. It
-supports `LIFECYCLE_TOKEN_FILE` for file-mounted secrets.
+supports `LIFECYCLE_TOKEN_FILE` for file-mounted secrets. API servers also send
+it when they probe relay nodes, unless `RELAY_PROBE_TOKEN` is set. See
+[operator-tokens.md](operator-tokens.md) for every operator token.
 
 ### JSON
 
