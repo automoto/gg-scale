@@ -365,6 +365,11 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// appCtx scopes the long-lived background loops. It outlives the signal so
+	// sockets and jobs keep working during the SIGTERM drain wait, and is
+	// cancelled once the HTTP server has shut down.
+	appCtx, cancelApp := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelApp()
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector())
@@ -509,12 +514,12 @@ func run() error {
 	if fleetCloser != nil {
 		defer func() { _ = fleetCloser.Close() }()
 	}
-	pluginInfo := pluginInfoFromCloser(ctx, fleetMgr, fleetCloser)
+	pluginInfo := pluginInfoFromCloser(appCtx, fleetMgr, fleetCloser)
 
 	// The relay carries realtime messages to players whose socket is on
 	// another server host.
 	hub := realtime.NewHub().WithRelay(appPool)
-	go hub.RunRelay(ctx)
+	go hub.RunRelay(appCtx)
 
 	var relayIssuer *relay.Issuer
 	if !cfg.FeatureP2PRelayEnabled {
@@ -558,7 +563,7 @@ func run() error {
 	var serverListRegistry *serverlist.Registry
 	if cfg.FeatureFleetEnabled {
 		serverListRegistry = serverlist.New(15 * time.Second)
-		go serverListRegistry.RunGC(ctx, 10*time.Second)
+		go serverListRegistry.RunGC(appCtx, 10*time.Second)
 	}
 
 	// Background jobs (River). Expired game-session/invite cleanup runs as a
@@ -572,7 +577,7 @@ func run() error {
 		MailFrom: cfg.MailFrom,
 		BaseURL:  cfg.ControlPanelBaseURL,
 	}
-	riverClient, stopRiver := startRiverJobs(ctx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
+	riverClient, stopRiver := startRiverJobs(appCtx, pool, appPool, fleetMgr, m, cfg.MailFrom, resetDeps, cfg.PlayerDeleteGracePeriod, logger)
 	if stopRiver != nil {
 		defer stopRiver()
 	}
@@ -590,7 +595,7 @@ func run() error {
 		WithMaxUnclaimedFleetAllocations(cfg.MatchmakerMaxUnclaimedFleetAllocs).
 		WithPartyEvents(hub)
 	workerDone := make(chan struct{})
-	workerCtx, cancelWorker := context.WithCancel(ctx)
+	workerCtx, cancelWorker := context.WithCancel(appCtx)
 	defer cancelWorker()
 	// The matchmaker worker always runs: match-only tickets need no fleet.
 	// Without a fleet backend the allocator stays nil and fleet buckets
@@ -623,6 +628,21 @@ func run() error {
 		defer close(workerDone)
 		worker.Run(workerCtx)
 	}()
+
+	// Lifecycle contract: draining refuses new realtime upgrades and a drain
+	// waits on open sockets plus in-flight HTTP requests.
+	realtimeDrain := realtime.NewDrain()
+	apiWork := httpapi.APIWork{Realtime: realtimeDrain, Inflight: &lifecycle.Inflight{}}
+	lc := lifecycle.New(lifecycle.Config{
+		Role:    "api",
+		Commit:  buildCommit(),
+		Token:   cfg.LifecycleToken,
+		Work:    apiWork,
+		Details: apiWork.Details,
+	})
+	if err := lc.Register(registry); err != nil {
+		return fmt.Errorf("lifecycle metrics: %w", err)
+	}
 
 	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
 		ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL)
@@ -731,11 +751,13 @@ func run() error {
 		MCPMaxProjectAPIKeys:     int64(cfg.MCPMaxProjectAPIKeys),
 		CORSMaxProjectOrigins:    cfg.CORSMaxProjectOrigins,
 		BillingHandoffKey:        billingHandoffKey,
+		Lifecycle:                lc,
+		RealtimeDrain:            realtimeDrain,
 	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           router,
+		Handler:           apiWork.Inflight.Middleware(router),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -743,13 +765,18 @@ func run() error {
 		MaxHeaderBytes:    1048576,
 	}
 
+	ln, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		return fmt.Errorf("http listen %s: %w", cfg.HTTPAddr, err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("starting ggscale-server", "addr", cfg.HTTPAddr, "env", cfg.Env, "commit", buildCommit())
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
+	lc.MarkReady()
 
 	select {
 	case <-ctx.Done():
@@ -757,17 +784,37 @@ func run() error {
 	case err := <-errCh:
 		return err
 	}
+	// Restore default signal handling so a second SIGTERM ends the drain wait.
+	stop()
+
+	drainRealtime(lc, apiWork, cfg.DrainTimeout)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	shutdownErr := srv.Shutdown(shutdownCtx)
 	cancelWorker()
+	cancelApp()
 	select {
 	case <-workerDone:
 	case <-time.After(30 * time.Second):
 		slog.Warn("matchmaker worker did not drain in 30s; forcing shutdown")
 	}
 	return shutdownErr
+}
+
+// drainRealtime is the API server's SIGTERM drain: refuse new realtime
+// upgrades, wait for open sockets and in-flight requests to finish or the
+// drain timeout to elapse, then close the remaining sockets with 1001 Going
+// Away so clients reconnect elsewhere before http.Server.Shutdown runs.
+func drainRealtime(lc *lifecycle.Controller, work httpapi.APIWork, timeout time.Duration) {
+	slog.Info("draining", "drain_timeout", timeout.String(), "active_work", work.ActiveWork())
+	if remaining := lc.Shutdown(timeout); remaining > 0 {
+		slog.Warn("drain timeout elapsed; closing remaining realtime sockets",
+			"remaining_work", remaining, "realtime_connections", work.Realtime.Count())
+	}
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	work.Realtime.CloseAll(closeCtx)
 }
 
 // matchCounter adapts *observability.Metrics to matchmaker.Counter so the

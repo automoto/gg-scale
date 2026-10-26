@@ -59,6 +59,7 @@ func realtimeHandler(d Deps) http.HandlerFunc {
 		MaxPerPlayer:      d.RealtimeMaxPerPlayer,
 		HeartbeatInterval: heartbeat,
 		AllowOrigin:       d.origins.allowOrigin,
+		Drain:             d.RealtimeDrain,
 	}
 	return func(w http.ResponseWriter, req *http.Request) {
 		opts := base

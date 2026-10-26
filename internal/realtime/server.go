@@ -63,6 +63,10 @@ type Options struct {
 	// before reap).
 	SlotTTL time.Duration
 
+	// Drain, when non-nil, tracks this socket for the lifecycle contract so a
+	// drain can count it and SIGTERM can close it with 1001 Going Away.
+	Drain *Drain
+
 	Logger *slog.Logger
 }
 
@@ -177,6 +181,9 @@ func ServeWS(opts Options) http.HandlerFunc {
 		writer := &wsWriter{ws: conn}
 		unregister := opts.Hub.Register(tenantID, playerID, writer)
 		defer unregister()
+		if opts.Drain != nil {
+			defer opts.Drain.track(writer)()
+		}
 
 		runConnection(r.Context(), conn, heartbeat, refreshPlayerSlot, opts.Revalidate, logger)
 	}
@@ -349,9 +356,13 @@ func (w *wsWriter) Write(ctx context.Context, data []byte) error {
 }
 
 func (w *wsWriter) Close() error {
+	return w.closeWith(websocket.StatusNormalClosure, "")
+}
+
+func (w *wsWriter) closeWith(code websocket.StatusCode, reason string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.ws.Close(websocket.StatusNormalClosure, "")
+	return w.ws.Close(code, reason)
 }
 
 func slotKeyForPlayer(tenantID, playerID int64) string {
