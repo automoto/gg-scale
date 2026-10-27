@@ -3,9 +3,9 @@
     "web": [
       {
         "type": "startup",
-        "name": "healthz",
-        "description": "Wait for /v1/healthz to return 200 before routing traffic",
-        "path": "/v1/healthz",
+        "name": "readyz",
+        "description": "Wait for /readyz to return 200 (lifecycle state active, listener bound) before routing traffic",
+        "path": "/readyz",
         "port": 8080,
         "initialDelay": 5,
         "attempts": 10,
