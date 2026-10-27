@@ -69,8 +69,9 @@ type RelayConfig struct {
 	// defaults to 0: a relay is drained through POST /lifecycle/drain before
 	// it is stopped, and TURN allocations outlive any short SIGTERM wait, so
 	// an undrained relay exits at once instead of being killed mid-wait.
-	LifecycleToken string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
-	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"0s"`
+	LifecycleToken     string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
+	LifecycleReadToken string        `env:"LIFECYCLE_READ_TOKEN" envFile:"true"`
+	DrainTimeout       time.Duration `env:"DRAIN_TIMEOUT" envDefault:"0s"`
 }
 
 // LoadRelay reads the relay-node environment and returns a validated
@@ -104,7 +105,7 @@ func (rc *RelayConfig) validate() error {
 	if rc.SharedSecretNext != "" && len(rc.SharedSecretNext) < 32 {
 		return fmt.Errorf("RELAY_SHARED_SECRET_NEXT must be >= 32 bytes when set (got %d)", len(rc.SharedSecretNext))
 	}
-	if err := validateLifecycle(rc.LifecycleToken, rc.DrainTimeout); err != nil {
+	if err := validateLifecycle(rc.LifecycleToken, rc.LifecycleReadToken, rc.DrainTimeout); err != nil {
 		return err
 	}
 	if err := validateRelayPublicIP(rc.PublicIP); err != nil {

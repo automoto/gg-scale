@@ -149,3 +149,45 @@ func TestLoad_should_read_lifecycle_token(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, strings.Repeat("t", 32), cfg.LifecycleToken)
 }
+
+func TestLoadRelay_should_read_lifecycle_read_token_from_file(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	path := filepath.Join(t.TempDir(), "lifecycle-read-token")
+	require.NoError(t, os.WriteFile(path, []byte(strings.Repeat("r", 32)+"\n"), 0o600))
+	t.Setenv("LIFECYCLE_READ_TOKEN_FILE", path)
+
+	rc, err := config.LoadRelay()
+
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("r", 32), rc.LifecycleReadToken)
+}
+
+func TestLoad_should_read_lifecycle_read_token(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("LIFECYCLE_READ_TOKEN", strings.Repeat("r", 32))
+
+	cfg, err := config.Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, strings.Repeat("r", 32), cfg.LifecycleReadToken)
+}
+
+func TestLoadRelay_should_reject_short_lifecycle_read_token(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	t.Setenv("LIFECYCLE_READ_TOKEN", "short")
+
+	_, err := config.LoadRelay()
+
+	assert.ErrorContains(t, err, "LIFECYCLE_READ_TOKEN")
+}
+
+func TestLoadRelay_should_reject_read_token_equal_to_lifecycle_token(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	t.Setenv("LIFECYCLE_TOKEN", strings.Repeat("t", 32))
+	t.Setenv("LIFECYCLE_READ_TOKEN", strings.Repeat("t", 32))
+
+	_, err := config.LoadRelay()
+
+	assert.ErrorContains(t, err, "LIFECYCLE_READ_TOKEN must differ from LIFECYCLE_TOKEN")
+}

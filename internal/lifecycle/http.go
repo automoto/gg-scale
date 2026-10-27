@@ -26,13 +26,13 @@ const (
 // Mount registers the lifecycle routes on r:
 //
 //   - GET /readyz, always open;
-//   - GET /lifecycle, behind the token when one is set;
+//   - GET /lifecycle, behind the token or the read token when either is set;
 //   - POST /lifecycle/drain and POST /lifecycle/resume, only when a token is
 //     set, so an unconfigured process cannot be drained by anyone (fail
 //     closed: the routes return 404).
 func (c *Controller) Mount(r Router) {
 	r.Handle(readyzPath, allowMethod(http.MethodGet, http.HandlerFunc(c.serveReadyz)))
-	r.Handle(statusPath, allowMethod(http.MethodGet, RequireBearer(c.token, http.HandlerFunc(c.serveStatus))))
+	r.Handle(statusPath, allowMethod(http.MethodGet, requireAnyBearer(http.HandlerFunc(c.serveStatus), c.token, c.readToken)))
 	if c.token == "" {
 		return
 	}
@@ -95,14 +95,30 @@ func allowMethod(method string, next http.Handler) http.Handler {
 // compare so the comparison runs over equal-length digests and does not leak
 // the token length through timing.
 func RequireBearer(token string, next http.Handler) http.Handler {
-	if token == "" {
+	return requireAnyBearer(next, token)
+}
+
+// requireAnyBearer is RequireBearer for several accepted tokens. Empty tokens
+// are ignored; with none left, next is open. Every configured token is
+// compared, so the timing does not reveal which one matched.
+func requireAnyBearer(next http.Handler, tokens ...string) http.Handler {
+	var wants [][sha256.Size]byte
+	for _, t := range tokens {
+		if t != "" {
+			wants = append(wants, sha256.Sum256([]byte(t)))
+		}
+	}
+	if len(wants) == 0 {
 		return next
 	}
-	want := sha256.Sum256([]byte(token))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		presented, ok := bearerCredential(r.Header.Get("Authorization"))
 		got := sha256.Sum256([]byte(presented))
-		if !ok || subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+		match := 0
+		for _, want := range wants {
+			match |= subtle.ConstantTimeCompare(got[:], want[:])
+		}
+		if !ok || match != 1 {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

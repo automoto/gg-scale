@@ -58,6 +58,11 @@ type Config struct {
 	// Token guards the /lifecycle routes. Empty leaves GET /lifecycle open and
 	// leaves the POST routes unregistered.
 	Token string
+	// ReadToken also authorizes GET /lifecycle, but never drain or resume.
+	// Give it to probes and monitors so they do not hold a token that can
+	// take the process out of service. When set, GET /lifecycle needs one of
+	// the two tokens even if Token is empty.
+	ReadToken string
 	// Work is the process's drainable work. Required.
 	Work Drainable
 	// Details returns the role-specific "details" object. nil reports {}.
@@ -74,6 +79,7 @@ type Controller struct {
 	role         string
 	commit       string
 	token        string
+	readToken    string
 	work         Drainable
 	details      func() map[string]any
 	now          func() time.Time
@@ -104,6 +110,7 @@ func New(cfg Config) *Controller {
 		role:         cfg.Role,
 		commit:       cfg.Commit,
 		token:        cfg.Token,
+		readToken:    cfg.ReadToken,
 		work:         cfg.Work,
 		details:      cfg.Details,
 		now:          now,

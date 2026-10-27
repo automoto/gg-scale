@@ -231,10 +231,11 @@ func runRelayCommand() error {
 // allocations.
 func newRelayLifecycle(rc *config.RelayConfig, srv *relay.Server) *lifecycle.Controller {
 	return lifecycle.New(lifecycle.Config{
-		Role:   "relay",
-		Commit: buildCommit(),
-		Token:  rc.LifecycleToken,
-		Work:   srv,
+		Role:      "relay",
+		Commit:    buildCommit(),
+		Token:     rc.LifecycleToken,
+		ReadToken: rc.LifecycleReadToken,
+		Work:      srv,
 		Details: func() map[string]any {
 			return map[string]any{
 				"active_allocations": srv.ActiveAllocations(),
@@ -644,11 +645,12 @@ func run() error {
 	apiWork := httpapi.NewAPIWork()
 	realtimeDrain := apiWork.Realtime
 	lc := lifecycle.New(lifecycle.Config{
-		Role:    "api",
-		Commit:  buildCommit(),
-		Token:   cfg.LifecycleToken,
-		Work:    apiWork,
-		Details: apiWork.Details,
+		Role:      "api",
+		Commit:    buildCommit(),
+		Token:     cfg.LifecycleToken,
+		ReadToken: cfg.LifecycleReadToken,
+		Work:      apiWork,
+		Details:   apiWork.Details,
 	})
 	if err := lc.Register(registry); err != nil {
 		return fmt.Errorf("lifecycle metrics: %w", err)

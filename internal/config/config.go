@@ -37,8 +37,9 @@ type Config struct {
 
 	// LifecycleToken and DrainTimeout are the process lifecycle settings
 	// shared with RelayConfig; see internal/lifecycle.
-	LifecycleToken string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
-	DrainTimeout   time.Duration `env:"DRAIN_TIMEOUT" envDefault:"30s"`
+	LifecycleToken     string        `env:"LIFECYCLE_TOKEN" envFile:"true"`
+	LifecycleReadToken string        `env:"LIFECYCLE_READ_TOKEN" envFile:"true"`
+	DrainTimeout       time.Duration `env:"DRAIN_TIMEOUT" envDefault:"30s"`
 
 	// FeatureFleetEnabled is the startup kill switch for dedicated game-server
 	// fleets. Defaults false: no fleet manager is built and every fleet entry
