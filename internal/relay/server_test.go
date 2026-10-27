@@ -114,10 +114,21 @@ func unusedTCPPort(t *testing.T) int {
 // exercising the TURNS listener path.
 func writeSelfSignedCert(t *testing.T) (certFile, keyFile string) {
 	t.Helper()
+	dir := t.TempDir()
+	certFile = filepath.Join(dir, "cert.pem")
+	keyFile = filepath.Join(dir, "key.pem")
+	writeCertPair(t, certFile, keyFile, 1)
+	return certFile, keyFile
+}
+
+// writeCertPair writes a self-signed cert/key pair with the given serial to
+// certFile and keyFile, replacing any existing files.
+func writeCertPair(t *testing.T, certFile, keyFile string, serial int64) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	tmpl := x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: big.NewInt(serial),
 		Subject:      pkix.Name{CommonName: "relay-test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
@@ -128,10 +139,6 @@ func writeSelfSignedCert(t *testing.T) (certFile, keyFile string) {
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	require.NoError(t, err)
 
-	dir := t.TempDir()
-	certFile = filepath.Join(dir, "cert.pem")
-	keyFile = filepath.Join(dir, "key.pem")
 	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
 	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
-	return certFile, keyFile
 }
