@@ -47,7 +47,26 @@ The [wiki](https://github.com/automoto/gg-scale/wiki) covers the architecture.
 - Open a PR; CI runs lint and unit tests first, then runs integration and
   end-to-end tests concurrently on separate Linux runners.
 
-## Reporting issues
+## Database migrations
+
+Migrations run when the server starts. During a deploy the previous release
+and the new release run against the same schema, and the previous release is
+also the rollback. So every migration must keep the previous release working.
+
+- Expand, then contract. Add new tables, columns and indexes in one release.
+  Remove the old ones in a later release, after no supported release uses them.
+- A new column is nullable or has a default, so the previous release can still
+  insert rows without it.
+- Do not rename or drop a table, column or enum value that the previous release
+  reads or writes. Add the new one, write to both, and drop the old one in a
+  later release.
+- Do not change a column's type in place. Add a new column, backfill it, and
+  switch reads to it in a later release.
+- Do not add a constraint that rows written by the previous release can break.
+- If a change cannot follow these rules, it takes two releases. Say so in the
+  PR description.
+
+
 
 Use GitHub Issues. Include reproduction steps, the version (`git rev-parse HEAD`),
 and relevant logs (`docker compose logs ggscale-server`).
