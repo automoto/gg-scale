@@ -320,6 +320,43 @@ func TestLifecycleAuth(t *testing.T) {
 	}
 }
 
+const testReadToken = "lifecycle-read-token-0123456789abcdef"
+
+func TestLifecycleReadTokenAuth(t *testing.T) {
+	tests := []struct {
+		name   string
+		token  string
+		read   string
+		method string
+		path   string
+		sent   string
+		want   int
+	}{
+		{"get allowed with read token", testToken, testReadToken, http.MethodGet, "/lifecycle", testReadToken, http.StatusOK},
+		{"get still allowed with full token", testToken, testReadToken, http.MethodGet, "/lifecycle", testToken, http.StatusOK},
+		{"get refused with wrong bearer", testToken, testReadToken, http.MethodGet, "/lifecycle", "wrong", http.StatusUnauthorized},
+		{"drain refused with read token", testToken, testReadToken, http.MethodPost, "/lifecycle/drain", testReadToken, http.StatusUnauthorized},
+		{"resume refused with read token", testToken, testReadToken, http.MethodPost, "/lifecycle/resume", testReadToken, http.StatusUnauthorized},
+		{"get refused without bearer when only read token set", "", testReadToken, http.MethodGet, "/lifecycle", "", http.StatusUnauthorized},
+		{"get allowed with read token when only read token set", "", testReadToken, http.MethodGet, "/lifecycle", testReadToken, http.StatusOK},
+		{"drain missing when only read token set", "", testReadToken, http.MethodPost, "/lifecycle/drain", testReadToken, http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := lifecycle.New(lifecycle.Config{
+				Role:      "relay",
+				Token:     tt.token,
+				ReadToken: tt.read,
+				Work:      &fakeWork{},
+			})
+
+			rec := do(t, newMux(c), tt.method, tt.path, tt.sent)
+
+			assert.Equal(t, tt.want, rec.Code)
+		})
+	}
+}
+
 func TestDrainRoute_should_move_to_draining(t *testing.T) {
 	c := newController(testToken, &fakeWork{})
 	c.MarkReady()
