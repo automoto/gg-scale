@@ -176,13 +176,17 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 	}
 
 	if cfg.TLSPort != 0 {
-		cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
+		logger := cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		certs, err := newCertReloader(cfg.TLSCertFile, cfg.TLSKeyFile, logger)
 		if err != nil {
 			return nil, fmt.Errorf("relay: load tls keypair: %w", err)
 		}
 		ln, err := tls.Listen("tcp4", net.JoinHostPort(bindAddr, strconv.Itoa(cfg.TLSPort)), &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
+			GetCertificate: certs.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("relay: bind tls %s:%d: %w", bindAddr, cfg.TLSPort, err)
