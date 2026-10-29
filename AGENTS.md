@@ -25,6 +25,7 @@
 
 - Match the Go version declared in `go.mod`. Do not bump it without asking.
 - Never edit an applied migration. Add a forward migration instead.
+- Migrations must keep the previous release working (expand now, contract in a later release). See "Database migrations" in `CONTRIBUTING.md`.
 - Do not put milestone, phase, or task numbers in code, identifiers, comments, or file names. They belong in docs only.
 - Features must work with minimal config for self-hosters.
 - Maintain derived and counter state in the Go write paths, not in database triggers.
