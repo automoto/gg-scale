@@ -5,9 +5,12 @@ import (
 	"runtime/debug"
 )
 
-// commit is overridden at build time via -ldflags (see Dockerfile and
-// Makefile).
-var commit = "unknown"
+// commit and release are overridden at build time via -ldflags (see
+// Dockerfile and Makefile). release is the image tag, such as v0.9.76.
+var (
+	commit  = "unknown"
+	release = "dev"
+)
 
 const commitShortLen = 12
 

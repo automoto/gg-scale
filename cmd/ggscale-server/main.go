@@ -337,6 +337,7 @@ func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Con
 	up.Set(1)
 	reg.MustRegister(up)
 	registerRelayServerMetrics(reg, srv)
+	observability.RegisterBuildInfo(reg, release, buildCommit())
 	if err := lc.Register(reg); err != nil {
 		return nil, fmt.Errorf("relay lifecycle metrics: %w", err)
 	}
@@ -373,6 +374,7 @@ func run() error {
 	registry.MustRegister(collectors.NewGoCollector())
 	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	metrics := observability.NewMetrics(registry)
+	observability.RegisterBuildInfo(registry, release, buildCommit())
 
 	// Apply forward-only SQL migrations before anything else touches the DB.
 	// Runner returns ErrNoChange internally as a no-op so this is safe on
@@ -522,6 +524,7 @@ func run() error {
 	// Relay credentials list the registered relay nodes the probe job last
 	// saw active, plus the relay embedded here, if any.
 	relayNodes := relaynode.NewStore(appPool)
+	registry.MustRegister(relaynode.NewCollector(relayNodes.List))
 	var relayIssuer *relay.Issuer
 	var relaySelector httpapi.RelayNodeSelector
 	if !cfg.FeatureP2PRelayEnabled {

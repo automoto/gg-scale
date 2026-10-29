@@ -223,7 +223,9 @@ jobs:
             org.opencontainers.image.source=https://github.com/automoto/gg-scale
             org.opencontainers.image.version=${{ env.RELEASE_TAG }}
             org.opencontainers.image.revision=${{ github.sha }}
-          build-args: GIT_COMMIT=${{ github.sha }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            RELEASE=${{ env.RELEASE_TAG }}
           provenance: mode=max
           sbom: true
 
