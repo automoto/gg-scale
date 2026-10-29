@@ -241,6 +241,7 @@ clean-full: ## Stop the full stack and delete its volumes
 docker-image: ## Build $(DOCKER_IMAGE):$(TAG) locally (host arch only; TAG defaults to dev)
 	docker build \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg RELEASE=$(TAG) \
 		-t $(DOCKER_IMAGE):$(TAG) \
 		.
 
@@ -253,6 +254,7 @@ docker-push: ## Push a multi-arch ($(PLATFORMS)) manifest to GHCR; requires TAG=
 		--builder ggscale-builder \
 		--platform $(PLATFORMS) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
+		--build-arg RELEASE=$(TAG) \
 		-t $(DOCKER_IMAGE):$(TAG) \
 		--push .
 

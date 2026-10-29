@@ -11,11 +11,13 @@ COPY . .
 
 # GIT_COMMIT comes from the Makefile targets; GIT_REV is injected
 # automatically by Dokku on git-push deploys. Either one stamps the binary.
+# RELEASE is the image tag (CI and the Makefile set it).
 ARG GIT_COMMIT=
 ARG GIT_REV=
+ARG RELEASE=dev
 ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build \
-    -ldflags="-s -w -X main.commit=${GIT_COMMIT:-${GIT_REV:-unknown}}" \
+    -ldflags="-s -w -X main.commit=${GIT_COMMIT:-${GIT_REV:-unknown}} -X main.release=${RELEASE}" \
     -o /out/ggscale-server \
     ./cmd/ggscale-server
 
