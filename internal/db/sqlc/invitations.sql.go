@@ -842,7 +842,7 @@ func (q *Queries) ListPlayerInvitationsForProject(ctx context.Context, projectID
 	return items, nil
 }
 
-const markControlPanelInvitationAccepted = `-- name: MarkControlPanelInvitationAccepted :exec
+const markControlPanelInvitationAccepted = `-- name: MarkControlPanelInvitationAccepted :execrows
 UPDATE control_panel_invitations
 SET accepted_at = now()
 WHERE id = $1
@@ -850,12 +850,15 @@ WHERE id = $1
   AND revoked_at IS NULL
 `
 
-func (q *Queries) MarkControlPanelInvitationAccepted(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markControlPanelInvitationAccepted, id)
-	return err
+func (q *Queries) MarkControlPanelInvitationAccepted(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, markControlPanelInvitationAccepted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const markPlayerInvitationAccepted = `-- name: MarkPlayerInvitationAccepted :exec
+const markPlayerInvitationAccepted = `-- name: MarkPlayerInvitationAccepted :execrows
 UPDATE player_invitations
 SET accepted_at = now()
 WHERE id = $1
@@ -863,9 +866,12 @@ WHERE id = $1
   AND revoked_at IS NULL
 `
 
-func (q *Queries) MarkPlayerInvitationAccepted(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, markPlayerInvitationAccepted, id)
-	return err
+func (q *Queries) MarkPlayerInvitationAccepted(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, markPlayerInvitationAccepted, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const markPlayerVerifiedByID = `-- name: MarkPlayerVerifiedByID :exec

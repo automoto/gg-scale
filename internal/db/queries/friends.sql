@@ -19,11 +19,14 @@ FROM friend_edges
 WHERE from_account_id = sqlc.arg(from_account_id)
   AND to_account_id   = sqlc.arg(to_account_id);
 
--- name: SetFriendEdgeStatusByAccount :exec
+-- name: ResolvePendingFriendEdge :execrows
+-- Accept or reject. Only a pending edge can move, so a block or an unfriend that
+-- commits first wins: the row lock makes this re-check status, and it returns 0.
 UPDATE friend_edges
 SET status = sqlc.arg(status), updated_at = now()
 WHERE from_account_id = sqlc.arg(from_account_id)
-  AND to_account_id   = sqlc.arg(to_account_id);
+  AND to_account_id   = sqlc.arg(to_account_id)
+  AND status = 'pending';
 
 -- name: UpsertFriendEdgeStatusByAccount :exec
 -- Used for block: create-or-overwrite the directed edge to a terminal status

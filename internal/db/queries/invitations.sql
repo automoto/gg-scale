@@ -74,7 +74,7 @@ WHERE tenant_id IS NULL
   AND revoked_at IS NULL
 ORDER BY created_at DESC;
 
--- name: MarkControlPanelInvitationAccepted :exec
+-- name: MarkControlPanelInvitationAccepted :execrows
 UPDATE control_panel_invitations
 SET accepted_at = now()
 WHERE id = sqlc.arg(id)
@@ -194,7 +194,7 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND revoked_at IS NULL
 ORDER BY created_at DESC;
 
--- name: MarkPlayerInvitationAccepted :exec
+-- name: MarkPlayerInvitationAccepted :execrows
 UPDATE player_invitations
 SET accepted_at = now()
 WHERE id = sqlc.arg(id)

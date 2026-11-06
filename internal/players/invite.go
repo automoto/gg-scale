@@ -167,7 +167,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 				}
 				return errInvitePlayerExists
 			}
-			return q.MarkPlayerInvitationAccepted(r.Context(), row.ID)
+			return markPlayerInviteAccepted(r.Context(), q, row.ID)
 		}
 		qc, qerr := q.GetTenantQuotaContext(r.Context())
 		if qerr != nil {
@@ -217,7 +217,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 		default:
 			return eerr
 		}
-		if merr := q.MarkPlayerInvitationAccepted(r.Context(), row.ID); merr != nil {
+		if merr := markPlayerInviteAccepted(r.Context(), q, row.ID); merr != nil {
 			return merr
 		}
 		if !created {
@@ -329,6 +329,19 @@ func (h *Handler) lookupPlayerInvite(ctx context.Context, projectID int64, code 
 		return InviteAcceptView{}, err
 	}
 	return out, nil
+}
+
+// markPlayerInviteAccepted fails the transaction when a revoke or another accept
+// committed after the lookup, so the invitee gets no access.
+func markPlayerInviteAccepted(ctx context.Context, q *sqlcgen.Queries, id int64) error {
+	n, err := q.MarkPlayerInvitationAccepted(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errInviteNotFound
+	}
+	return nil
 }
 
 func (h *Handler) renderInviteLookupError(w http.ResponseWriter, r *http.Request, projectID int64, err error) {

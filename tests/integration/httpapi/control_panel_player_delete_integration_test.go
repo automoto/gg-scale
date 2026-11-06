@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -182,4 +183,71 @@ func TestControlPanelPlayerDelete_platform_admin_allowed_member_denied(t *testin
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
 		`SELECT delete_requested_at IS NOT NULL FROM project_players WHERE id = $1`, playerID).Scan(&pending))
 	assert.True(t, pending, "a platform admin can request deletion in any tenant")
+}
+
+// seedPlayerOwnedDelete creates a player with a pending deletion that the player
+// requested, and returns the player's control panel path.
+func seedPlayerOwnedDelete(t *testing.T, c *cluster, srvURL string, tenantID, projectID int64) (int64, string) {
+	t.Helper()
+	var playerID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO project_players (tenant_id, project_id, external_id, delete_requested_at, disabled_at)
+		 VALUES ($1, $2, 'leaving', now() - interval '1 day', now() - interval '1 day') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	return playerID, srvURL + "/v1/control-panel" + playerDeleteBase(tenantID, projectID, playerID)
+}
+
+func TestControlPanelPlayerDelete_admin_request_should_take_over_player_request(t *testing.T) {
+	c := startCluster(t)
+	ctx := context.Background()
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "cp-del")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	playerID, base := seedPlayerOwnedDelete(t, c, srv.URL, tenantID, projectID)
+	var requestedBefore time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT delete_requested_at FROM project_players WHERE id = $1`, playerID).Scan(&requestedBefore))
+
+	resp := postForm(t, noRedirectClient(), base+"/request-delete", url.Values{"_csrf": {csrf}}, cookie)
+	resp.Body.Close()
+
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	var byAdmin, disableOwnedByRequest bool
+	var requestedAfter time.Time
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT delete_requested_by_admin, disabled_at = delete_requested_at, delete_requested_at
+		 FROM project_players WHERE id = $1`, playerID).Scan(&byAdmin, &disableOwnedByRequest, &requestedAfter))
+	assert.True(t, byAdmin, "the player must no longer be able to cancel")
+	assert.True(t, disableOwnedByRequest, "an admin cancel must still lift the disable")
+	assert.True(t, requestedBefore.Equal(requestedAfter), "the purge time must not move")
+}
+
+func TestControlPanelPlayerDelete_admin_request_should_show_only_while_player_owns_it(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "cp-del")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	_, base := seedPlayerOwnedDelete(t, c, srv.URL, tenantID, projectID)
+	page := func() string {
+		req, err := http.NewRequest(http.MethodGet, base, nil)
+		require.NoError(t, err)
+		req.AddCookie(cookie)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return string(body)
+	}
+
+	playerOwned := page()
+	postForm(t, noRedirectClient(), base+"/request-delete", url.Values{"_csrf": {csrf}}, cookie).Body.Close()
+	adminOwned := page()
+
+	assert.Contains(t, playerOwned, "/request-delete")
+	assert.NotContains(t, adminOwned, "/request-delete")
 }

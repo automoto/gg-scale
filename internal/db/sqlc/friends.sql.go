@@ -335,6 +335,30 @@ func (q *Queries) RequestFriendByAccount(ctx context.Context, arg RequestFriendB
 	return i, err
 }
 
+const resolvePendingFriendEdge = `-- name: ResolvePendingFriendEdge :execrows
+UPDATE friend_edges
+SET status = $1, updated_at = now()
+WHERE from_account_id = $2
+  AND to_account_id   = $3
+  AND status = 'pending'
+`
+
+type ResolvePendingFriendEdgeParams struct {
+	Status        string
+	FromAccountID pgtype.UUID
+	ToAccountID   pgtype.UUID
+}
+
+// Accept or reject. Only a pending edge can move, so a block or an unfriend that
+// commits first wins: the row lock makes this re-check status, and it returns 0.
+func (q *Queries) ResolvePendingFriendEdge(ctx context.Context, arg ResolvePendingFriendEdgeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolvePendingFriendEdge, arg.Status, arg.FromAccountID, arg.ToAccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resolvePlayersForAccountsInProject = `-- name: ResolvePlayersForAccountsInProject :many
 SELECT id AS player_id, player_account_id
 FROM project_players
@@ -373,24 +397,6 @@ func (q *Queries) ResolvePlayersForAccountsInProject(ctx context.Context, arg Re
 		return nil, err
 	}
 	return items, nil
-}
-
-const setFriendEdgeStatusByAccount = `-- name: SetFriendEdgeStatusByAccount :exec
-UPDATE friend_edges
-SET status = $1, updated_at = now()
-WHERE from_account_id = $2
-  AND to_account_id   = $3
-`
-
-type SetFriendEdgeStatusByAccountParams struct {
-	Status        string
-	FromAccountID pgtype.UUID
-	ToAccountID   pgtype.UUID
-}
-
-func (q *Queries) SetFriendEdgeStatusByAccount(ctx context.Context, arg SetFriendEdgeStatusByAccountParams) error {
-	_, err := q.db.Exec(ctx, setFriendEdgeStatusByAccount, arg.Status, arg.FromAccountID, arg.ToAccountID)
-	return err
 }
 
 const upsertFriendEdgeStatusByAccount = `-- name: UpsertFriendEdgeStatusByAccount :exec

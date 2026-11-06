@@ -16,6 +16,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/automoto/gg-scale/internal/db"
+	"github.com/automoto/gg-scale/internal/jobs"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 var signupCodeRe = regexp.MustCompile(`request-access/accept\?code=([^\s]+)`)
@@ -214,4 +218,63 @@ func TestTenantSignup_deny_blocks_reapply(t *testing.T) {
 	resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, int64(1), countSignupRequests(t, c, email))
+}
+
+func seedApprovedSignup(t *testing.T, c *cluster, code, expiresIn string) {
+	t.Helper()
+	ctx := context.Background()
+	_, err := c.bootstrapPool.Exec(ctx, `UPDATE platform_signup_config SET public_tenant_signup_enabled = true WHERE id = 1`)
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(ctx,
+		`INSERT INTO tenant_signup_requests
+		   (email, requested_tenant_name, project_description, status, code_hash, code_expires_at)
+		 VALUES ('dev@example.com', 'Seeded Studio', 'A game.', 'approved', $1, now() + $2::interval)`,
+		verifycode.Hash(nil, code), expiresIn)
+	require.NoError(t, err)
+}
+
+func TestTenantSignup_accept_should_create_no_tenant_when_the_sweep_commits_during_accept(t *testing.T) {
+	c := startCluster(t)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
+	const code = "raw-signup-code-very-long-for-security"
+	seedApprovedSignup(t, c, code, "1 hour")
+	client := jarClient(t)
+	acceptURL := srv.URL + "/v1/control-panel/request-access/accept"
+	csrf := getPlayerCSRF(t, client, acceptURL+"?code="+url.QueryEscape(code))
+
+	status := raceAgainstCommit(t, c, "tenant_signup_requests", `DELETE FROM tenant_signup_requests`, func() int {
+		resp := postForm(t, client, acceptURL, url.Values{
+			"_csrf": {csrf}, "code": {code}, "password": {"correct-horse-battery-staple"},
+		}, nil)
+		resp.Body.Close()
+		return resp.StatusCode
+	})
+
+	assert.Equal(t, http.StatusNotFound, status)
+	var tenants int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM tenants WHERE name = 'Seeded Studio'`).Scan(&tenants))
+	assert.Zero(t, tenants)
+}
+
+func TestTenantSignup_should_accept_a_new_request_after_the_sweep(t *testing.T) {
+	c := startCluster(t)
+	srv, _ := newControlPanelAndPlayerServer(t, c)
+	seedApprovedSignup(t, c, "raw-signup-code-very-long-for-security", "-1 hour")
+	require.NoError(t, jobs.SweepExpiredTenantSignups(context.Background(), db.NewPool(c.appPool)))
+	dev := jarClient(t)
+	csrf := getPlayerCSRF(t, dev, srv.URL+"/v1/control-panel/request-access")
+
+	resp := postForm(t, dev, srv.URL+"/v1/control-panel/request-access", url.Values{
+		"_csrf":               {csrf},
+		"email":               {"dev@example.com"},
+		"tenant_name":         {"Seeded Studio"},
+		"project_description": {"A game."},
+	}, nil)
+	resp.Body.Close()
+
+	var status string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT status FROM tenant_signup_requests WHERE email = 'dev@example.com'`).Scan(&status))
+	assert.Equal(t, "pending", status)
 }

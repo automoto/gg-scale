@@ -31,6 +31,7 @@ func PeriodicRegistrations() []PeriodicRegistration {
 		{Args: PasswordResetGCArgs{}, Interval: 24 * time.Hour},
 		{Args: PlayerDeletePurgeArgs{}, Interval: time.Hour},
 		{Args: RealtimeTicketGCArgs{}, Interval: time.Hour},
+		{Args: TenantSignupExpiryArgs{}, Interval: time.Hour},
 		// Short interval: a period reset should land within minutes of its
 		// calendar boundary, and the sweep is one indexed query per tenant
 		// when nothing is due.

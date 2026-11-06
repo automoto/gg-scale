@@ -100,6 +100,22 @@ func (q *Queries) CreateTenantSignupRequest(ctx context.Context, arg CreateTenan
 	return i, err
 }
 
+const deleteExpiredTenantSignupApprovals = `-- name: DeleteExpiredTenantSignupApprovals :execrows
+DELETE FROM tenant_signup_requests
+WHERE status = 'approved'
+  AND code_expires_at <= now()
+`
+
+// An expired approval can never be accepted, so it must not hold its tenant name
+// or its email slot. The person can apply again. The audit log keeps the approval.
+func (q *Queries) DeleteExpiredTenantSignupApprovals(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredTenantSignupApprovals)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const denyTenantSignupRequest = `-- name: DenyTenantSignupRequest :execrows
 UPDATE tenant_signup_requests
 SET status = 'denied',
@@ -281,13 +297,14 @@ func (q *Queries) ListPendingTenantSignupRequests(ctx context.Context) ([]ListPe
 	return items, nil
 }
 
-const markTenantSignupAccepted = `-- name: MarkTenantSignupAccepted :exec
+const markTenantSignupAccepted = `-- name: MarkTenantSignupAccepted :execrows
 UPDATE tenant_signup_requests
 SET status = 'accepted',
     tenant_id = $1,
     accepted_at = now(),
     code_hash = NULL
 WHERE id = $2
+  AND status = 'approved'
 `
 
 type MarkTenantSignupAcceptedParams struct {
@@ -296,9 +313,12 @@ type MarkTenantSignupAcceptedParams struct {
 }
 
 // Clears the code hash so the magic link can't be replayed after acceptance.
-func (q *Queries) MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) error {
-	_, err := q.db.Exec(ctx, markTenantSignupAccepted, arg.TenantID, arg.ID)
-	return err
+func (q *Queries) MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markTenantSignupAccepted, arg.TenantID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setPublicSignupEnabled = `-- name: SetPublicSignupEnabled :exec

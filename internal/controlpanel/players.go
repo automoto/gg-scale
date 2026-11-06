@@ -219,6 +219,9 @@ type PlayerView struct {
 	// request is pending; zero otherwise.
 	DeleteRequestedAt time.Time
 	ScheduledPurgeAt  time.Time
+	// DeleteRequestedByAdmin is false while the player owns the request and can
+	// still cancel it. Only the player detail page sets it.
+	DeleteRequestedByAdmin bool
 	// Account link + remote-address / ban fields. AccountID is empty for
 	// anonymous players.
 	AccountID    string
@@ -829,14 +832,15 @@ func (h *Handler) playerCancelDeleteHandler(w http.ResponseWriter, r *http.Reque
 
 func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
 	pv := PlayerView{
-		ID:                row.ID,
-		ExternalID:        row.ExternalID,
-		Email:             row.Email,
-		EmailVerifiedAt:   row.EmailVerifiedAt.Time,
-		DisabledAt:        row.DisabledAt.Time,
-		CreatedAt:         row.CreatedAt.Time,
-		DeleteRequestedAt: row.DeleteRequestedAt.Time,
-		TenantBanned:      row.TenantBanned,
+		ID:                     row.ID,
+		ExternalID:             row.ExternalID,
+		Email:                  row.Email,
+		EmailVerifiedAt:        row.EmailVerifiedAt.Time,
+		DisabledAt:             row.DisabledAt.Time,
+		CreatedAt:              row.CreatedAt.Time,
+		DeleteRequestedAt:      row.DeleteRequestedAt.Time,
+		DeleteRequestedByAdmin: row.DeleteRequestedByAdmin,
+		TenantBanned:           row.TenantBanned,
 	}
 	if row.PlayerAccountID.Valid {
 		pv.AccountID = uuid.UUID(row.PlayerAccountID.Bytes).String()
