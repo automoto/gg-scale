@@ -73,4 +73,4 @@ The game server fleet feature is beta and not ready for production.
 
 ## Contributing and license
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). ggscale is licensed under the [Apache License 2.0](LICENSE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). ggscale is licensed under the [GNU GPL v3](LICENSE).
