@@ -260,6 +260,9 @@ type Querier interface {
 	DeleteExpiredPlayerAccountPasswordResets(ctx context.Context) (int64, error)
 	DeleteExpiredPlayerAccountTrustedDevices(ctx context.Context) (int64, error)
 	DeleteExpiredRealtimeTickets(ctx context.Context) (int64, error)
+	// An expired approval can never be accepted, so it must not hold its tenant name
+	// or its email slot. The person can apply again. The audit log keeps the approval.
+	DeleteExpiredTenantSignupApprovals(ctx context.Context) (int64, error)
 	// Delete only after its allocation has been successfully deallocated. The
 	// guards make retries and a concurrent cleanup safe.
 	DeleteExpiredUnclaimedMatchmakerMatch(ctx context.Context, id string) (int64, error)
@@ -810,12 +813,16 @@ type Querier interface {
 	// to a single storage object so the read-modify-write of the tenant byte
 	// counter can't be raced past. Released on commit/rollback.
 	LockStorageObjectForWrite(ctx context.Context, arg LockStorageObjectForWriteParams) error
+	// A released row stays 'shutdown'. A 'ready' row can still fail, because the
+	// commit of MarkAllocationReady can succeed and report an error.
 	MarkAllocationFailed(ctx context.Context, id int64) error
-	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error
-	MarkControlPanelInvitationAccepted(ctx context.Context, id int64) error
+	// 0 rows = the row left 'pending' during the backend call, so the caller must
+	// free the server that the call created.
+	MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) (int64, error)
+	MarkControlPanelInvitationAccepted(ctx context.Context, id int64) (int64, error)
 	MarkControlPanelUserVerified(ctx context.Context, id int64) error
 	MarkPlayerAccountVerified(ctx context.Context, id pgtype.UUID) error
-	MarkPlayerInvitationAccepted(ctx context.Context, id int64) error
+	MarkPlayerInvitationAccepted(ctx context.Context, id int64) (int64, error)
 	// A proven verification also restarts the lifetime budget and drops any
 	// lockout, mirroring CompletePlayerPasswordReset.
 	MarkPlayerVerified(ctx context.Context, id int64) error
@@ -826,7 +833,7 @@ type Querier interface {
 	// (0 rows = another request already sent it).
 	MarkRelayUsageWarned80(ctx context.Context, month pgtype.Date) (int64, error)
 	// Clears the code hash so the magic link can't be replayed after acceptance.
-	MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) error
+	MarkTenantSignupAccepted(ctx context.Context, arg MarkTenantSignupAcceptedParams) (int64, error)
 	// Cross-tenant queue-depth + oldest-queued-ticket age, sampled by the
 	// observability collector for the queue gauges. Privileged: runs over the
 	// bootstrap role (no tenant GUC), mirroring the sweeper's scan. Region is a
@@ -907,7 +914,9 @@ type Querier interface {
 	// Admin-side delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same
 	// now() so cancel can tell the two apart. Marks the request as the admin's,
-	// so the player cannot cancel it. 0 rows = gone or already pending.
+	// so the player cannot cancel it. A pending player request becomes the admin's
+	// and keeps its time stamp, so the purge time does not move. 0 rows = gone or
+	// already the admin's.
 	RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error)
 	// Self-service delete request: disables the player (keeping an earlier
 	// suspension timestamp intact) and stamps delete_requested_at with the same
@@ -944,6 +953,9 @@ type Querier interface {
 	ReserveTenantPlayerSlot(ctx context.Context, playerLimit int64) (int64, error)
 	ResetControlPanelTOTPAttempts(ctx context.Context, controlPanelUserID int64) error
 	ResetPlayerAccountTOTPAttempts(ctx context.Context, playerAccountID pgtype.UUID) error
+	// Accept or reject. Only a pending edge can move, so a block or an unfriend that
+	// commits first wins: the row lock makes this re-check status, and it returns 0.
+	ResolvePendingFriendEdge(ctx context.Context, arg ResolvePendingFriendEdgeParams) (int64, error)
 	// Tenant-scoped: maps a set of accounts back to their player in a specific
 	// project, for presence sharing and JSON-API user_id mapping.
 	ResolvePlayersForAccountsInProject(ctx context.Context, arg ResolvePlayersForAccountsInProjectParams) ([]ResolvePlayersForAccountsInProjectRow, error)
@@ -1011,7 +1023,6 @@ type Querier interface {
 	// enable (NULL).
 	SetControlPanelUserDisabled(ctx context.Context, arg SetControlPanelUserDisabledParams) error
 	SetControlPanelUserVerificationCode(ctx context.Context, arg SetControlPanelUserVerificationCodeParams) error
-	SetFriendEdgeStatusByAccount(ctx context.Context, arg SetFriendEdgeStatusByAccountParams) error
 	// Platform-level disable. Bumps session_epoch to kill live sessions.
 	SetPlayerAccountDisabled(ctx context.Context, id pgtype.UUID) error
 	// Player-set display name (PATCH /v1/profile). NULL clears it.

@@ -1572,6 +1572,13 @@ templ PlayerDetailPage(vm PlayerDetailView) {
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<button type="submit" class="btn-inline">Cancel deletion</button>
 				</form>
+				if !vm.Player.DeleteRequestedByAdmin {
+					<p>The player requested this deletion and can still cancel it.</p>
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/request-delete") } data-confirm="Stop the player from cancelling this deletion?">
+						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+						<button type="submit" class="contrast outline btn-inline">Make this an admin deletion</button>
+					</form>
+				}
 			} else {
 				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/" + stringFromInt(vm.Player.ID) + "/disable") }>
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>

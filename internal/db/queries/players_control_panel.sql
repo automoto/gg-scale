@@ -41,6 +41,7 @@ SELECT
     u.email_verified_at,
     u.disabled_at,
     u.delete_requested_at,
+    u.delete_requested_by_admin,
     u.created_at,
     u.tenant_id,
     u.project_id,
@@ -78,9 +79,11 @@ WHERE id = sqlc.arg(id)
 -- Admin-side delete request: disables the player (keeping an earlier
 -- suspension timestamp intact) and stamps delete_requested_at with the same
 -- now() so cancel can tell the two apart. Marks the request as the admin's,
--- so the player cannot cancel it. 0 rows = gone or already pending.
+-- so the player cannot cancel it. A pending player request becomes the admin's
+-- and keeps its time stamp, so the purge time does not move. 0 rows = gone or
+-- already the admin's.
 UPDATE project_players
-SET delete_requested_at = now(),
+SET delete_requested_at = COALESCE(delete_requested_at, now()),
     delete_requested_by_admin = true,
     disabled_at   = COALESCE(disabled_at, now()),
     session_epoch = session_epoch + 1
@@ -88,7 +91,7 @@ WHERE id = sqlc.arg(id)
   AND project_id = sqlc.arg(project_id)
   AND tenant_id = sqlc.arg(tenant_id)
   AND deleted_at IS NULL
-  AND delete_requested_at IS NULL
+  AND NOT delete_requested_by_admin
 RETURNING delete_requested_at;
 
 -- name: CancelPlayerDeleteInProject :execrows

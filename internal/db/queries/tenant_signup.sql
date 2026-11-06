@@ -46,14 +46,22 @@ SET status = 'denied',
 WHERE id = sqlc.arg(id)
   AND status = 'pending';
 
--- name: MarkTenantSignupAccepted :exec
+-- name: DeleteExpiredTenantSignupApprovals :execrows
+-- An expired approval can never be accepted, so it must not hold its tenant name
+-- or its email slot. The person can apply again. The audit log keeps the approval.
+DELETE FROM tenant_signup_requests
+WHERE status = 'approved'
+  AND code_expires_at <= now();
+
+-- name: MarkTenantSignupAccepted :execrows
 -- Clears the code hash so the magic link can't be replayed after acceptance.
 UPDATE tenant_signup_requests
 SET status = 'accepted',
     tenant_id = sqlc.arg(tenant_id),
     accepted_at = now(),
     code_hash = NULL
-WHERE id = sqlc.arg(id);
+WHERE id = sqlc.arg(id)
+  AND status = 'approved';
 
 -- name: TenantNameTaken :one
 -- A name is taken if an active tenant has it, or another live (pending/approved)

@@ -908,6 +908,7 @@ func startRiverJobs(ctx context.Context, pool *pgxpool.Pool, appPool *db.Pool, m
 	river.AddWorker(workers, jobs.NewStorageWarnWorker(appPool, m, mailFrom))
 	river.AddWorker(workers, jobs.NewPasswordResetEmailWorker(resetDeps))
 	river.AddWorker(workers, jobs.NewPasswordResetGCWorker(appPool))
+	river.AddWorker(workers, jobs.NewTenantSignupExpiryWorker(appPool))
 	river.AddWorker(workers, jobs.NewLeaderboardPeriodResetWorker(appPool))
 	river.AddWorker(workers, jobs.NewPlayerDeletePurgeWorker(appPool, deleteGrace))
 	river.AddWorker(workers, jobs.NewRelayNodeProbeWorker(relayProber))

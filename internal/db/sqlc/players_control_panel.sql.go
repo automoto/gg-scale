@@ -72,6 +72,7 @@ SELECT
     u.email_verified_at,
     u.disabled_at,
     u.delete_requested_at,
+    u.delete_requested_by_admin,
     u.created_at,
     u.tenant_id,
     u.project_id,
@@ -99,21 +100,22 @@ type GetPlayerForProjectParams struct {
 }
 
 type GetPlayerForProjectRow struct {
-	ID                 int64
-	ExternalID         string
-	Email              string
-	EmailVerifiedAt    pgtype.Timestamptz
-	DisabledAt         pgtype.Timestamptz
-	DeleteRequestedAt  pgtype.Timestamptz
-	CreatedAt          pgtype.Timestamptz
-	TenantID           int64
-	ProjectID          int64
-	PlayerAccountID    pgtype.UUID
-	RemoteAddrIpLan    *string
-	RemoteAddrIpPublic *string
-	RemoteAddrDns      *string
-	RemoteAddrIroh     *string
-	TenantBanned       bool
+	ID                     int64
+	ExternalID             string
+	Email                  string
+	EmailVerifiedAt        pgtype.Timestamptz
+	DisabledAt             pgtype.Timestamptz
+	DeleteRequestedAt      pgtype.Timestamptz
+	DeleteRequestedByAdmin bool
+	CreatedAt              pgtype.Timestamptz
+	TenantID               int64
+	ProjectID              int64
+	PlayerAccountID        pgtype.UUID
+	RemoteAddrIpLan        *string
+	RemoteAddrIpPublic     *string
+	RemoteAddrDns          *string
+	RemoteAddrIroh         *string
+	TenantBanned           bool
 }
 
 // Enriched with the linked global account: remote addresses (project admins
@@ -130,6 +132,7 @@ func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProje
 		&i.EmailVerifiedAt,
 		&i.DisabledAt,
 		&i.DeleteRequestedAt,
+		&i.DeleteRequestedByAdmin,
 		&i.CreatedAt,
 		&i.TenantID,
 		&i.ProjectID,
@@ -220,7 +223,7 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 
 const requestPlayerDeleteInProject = `-- name: RequestPlayerDeleteInProject :one
 UPDATE project_players
-SET delete_requested_at = now(),
+SET delete_requested_at = COALESCE(delete_requested_at, now()),
     delete_requested_by_admin = true,
     disabled_at   = COALESCE(disabled_at, now()),
     session_epoch = session_epoch + 1
@@ -228,7 +231,7 @@ WHERE id = $1
   AND project_id = $2
   AND tenant_id = $3
   AND deleted_at IS NULL
-  AND delete_requested_at IS NULL
+  AND NOT delete_requested_by_admin
 RETURNING delete_requested_at
 `
 
@@ -241,7 +244,9 @@ type RequestPlayerDeleteInProjectParams struct {
 // Admin-side delete request: disables the player (keeping an earlier
 // suspension timestamp intact) and stamps delete_requested_at with the same
 // now() so cancel can tell the two apart. Marks the request as the admin's,
-// so the player cannot cancel it. 0 rows = gone or already pending.
+// so the player cannot cancel it. A pending player request becomes the admin's
+// and keeps its time stamp, so the purge time does not move. 0 rows = gone or
+// already the admin's.
 func (q *Queries) RequestPlayerDeleteInProject(ctx context.Context, arg RequestPlayerDeleteInProjectParams) (pgtype.Timestamptz, error) {
 	row := q.db.QueryRow(ctx, requestPlayerDeleteInProject, arg.ID, arg.ProjectID, arg.TenantID)
 	var delete_requested_at pgtype.Timestamptz

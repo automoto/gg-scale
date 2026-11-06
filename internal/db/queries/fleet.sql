@@ -8,14 +8,17 @@ VALUES (
 )
 RETURNING id, requested_at;
 
--- name: MarkAllocationReady :exec
+-- name: MarkAllocationReady :execrows
+-- 0 rows = the row left 'pending' during the backend call, so the caller must
+-- free the server that the call created.
 UPDATE game_server_allocations
 SET status      = 'ready',
     backend_ref = $2,
     address     = $3,
     ready_at    = now()
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1;
+  AND id = $1
+  AND status = 'pending';
 
 -- name: SetAllocationStatus :exec
 UPDATE game_server_allocations
@@ -24,11 +27,14 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: MarkAllocationFailed :exec
+-- A released row stays 'shutdown'. A 'ready' row can still fail, because the
+-- commit of MarkAllocationReady can succeed and report an error.
 UPDATE game_server_allocations
 SET status      = 'failed',
     released_at = COALESCE(released_at, now())
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1;
+  AND id = $1
+  AND status <> 'shutdown';
 
 -- name: ReleaseAllocation :exec
 UPDATE game_server_allocations

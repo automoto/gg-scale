@@ -618,11 +618,16 @@ func (h *Handler) acceptTenantSignup(ctx context.Context, in signupAcceptInput) 
 				return fmt.Errorf("rbac signup owner: %w", err)
 			}
 		}
-		if err := q.MarkTenantSignupAccepted(ctx, sqlcgen.MarkTenantSignupAcceptedParams{
+		n, err := q.MarkTenantSignupAccepted(ctx, sqlcgen.MarkTenantSignupAcceptedParams{
 			ID:       req.ID,
 			TenantID: &tenantID,
-		}); err != nil {
+		})
+		if err != nil {
 			return err
+		}
+		// 0 rows: the expiry sweep committed after the lookup.
+		if n == 0 {
+			return errInviteExpired
 		}
 		out = signupAcceptResult{UserID: userID, Email: email, IsNewUser: isNew, TenantName: name}
 		return nil
@@ -731,10 +736,10 @@ func (h *Handler) tenantSignupAcceptHandler(w http.ResponseWriter, r *http.Reque
 			view.Error = "That Account Tenant name is no longer available. Contact your platform admin."
 		case errors.Is(err, errInviteExpired):
 			status = http.StatusGone
-			view.Error = "This invite has expired. Ask a platform admin to re-approve."
+			view.Error = signupInviteExpiredMsg
 		case errors.Is(err, errInviteNotFound):
 			status = http.StatusNotFound
-			view.Error = "Invite not found or already used."
+			view.Error = signupInviteNotFoundMsg
 		case errors.Is(err, errInviteForDisabledAccount):
 			status = http.StatusForbidden
 			view.Error = "This account has been disabled. Contact your platform admin."
@@ -750,6 +755,13 @@ func (h *Handler) tenantSignupAcceptHandler(w http.ResponseWriter, r *http.Reque
 	h.finishLogin(w, r, controlPanelUser{ID: res.UserID, Email: res.Email})
 }
 
+// The expiry sweep deletes an expired approval, so an old link can reach either
+// message.
+const (
+	signupInviteExpiredMsg  = "This invite has expired. You can request access again."
+	signupInviteNotFoundMsg = "Invite not found, expired, or already used."
+)
+
 func (h *Handler) renderSignupAcceptError(w http.ResponseWriter, r *http.Request, err error) {
 	var (
 		status int
@@ -758,10 +770,10 @@ func (h *Handler) renderSignupAcceptError(w http.ResponseWriter, r *http.Request
 	switch {
 	case errors.Is(err, errInviteExpired):
 		status = http.StatusGone
-		msg = "This invite has expired."
+		msg = signupInviteExpiredMsg
 	case errors.Is(err, errInviteNotFound):
 		status = http.StatusNotFound
-		msg = "Invite not found or already used."
+		msg = signupInviteNotFoundMsg
 	case errors.Is(err, errInviteForDisabledAccount):
 		status = http.StatusForbidden
 		msg = "This account has been disabled. Contact your platform admin."

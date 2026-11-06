@@ -54,14 +54,23 @@ func (s *PostgresStore) InsertPending(ctx context.Context, req AllocationRequest
 	return id, nil
 }
 
-// MarkReady flips the row to 'ready' and stamps backend_ref + address.
+// MarkReady flips a pending row to 'ready' and stamps backend_ref + address. It
+// returns an error when the row is no longer pending, so the manager frees the
+// server instead of reviving a released row.
 func (s *PostgresStore) MarkReady(ctx context.Context, id AllocationID, backendRef, address string) error {
 	return s.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).MarkAllocationReady(ctx, sqlcgen.MarkAllocationReadyParams{
+		n, err := sqlcgen.New(tx).MarkAllocationReady(ctx, sqlcgen.MarkAllocationReadyParams{
 			ID:         int64(id),
 			BackendRef: backendRef,
 			Address:    address,
 		})
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("allocation %d is no longer pending", id)
+		}
+		return nil
 	})
 }
 

@@ -268,29 +268,24 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 		switch action {
 		case "accept", "reject":
 			// Only a pending incoming request (other→me) may be accepted or
-			// rejected. Reading the current status first prevents flipping a
-			// 'blocked' or 'rejected' edge — the JSON path enforces the same
-			// guard, and without it a blocked user could turn the block into a
-			// friendship.
-			edge, err := q.GetFriendEdgeByAccount(ctx, sqlcgen.GetFriendEdgeByAccountParams{
-				FromAccountID: other, ToAccountID: me,
-			})
-			if errors.Is(err, pgx.ErrNoRows) || (err == nil && edge.Status != "pending") {
-				flash = "That request is no longer available."
-				return nil
-			}
-			if err != nil {
-				return err
-			}
+			// rejected. The query enforces this for both this path and the JSON
+			// path, so a blocked user cannot turn the block into a friendship.
 			newStatus := "accepted"
 			flash = "Friend added."
 			if action == "reject" {
 				newStatus = "rejected"
 				flash = "Request declined."
 			}
-			return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
+			n, err := q.ResolvePendingFriendEdge(ctx, sqlcgen.ResolvePendingFriendEdgeParams{
 				FromAccountID: other, ToAccountID: me, Status: newStatus,
 			})
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				flash = "That request is no longer available."
+			}
+			return nil
 		case "unfriend":
 			flash = "Removed."
 			_, e := q.DeleteFriendEdgeByAccount(ctx, sqlcgen.DeleteFriendEdgeByAccountParams{Me: me, Other: other})

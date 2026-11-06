@@ -380,14 +380,17 @@ SET status      = 'failed',
     released_at = COALESCE(released_at, now())
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
+  AND status <> 'shutdown'
 `
 
+// A released row stays 'shutdown'. A 'ready' row can still fail, because the
+// commit of MarkAllocationReady can succeed and report an error.
 func (q *Queries) MarkAllocationFailed(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markAllocationFailed, id)
 	return err
 }
 
-const markAllocationReady = `-- name: MarkAllocationReady :exec
+const markAllocationReady = `-- name: MarkAllocationReady :execrows
 UPDATE game_server_allocations
 SET status      = 'ready',
     backend_ref = $2,
@@ -395,6 +398,7 @@ SET status      = 'ready',
     ready_at    = now()
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1
+  AND status = 'pending'
 `
 
 type MarkAllocationReadyParams struct {
@@ -403,9 +407,14 @@ type MarkAllocationReadyParams struct {
 	Address    string
 }
 
-func (q *Queries) MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) error {
-	_, err := q.db.Exec(ctx, markAllocationReady, arg.ID, arg.BackendRef, arg.Address)
-	return err
+// 0 rows = the row left 'pending' during the backend call, so the caller must
+// free the server that the call created.
+func (q *Queries) MarkAllocationReady(ctx context.Context, arg MarkAllocationReadyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markAllocationReady, arg.ID, arg.BackendRef, arg.Address)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const releaseAllocation = `-- name: ReleaseAllocation :exec

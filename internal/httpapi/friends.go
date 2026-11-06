@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -231,13 +230,13 @@ func friendRequest(d Deps) func(context.Context, *friendTargetInput) (*friendSta
 
 func friendAccept(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
 	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
-		return changeFriendStatus(ctx, d, in.PlayerID, "accepted", []string{"pending"})
+		return changeFriendStatus(ctx, d, in.PlayerID, "accepted")
 	}
 }
 
 func friendReject(d Deps) func(context.Context, *friendTargetInput) (*friendStatusOutput, error) {
 	return func(ctx context.Context, in *friendTargetInput) (*friendStatusOutput, error) {
-		return changeFriendStatus(ctx, d, in.PlayerID, "rejected", []string{"pending", "accepted"})
+		return changeFriendStatus(ctx, d, in.PlayerID, "rejected")
 	}
 }
 
@@ -360,8 +359,8 @@ func friendBlockToggle(ctx context.Context, d Deps, toUser int64, block bool) (*
 	return &friendStatusOutput{Body: friendStatusResult{Status: status}}, nil
 }
 
-// changeFriendStatus is shared by accept/reject. allowed gates the transition.
-func changeFriendStatus(ctx context.Context, d Deps, other int64, newStatus string, allowed []string) (*friendStatusOutput, error) {
+// changeFriendStatus is shared by accept/reject.
+func changeFriendStatus(ctx context.Context, d Deps, other int64, newStatus string) (*friendStatusOutput, error) {
 	// {player_id} is the OTHER user — for accept/reject the "from" of the
 	// request is them, "to" is the current user.
 	me, ok := playerauth.IDFromContext(ctx)
@@ -382,23 +381,32 @@ func changeFriendStatus(ctx context.Context, d Deps, other int64, newStatus stri
 		if !otherAcc.Valid {
 			return errTargetNoAccount
 		}
+		n, err := q.ResolvePendingFriendEdge(ctx, sqlcgen.ResolvePendingFriendEdgeParams{
+			FromAccountID: otherAcc, ToAccountID: myAcc, Status: newStatus,
+		})
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			return nil
+		}
+		// Nothing moved: 404 when no edge exists, 409 when it is not pending.
 		edge, err := q.GetFriendEdgeByAccount(ctx, sqlcgen.GetFriendEdgeByAccountParams{
 			FromAccountID: otherAcc, ToAccountID: myAcc,
 		})
 		if err != nil {
 			return err
 		}
-		if !slices.Contains(allowed, edge.Status) {
-			return errFriendIllegalTransition
+		if edge.Status == "blocked" {
+			return errFriendBlocked
 		}
-		return q.SetFriendEdgeStatusByAccount(ctx, sqlcgen.SetFriendEdgeStatusByAccountParams{
-			FromAccountID: otherAcc, ToAccountID: myAcc, Status: newStatus,
-		})
+		return errFriendIllegalTransition
 	})
 	switch {
 	case errors.Is(err, errNoAccount):
 		return nil, huma.Error403Forbidden(linkAccountMsg)
-	case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows):
+	// A block never reveals itself: the blockee gets the same 404 as with no edge.
+	case errors.Is(err, errTargetNoAccount), errors.Is(err, pgx.ErrNoRows), errors.Is(err, errFriendBlocked):
 		return nil, huma.Error404NotFound("no pending request")
 	case errors.Is(err, errFriendIllegalTransition):
 		return nil, huma.Error409Conflict("illegal transition")

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 func intervalFor(t *testing.T, kind string) time.Duration {
@@ -28,6 +29,12 @@ func TestPeriodicRegistrations_game_session_gc_runs_hourly(t *testing.T) {
 // that often or expired rows pile up between deploys.
 func TestPeriodicRegistrations_game_session_gc_keeps_pace_with_session_ttl(t *testing.T) {
 	assert.LessOrEqual(t, intervalFor(t, GameSessionGCKind), gamesession.DefaultTTL)
+}
+
+// An expired approval holds its tenant name until this job runs, so the job
+// must recur more often than the code lifetime.
+func TestPeriodicRegistrations_tenant_signup_expiry_keeps_pace_with_invite_ttl(t *testing.T) {
+	assert.Less(t, intervalFor(t, TenantSignupExpiryKind), verifycode.InviteTTL)
 }
 
 func TestPeriodicRegistrations_relay_node_probe_runs_every_ten_seconds(t *testing.T) {

@@ -142,7 +142,15 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 		if err := h.applyInviteRoles(ctx, tx, q, row, out.UserID); err != nil {
 			return err
 		}
-		return q.MarkControlPanelInvitationAccepted(ctx, row.ID)
+		// 0 rows: a revoke or another accept committed after the lookup.
+		n, err := q.MarkControlPanelInvitationAccepted(ctx, row.ID)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return errInviteNotFound
+		}
+		return nil
 	})
 	if err != nil {
 		return out, err
