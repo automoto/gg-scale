@@ -20,7 +20,7 @@ Operators running relay nodes or rolling deploys should read [Relay Operations](
 
 For more technical detail, ask DeepWiki:
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/automoto/gg-scale)
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/automoto/gg-scale)
 
 ## SDKs
 
@@ -65,12 +65,8 @@ Run `make help` for the full list.
 | `make test-e2e` | End-to-end suite against the running `make up` stack. |
 | `make check` | Lint and unit tests, the same gate as CI. |
 
-## Testing
-
-Every test target runs with only Docker and this checkout. Together they cover the GA features: auth and players, game sessions and signaling, matchmaking and parties, P2P relay, cloud saves, leaderboards, friends and invites, and the control panel.
-
-The game server fleet feature is beta and not ready for production.
-
 ## Contributing and license
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). ggscale is licensed under the [GNU GPL v3](LICENSE).
+
+Copyright (C) 2026 Build W Solutions Foundation. See [NOTICE](NOTICE).

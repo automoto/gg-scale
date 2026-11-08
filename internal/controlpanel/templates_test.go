@@ -786,3 +786,21 @@ func TestPlayerDetail_shows_placeholder_when_no_remote_addrs(t *testing.T) {
 	assert.Contains(t, html, "Remote addresses")
 	assert.Contains(t, html, "—")
 }
+
+func TestLayouts_should_show_legal_notice(t *testing.T) {
+	tests := []struct {
+		name string
+		page templ.Component
+	}{
+		{name: "app layout", page: HomePage(HomeView{})},
+		{name: "auth layout", page: LoginPage(LoginView{})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			html := renderToString(t, tt.page)
+
+			assert.Contains(t, html, "Build W Solutions Foundation")
+			assert.Contains(t, html, "GNU GPL v3")
+		})
+	}
+}

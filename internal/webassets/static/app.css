@@ -223,6 +223,13 @@ main.app-main {
   width: 100%;
   max-width: none;
 }
+.legal-footer {
+  padding: 0 1.5rem 1rem;
+  text-align: center;
+}
+.legal-footer small {
+  font-size: 0.6em;
+}
 .auth-shell article {
   width: 100%;
   max-width: 420px;

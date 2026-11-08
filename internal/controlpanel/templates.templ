@@ -83,6 +83,7 @@ templ appLayout(title, userEmail, csrfToken string, nav AppNav) {
 			<main class="app-main">
 				{ children... }
 			</main>
+			@webassets.LegalFooter()
 			<div id="modal-root"></div>
 		</body>
 	</html>
@@ -106,6 +107,7 @@ templ authLayout(title string) {
 					{ children... }
 				</article>
 			</main>
+			@webassets.LegalFooter()
 		</body>
 	</html>
 }

@@ -63,6 +63,7 @@ templ playerLayout(title string, active playerNavDestination, csrfToken, account
 			<main class="app-main">
 				{ children... }
 			</main>
+			@webassets.LegalFooter()
 		</body>
 	</html>
 }
@@ -87,6 +88,7 @@ templ playerAuthLayout(title string) {
 					{ children... }
 				</article>
 			</main>
+			@webassets.LegalFooter()
 		</body>
 	</html>
 }
