@@ -30,6 +30,7 @@ COPY db/migrations /migrations
 # Dokku reads app.json (the /readyz startup check) from the image WORKDIR
 # when the app is deployed with git:from-image instead of a source push.
 COPY app.json ./app.json
+COPY LICENSE NOTICE /
 
 USER nonroot:nonroot
 EXPOSE 8080

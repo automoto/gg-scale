@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a-h/templ"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -198,4 +199,25 @@ func TestConnectionAddressFormPage_renders_edit_action(t *testing.T) {
 	assert.Contains(t, html, `action="/v1/players/account/remote-addrs/dns"`)
 	assert.Contains(t, html, `value="nas.local"`)
 	assert.Contains(t, html, `<option value="dns" selected>DNS name</option>`)
+}
+
+func TestLayouts_should_show_legal_notice(t *testing.T) {
+	tests := []struct {
+		name string
+		page templ.Component
+	}{
+		{name: "player layout", page: AccountHomePage(AccountHomeView{})},
+		{name: "player auth layout", page: AccountLoginPage(AccountLoginView{})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sb strings.Builder
+
+			err := tt.page.Render(context.Background(), &sb)
+
+			require.NoError(t, err)
+			assert.Contains(t, sb.String(), "Build W Solutions Foundation")
+			assert.Contains(t, sb.String(), "GNU GPL v3")
+		})
+	}
 }
