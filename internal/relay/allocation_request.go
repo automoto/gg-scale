@@ -92,9 +92,6 @@ func (g *playerAllocationGenerator) AllocatePacketConn(
 		return nil, nil, err
 	}
 	conn = newBandwidthLimitedConn(conn, g.maxBPS, g.dropped)
-	if len(releases) == 0 {
-		return conn, addr, nil
-	}
 	return &countedPacketConn{PacketConn: conn, release: releaseAll}, addr, nil
 }
 

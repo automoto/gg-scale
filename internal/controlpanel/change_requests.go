@@ -92,12 +92,7 @@ func isQuotaAxis(axis string) bool {
 // isAdminQuotaAxis reports whether a platform admin may set an override for
 // axis.
 func isAdminQuotaAxis(axis string) bool {
-	for _, a := range adminOnlyQuotaAxes {
-		if a.Value == axis {
-			return true
-		}
-	}
-	return isQuotaAxis(axis)
+	return isQuotaAxis(axis) || slices.ContainsFunc(adminOnlyQuotaAxes, func(a struct{ Value, Label string }) bool { return a.Value == axis })
 }
 
 func quotaAxisLabel(axis string) string {
