@@ -42,13 +42,16 @@ func New(pool *db.Pool, m mailer.Mailer, mailFrom string) *Meter {
 // refused attempt is not counted). The count, the allowance check, and the
 // warn-claim updates run in one tenant-context transaction; warning emails go
 // out after commit, best-effort.
-func (m *Meter) Allow(ctx context.Context, tenantID int64) error {
+//
+// allocCap is the tenant's class RelayAllocationsPerNode for the credential, or
+// 0 for a tenant without enforce_quotas, which leaves the relay's own default.
+func (m *Meter) Allow(ctx context.Context, tenantID int64) (allocCap int64, err error) {
 	month := monthStart(m.now())
 	var warn80, warn100 bool
 	var allowance, sessions int64
 
 	tctx := db.WithTenant(ctx, tenantID)
-	err := m.pool.Q(tctx, func(tx pgx.Tx) error {
+	err = m.pool.Q(tctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		qc, err := q.GetTenantQuotaContext(tctx)
 		if err != nil {
@@ -61,6 +64,7 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) error {
 				return rerr
 			}
 			allowance = limits.RelaySessionsPerMonth
+			allocCap = limits.RelayAllocationsPerNode
 		}
 		// A zero allowance blocks all issuance. Refuse before the upsert:
 		// its allowance predicate only guards the conflict update, so the
@@ -102,7 +106,7 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if warn80 {
@@ -111,7 +115,7 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) error {
 	if warn100 {
 		m.sendWarning(ctx, tenantID, warn100Email(allowance))
 	}
-	return nil
+	return allocCap, nil
 }
 
 // monthStart is the UTC first-of-month key for the usage row.

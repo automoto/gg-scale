@@ -130,9 +130,11 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 			return nil, err
 		}
 		// Monthly session allowance: refuses only new issuance — in-flight
-		// TURN sessions are unaffected.
+		// TURN sessions are unaffected. It also resolves the tenant's per-node
+		// allocation cap, which the credential carries to the relay.
+		var allocCap int64
 		if d.RelayMeter != nil {
-			if err := d.RelayMeter.Allow(ctx, tenantID); err != nil {
+			if allocCap, err = d.RelayMeter.Allow(ctx, tenantID); err != nil {
 				var qe *quota.ErrQuotaExceeded
 				if errors.As(err, &qe) {
 					d.Metrics.QuotaRejection(qe.Axis)
@@ -141,7 +143,7 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 				return nil, huma.Error500InternalServerError("internal error")
 			}
 		}
-		creds, err := d.RelayIssuer.Issue(tenantID, playerID)
+		creds, err := d.RelayIssuer.IssueWithTenantCap(tenantID, playerID, allocCap)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("internal error")
 		}

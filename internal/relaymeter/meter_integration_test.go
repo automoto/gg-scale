@@ -120,11 +120,35 @@ func seedUsage(t *testing.T, owner *pgxpool.Pool, tenantID int64, month time.Tim
 	require.NoError(t, err)
 }
 
+// allow is Allow without the allocation cap, for tests that only check metering.
+func allow(m *Meter, tenantID int64) error {
+	_, err := m.Allow(context.Background(), tenantID)
+	return err
+}
+
+func TestAllow_should_return_plan_alloc_cap_for_enforced_tenant(t *testing.T) {
+	m, _, _ := newTestMeter(t, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
+
+	allocCap, err := m.Allow(context.Background(), enforcedTenant)
+
+	require.NoError(t, err)
+	assert.Equal(t, quota.LimitsForClass(0).RelayAllocationsPerNode, allocCap)
+}
+
+func TestAllow_should_return_no_alloc_cap_for_unenforced_tenant(t *testing.T) {
+	m, _, _ := newTestMeter(t, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
+
+	allocCap, err := m.Allow(context.Background(), unenforcedTenant)
+
+	require.NoError(t, err)
+	assert.Zero(t, allocCap)
+}
+
 func TestAllow_unenforced_tenant_is_unmetered(t *testing.T) {
 	m, _, mails := newTestMeter(t, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
 
 	for range 5 {
-		require.NoError(t, m.Allow(context.Background(), unenforcedTenant))
+		require.NoError(t, allow(m, unenforcedTenant))
 	}
 	assert.Empty(t, mails.subjects())
 }
@@ -134,8 +158,8 @@ func TestAllow_warns_once_at_80_percent(t *testing.T) {
 	m, owner, mails := newTestMeter(t, now)
 	seedUsage(t, owner, enforcedTenant, monthStart(now), 799)
 
-	require.NoError(t, m.Allow(context.Background(), enforcedTenant)) // 800 = 80% of 1,000
-	require.NoError(t, m.Allow(context.Background(), enforcedTenant)) // 801: no second warning
+	require.NoError(t, allow(m, enforcedTenant)) // 800 = 80% of 1,000
+	require.NoError(t, allow(m, enforcedTenant)) // 801: no second warning
 
 	subjects := mails.subjects()
 	require.Len(t, subjects, 1)
@@ -147,9 +171,9 @@ func TestAllow_warns_at_100_percent_then_refuses(t *testing.T) {
 	m, owner, mails := newTestMeter(t, now)
 	seedUsage(t, owner, enforcedTenant, monthStart(now), 999)
 
-	require.NoError(t, m.Allow(context.Background(), enforcedTenant)) // 1,000 = allowance
+	require.NoError(t, allow(m, enforcedTenant)) // 1,000 = allowance
 
-	err := m.Allow(context.Background(), enforcedTenant) // 1,001 refused
+	err := allow(m, enforcedTenant) // 1,001 refused
 	var qe *quota.ErrQuotaExceeded
 	require.ErrorAs(t, err, &qe)
 	assert.Equal(t, quota.AxisRelaySessions, qe.Axis)
@@ -179,7 +203,7 @@ func TestAllow_zero_allowance_refuses_first_issuance_of_month(t *testing.T) {
 		enforcedTenant)
 	require.NoError(t, err)
 
-	err = m.Allow(context.Background(), enforcedTenant)
+	err = allow(m, enforcedTenant)
 	var qe *quota.ErrQuotaExceeded
 	require.ErrorAs(t, err, &qe)
 	assert.Equal(t, quota.AxisRelaySessions, qe.Axis)
@@ -198,16 +222,16 @@ func TestAllow_new_month_resets_the_allowance(t *testing.T) {
 	seedUsage(t, owner, enforcedTenant, monthStart(july), 1000)
 
 	var qe *quota.ErrQuotaExceeded
-	require.ErrorAs(t, m.Allow(context.Background(), enforcedTenant), &qe, "july is exhausted")
+	require.ErrorAs(t, allow(m, enforcedTenant), &qe, "july is exhausted")
 
 	m.now = func() time.Time { return time.Date(2026, 8, 1, 0, 5, 0, 0, time.UTC) }
-	assert.NoError(t, m.Allow(context.Background(), enforcedTenant), "august starts fresh")
+	assert.NoError(t, allow(m, enforcedTenant), "august starts fresh")
 }
 
 func TestAllow_unknown_tenant_errors(t *testing.T) {
 	m, _, _ := newTestMeter(t, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
 
-	err := m.Allow(context.Background(), 424242)
+	err := allow(m, 424242)
 	require.Error(t, err)
 	assert.False(t, errors.As(err, new(*quota.ErrQuotaExceeded)), "missing tenant is an internal error, not a quota rejection")
 }
