@@ -118,6 +118,48 @@ func TestSubjectAllocCaps_should_drop_expired_idle_caps_when_new_tenant_authenti
 	assert.NotContains(t, caps.tenantCap, int64(1))
 }
 
+// The race from review: OnAuth records the cap just before the credential
+// expires, the tenant's last old allocation closes and another tenant triggers
+// cleanup after expiry, then the same request reaches AllocatePacketConn.
+func TestSubjectAllocCaps_should_keep_cap_for_allocate_that_authenticated_just_before_expiry(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	now := int64(900)
+	caps.now = func() int64 { return now }
+	caps.setTenantCap(1, 900, ptr(5))
+	require.NoError(t, caps.acquire(1, 1))
+	now = 1000
+	caps.setTenantCap(1, 1000, ptr(0))
+	now = 1001
+	caps.release(1, 1)
+	caps.setTenantCap(2, 1301, ptr(5))
+
+	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
+}
+
+func TestSubjectAllocCaps_should_keep_idle_cap_within_retention_after_expiry(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	now := int64(1000)
+	caps.now = func() int64 { return now }
+	caps.setTenantCap(1, 1000, ptr(1))
+	now = 1000 + capRetentionSeconds
+
+	caps.setTenantCap(2, now+300, ptr(5))
+
+	assert.Contains(t, caps.tenantCap, int64(1))
+}
+
+func TestSubjectAllocCaps_should_drop_idle_cap_just_after_retention(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	now := int64(1000)
+	caps.now = func() int64 { return now }
+	caps.setTenantCap(1, 1000, ptr(1))
+	now = 1000 + capRetentionSeconds + 1
+
+	caps.setTenantCap(2, now+300, ptr(5))
+
+	assert.NotContains(t, caps.tenantCap, int64(1))
+}
+
 func TestSubjectAllocCaps_should_keep_caps_of_tenants_with_live_allocations(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 2000)
 	now := int64(1000)
@@ -256,3 +298,20 @@ func TestAuthEvent_should_ignore_tenant_cap_when_integrity_fails(t *testing.T) {
 }
 
 func ptr(n int64) *int64 { return &n }
+
+// AuthHandler checks expiry, then pion calls OnAuth. If the second ticks over in
+// between, the verified credential's cap must still be recorded.
+func TestIssuer_tenantAllocCap_should_read_cap_when_credential_expired_after_auth(t *testing.T) {
+	iss := NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	iss.SetTenantCapInCredentials(true)
+	creds, err := iss.IssueWithTenantCap(1, 2, ptr(0))
+	require.NoError(t, err)
+	expires, err := strconv.ParseInt(strings.SplitN(creds.Username, ":", 2)[0], 10, 64)
+	require.NoError(t, err)
+	iss.now = func() time.Time { return time.Unix(expires+1, 0) }
+
+	_, _, allocCap, ok := iss.tenantAllocCap(creds.Username)
+
+	require.True(t, ok)
+	assert.Equal(t, int64(0), *allocCap)
+}

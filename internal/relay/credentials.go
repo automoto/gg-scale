@@ -179,16 +179,12 @@ func (i *Issuer) authForUsername(username string) (tenantID, playerID int64, pas
 }
 
 // tenantAllocCap returns the tenant, the credential expiry and its allocation
-// cap from a username.
-// allocCap is nil when the username carries none. Call it only for a username
-// whose integrity pion already verified.
+// cap from a username. Call it only from pion's OnAuth with verdict true:
+// AuthHandler has checked expiry and pion has verified the HMAC. It does not
+// check expiry again, so a credential that expires between the two still has
+// its cap recorded.
 func (i *Issuer) tenantAllocCap(username string) (tenantID, expires int64, allocCap *int64, ok bool) {
-	tenantID, _, allocCap, _, err := i.parseUsername(username)
-	if err != nil {
-		return 0, 0, nil, false
-	}
-	expiresField, _, _ := strings.Cut(username, ":")
-	expires, err = strconv.ParseInt(expiresField, 10, 64)
+	expires, tenantID, _, allocCap, _, err := parseUsernameFields(username)
 	return tenantID, expires, allocCap, err == nil
 }
 
@@ -216,36 +212,43 @@ func parseAllocationUserID(userID string) (tenantID, playerID int64, ok bool) {
 // username, returning ErrCredentialsExpired past the encoded expiry and
 // ErrCredentialsInvalid on any structural problem. allocCap is nil when absent.
 func (i *Issuer) parseUsername(username string) (tenantID, playerID int64, allocCap *int64, kid string, err error) {
-	parts := strings.SplitN(username, ":", 5)
-	if len(parts) < 4 {
-		return 0, 0, nil, "", ErrCredentialsInvalid
-	}
-	expires, err := strconv.ParseInt(parts[0], 10, 64)
+	expires, tenantID, playerID, allocCap, kid, err := parseUsernameFields(username)
 	if err != nil {
-		return 0, 0, nil, "", ErrCredentialsInvalid
+		return 0, 0, nil, "", err
 	}
 	if i.now().Unix() > expires {
 		return 0, 0, nil, "", ErrCredentialsExpired
 	}
-	tenantID, err = strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, nil, "", ErrCredentialsInvalid
+	return tenantID, playerID, allocCap, kid, nil
+}
+
+// parseUsernameFields splits and validates the username fields without checking
+// expiry.
+func parseUsernameFields(username string) (expires, tenantID, playerID int64, allocCap *int64, kid string, err error) {
+	parts := strings.SplitN(username, ":", 5)
+	if len(parts) < 4 {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
-	playerID, err = strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return 0, 0, nil, "", ErrCredentialsInvalid
+	if expires, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
+	}
+	if tenantID, err = strconv.ParseInt(parts[1], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
+	}
+	if playerID, err = strconv.ParseInt(parts[2], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
 	if parts[3] == "" {
-		return 0, 0, nil, "", ErrCredentialsInvalid
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
 	if len(parts) == 5 {
 		n, err := strconv.ParseInt(parts[4], 10, 64)
 		if err != nil || n < unlimitedTenantCap {
-			return 0, 0, nil, "", ErrCredentialsInvalid
+			return 0, 0, 0, nil, "", ErrCredentialsInvalid
 		}
 		allocCap = &n
 	}
-	return tenantID, playerID, allocCap, parts[3], nil
+	return expires, tenantID, playerID, allocCap, parts[3], nil
 }
 
 func passwordWith(secret []byte, username string) string {

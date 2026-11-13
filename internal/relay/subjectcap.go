@@ -25,7 +25,8 @@ var (
 // The tenant cap comes from the newest verified credential of that tenant that
 // carries one (see Issuer.IssueWithTenantCap); until then defaultTenant applies.
 // It is forgotten once the tenant has no live allocation and that credential
-// has expired (checked when a new tenant is recorded).
+// expired more than capRetentionSeconds ago (checked when a new tenant is
+// recorded).
 // Tenant caps use the credential's values: unlimitedTenantCap lifts the cap,
 // 0 refuses every new allocation.
 type subjectAllocCaps struct {
@@ -47,6 +48,17 @@ type allocSubject struct{ tenantID, playerID int64 }
 // tenantCapEntry is a tenant's cap and the expiry of the credential that set
 // it. Issuers share one TTL, so a later expiry means a newer credential.
 type tenantCapEntry struct{ limit, expires int64 }
+
+// capRetentionSeconds keeps an idle tenant's cap this long after its
+// credential expires. pion records the cap in OnAuth and reserves the slot in
+// AllocatePacketConn, synchronously in one request handler, and AuthHandler
+// passes only up to expiry. Removing the cap before expiry plus this margin
+// could make that request fall back to the default cap. The gap is CPU time
+// only; 60 s leaves a wide margin. Pion offers no hook that identifies the
+// request on the refusal paths in between, so the cap cannot be pinned per
+// request, and the UserID must stay the same across Refresh, so it cannot
+// carry the cap.
+const capRetentionSeconds = 60
 
 // unlimitedTenantCap is the credential value that lifts the per-tenant cap. It
 // matches quota.Unlimited, which the issuer passes through unchanged.
@@ -94,12 +106,11 @@ func (c *subjectAllocCaps) setTenantCap(tenantID, expires int64, allocCap *int64
 }
 
 // dropIdleExpiredLocked forgets the caps of tenants with no live allocation
-// whose credential has expired. A cap from a still-valid credential stays: an
-// Allocate that authenticated with it may not have reserved its slot yet.
+// whose credential expired more than capRetentionSeconds ago.
 func (c *subjectAllocCaps) dropIdleExpiredLocked() {
 	now := c.now()
 	for t, e := range c.tenantCap {
-		if c.tenants[t] == 0 && e.expires < now {
+		if c.tenants[t] == 0 && e.expires+capRetentionSeconds < now {
 			delete(c.tenantCap, t)
 		}
 	}
