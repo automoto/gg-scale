@@ -39,6 +39,14 @@ type ServerConfig struct {
 	// per player so one credential can't monopolise the global pool. <=0 disables.
 	PlayerAllocPerMinute int
 	PlayerAllocBurst     int
+	// MaxAllocationsPerPlayer caps one player's live allocations on this node.
+	// MaxAllocationsPerTenant caps one tenant's live allocations on this node
+	// when its credential carries no cap of its own. 0 = unlimited.
+	MaxAllocationsPerPlayer int
+	MaxAllocationsPerTenant int
+	// AllocationMaxBPS caps each allocation's relayed traffic, in bits per
+	// second, in each direction. Packets over it are dropped. 0 = unlimited.
+	AllocationMaxBPS int64
 	// AllowPrivatePeers lets clients relay to loopback/RFC1918/link-local/ULA
 	// peer addresses. Default false: the relay refuses to proxy into private
 	// space, so a valid credential can't turn the node into an SSRF hop to
@@ -58,6 +66,7 @@ type Server struct {
 	listeners      []net.Listener
 	alloc          *allocationLimiter
 	playerLimiter  *playerAllocLimiter
+	caps           *subjectAllocCaps
 	drain          lifecycle.Gate
 	publicIP       string
 	transports     []string
@@ -65,6 +74,7 @@ type Server struct {
 	authFailures   atomic.Int64
 	allocThrottled atomic.Int64
 	peerRejected   atomic.Int64
+	bwDropped      atomic.Int64
 }
 
 // NewServer binds the configured listeners and starts the underlying pion
@@ -101,6 +111,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	s := &Server{publicIP: cfg.PublicIP, transports: []string{"udp"}}
 	s.alloc = newAllocationLimiter(relayGenerator(ip, bindAddr, cfg.RelayMinPort, cfg.RelayMaxPort), cfg.MaxAllocations)
 	s.playerLimiter = newPlayerAllocLimiter(cfg.PlayerAllocPerMinute, cfg.PlayerAllocBurst)
+	s.caps = newSubjectAllocCaps(cfg.MaxAllocationsPerPlayer, cfg.MaxAllocationsPerTenant)
 
 	conn, err := net.ListenPacket("udp4", net.JoinHostPort(bindAddr, strconv.Itoa(bindPort)))
 	if err != nil {
@@ -116,6 +127,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		logger.Warn("relay: private peer addresses are allowed; the relay can proxy UDP to loopback/RFC1918/link-local peers")
 	}
 	relayGen := newPlayerAllocationGenerator(s.alloc, &s.drain, s.playerLimiter, &s.allocThrottled)
+	relayGen.caps = s.caps
+	relayGen.maxBPS = cfg.AllocationMaxBPS
+	relayGen.dropped = &s.bwDropped
 	packetConns := []pionturn.PacketConnConfig{{
 		PacketConn:            conn,
 		RelayAddressGenerator: relayGen,
@@ -131,10 +145,11 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	turnServer, err := pionturn.NewServer(pionturn.ServerConfig{
 		Realm:             cfg.Issuer.realm,
 		AuthHandler:       s.authHandler(cfg.Issuer),
+		QuotaHandler:      s.quotaHandler,
 		PacketConnConfigs: packetConns,
 		ListenerConfigs:   listenerConfigs,
 		LoggerFactory:     newSlogLoggerFactory(cfg.Logger),
-		EventHandler:      s.authEventHandler(),
+		EventHandler:      s.authEventHandler(cfg.Issuer),
 	})
 	if err != nil {
 		_ = s.closeListeners()
@@ -306,16 +321,35 @@ func (s *Server) authHandler(iss *Issuer) pionturn.AuthHandler {
 // authEventHandler counts MESSAGE-INTEGRITY failures. Pion emits OnAuth only
 // after AuthHandler resolved a key, so these failures are disjoint from the
 // malformed, expired, unknown-key and wrong-realm cases counted above.
-func (s *Server) authEventHandler() pionturn.EventHandler {
+//
+// On success it records the tenant allocation cap the credential carries. This
+// is the first point where pion has verified the HMAC, so a forged username
+// cannot change a tenant's cap. AuthHandler runs before that check.
+func (s *Server) authEventHandler(iss *Issuer) pionturn.EventHandler {
 	return pionturn.EventHandler{OnAuth: func(
 		_, _ net.Addr,
-		_, _, _, _ string,
+		_, username, _, _ string,
 		verdict bool,
 	) {
 		if !verdict {
 			s.authFailures.Add(1)
+			return
+		}
+		if tenantID, allocCap, ok := iss.tenantAllocCap(username); ok {
+			s.caps.setTenantCap(tenantID, allocCap)
 		}
 	}}
+}
+
+// quotaHandler refuses an Allocate with 486 (Allocation Quota Reached) when the
+// player or tenant is already at its cap. It only reads the counts; the
+// generator reserves the slot, so concurrent Allocates cannot overshoot.
+func (s *Server) quotaHandler(userID, _ string, _ net.Addr) bool {
+	tenantID, playerID, ok := parseAllocationUserID(userID)
+	if !ok {
+		return true // the generator refuses a malformed subject
+	}
+	return s.caps.check(tenantID, playerID) == nil
 }
 
 // ActiveAllocations reports the number of currently-live relay allocations.
@@ -334,6 +368,28 @@ func (s *Server) RejectedAllocations() int64 {
 	}
 	return s.alloc.rejected.Load()
 }
+
+// PlayerCapRejected reports the cumulative count of allocations refused
+// because the player was at its live-allocation cap.
+func (s *Server) PlayerCapRejected() int64 {
+	if s.caps == nil {
+		return 0
+	}
+	return s.caps.playerRejected.Load()
+}
+
+// TenantCapRejected reports the cumulative count of allocations refused
+// because the tenant was at its live-allocation cap.
+func (s *Server) TenantCapRejected() int64 {
+	if s.caps == nil {
+		return 0
+	}
+	return s.caps.tenantRejected.Load()
+}
+
+// BandwidthDropped reports the cumulative count of relayed packets dropped by
+// the per-allocation bandwidth limit, both directions.
+func (s *Server) BandwidthDropped() int64 { return s.bwDropped.Load() }
 
 // AuthFailures reports the cumulative count of rejected TURN auth attempts.
 func (s *Server) AuthFailures() int64 { return s.authFailures.Load() }

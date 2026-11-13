@@ -146,3 +146,69 @@ func TestVerifyRejectsMalformedUsername(t *testing.T) {
 
 	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid)
 }
+
+func TestIssueWithTenantCap_should_omit_cap_when_disabled(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+
+	creds, err := issuer.IssueWithTenantCap(1, 42, 200)
+
+	require.NoError(t, err)
+	assert.Len(t, strings.Split(creds.Username, ":"), 4, "old relays reject a fifth field")
+}
+
+func TestIssueWithTenantCap_should_append_cap_when_enabled(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	issuer.SetTenantCapInCredentials(true)
+
+	creds, err := issuer.IssueWithTenantCap(1, 42, 200)
+
+	require.NoError(t, err)
+	parts := strings.Split(creds.Username, ":")
+	require.Len(t, parts, 5)
+	assert.Equal(t, "200", parts[4])
+}
+
+func TestIssueWithTenantCap_should_omit_cap_when_tenant_has_none(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	issuer.SetTenantCapInCredentials(true)
+
+	creds, err := issuer.IssueWithTenantCap(1, 42, 0)
+
+	require.NoError(t, err)
+	assert.Len(t, strings.Split(creds.Username, ":"), 4)
+}
+
+func TestVerify_should_accept_credential_with_tenant_cap(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	issuer.SetTenantCapInCredentials(true)
+	creds, err := issuer.IssueWithTenantCap(1, 42, 200)
+	require.NoError(t, err)
+
+	tenantID, playerID, err := issuer.Verify(creds.Username, creds.Password)
+
+	require.NoError(t, err)
+	assert.Equal(t, [2]int64{1, 42}, [2]int64{tenantID, playerID})
+}
+
+func TestVerify_should_reject_raised_tenant_cap(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	issuer.SetTenantCapInCredentials(true)
+	creds, err := issuer.IssueWithTenantCap(1, 42, 200)
+	require.NoError(t, err)
+
+	raised := strings.TrimSuffix(creds.Username, ":200") + ":999999"
+	_, _, err = issuer.Verify(raised, creds.Password)
+
+	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid)
+}
+
+func TestVerify_should_reject_malformed_tenant_cap(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", time.Minute)
+	creds, err := issuer.Issue(1, 42)
+	require.NoError(t, err)
+
+	for _, suffix := range []string{":", ":abc", ":0", ":-5", ":1:2"} {
+		_, _, err = issuer.Verify(creds.Username+suffix, creds.Password)
+		assert.ErrorIs(t, err, relay.ErrCredentialsInvalid, "suffix %q", suffix)
+	}
+}
