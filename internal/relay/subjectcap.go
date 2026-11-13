@@ -2,8 +2,10 @@ package relay
 
 import (
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -22,7 +24,8 @@ var (
 //
 // The tenant cap comes from the newest verified credential of that tenant that
 // carries one (see Issuer.IssueWithTenantCap); until then defaultTenant applies.
-// It is forgotten with the tenant's last allocation.
+// It is forgotten once the tenant has no live allocation and that credential
+// has expired (checked when a new tenant is recorded).
 // Tenant caps use the credential's values: unlimitedTenantCap lifts the cap,
 // 0 refuses every new allocation.
 type subjectAllocCaps struct {
@@ -33,6 +36,7 @@ type subjectAllocCaps struct {
 	players   map[allocSubject]int64
 	tenants   map[int64]int64
 	tenantCap map[int64]tenantCapEntry
+	now       func() int64 // unix seconds, compared with credential expiry
 
 	playerRejected atomic.Int64
 	tenantRejected atomic.Int64
@@ -60,11 +64,13 @@ func newSubjectAllocCaps(perPlayer, defaultTenant int) *subjectAllocCaps {
 		players:       make(map[allocSubject]int64),
 		tenants:       make(map[int64]int64),
 		tenantCap:     make(map[int64]tenantCapEntry),
+		now:           func() int64 { return time.Now().Unix() },
 	}
 }
 
 // setTenantCap records the cap carried by a verified credential with the given
-// expiry. A nil cap, or a credential older than the recorded one, changes nothing.
+// expiry. A nil cap, an older credential, or a same-second credential with a
+// looser cap changes nothing.
 func (c *subjectAllocCaps) setTenantCap(tenantID, expires int64, allocCap *int64) {
 	// A credential without the field (issued before the rollout flag) and an
 	// older credential must not weaken a cap set by a newer one, for example
@@ -74,10 +80,37 @@ func (c *subjectAllocCaps) setTenantCap(tenantID, expires int64, allocCap *int64
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if e, ok := c.tenantCap[tenantID]; ok && expires < e.expires {
+	e, ok := c.tenantCap[tenantID]
+	switch {
+	case !ok:
+		c.dropIdleExpiredLocked()
+	case expires < e.expires:
+		return
+	case expires == e.expires && looseness(*allocCap) > looseness(e.limit):
+		// Same-second credentials cannot be ordered, so the stricter cap wins.
 		return
 	}
 	c.tenantCap[tenantID] = tenantCapEntry{limit: *allocCap, expires: expires}
+}
+
+// dropIdleExpiredLocked forgets the caps of tenants with no live allocation
+// whose credential has expired. A cap from a still-valid credential stays: an
+// Allocate that authenticated with it may not have reserved its slot yet.
+func (c *subjectAllocCaps) dropIdleExpiredLocked() {
+	now := c.now()
+	for t, e := range c.tenantCap {
+		if c.tenants[t] == 0 && e.expires < now {
+			delete(c.tenantCap, t)
+		}
+	}
+}
+
+// looseness orders caps from strictest to loosest; unlimited is the loosest.
+func looseness(limit int64) int64 {
+	if limit == unlimitedTenantCap {
+		return math.MaxInt64
+	}
+	return limit
 }
 
 // check reports whether one more allocation would cross a cap, without
@@ -110,7 +143,6 @@ func (c *subjectAllocCaps) release(tenantID, playerID int64) {
 	}
 	if c.tenants[tenantID]--; c.tenants[tenantID] <= 0 {
 		delete(c.tenants, tenantID)
-		delete(c.tenantCap, tenantID) // the next Allocate's credential sets it again
 	}
 }
 
