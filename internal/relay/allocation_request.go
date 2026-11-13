@@ -16,8 +16,9 @@ var (
 	errRelayDraining                = errors.New("relay: node is draining; new allocations are refused")
 )
 
-// playerAllocationGenerator applies the drain gate and the player budget at
-// Pion's relay allocation boundary. Pion supplies the stable authenticated
+// playerAllocationGenerator applies the drain gate, the player and tenant
+// allocation caps, the player budget, and the bandwidth limit at Pion's relay
+// allocation boundary. Pion supplies the stable authenticated
 // UserID only after MESSAGE-INTEGRITY succeeds. Empty identities, including
 // EVEN-PORT preflight calls, fail closed before reaching the node allocator.
 // Only new Allocate requests pass through here, so a draining node keeps
@@ -27,6 +28,11 @@ type playerAllocationGenerator struct {
 	drain     *lifecycle.Gate
 	limiter   *playerAllocLimiter
 	throttled *atomic.Int64
+
+	// Optional; nil caps and maxBPS 0 turn them off.
+	caps    *subjectAllocCaps
+	maxBPS  int64
+	dropped *atomic.Int64
 }
 
 func newPlayerAllocationGenerator(
@@ -46,29 +52,47 @@ func (g *playerAllocationGenerator) AllocatePacketConn(
 	if conf.UserID == "" {
 		return nil, nil, errAllocationSubjectUnavailable
 	}
-	if g.drain == nil {
-		if err := g.allow(conf.UserID); err != nil {
-			return nil, nil, err
+	// Each admitted step adds its undo. They all run once, when the relayed
+	// socket closes or when a later step refuses the allocation.
+	var releases []func()
+	releaseAll := func() {
+		for _, r := range releases {
+			r()
 		}
-		return g.inner.AllocatePacketConn(conf)
 	}
-	// Checked before the player budget so a refused allocation spends no
+	// The drain gate goes first so a refused allocation spends no cap slot or
 	// token. An admitted Allocate counts as one unit of drain work from here
 	// until its relayed socket closes, so setup and the live allocation are
 	// never counted twice or not at all.
-	if !g.drain.Enter() {
-		return nil, nil, errRelayDraining
+	if g.drain != nil {
+		if !g.drain.Enter() {
+			return nil, nil, errRelayDraining
+		}
+		releases = append(releases, g.drain.Leave)
+	}
+	if g.caps != nil {
+		tenantID, playerID, ok := parseAllocationUserID(conf.UserID)
+		if !ok {
+			releaseAll()
+			return nil, nil, errAllocationSubjectUnavailable
+		}
+		if err := g.caps.acquire(tenantID, playerID); err != nil {
+			releaseAll()
+			return nil, nil, err
+		}
+		releases = append(releases, func() { g.caps.release(tenantID, playerID) })
 	}
 	if err := g.allow(conf.UserID); err != nil {
-		g.drain.Leave()
+		releaseAll()
 		return nil, nil, err
 	}
 	conn, addr, err := g.inner.AllocatePacketConn(conf)
 	if err != nil {
-		g.drain.Leave()
+		releaseAll()
 		return nil, nil, err
 	}
-	return &countedPacketConn{PacketConn: conn, release: g.drain.Leave}, addr, nil
+	conn = newBandwidthLimitedConn(conn, g.maxBPS, g.dropped)
+	return &countedPacketConn{PacketConn: conn, release: releaseAll}, addr, nil
 }
 
 func (g *playerAllocationGenerator) AllocateListener(

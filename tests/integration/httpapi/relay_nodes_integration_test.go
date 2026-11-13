@@ -31,6 +31,7 @@ import (
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/relay"
+	"github.com/automoto/gg-scale/internal/relaymeter"
 	"github.com/automoto/gg-scale/internal/relaynode"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
@@ -53,7 +54,7 @@ type relayNodesFixture struct {
 	access  string
 }
 
-func newRelayNodesFixture(t *testing.T, name string) *relayNodesFixture {
+func newRelayNodesFixture(t *testing.T, name string, opts ...func(*httpapi.Deps)) *relayNodesFixture {
 	t.Helper()
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, name)
@@ -76,7 +77,7 @@ func newRelayNodesFixture(t *testing.T, name string) *relayNodesFixture {
 	t.Cleanup(authorizer.Close)
 	store := relaynode.NewStore(pool)
 	issuer := relay.NewIssuer(relayNodesSecret, "relay.test", time.Minute)
-	srv := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
+	deps := httpapi.Deps{
 		Version:            "v1",
 		Commit:             "test",
 		Pool:               pool,
@@ -89,7 +90,11 @@ func newRelayNodesFixture(t *testing.T, name string) *relayNodesFixture {
 		RelayNodes:         relaynode.NewSelector(store.Eligible, nil),
 		RelayNodeAdmin:     store,
 		PlatformAdminToken: relayNodesAdminToken,
-	}))
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	srv := httptest.NewServer(httpapi.NewRouter(deps))
 	t.Cleanup(srv.Close)
 	return &relayNodesFixture{
 		c:       c,
@@ -231,6 +236,25 @@ func TestRelayNodes_should_allocate_through_a_node_registered_by_the_admin_api(t
 
 	code, creds := f.credentials(t, "us-east")
 	require.Equal(t, http.StatusOK, code)
+
+	assert.NoError(t, allocateThrough(t, creds))
+}
+
+func TestRelayNodes_should_issue_a_plan_capped_credential_the_relay_accepts(t *testing.T) {
+	f := newRelayNodesFixture(t, "relay-nodes-plan-cap", func(d *httpapi.Deps) {
+		d.RelayIssuer.SetTenantCapInCredentials(true)
+		d.RelayMeter = relaymeter.New(d.Pool, nil, "")
+	})
+	_, err := f.c.bootstrapPool.Exec(t.Context(),
+		`UPDATE tenants SET enforce_quotas = true WHERE name = $1`, "tenant-relay-nodes-plan-cap")
+	require.NoError(t, err)
+	turnURL, _, lifecycleURL := startLifecycleRelay(t, f.issuer)
+	f.register(t, "us-east", lifecycleURL, turnURL)
+	f.probe(t)
+
+	code, creds := f.credentials(t, "us-east")
+	require.Equal(t, http.StatusOK, code)
+	require.True(t, strings.HasSuffix(creds.Username, ":200"), "tier_0 cap in %q", creds.Username)
 
 	assert.NoError(t, allocateThrough(t, creds))
 }

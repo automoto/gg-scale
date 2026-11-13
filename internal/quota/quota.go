@@ -24,6 +24,9 @@ const (
 	AxisStorage       = "storage"
 	AxisRelaySessions = "relay_sessions"
 	AxisOpenSessions  = "open_sessions"
+	// AxisRelayAllocations overrides RelayAllocationsPerNode. Only a platform
+	// admin may set it; tenants cannot request it.
+	AxisRelayAllocations = "relay_allocations"
 )
 
 const gb = int64(1073741824)
@@ -35,12 +38,17 @@ const gb = int64(1073741824)
 // p2p_relay grant with enforce_quotas on. OpenSessionsPerProject caps live
 // game sessions per project; every tenant additionally sits under
 // gamesession.SessionsHardCap regardless of enforcement.
+// RelayAllocationsPerNode caps the tenant's live TURN allocations on each relay
+// node. It travels inside the relay credential, since relay nodes have no
+// database. Unlimited lifts the per-tenant cap (the node cap still applies);
+// 0 refuses every new allocation.
 type Limits struct {
-	Projects               int
-	Players                int64
-	StorageBytes           int64
-	RelaySessionsPerMonth  int64
-	OpenSessionsPerProject int64
+	Projects                int
+	Players                 int64
+	StorageBytes            int64
+	RelaySessionsPerMonth   int64
+	OpenSessionsPerProject  int64
+	RelayAllocationsPerNode int64
 }
 
 // LimitsForClass returns the quota ladder for a tenant class.
@@ -48,13 +56,13 @@ type Limits struct {
 func LimitsForClass(t tenant.Tier) Limits {
 	switch t {
 	case tenant.Tier1:
-		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000, OpenSessionsPerProject: 2_000}
+		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000, OpenSessionsPerProject: 2_000, RelayAllocationsPerNode: 2_000}
 	case tenant.Tier2:
-		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000, OpenSessionsPerProject: 5_000}
+		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000, OpenSessionsPerProject: 5_000, RelayAllocationsPerNode: 2_000}
 	case tenant.Tier3:
-		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited, OpenSessionsPerProject: 10_000}
+		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited, OpenSessionsPerProject: 10_000, RelayAllocationsPerNode: 2_000}
 	default:
-		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000, OpenSessionsPerProject: 500}
+		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000, OpenSessionsPerProject: 500, RelayAllocationsPerNode: 200}
 	}
 }
 
@@ -75,6 +83,8 @@ func Resolve(t tenant.Tier, overrides map[string]int64) Limits {
 			l.RelaySessionsPerMonth = v
 		case AxisOpenSessions:
 			l.OpenSessionsPerProject = v
+		case AxisRelayAllocations:
+			l.RelayAllocationsPerNode = v
 		}
 	}
 	return l

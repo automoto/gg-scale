@@ -35,6 +35,15 @@ func TestLimitsForClass_ladder_values(t *testing.T) {
 	}
 }
 
+func TestLimitsForClass_should_set_relay_allocations_per_node(t *testing.T) {
+	got := []int64{}
+	for _, tier := range []tenant.Tier{tenant.Tier0, tenant.Tier1, tenant.Tier2, tenant.Tier3} {
+		got = append(got, quota.LimitsForClass(tier).RelayAllocationsPerNode)
+	}
+
+	assert.Equal(t, []int64{200, 2000, 2000, 2000}, got)
+}
+
 func TestLimitsForClass_unknown_class_falls_back_to_tier0(t *testing.T) {
 	assert.Equal(t, quota.LimitsForClass(tenant.Tier0), quota.LimitsForClass(tenant.Tier(99)))
 }
@@ -131,6 +140,12 @@ func TestResolve_applies_overrides_per_axis(t *testing.T) {
 	assert.Equal(t, int64(42), got.StorageBytes)
 	assert.Equal(t, int64(quota.Unlimited), got.RelaySessionsPerMonth)
 	assert.Equal(t, int64(9_000), got.OpenSessionsPerProject)
+}
+
+func TestResolve_should_apply_relay_allocations_override(t *testing.T) {
+	got := quota.Resolve(tenant.Tier0, map[string]int64{quota.AxisRelayAllocations: 5_000})
+
+	assert.Equal(t, int64(5_000), got.RelayAllocationsPerNode)
 }
 
 func TestResolve_ignores_unknown_axis(t *testing.T) {

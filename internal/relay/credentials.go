@@ -8,6 +8,14 @@
 // accepted at once: the active (first) secret signs new credentials while
 // older secrets stay valid, giving a zero-downtime rotation window equal to
 // the credential TTL.
+//
+// A username may carry a fifth field, the tenant's per-node allocation cap
+// ("expires:tenant:player:kid:cap"): N > 0 caps the tenant at N, 0 refuses
+// every new allocation, -1 lifts the per-tenant cap. Without the field the
+// relay applies its own default. The HMAC covers the whole username, so a
+// client cannot change it. Relays built before this field existed reject such
+// usernames (their key-id lookup fails on "kid:cap"), so issuers emit it only
+// when SetTenantCapInCredentials(true) is set, after every relay is upgraded.
 package relay
 
 import (
@@ -61,6 +69,8 @@ type Issuer struct {
 	ttl      time.Duration
 	stunURLs []string
 	now      func() time.Time
+
+	tenantCapInCreds bool
 }
 
 // NewIssuer returns an Issuer with a single shared secret and realm. ttl is
@@ -102,15 +112,29 @@ func kidFor(secret string) string {
 // credentials so WebRTC clients can gather direct server-reflexive candidates.
 func (i *Issuer) SetSTUNURLs(urls []string) { i.stunURLs = urls }
 
+// SetTenantCapInCredentials turns on the tenant-cap username field. Leave it
+// off until every relay node accepts the field.
+func (i *Issuer) SetTenantCapInCredentials(on bool) { i.tenantCapInCreds = on }
+
 // Issue returns a fresh credential pair scoped to (tenantID, playerID), signed
 // by the active secret and tagged with its key id.
 func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
+	return i.IssueWithTenantCap(tenantID, playerID, nil)
+}
+
+// IssueWithTenantCap is Issue plus the tenant's per-node allocation cap. The
+// cap is left out when it is nil or the field is turned off, and the relay
+// then applies its own default.
+func (i *Issuer) IssueWithTenantCap(tenantID, playerID int64, allocCap *int64) (*Credentials, error) {
 	if len(i.secrets) == 0 {
 		return nil, errors.New("relay: no signing secret configured")
 	}
 	active := i.secrets[0]
 	expires := i.now().Add(i.ttl).Unix()
 	username := fmt.Sprintf("%d:%d:%d:%s", expires, tenantID, playerID, active.kid)
+	if i.tenantCapInCreds && allocCap != nil {
+		username += ":" + strconv.FormatInt(*allocCap, 10)
+	}
 	return &Credentials{
 		Username:   username,
 		Password:   passwordWith(active.key, username),
@@ -126,7 +150,7 @@ func (i *Issuer) Issue(tenantID, playerID int64) (*Credentials, error) {
 // HMAC key itself); Verify is the standalone entrypoint for verifying a
 // credential pair out of band — e.g. an external relay or a conformance test.
 func (i *Issuer) Verify(username, password string) (int64, int64, error) {
-	tenantID, playerID, _, err := i.parseUsername(username)
+	tenantID, playerID, _, _, err := i.parseUsername(username)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -143,7 +167,7 @@ func (i *Issuer) Verify(username, password string) (int64, int64, error) {
 // key, while the subject deliberately excludes its expiry and signing-key id so
 // renewed credentials continue to control the same live allocation.
 func (i *Issuer) authForUsername(username string) (tenantID, playerID int64, password string, ok bool) {
-	tenantID, playerID, kid, err := i.parseUsername(username)
+	tenantID, playerID, _, kid, err := i.parseUsername(username)
 	if err != nil {
 		return 0, 0, "", false
 	}
@@ -152,6 +176,16 @@ func (i *Issuer) authForUsername(username string) (tenantID, playerID int64, pas
 		return 0, 0, "", false
 	}
 	return tenantID, playerID, passwordWith(e.key, username), true
+}
+
+// tenantAllocCap returns the tenant, the credential expiry and its allocation
+// cap from a username. Call it only from pion's OnAuth with verdict true:
+// AuthHandler has checked expiry and pion has verified the HMAC. It does not
+// check expiry again, so a credential that expires between the two still has
+// its cap recorded.
+func (i *Issuer) tenantAllocCap(username string) (tenantID, expires int64, allocCap *int64, ok bool) {
+	expires, tenantID, _, allocCap, _, err := parseUsernameFields(username)
+	return tenantID, expires, allocCap, err == nil
 }
 
 func allocationUserID(tenantID, playerID int64) string {
@@ -174,33 +208,47 @@ func parseAllocationUserID(userID string) (tenantID, playerID int64, ok bool) {
 	return tenantID, playerID, true
 }
 
-// parseUsername splits and validates the "expires:tenant:player:kid" username,
-// returning ErrCredentialsExpired past the encoded expiry and
-// ErrCredentialsInvalid on any structural problem.
-func (i *Issuer) parseUsername(username string) (tenantID, playerID int64, kid string, err error) {
-	parts := strings.SplitN(username, ":", 4)
-	if len(parts) != 4 {
-		return 0, 0, "", ErrCredentialsInvalid
-	}
-	expires, err := strconv.ParseInt(parts[0], 10, 64)
+// parseUsername splits and validates the "expires:tenant:player:kid[:cap]"
+// username, returning ErrCredentialsExpired past the encoded expiry and
+// ErrCredentialsInvalid on any structural problem. allocCap is nil when absent.
+func (i *Issuer) parseUsername(username string) (tenantID, playerID int64, allocCap *int64, kid string, err error) {
+	expires, tenantID, playerID, allocCap, kid, err := parseUsernameFields(username)
 	if err != nil {
-		return 0, 0, "", ErrCredentialsInvalid
+		return 0, 0, nil, "", err
 	}
 	if i.now().Unix() > expires {
-		return 0, 0, "", ErrCredentialsExpired
+		return 0, 0, nil, "", ErrCredentialsExpired
 	}
-	tenantID, err = strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, "", ErrCredentialsInvalid
+	return tenantID, playerID, allocCap, kid, nil
+}
+
+// parseUsernameFields splits and validates the username fields without checking
+// expiry.
+func parseUsernameFields(username string) (expires, tenantID, playerID int64, allocCap *int64, kid string, err error) {
+	parts := strings.SplitN(username, ":", 5)
+	if len(parts) < 4 {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
-	playerID, err = strconv.ParseInt(parts[2], 10, 64)
-	if err != nil {
-		return 0, 0, "", ErrCredentialsInvalid
+	if expires, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
+	}
+	if tenantID, err = strconv.ParseInt(parts[1], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
+	}
+	if playerID, err = strconv.ParseInt(parts[2], 10, 64); err != nil {
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
 	if parts[3] == "" {
-		return 0, 0, "", ErrCredentialsInvalid
+		return 0, 0, 0, nil, "", ErrCredentialsInvalid
 	}
-	return tenantID, playerID, parts[3], nil
+	if len(parts) == 5 {
+		n, err := strconv.ParseInt(parts[4], 10, 64)
+		if err != nil || n < unlimitedTenantCap {
+			return 0, 0, 0, nil, "", ErrCredentialsInvalid
+		}
+		allocCap = &n
+	}
+	return expires, tenantID, playerID, allocCap, parts[3], nil
 }
 
 func passwordWith(secret []byte, username string) string {

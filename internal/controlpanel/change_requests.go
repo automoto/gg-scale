@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -68,6 +69,17 @@ var quotaOverrideAxes = []struct{ Value, Label string }{
 	{quota.AxisOpenSessions, "Open game sessions per Game Project"},
 }
 
+// adminOnlyQuotaAxes are quota axes only a platform admin may set. Tenants
+// cannot request them, and the change-request feature CHECK refuses them too.
+var adminOnlyQuotaAxes = []struct{ Value, Label string }{
+	{quota.AxisRelayAllocations, "Relay allocations per relay node"},
+}
+
+// errNotRequestableAxis refuses a change request for an axis tenants may not
+// request.
+var errNotRequestableAxis = errors.New("quota axis cannot be requested by a tenant")
+
+// isQuotaAxis reports whether a tenant may request an override for axis.
 func isQuotaAxis(axis string) bool {
 	for _, a := range quotaOverrideAxes {
 		if a.Value == axis {
@@ -77,8 +89,14 @@ func isQuotaAxis(axis string) bool {
 	return false
 }
 
+// isAdminQuotaAxis reports whether a platform admin may set an override for
+// axis.
+func isAdminQuotaAxis(axis string) bool {
+	return isQuotaAxis(axis) || slices.ContainsFunc(adminOnlyQuotaAxes, func(a struct{ Value, Label string }) bool { return a.Value == axis })
+}
+
 func quotaAxisLabel(axis string) string {
-	for _, a := range quotaOverrideAxes {
+	for _, a := range slices.Concat(quotaOverrideAxes, adminOnlyQuotaAxes) {
 		if a.Value == axis {
 			return a.Label
 		}
@@ -497,6 +515,9 @@ func (h *Handler) applyChangeRequest(ctx context.Context, q *sqlcgen.Queries, re
 			Reason:     strPtr("approved change request " + strconv.FormatInt(req.ID, 10)),
 		})
 	case req.Kind == changeKindQuotaOverride && req.Feature != nil && req.RequestedLimit != nil:
+		if !isQuotaAxis(*req.Feature) {
+			return errNotRequestableAxis
+		}
 		// Re-validate at apply time: submit-side validation can't cover a
 		// request that predates a bounds change.
 		if err := validateOverrideLimit(*req.Feature, *req.RequestedLimit); err != nil {
