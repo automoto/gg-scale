@@ -335,8 +335,8 @@ func (s *Server) authEventHandler(iss *Issuer) pionturn.EventHandler {
 			s.authFailures.Add(1)
 			return
 		}
-		if tenantID, allocCap, ok := iss.tenantAllocCap(username); ok {
-			s.caps.setTenantCap(tenantID, allocCap)
+		if tenantID, expires, allocCap, ok := iss.tenantAllocCap(username); ok {
+			s.caps.setTenantCap(tenantID, expires, allocCap)
 		}
 	}}
 }

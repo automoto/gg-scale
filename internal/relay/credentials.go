@@ -178,12 +178,18 @@ func (i *Issuer) authForUsername(username string) (tenantID, playerID int64, pas
 	return tenantID, playerID, passwordWith(e.key, username), true
 }
 
-// tenantAllocCap returns the tenant and its allocation cap from a username.
+// tenantAllocCap returns the tenant, the credential expiry and its allocation
+// cap from a username.
 // allocCap is nil when the username carries none. Call it only for a username
 // whose integrity pion already verified.
-func (i *Issuer) tenantAllocCap(username string) (tenantID int64, allocCap *int64, ok bool) {
+func (i *Issuer) tenantAllocCap(username string) (tenantID, expires int64, allocCap *int64, ok bool) {
 	tenantID, _, allocCap, _, err := i.parseUsername(username)
-	return tenantID, allocCap, err == nil
+	if err != nil {
+		return 0, 0, nil, false
+	}
+	expiresField, _, _ := strings.Cut(username, ":")
+	expires, err = strconv.ParseInt(expiresField, 10, 64)
+	return tenantID, expires, allocCap, err == nil
 }
 
 func allocationUserID(tenantID, playerID int64) string {

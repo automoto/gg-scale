@@ -1,6 +1,8 @@
 package relay
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,7 +58,7 @@ func TestSubjectAllocCaps_should_use_default_tenant_cap_without_credential_cap(t
 
 func TestSubjectAllocCaps_should_use_tenant_cap_from_credential(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 2000)
-	caps.setTenantCap(1, ptr(1))
+	caps.setTenantCap(1, 100, ptr(1))
 	require.NoError(t, caps.acquire(1, 1))
 
 	err := caps.acquire(1, 2)
@@ -64,25 +66,67 @@ func TestSubjectAllocCaps_should_use_tenant_cap_from_credential(t *testing.T) {
 	assert.ErrorIs(t, err, errTenantAllocationCap)
 }
 
-func TestSubjectAllocCaps_should_fall_back_to_default_when_credential_has_no_cap(t *testing.T) {
+func TestSubjectAllocCaps_should_keep_recorded_cap_when_credential_has_no_cap(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 2000)
-	caps.setTenantCap(1, ptr(1))
-	caps.setTenantCap(1, nil)
+	caps.setTenantCap(1, 100, ptr(1))
+	caps.setTenantCap(1, 200, nil)
 	require.NoError(t, caps.acquire(1, 1))
 
-	assert.NoError(t, caps.acquire(1, 2))
+	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
+}
+
+func TestSubjectAllocCaps_should_ignore_cap_from_older_credential(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	caps.setTenantCap(1, 200, ptr(1))
+	caps.setTenantCap(1, 100, ptr(2000))
+	require.NoError(t, caps.acquire(1, 1))
+
+	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
+}
+
+func TestSubjectAllocCaps_should_apply_cap_from_newer_credential(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	caps.setTenantCap(1, 100, ptr(2000))
+	caps.setTenantCap(1, 200, ptr(1))
+	require.NoError(t, caps.acquire(1, 1))
+
+	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
+}
+
+func TestSubjectAllocCaps_should_forget_tenant_cap_when_last_allocation_closes(t *testing.T) {
+	caps := newSubjectAllocCaps(0, 2000)
+	caps.setTenantCap(1, 100, ptr(1))
+	require.NoError(t, caps.acquire(1, 1))
+
+	caps.release(1, 1)
+
+	assert.Empty(t, caps.tenantCap)
+}
+
+func TestIssuer_tenantAllocCap_should_return_credential_expiry(t *testing.T) {
+	iss := NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	iss.SetTenantCapInCredentials(true)
+	creds, err := iss.IssueWithTenantCap(1, 2, ptr(5))
+	require.NoError(t, err)
+	want, err := strconv.ParseInt(strings.SplitN(creds.Username, ":", 2)[0], 10, 64)
+	require.NoError(t, err)
+
+	_, expires, _, ok := iss.tenantAllocCap(creds.Username)
+
+	require.True(t, ok)
+	assert.Equal(t, want, expires)
 }
 
 func TestSubjectAllocCaps_should_refuse_tenant_with_zero_cap(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 2000)
-	caps.setTenantCap(1, ptr(0))
+	caps.setTenantCap(1, 100, ptr(0))
 
 	assert.ErrorIs(t, caps.acquire(1, 1), errTenantAllocationCap)
 }
 
 func TestSubjectAllocCaps_should_not_cap_tenant_with_unlimited_cap(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 1)
-	caps.setTenantCap(1, ptr(-1))
+	caps.setTenantCap(1, 100, ptr(-1))
 	require.NoError(t, caps.acquire(1, 1))
 
 	assert.NoError(t, caps.acquire(1, 2))
