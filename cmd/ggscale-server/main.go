@@ -195,6 +195,10 @@ func runRelayCommand() error {
 		AllowPrivatePeers:    rc.AllowPrivatePeers,
 		Logger:               logger,
 		Issuer:               issuer,
+
+		MaxAllocationsPerPlayer: rc.MaxAllocationsPerPlayer,
+		MaxAllocationsPerTenant: rc.MaxAllocationsPerTenant,
+		AllocationMaxBPS:        rc.AllocationMaxBPS,
 	})
 	if err != nil {
 		return fmt.Errorf("relay: %w", err)
@@ -204,7 +208,10 @@ func runRelayCommand() error {
 		"public_ip", rc.PublicIP, "bind", rc.BindAddr, "udp_port", rc.UDPPort,
 		"tcp_port", rc.TCPPort, "tls_port", rc.TLSPort, "realm", rc.Realm,
 		"relay_min_port", rc.MinPort, "relay_max_port", rc.MaxPort,
-		"max_allocations", rc.MaxAllocations)
+		"max_allocations", rc.MaxAllocations,
+		"max_allocations_per_player", rc.MaxAllocationsPerPlayer,
+		"max_allocations_per_tenant", rc.MaxAllocationsPerTenant,
+		"allocation_max_bps", rc.AllocationMaxBPS)
 
 	lc := newRelayLifecycle(rc, srv)
 	stopHealth, err := startRelayHealth(rc, srv, lc, logger)
@@ -261,17 +268,23 @@ func embeddedRelayNode(urls []string, publicIP string, udpPort int) *relaynode.N
 // registerRelayServerMetrics exposes the relay Server's live-allocation gauge
 // and the rejected-allocation / auth-failure / peer-filter counters on reg.
 // These are the signals the ops runbook alerts on (port-range exhaustion,
-// credential probing, attempts to relay into private space); pion/turn v5
-// exposes no bandwidth hook.
+// credential probing, attempts to relay into private space, bandwidth abuse).
 func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "ggscale_relay_active_allocations",
 		Help: "Currently live TURN relay allocations on this node.",
 	}, func() float64 { return float64(srv.ActiveAllocations()) }))
-	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
-		Name: "ggscale_relay_allocations_rejected_total",
-		Help: "TURN relay allocations refused because the node allocation cap was reached.",
-	}, func() float64 { return float64(srv.RejectedAllocations()) }))
+	for reason, rejected := range map[string]func() int64{
+		"node_cap":   srv.RejectedAllocations,
+		"player_cap": srv.PlayerCapRejected,
+		"tenant_cap": srv.TenantCapRejected,
+	} {
+		reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+			Name:        "ggscale_relay_allocations_rejected_total",
+			Help:        "TURN relay allocations refused by the node, player, or tenant allocation cap.",
+			ConstLabels: prometheus.Labels{"reason": reason},
+		}, func() float64 { return float64(rejected()) }))
+	}
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Name: "ggscale_relay_auth_failures_total",
 		Help: "Rejected TURN auth attempts (bad/expired/unknown credentials or wrong realm).",
@@ -284,6 +297,10 @@ func registerRelayServerMetrics(reg prometheus.Registerer, srv *relay.Server) {
 		Name: "ggscale_relay_peer_rejected_total",
 		Help: "CreatePermission/ChannelBind attempts refused because the peer address is private.",
 	}, func() float64 { return float64(srv.PeerRejected()) }))
+	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
+		Name: "ggscale_relay_bandwidth_dropped_packets_total",
+		Help: "Relayed packets dropped by the per-allocation bandwidth limit, both directions.",
+	}, func() float64 { return float64(srv.BandwidthDropped()) }))
 }
 
 // startRelayHealth serves /healthz, /metrics and the lifecycle routes for the
@@ -533,6 +550,7 @@ func run() error {
 	if cfg.FeatureP2PRelayEnabled && cfg.RelaySharedSecret != "" {
 		relayIssuer = relay.NewIssuerWithSecrets(cfg.RelaySecrets(), cfg.RelayRealm, cfg.RelayCredTTL)
 		relayIssuer.SetSTUNURLs(cfg.RelaySTUNURLs)
+		relayIssuer.SetTenantCapInCredentials(cfg.RelayCredTenantCap)
 		var embedded *relaynode.Node
 		if cfg.RelayPublicIP != "" {
 			relayServer, rerr := relay.NewServer(relay.ServerConfig{
@@ -547,6 +565,10 @@ func run() error {
 				AllowPrivatePeers:    cfg.RelayAllowPrivatePeers,
 				Logger:               logger,
 				Issuer:               relayIssuer,
+
+				MaxAllocationsPerPlayer: cfg.RelayMaxAllocationsPerPlayer,
+				MaxAllocationsPerTenant: cfg.RelayMaxAllocationsPerTenant,
+				AllocationMaxBPS:        cfg.RelayAllocationMaxBPS,
 			})
 			if rerr != nil {
 				return fmt.Errorf("relay: %w", rerr)

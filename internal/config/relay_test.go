@@ -101,3 +101,23 @@ func TestLoadRelayRejectsInvertedPortRange(t *testing.T) {
 
 	assert.ErrorContains(t, err, "RELAY_MIN_PORT")
 }
+
+func TestLoadRelay_should_default_abuse_limits(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+
+	rc, err := config.LoadRelay()
+
+	require.NoError(t, err)
+	assert.Equal(t, []int64{32, 2000, 2000000},
+		[]int64{int64(rc.MaxAllocationsPerPlayer), int64(rc.MaxAllocationsPerTenant), rc.AllocationMaxBPS})
+}
+
+func TestLoad_should_default_relay_abuse_limits_and_leave_tenant_cap_credentials_off(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+
+	require.NoError(t, err)
+	assert.Equal(t, []any{32, 2000, int64(2000000), false},
+		[]any{cfg.RelayMaxAllocationsPerPlayer, cfg.RelayMaxAllocationsPerTenant, cfg.RelayAllocationMaxBPS, cfg.RelayCredTenantCap})
+}

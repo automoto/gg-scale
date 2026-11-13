@@ -184,6 +184,16 @@ type Config struct {
 	// allocations per player so one credential can't monopolise the pool. 0 = off.
 	RelayPlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
 	RelayPlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
+	// Per-player and per-tenant live-allocation caps and the per-allocation
+	// bandwidth cap (bits per second, each direction) for the embedded relay.
+	// 0 = unlimited. See RelayConfig.
+	RelayMaxAllocationsPerPlayer int   `env:"RELAY_MAX_ALLOCATIONS_PER_PLAYER" envDefault:"32"`
+	RelayMaxAllocationsPerTenant int   `env:"RELAY_MAX_ALLOCATIONS_PER_TENANT" envDefault:"2000"`
+	RelayAllocationMaxBPS        int64 `env:"RELAY_ALLOCATION_MAX_BPS" envDefault:"2000000"`
+	// RelayCredTenantCap puts the tenant's plan allocation cap into issued
+	// credentials. Relays older than this field reject such credentials, so
+	// turn it on only after every relay node runs a release that accepts it.
+	RelayCredTenantCap bool `env:"RELAY_CRED_TENANT_CAP" envDefault:"false"`
 	// RelayAllowPrivatePeers lets the embedded relay proxy to loopback/RFC1918/
 	// link-local/ULA peers. Default false (refuse private peers); enable only
 	// for a trusted self-host relay bridging private peers.

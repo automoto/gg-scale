@@ -51,6 +51,14 @@ type RelayConfig struct {
 	PlayerAllocPerMinute int `env:"RELAY_PLAYER_ALLOC_PER_MIN" envDefault:"6"`
 	PlayerAllocBurst     int `env:"RELAY_PLAYER_ALLOC_BURST" envDefault:"20"`
 
+	// MaxAllocationsPerPlayer caps one player's live allocations on this node.
+	// MaxAllocationsPerTenant caps one tenant's live allocations on this node
+	// when its credential carries no plan cap. AllocationMaxBPS caps each
+	// allocation's traffic per direction, in bits per second. 0 = unlimited.
+	MaxAllocationsPerPlayer int   `env:"RELAY_MAX_ALLOCATIONS_PER_PLAYER" envDefault:"32"`
+	MaxAllocationsPerTenant int   `env:"RELAY_MAX_ALLOCATIONS_PER_TENANT" envDefault:"2000"`
+	AllocationMaxBPS        int64 `env:"RELAY_ALLOCATION_MAX_BPS" envDefault:"2000000"`
+
 	// AllowPrivatePeers lets clients relay to loopback/RFC1918/link-local/ULA
 	// peers. Default false: the relay refuses to proxy into private space, so a
 	// valid credential can't become an SSRF hop to internal services. Enable
