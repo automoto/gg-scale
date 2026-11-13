@@ -131,15 +131,42 @@ func TestRelayTenantCap_should_use_cap_from_credential(t *testing.T) {
 	iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
 	iss.SetTenantCapInCredentials(true)
 	addr, _ := startLimitedRelay(t, relay.ServerConfig{MaxAllocationsPerTenant: 2000, Issuer: iss})
-	first, err := iss.IssueWithTenantCap(7, 1, 1)
+	first, err := iss.IssueWithTenantCap(7, 1, capOf(1))
 	require.NoError(t, err)
-	second, err := iss.IssueWithTenantCap(7, 2, 1)
+	second, err := iss.IssueWithTenantCap(7, 2, capOf(1))
 	require.NoError(t, err)
 	require.Equal(t, stun.ClassSuccessResponse, rawAllocate(t, addr, first).Type.Class)
 
 	response := rawAllocate(t, addr, second)
 
 	assert.Equal(t, stun.CodeAllocQuotaReached, errorCode(t, response))
+}
+
+func TestRelayTenantCap_should_refuse_every_allocation_when_credential_cap_is_zero(t *testing.T) {
+	iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	iss.SetTenantCapInCredentials(true)
+	addr, _ := startLimitedRelay(t, relay.ServerConfig{MaxAllocationsPerTenant: 2000, Issuer: iss})
+	creds, err := iss.IssueWithTenantCap(7, 1, capOf(0))
+	require.NoError(t, err)
+
+	response := rawAllocate(t, addr, creds)
+
+	assert.Equal(t, stun.CodeAllocQuotaReached, errorCode(t, response))
+}
+
+func TestRelayTenantCap_should_lift_default_when_credential_cap_is_unlimited(t *testing.T) {
+	iss := relay.NewIssuer(strings.Repeat("s", 32), "ggscale", time.Minute)
+	iss.SetTenantCapInCredentials(true)
+	addr, _ := startLimitedRelay(t, relay.ServerConfig{MaxAllocationsPerTenant: 1, Issuer: iss})
+	first, err := iss.IssueWithTenantCap(7, 1, capOf(-1))
+	require.NoError(t, err)
+	second, err := iss.IssueWithTenantCap(7, 2, capOf(-1))
+	require.NoError(t, err)
+	require.Equal(t, stun.ClassSuccessResponse, rawAllocate(t, addr, first).Type.Class)
+
+	response := rawAllocate(t, addr, second)
+
+	assert.Equal(t, stun.ClassSuccessResponse, response.Type.Class)
 }
 
 func TestRelayTenantCap_should_use_default_for_credential_without_cap(t *testing.T) {

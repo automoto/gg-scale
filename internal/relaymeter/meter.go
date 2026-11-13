@@ -43,9 +43,11 @@ func New(pool *db.Pool, m mailer.Mailer, mailFrom string) *Meter {
 // warn-claim updates run in one tenant-context transaction; warning emails go
 // out after commit, best-effort.
 //
-// allocCap is the tenant's class RelayAllocationsPerNode for the credential, or
-// 0 for a tenant without enforce_quotas, which leaves the relay's own default.
-func (m *Meter) Allow(ctx context.Context, tenantID int64) (allocCap int64, err error) {
+// allocCap is the tenant's effective RelayAllocationsPerNode for the
+// credential: the platform-admin override when set, else the class value. It
+// is nil for a tenant without enforce_quotas, which leaves the relay's own
+// default.
+func (m *Meter) Allow(ctx context.Context, tenantID int64) (allocCap *int64, err error) {
 	month := monthStart(m.now())
 	var warn80, warn100 bool
 	var allowance, sessions int64
@@ -64,7 +66,7 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) (allocCap int64, err 
 				return rerr
 			}
 			allowance = limits.RelaySessionsPerMonth
-			allocCap = limits.RelayAllocationsPerNode
+			allocCap = &limits.RelayAllocationsPerNode
 		}
 		// A zero allowance blocks all issuance. Refuse before the upsert:
 		// its allowance predicate only guards the conflict update, so the
@@ -106,7 +108,7 @@ func (m *Meter) Allow(ctx context.Context, tenantID int64) (allocCap int64, err 
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	if warn80 {

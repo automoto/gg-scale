@@ -22,9 +22,11 @@ var (
 //
 // The tenant cap comes from the last verified credential of that tenant (see
 // Issuer.IssueWithTenantCap); a credential without one gets defaultTenant.
+// Tenant caps use the credential's values: unlimitedTenantCap lifts the cap,
+// 0 refuses every new allocation.
 type subjectAllocCaps struct {
 	perPlayer     int64 // 0 = unlimited
-	defaultTenant int64 // 0 = unlimited
+	defaultTenant int64
 
 	mu        sync.Mutex
 	players   map[allocSubject]int64
@@ -37,24 +39,34 @@ type subjectAllocCaps struct {
 
 type allocSubject struct{ tenantID, playerID int64 }
 
+// unlimitedTenantCap is the credential value that lifts the per-tenant cap. It
+// matches quota.Unlimited, which the issuer passes through unchanged.
+const unlimitedTenantCap = -1
+
+// newSubjectAllocCaps takes env-style caps: <= 0 means unlimited.
 func newSubjectAllocCaps(perPlayer, defaultTenant int) *subjectAllocCaps {
+	tenantDefault := int64(defaultTenant)
+	if tenantDefault <= 0 {
+		tenantDefault = unlimitedTenantCap
+	}
 	return &subjectAllocCaps{
 		perPlayer:     int64(perPlayer),
-		defaultTenant: int64(defaultTenant),
+		defaultTenant: tenantDefault,
 		players:       make(map[allocSubject]int64),
 		tenants:       make(map[int64]int64),
 		tenantCap:     make(map[int64]int64),
 	}
 }
 
-// setTenantCap records the cap carried by a verified credential. allocCap <= 0
-// means the credential carried none.
-func (c *subjectAllocCaps) setTenantCap(tenantID, allocCap int64) {
-	if allocCap <= 0 {
-		allocCap = c.defaultTenant
+// setTenantCap records the cap carried by a verified credential. nil means the
+// credential carried none.
+func (c *subjectAllocCaps) setTenantCap(tenantID int64, allocCap *int64) {
+	limit := c.defaultTenant
+	if allocCap != nil {
+		limit = *allocCap
 	}
 	c.mu.Lock()
-	c.tenantCap[tenantID] = allocCap
+	c.tenantCap[tenantID] = limit
 	c.mu.Unlock()
 }
 
@@ -100,7 +112,7 @@ func (c *subjectAllocCaps) refuseLocked(tenantID, playerID int64) error {
 	if !ok {
 		limit = c.defaultTenant
 	}
-	if limit > 0 && c.tenants[tenantID] >= limit {
+	if limit != unlimitedTenantCap && c.tenants[tenantID] >= limit {
 		c.tenantRejected.Add(1)
 		return errTenantAllocationCap
 	}

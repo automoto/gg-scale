@@ -132,7 +132,7 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 		// Monthly session allowance: refuses only new issuance — in-flight
 		// TURN sessions are unaffected. It also resolves the tenant's per-node
 		// allocation cap, which the credential carries to the relay.
-		var allocCap int64
+		var allocCap *int64
 		if d.RelayMeter != nil {
 			if allocCap, err = d.RelayMeter.Allow(ctx, tenantID); err != nil {
 				var qe *quota.ErrQuotaExceeded

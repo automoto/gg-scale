@@ -24,6 +24,9 @@ const (
 	AxisStorage       = "storage"
 	AxisRelaySessions = "relay_sessions"
 	AxisOpenSessions  = "open_sessions"
+	// AxisRelayAllocations overrides RelayAllocationsPerNode. Only a platform
+	// admin may set it; tenants cannot request it.
+	AxisRelayAllocations = "relay_allocations"
 )
 
 const gb = int64(1073741824)
@@ -37,7 +40,8 @@ const gb = int64(1073741824)
 // gamesession.SessionsHardCap regardless of enforcement.
 // RelayAllocationsPerNode caps the tenant's live TURN allocations on each relay
 // node. It travels inside the relay credential, since relay nodes have no
-// database; it has no override axis.
+// database. Unlimited lifts the per-tenant cap (the node cap still applies);
+// 0 refuses every new allocation.
 type Limits struct {
 	Projects                int
 	Players                 int64
@@ -79,6 +83,8 @@ func Resolve(t tenant.Tier, overrides map[string]int64) Limits {
 			l.RelaySessionsPerMonth = v
 		case AxisOpenSessions:
 			l.OpenSessionsPerProject = v
+		case AxisRelayAllocations:
+			l.RelayAllocationsPerNode = v
 		}
 	}
 	return l

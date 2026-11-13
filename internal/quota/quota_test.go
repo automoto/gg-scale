@@ -142,6 +142,12 @@ func TestResolve_applies_overrides_per_axis(t *testing.T) {
 	assert.Equal(t, int64(9_000), got.OpenSessionsPerProject)
 }
 
+func TestResolve_should_apply_relay_allocations_override(t *testing.T) {
+	got := quota.Resolve(tenant.Tier0, map[string]int64{quota.AxisRelayAllocations: 5_000})
+
+	assert.Equal(t, int64(5_000), got.RelayAllocationsPerNode)
+}
+
 func TestResolve_ignores_unknown_axis(t *testing.T) {
 	got := quota.Resolve(tenant.Tier0, map[string]int64{"bogus": 1})
 	assert.Equal(t, quota.LimitsForClass(tenant.Tier0), got)

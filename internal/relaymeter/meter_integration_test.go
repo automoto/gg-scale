@@ -132,7 +132,22 @@ func TestAllow_should_return_plan_alloc_cap_for_enforced_tenant(t *testing.T) {
 	allocCap, err := m.Allow(context.Background(), enforcedTenant)
 
 	require.NoError(t, err)
-	assert.Equal(t, quota.LimitsForClass(0).RelayAllocationsPerNode, allocCap)
+	assert.Equal(t, quota.LimitsForClass(0).RelayAllocationsPerNode, *allocCap)
+}
+
+func TestAllow_should_return_platform_admin_alloc_cap_override(t *testing.T) {
+	for _, override := range []int64{5_000, 0, quota.Unlimited} {
+		m, owner, _ := newTestMeter(t, time.Date(2026, 7, 18, 12, 0, 0, 0, time.UTC))
+		_, err := owner.Exec(context.Background(),
+			`INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit") VALUES ($1, 'relay_allocations', $2)`,
+			enforcedTenant, override)
+		require.NoError(t, err)
+
+		allocCap, err := m.Allow(context.Background(), enforcedTenant)
+
+		require.NoError(t, err)
+		assert.Equal(t, override, *allocCap)
+	}
 }
 
 func TestAllow_should_return_no_alloc_cap_for_unenforced_tenant(t *testing.T) {
@@ -141,7 +156,7 @@ func TestAllow_should_return_no_alloc_cap_for_unenforced_tenant(t *testing.T) {
 	allocCap, err := m.Allow(context.Background(), unenforcedTenant)
 
 	require.NoError(t, err)
-	assert.Zero(t, allocCap)
+	assert.Nil(t, allocCap)
 }
 
 func TestAllow_unenforced_tenant_is_unmetered(t *testing.T) {

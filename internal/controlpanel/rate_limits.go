@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -468,9 +469,12 @@ func buildQuotaOverrideRows(tier tenant.Tier, overrides map[string]int64) []Quot
 		quota.AxisStorage:       ladder.StorageBytes,
 		quota.AxisRelaySessions: ladder.RelaySessionsPerMonth,
 		quota.AxisOpenSessions:  ladder.OpenSessionsPerProject,
+
+		quota.AxisRelayAllocations: ladder.RelayAllocationsPerNode,
 	}
-	rows := make([]QuotaOverrideRowView, 0, len(quotaOverrideAxes))
-	for _, a := range quotaOverrideAxes {
+	axes := slices.Concat(quotaOverrideAxes, adminOnlyQuotaAxes)
+	rows := make([]QuotaOverrideRowView, 0, len(axes))
+	for _, a := range axes {
 		row := QuotaOverrideRowView{Axis: a.Value, Label: a.Label, DefaultLabel: quotaLimitLabel(defaults[a.Value])}
 		if v, ok := overrides[a.Value]; ok {
 			value := v
@@ -484,7 +488,7 @@ func buildQuotaOverrideRows(tier tenant.Tier, overrides map[string]int64) []Quot
 // setQuotaOverride writes (or, with a blank value, clears) one per-tenant
 // quota-axis override. Platform-admin only.
 func (h *Handler) setQuotaOverride(ctx context.Context, actorID, tenantID int64, axis, limitStr string) error {
-	if !isQuotaAxis(axis) {
+	if !isAdminQuotaAxis(axis) {
 		return errInvalidLimit
 	}
 	clear := strings.TrimSpace(limitStr) == ""
