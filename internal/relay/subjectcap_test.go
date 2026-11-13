@@ -93,84 +93,20 @@ func TestSubjectAllocCaps_should_apply_cap_from_newer_credential(t *testing.T) {
 	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
 }
 
-func TestSubjectAllocCaps_should_keep_cap_of_valid_credential_after_last_allocation_closes(t *testing.T) {
+// The race from review: OnAuth records the cap, the tenant's last old
+// allocation closes and other tenants authenticate, then the same request
+// reaches AllocatePacketConn. Nothing in between may remove the cap.
+func TestSubjectAllocCaps_should_keep_cap_through_release_and_other_tenants(t *testing.T) {
 	caps := newSubjectAllocCaps(0, 2000)
-	caps.now = func() int64 { return 1000 }
-	caps.setTenantCap(1, 1300, ptr(1))
-	require.NoError(t, caps.acquire(1, 1))
-	caps.release(1, 1)
-	require.NoError(t, caps.acquire(1, 2))
-
-	assert.ErrorIs(t, caps.acquire(1, 3), errTenantAllocationCap)
-}
-
-func TestSubjectAllocCaps_should_drop_expired_idle_caps_when_new_tenant_authenticates(t *testing.T) {
-	caps := newSubjectAllocCaps(0, 2000)
-	now := int64(1000)
-	caps.now = func() int64 { return now }
-	caps.setTenantCap(1, 1300, ptr(1))
-	require.NoError(t, caps.acquire(1, 1))
-	caps.release(1, 1)
-	now = 2000
-
-	caps.setTenantCap(2, 2300, ptr(5))
-
-	assert.NotContains(t, caps.tenantCap, int64(1))
-}
-
-// The race from review: OnAuth records the cap just before the credential
-// expires, the tenant's last old allocation closes and another tenant triggers
-// cleanup after expiry, then the same request reaches AllocatePacketConn.
-func TestSubjectAllocCaps_should_keep_cap_for_allocate_that_authenticated_just_before_expiry(t *testing.T) {
-	caps := newSubjectAllocCaps(0, 2000)
-	now := int64(900)
-	caps.now = func() int64 { return now }
 	caps.setTenantCap(1, 900, ptr(5))
 	require.NoError(t, caps.acquire(1, 1))
-	now = 1000
 	caps.setTenantCap(1, 1000, ptr(0))
-	now = 1001
 	caps.release(1, 1)
-	caps.setTenantCap(2, 1301, ptr(5))
+	for tenant := int64(2); tenant < 100; tenant++ {
+		caps.setTenantCap(tenant, 1_000_000, ptr(5))
+	}
 
 	assert.ErrorIs(t, caps.acquire(1, 2), errTenantAllocationCap)
-}
-
-func TestSubjectAllocCaps_should_keep_idle_cap_within_retention_after_expiry(t *testing.T) {
-	caps := newSubjectAllocCaps(0, 2000)
-	now := int64(1000)
-	caps.now = func() int64 { return now }
-	caps.setTenantCap(1, 1000, ptr(1))
-	now = 1000 + capRetentionSeconds
-
-	caps.setTenantCap(2, now+300, ptr(5))
-
-	assert.Contains(t, caps.tenantCap, int64(1))
-}
-
-func TestSubjectAllocCaps_should_drop_idle_cap_just_after_retention(t *testing.T) {
-	caps := newSubjectAllocCaps(0, 2000)
-	now := int64(1000)
-	caps.now = func() int64 { return now }
-	caps.setTenantCap(1, 1000, ptr(1))
-	now = 1000 + capRetentionSeconds + 1
-
-	caps.setTenantCap(2, now+300, ptr(5))
-
-	assert.NotContains(t, caps.tenantCap, int64(1))
-}
-
-func TestSubjectAllocCaps_should_keep_caps_of_tenants_with_live_allocations(t *testing.T) {
-	caps := newSubjectAllocCaps(0, 2000)
-	now := int64(1000)
-	caps.now = func() int64 { return now }
-	caps.setTenantCap(1, 1300, ptr(1))
-	require.NoError(t, caps.acquire(1, 1))
-	now = 2000
-
-	caps.setTenantCap(2, 2300, ptr(5))
-
-	assert.Contains(t, caps.tenantCap, int64(1))
 }
 
 func TestSubjectAllocCaps_should_keep_stricter_cap_from_credential_with_same_expiry(t *testing.T) {

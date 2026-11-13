@@ -5,7 +5,6 @@ import (
 	"math"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 var (
@@ -19,14 +18,17 @@ var (
 //
 // Counts go up when the relay address generator hands out a relayed socket and
 // down when pion closes it. Pion closes it on every delete path: a Refresh with
-// LIFETIME 0, lifetime expiry, and a relay read error. Maps hold only subjects
-// with a live allocation, so they stay bounded by the node allocation cap.
+// LIFETIME 0, lifetime expiry, and a relay read error. The count maps hold
+// only subjects with a live allocation, so they stay bounded by the node
+// allocation cap.
 //
 // The tenant cap comes from the newest verified credential of that tenant that
 // carries one (see Issuer.IssueWithTenantCap); until then defaultTenant applies.
-// It is forgotten once the tenant has no live allocation and that credential
-// expired more than capRetentionSeconds ago (checked when a new tenant is
-// recorded).
+// Caps are never removed: pion records the cap in OnAuth and reserves the slot
+// in AllocatePacketConn, and offers no per-request hook or data between them,
+// so removing a cap at any time could make an in-flight Allocate fall back to
+// the default. Entries come only from HMAC-verified credentials, so the map is
+// bounded by the number of tenants that used this node since it started.
 // Tenant caps use the credential's values: unlimitedTenantCap lifts the cap,
 // 0 refuses every new allocation.
 type subjectAllocCaps struct {
@@ -37,7 +39,6 @@ type subjectAllocCaps struct {
 	players   map[allocSubject]int64
 	tenants   map[int64]int64
 	tenantCap map[int64]tenantCapEntry
-	now       func() int64 // unix seconds, compared with credential expiry
 
 	playerRejected atomic.Int64
 	tenantRejected atomic.Int64
@@ -48,17 +49,6 @@ type allocSubject struct{ tenantID, playerID int64 }
 // tenantCapEntry is a tenant's cap and the expiry of the credential that set
 // it. Issuers share one TTL, so a later expiry means a newer credential.
 type tenantCapEntry struct{ limit, expires int64 }
-
-// capRetentionSeconds keeps an idle tenant's cap this long after its
-// credential expires. pion records the cap in OnAuth and reserves the slot in
-// AllocatePacketConn, synchronously in one request handler, and AuthHandler
-// passes only up to expiry. Removing the cap before expiry plus this margin
-// could make that request fall back to the default cap. The gap is CPU time
-// only; 60 s leaves a wide margin. Pion offers no hook that identifies the
-// request on the refusal paths in between, so the cap cannot be pinned per
-// request, and the UserID must stay the same across Refresh, so it cannot
-// carry the cap.
-const capRetentionSeconds = 60
 
 // unlimitedTenantCap is the credential value that lifts the per-tenant cap. It
 // matches quota.Unlimited, which the issuer passes through unchanged.
@@ -76,7 +66,6 @@ func newSubjectAllocCaps(perPlayer, defaultTenant int) *subjectAllocCaps {
 		players:       make(map[allocSubject]int64),
 		tenants:       make(map[int64]int64),
 		tenantCap:     make(map[int64]tenantCapEntry),
-		now:           func() int64 { return time.Now().Unix() },
 	}
 }
 
@@ -92,28 +81,16 @@ func (c *subjectAllocCaps) setTenantCap(tenantID, expires int64, allocCap *int64
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e, ok := c.tenantCap[tenantID]
-	switch {
-	case !ok:
-		c.dropIdleExpiredLocked()
-	case expires < e.expires:
-		return
-	case expires == e.expires && looseness(*allocCap) > looseness(e.limit):
+	if e, ok := c.tenantCap[tenantID]; ok {
+		if expires < e.expires {
+			return
+		}
 		// Same-second credentials cannot be ordered, so the stricter cap wins.
-		return
-	}
-	c.tenantCap[tenantID] = tenantCapEntry{limit: *allocCap, expires: expires}
-}
-
-// dropIdleExpiredLocked forgets the caps of tenants with no live allocation
-// whose credential expired more than capRetentionSeconds ago.
-func (c *subjectAllocCaps) dropIdleExpiredLocked() {
-	now := c.now()
-	for t, e := range c.tenantCap {
-		if c.tenants[t] == 0 && e.expires+capRetentionSeconds < now {
-			delete(c.tenantCap, t)
+		if expires == e.expires && looseness(*allocCap) > looseness(e.limit) {
+			return
 		}
 	}
+	c.tenantCap[tenantID] = tenantCapEntry{limit: *allocCap, expires: expires}
 }
 
 // looseness orders caps from strictest to loosest; unlimited is the loosest.
