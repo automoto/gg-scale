@@ -6,16 +6,20 @@ package migrate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	"github.com/golang-migrate/migrate/v4/source"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
 // Runner applies golang-migrate migrations against a Postgres database.
 type Runner struct {
-	m *migrate.Migrate
+	m   *migrate.Migrate
+	src source.Driver
 }
 
 // New constructs a Runner reading SQL migrations from migrationsDir and
@@ -25,15 +29,35 @@ func New(databaseURL, migrationsDir string) (*Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := migrate.New("file://"+migrationsDir, dsn)
+	src, err := source.Open("file://" + migrationsDir)
 	if err != nil {
+		return nil, fmt.Errorf("open migrations: %w", err)
+	}
+	m, err := migrate.NewWithSourceInstance("file", src, dsn)
+	if err != nil {
+		_ = src.Close()
 		return nil, fmt.Errorf("init migrate: %w", err)
 	}
-	return &Runner{m: m}, nil
+	return &Runner{m: m, src: src}, nil
 }
 
-// Up applies all pending migrations. ErrNoChange is treated as success.
+// Up applies all pending migrations. ErrNoChange is treated as success. A clean
+// database already past the newest bundled migration is also a no-op: an older
+// release must start against a schema a newer release expanded (rollback).
 func (r *Runner) Up() error {
+	v, dirty, err := r.Version()
+	if err != nil {
+		return err
+	}
+	newest, err := newestVersion(r.src)
+	if err != nil {
+		return err
+	}
+	if !dirty && v > newest {
+		slog.Warn("database schema is newer than this release's migrations; skipping migrate",
+			"db_version", v, "newest_bundled_version", newest)
+		return nil
+	}
 	if err := r.m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return err
 	}
@@ -77,6 +101,27 @@ func (r *Runner) Close() error {
 	}
 	srcErr, dbErr := r.m.Close()
 	return errors.Join(srcErr, dbErr)
+}
+
+// newestVersion returns the highest migration version in src.
+func newestVersion(src source.Driver) (uint, error) {
+	v, err := src.First()
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read first migration: %w", err)
+	}
+	for {
+		next, err := src.Next(v)
+		if errors.Is(err, os.ErrNotExist) {
+			return v, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("read migration after %d: %w", v, err)
+		}
+		v = next
+	}
 }
 
 // pgxDSN ensures the DSN uses the pgx5 driver scheme that golang-migrate
