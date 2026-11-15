@@ -221,9 +221,9 @@ func (s *Server) buildTCPListeners(cfg ServerConfig, bindAddr string, relayGen p
 
 // permissionHandler returns the pion PermissionHandler that filters
 // CreatePermission/ChannelBind peer addresses. With allowPrivate false (the
-// default) it refuses loopback, RFC1918, ULA, link-local, unspecified, and
-// interface-local peers, so a valid relay credential cannot proxy UDP into
-// private space. allowPrivate true admits everything (opt-in for trusted
+// default) it refuses loopback, RFC1918, ULA, link-local, unspecified,
+// interface-local, and reservedV4 peers, so a valid relay credential cannot
+// proxy UDP into private space. allowPrivate true admits everything (opt-in for trusted
 // self-host bridging).
 func (s *Server) permissionHandler(allowPrivate bool) pionturn.PermissionHandler {
 	return func(_ net.Addr, peerIP net.IP) bool {
@@ -238,21 +238,36 @@ func (s *Server) permissionHandler(allowPrivate bool) pionturn.PermissionHandler
 	}
 }
 
-// cgnat is the RFC 6598 carrier-grade NAT range. It is not routable on the
-// public internet, and it is the range Tailscale assigns from, so a relay node
-// on a tailnet reaches its own operator network through it.
-var cgnat = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+// reservedV4 lists IPv4 ranges that IsGlobalUnicast and IsPrivate pass but that
+// are never public peers. The RFC 6598 carrier-grade NAT range is also the range
+// Tailscale assigns from, so a relay node on a tailnet reaches its own operator
+// network through it.
+var reservedV4 = []net.IPNet{
+	{IP: net.IPv4(0, 0, 0, 0), Mask: net.CIDRMask(8, 32)},       // "this network"
+	{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)},   // carrier-grade NAT
+	{IP: net.IPv4(192, 0, 0, 0), Mask: net.CIDRMask(24, 32)},    // IETF protocol assignments
+	{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)},    // documentation
+	{IP: net.IPv4(198, 18, 0, 0), Mask: net.CIDRMask(15, 32)},   // benchmarking
+	{IP: net.IPv4(198, 51, 100, 0), Mask: net.CIDRMask(24, 32)}, // documentation
+	{IP: net.IPv4(203, 0, 113, 0), Mask: net.CIDRMask(24, 32)},  // documentation
+	{IP: net.IPv4(240, 0, 0, 0), Mask: net.CIDRMask(4, 32)},     // reserved
+}
 
 // isPrivatePeer reports whether peerIP is an address the relay must not proxy
 // to when private peers are disallowed.
 func isPrivatePeer(peerIP net.IP) bool {
 	// IsGlobalUnicast is false for loopback, the unspecified address, IPv4
 	// broadcast, every multicast scope, and link-local unicast. It is true for
-	// RFC1918, ULA and CGNAT, so those are checked separately below.
-	if !peerIP.IsGlobalUnicast() {
+	// RFC1918, ULA and the reservedV4 ranges, so those are checked below.
+	if !peerIP.IsGlobalUnicast() || peerIP.IsPrivate() {
 		return true
 	}
-	return peerIP.IsPrivate() || cgnat.Contains(peerIP)
+	for _, n := range reservedV4 {
+		if n.Contains(peerIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // Close stops the TURN server and releases every listener.
