@@ -210,14 +210,20 @@ func parseAllocationUserID(userID string) (tenantID, playerID int64, ok bool) {
 
 // parseUsername splits and validates the "expires:tenant:player:kid[:cap]"
 // username, returning ErrCredentialsExpired past the encoded expiry and
-// ErrCredentialsInvalid on any structural problem. allocCap is nil when absent.
+// ErrCredentialsInvalid on any structural problem or an expiry more than
+// max(1h, ttl) away. allocCap is nil when absent.
 func (i *Issuer) parseUsername(username string) (tenantID, playerID int64, allocCap *int64, kid string, err error) {
 	expires, tenantID, playerID, allocCap, kid, err := parseUsernameFields(username)
 	if err != nil {
 		return 0, 0, nil, "", err
 	}
-	if i.now().Unix() > expires {
+	now := i.now().Unix()
+	if now > expires {
 		return 0, 0, nil, "", ErrCredentialsExpired
+	}
+	// Bound the lifetime so a forged or misissued credential cannot last forever.
+	if expires-now > int64(max(time.Hour, i.ttl).Seconds()) {
+		return 0, 0, nil, "", ErrCredentialsInvalid
 	}
 	return tenantID, playerID, allocCap, kid, nil
 }
