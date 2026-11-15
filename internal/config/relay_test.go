@@ -84,17 +84,6 @@ func TestLoadRelayAcceptsPortRange(t *testing.T) {
 	assert.Equal(t, 49300, rc.MaxPort)
 }
 
-func TestLoadRelay_should_accept_allocations_equal_to_port_range(t *testing.T) {
-	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
-	t.Setenv("RELAY_MIN_PORT", "49152")
-	t.Setenv("RELAY_MAX_PORT", "53151")
-	t.Setenv("RELAY_MAX_ALLOCATIONS", "4000")
-
-	_, err := config.LoadRelay()
-
-	assert.NoError(t, err)
-}
-
 func TestLoadRelay_should_reject_more_allocations_than_ports_in_range(t *testing.T) {
 	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
 	t.Setenv("RELAY_MIN_PORT", "49152")

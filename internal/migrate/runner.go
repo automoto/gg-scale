@@ -53,7 +53,9 @@ func (r *Runner) Up() error {
 	if err != nil {
 		return err
 	}
-	if !dirty && v > newest {
+	// newest == 0 means an empty migrations dir (a bad image or mount): fail
+	// in m.Up() as before rather than start against an unknown schema.
+	if !dirty && newest > 0 && v > newest {
 		slog.Warn("database schema is newer than this release's migrations; skipping migrate",
 			"db_version", v, "newest_bundled_version", newest)
 		return nil

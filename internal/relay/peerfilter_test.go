@@ -41,6 +41,29 @@ func TestIsPrivatePeer(t *testing.T) {
 		{"mapped cgnat", "::ffff:100.64.0.1", true},
 		{"mapped public", "::ffff:8.8.8.8", false},
 
+		// Special-purpose and documentation ranges, with the address on each
+		// side of the edge. The mapped forms must be refused too.
+		{"reserved 0.1.2.3", "0.1.2.3", true},
+		{"reserved 0.255.255.255", "0.255.255.255", true},
+		{"reserved 1.0.0.1", "1.0.0.1", false},
+		{"reserved 192.0.0.1", "192.0.0.1", true},
+		{"reserved 192.0.1.1", "192.0.1.1", false},
+		{"reserved 192.0.2.1", "192.0.2.1", true},
+		{"reserved 192.0.3.1", "192.0.3.1", false},
+		{"reserved 198.17.255.255", "198.17.255.255", false},
+		{"reserved 198.18.0.1", "198.18.0.1", true},
+		{"reserved 198.19.255.255", "198.19.255.255", true},
+		{"reserved 198.20.0.1", "198.20.0.1", false},
+		{"reserved 198.51.100.1", "198.51.100.1", true},
+		{"reserved 198.51.101.1", "198.51.101.1", false},
+		{"reserved 203.0.113.10", "203.0.113.10", true},
+		{"reserved 203.0.114.1", "203.0.114.1", false},
+		{"reserved 223.255.255.255", "223.255.255.255", false},
+		{"reserved 240.0.0.1", "240.0.0.1", true},
+		{"reserved 254.255.255.255", "254.255.255.255", true},
+		{"reserved ::ffff:198.18.0.1", "::ffff:198.18.0.1", true},
+		{"reserved ::ffff:203.0.113.1", "::ffff:203.0.113.1", true},
+
 		{"public v4", "8.8.8.8", false},
 		{"public v4 2", "1.1.1.1", false},
 		{"public v4 3", "9.9.9.9", false},
@@ -52,43 +75,6 @@ func TestIsPrivatePeer(t *testing.T) {
 			ip := net.ParseIP(c.ip)
 			assert.NotNil(t, ip, "test case parses")
 			assert.Equal(t, c.private, isPrivatePeer(ip), "isPrivatePeer(%s)", c.ip)
-		})
-	}
-}
-
-func TestIsPrivatePeer_should_refuse_reserved_ipv4_ranges(t *testing.T) {
-	cases := []struct {
-		ip      string
-		refused bool
-	}{
-		{"0.1.2.3", true},
-		{"0.255.255.255", true},
-		{"1.0.0.1", false},
-		{"192.0.0.1", true},
-		{"192.0.1.1", false},
-		{"192.0.2.1", true},
-		{"192.0.3.1", false},
-		{"198.17.255.255", false},
-		{"198.18.0.1", true},
-		{"198.19.255.255", true},
-		{"198.20.0.1", false},
-		{"198.51.100.1", true},
-		{"198.51.101.1", false},
-		{"203.0.113.10", true},
-		{"203.0.114.1", false},
-		{"223.255.255.255", false},
-		{"240.0.0.1", true},
-		{"254.255.255.255", true},
-		{"::ffff:198.18.0.1", true},
-		{"::ffff:203.0.113.1", true},
-	}
-	for _, c := range cases {
-		t.Run(c.ip, func(t *testing.T) {
-			ip := net.ParseIP(c.ip)
-
-			refused := isPrivatePeer(ip)
-
-			assert.Equal(t, c.refused, refused)
 		})
 	}
 }

@@ -17,8 +17,14 @@ import (
 // and a stub database already at dbVersion.
 func newStubRunner(t *testing.T, dbVersion int, dirty bool) (*Runner, *stub.Stub) {
 	t.Helper()
+	return newStubRunnerWith(t, []string{"0001_a.up.sql", "0001_a.down.sql", "0002_b.up.sql", "0002_b.down.sql"}, dbVersion, dirty)
+}
+
+// newStubRunnerWith is newStubRunner over the given migration file names.
+func newStubRunnerWith(t *testing.T, files []string, dbVersion int, dirty bool) (*Runner, *stub.Stub) {
+	t.Helper()
 	dir := t.TempDir()
-	for _, name := range []string{"0001_a.up.sql", "0001_a.down.sql", "0002_b.up.sql", "0002_b.down.sql"} {
+	for _, name := range files {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("SELECT 1;"), 0o600))
 	}
 	src, err := source.Open("file://" + dir)
@@ -58,4 +64,16 @@ func TestUp_should_apply_pending_migrations_when_db_is_behind(t *testing.T) {
 	require.NoError(t, r.Up())
 
 	assert.Equal(t, 2, db.CurrentVersion)
+}
+
+func TestUp_should_fail_when_migrations_dir_is_empty(t *testing.T) {
+	r, _ := newStubRunnerWith(t, nil, 5, false)
+
+	assert.Error(t, r.Up())
+}
+
+func TestUp_should_fail_when_db_version_is_missing_below_newest(t *testing.T) {
+	r, _ := newStubRunnerWith(t, []string{"0001_a.up.sql", "0002_b.up.sql", "0005_c.up.sql"}, 3, false)
+
+	assert.Error(t, r.Up())
 }

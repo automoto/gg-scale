@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"slices"
 	"strconv"
 	"sync/atomic"
 
@@ -262,12 +263,7 @@ func isPrivatePeer(peerIP net.IP) bool {
 	if !peerIP.IsGlobalUnicast() || peerIP.IsPrivate() {
 		return true
 	}
-	for _, n := range reservedV4 {
-		if n.Contains(peerIP) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(reservedV4, func(n net.IPNet) bool { return n.Contains(peerIP) })
 }
 
 // Close stops the TURN server and releases every listener.
