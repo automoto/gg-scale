@@ -64,6 +64,11 @@ func TestIsPrivatePeer(t *testing.T) {
 		{"reserved ::ffff:198.18.0.1", "::ffff:198.18.0.1", true},
 		{"reserved ::ffff:203.0.113.1", "::ffff:203.0.113.1", true},
 
+		{"reserved 192.88.98.255", "192.88.98.255", false},
+		{"reserved 192.88.99.1", "192.88.99.1", true},
+		{"reserved 192.88.99.255", "192.88.99.255", true},
+		{"reserved 192.88.100.0", "192.88.100.0", false},
+		{"reserved ::ffff:192.88.99.1", "::ffff:192.88.99.1", true},
 		{"public v4", "8.8.8.8", false},
 		{"public v4 2", "1.1.1.1", false},
 		{"public v4 3", "9.9.9.9", false},

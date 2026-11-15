@@ -248,6 +248,7 @@ var reservedV4 = []net.IPNet{
 	{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)},   // carrier-grade NAT
 	{IP: net.IPv4(192, 0, 0, 0), Mask: net.CIDRMask(24, 32)},    // IETF protocol assignments
 	{IP: net.IPv4(192, 0, 2, 0), Mask: net.CIDRMask(24, 32)},    // documentation
+	{IP: net.IPv4(192, 88, 99, 0), Mask: net.CIDRMask(24, 32)},  // 6to4 relay anycast (deprecated, RFC 7526)
 	{IP: net.IPv4(198, 18, 0, 0), Mask: net.CIDRMask(15, 32)},   // benchmarking
 	{IP: net.IPv4(198, 51, 100, 0), Mask: net.CIDRMask(24, 32)}, // documentation
 	{IP: net.IPv4(203, 0, 113, 0), Mask: net.CIDRMask(24, 32)},  // documentation
