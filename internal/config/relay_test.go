@@ -75,12 +75,47 @@ func TestLoadRelayAcceptsPortRange(t *testing.T) {
 	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
 	t.Setenv("RELAY_MIN_PORT", "49200")
 	t.Setenv("RELAY_MAX_PORT", "49300")
+	t.Setenv("RELAY_MAX_ALLOCATIONS", "101")
 
 	rc, err := config.LoadRelay()
 
 	require.NoError(t, err)
 	assert.Equal(t, 49200, rc.MinPort)
 	assert.Equal(t, 49300, rc.MaxPort)
+}
+
+func TestLoadRelay_should_accept_allocations_equal_to_port_range(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	t.Setenv("RELAY_MIN_PORT", "49152")
+	t.Setenv("RELAY_MAX_PORT", "53151")
+	t.Setenv("RELAY_MAX_ALLOCATIONS", "4000")
+
+	_, err := config.LoadRelay()
+
+	assert.NoError(t, err)
+}
+
+func TestLoadRelay_should_reject_more_allocations_than_ports_in_range(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	t.Setenv("RELAY_MIN_PORT", "49152")
+	t.Setenv("RELAY_MAX_PORT", "53150")
+	t.Setenv("RELAY_MAX_ALLOCATIONS", "4000")
+
+	_, err := config.LoadRelay()
+
+	require.Error(t, err)
+	for _, name := range []string{"RELAY_MAX_ALLOCATIONS", "RELAY_MIN_PORT", "RELAY_MAX_PORT"} {
+		assert.ErrorContains(t, err, name)
+	}
+}
+
+func TestLoadRelay_should_skip_allocation_check_without_port_range(t *testing.T) {
+	setRelayEnv(t, strings.Repeat("a", 32), "203.0.113.10")
+	t.Setenv("RELAY_MAX_ALLOCATIONS", "100000")
+
+	_, err := config.LoadRelay()
+
+	assert.NoError(t, err)
 }
 
 func TestLoadRelayRejectsHalfPortRange(t *testing.T) {

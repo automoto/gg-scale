@@ -148,7 +148,7 @@ func (c *Config) checkRelay() error {
 			return fmt.Errorf("RELAY_STUN_URLS %q: %w", raw, err)
 		}
 	}
-	return validatePortRange(c.RelayMinPort, c.RelayMaxPort)
+	return validatePortRange(c.RelayMinPort, c.RelayMaxPort, c.RelayMaxAllocations)
 }
 
 // validateSTUNURI accepts the RFC 7064 stun:/stuns: URI forms. Like turn:,
