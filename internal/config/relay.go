@@ -133,7 +133,7 @@ func (rc *RelayConfig) validate() error {
 	if err := rc.validateTLS(); err != nil {
 		return err
 	}
-	return validatePortRange(rc.MinPort, rc.MaxPort)
+	return validatePortRange(rc.MinPort, rc.MaxPort, rc.MaxAllocations)
 }
 
 // validateTLS enforces that TURNS is all-or-nothing: a TLS port needs both a
@@ -177,9 +177,9 @@ func checkPort(name string, port int) error {
 }
 
 // validatePortRange enforces the relayed-media port range: both bounds set
-// together, each a valid port, and min <= max. 0/0 means "unset" (OS ephemeral
-// range) and is allowed.
-func validatePortRange(minPort, maxPort int) error {
+// together, each a valid port, min <= max, and no more allocations than ports.
+// 0/0 means "unset" (OS ephemeral range) and is allowed.
+func validatePortRange(minPort, maxPort, maxAllocations int) error {
 	if minPort == 0 && maxPort == 0 {
 		return nil
 	}
@@ -194,6 +194,10 @@ func validatePortRange(minPort, maxPort int) error {
 	}
 	if minPort > maxPort {
 		return fmt.Errorf("RELAY_MIN_PORT (%d) must be <= RELAY_MAX_PORT (%d)", minPort, maxPort)
+	}
+	if ports := maxPort - minPort + 1; maxAllocations > ports {
+		return fmt.Errorf("RELAY_MAX_ALLOCATIONS (%d) must be <= the %d ports in RELAY_MIN_PORT..RELAY_MAX_PORT (%d..%d)",
+			maxAllocations, ports, minPort, maxPort)
 	}
 	return nil
 }

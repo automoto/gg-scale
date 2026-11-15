@@ -219,3 +219,49 @@ func TestVerify_should_reject_malformed_tenant_cap(t *testing.T) {
 		assert.ErrorIs(t, err, relay.ErrCredentialsInvalid, "suffix %q", suffix)
 	}
 }
+
+func TestVerify_should_accept_credential_expiring_at_ttl(t *testing.T) {
+	issuer := relay.NewIssuer("shared-secret", "ggscale", 2*time.Hour)
+	creds, err := issuer.Issue(1, 42)
+	require.NoError(t, err)
+
+	_, _, err = issuer.Verify(creds.Username, creds.Password)
+
+	assert.NoError(t, err)
+}
+
+func TestVerify_should_accept_credential_within_one_hour_when_ttl_is_shorter(t *testing.T) {
+	minter := relay.NewIssuer("shared-secret", "ggscale", time.Hour)
+	verifier := relay.NewIssuer("shared-secret", "ggscale", 5*time.Minute)
+	creds, err := minter.Issue(1, 42)
+	require.NoError(t, err)
+
+	_, _, err = verifier.Verify(creds.Username, creds.Password)
+
+	assert.NoError(t, err)
+}
+
+func TestVerify_should_reject_credential_expiring_beyond_bound(t *testing.T) {
+	minter := relay.NewIssuer("shared-secret", "ggscale", 2*time.Hour)
+	verifier := relay.NewIssuer("shared-secret", "ggscale", 5*time.Minute)
+	creds, err := minter.Issue(1, 42)
+	require.NoError(t, err)
+
+	_, _, err = verifier.Verify(creds.Username, creds.Password)
+
+	assert.ErrorIs(t, err, relay.ErrCredentialsInvalid)
+}
+
+func TestVerify_should_accept_credential_from_issuer_clock_ahead_when_ttl_is_one_hour(t *testing.T) {
+	base := time.Unix(1_800_000_000, 0)
+	minter := relay.NewIssuer("shared-secret", "ggscale", time.Hour)
+	verifier := relay.NewIssuer("shared-secret", "ggscale", time.Hour)
+	relay.SetIssuerClock(minter, func() time.Time { return base })
+	relay.SetIssuerClock(verifier, func() time.Time { return base.Add(-30 * time.Second) })
+	creds, err := minter.Issue(1, 42)
+	require.NoError(t, err)
+
+	_, _, err = verifier.Verify(creds.Username, creds.Password)
+
+	assert.NoError(t, err)
+}

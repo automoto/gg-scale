@@ -270,6 +270,20 @@ func TestValidateAcceptsRelayPortRange(t *testing.T) {
 	assert.NoError(t, c.Validate())
 }
 
+func TestValidate_should_reject_relay_allocations_above_port_range(t *testing.T) {
+	c := baseProd()
+	c.FeatureP2PRelayEnabled = true
+	c.RelaySharedSecret = strings.Repeat("a", 32)
+	c.RelayPublicIP = "203.0.113.10"
+	c.RelayMinPort = 49200
+	c.RelayMaxPort = 49300
+	c.RelayMaxAllocations = 102
+
+	err := c.Validate()
+
+	assert.ErrorContains(t, err, "RELAY_MAX_ALLOCATIONS")
+}
+
 func TestValidateAcceptsSTUNSchemes(t *testing.T) {
 	for _, stun := range []string{"stun:relay.example.com:3478", "stuns:relay.example.com:5349"} {
 		t.Run(stun, func(t *testing.T) {
