@@ -176,7 +176,7 @@ func registerServerStorageRoutes(api huma.API, d Deps) {
 		Summary:      "Server-tier: create or replace a player's storage object",
 		Tags:         []string{"Cloud Saves"},
 		Security:     secretKeySecurity,
-		MaxBodyBytes: storageBodyReadLimit(d),
+		MaxBodyBytes: storageLimit(d),
 		RequestBody: &huma.RequestBody{
 			Required: true,
 			Content: map[string]*huma.MediaType{"application/json": {Schema: &huma.Schema{

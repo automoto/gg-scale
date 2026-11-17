@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -31,17 +30,6 @@ func storageLimit(d Deps) int64 {
 		return d.StorageMaxValueBytes
 	}
 	return storagelimit.DefaultMaxValueBytes
-}
-
-// Huma rejects a request after reading exactly MaxBodyBytes, while the storage
-// limit is inclusive. Give the reader one extra byte so the handler can accept
-// an exact-limit value and reject anything larger.
-func storageBodyReadLimit(d Deps) int64 {
-	limit := storageLimit(d)
-	if limit == math.MaxInt64 {
-		return limit
-	}
-	return limit + 1
 }
 
 type storageObjectResponse struct {
@@ -124,7 +112,7 @@ func registerStorageRoutes(api huma.API, d Deps) {
 		Summary:      "Create or replace a storage object",
 		Tags:         []string{"Cloud Saves"},
 		Security:     playerSecurity,
-		MaxBodyBytes: storageBodyReadLimit(d),
+		MaxBodyBytes: storageLimit(d),
 		// The body is an arbitrary JSON value, so huma would emit an empty
 		// schema and the docs would render a null request sample. Set the
 		// schema by hand; huma keeps a preset request-body schema as is.
