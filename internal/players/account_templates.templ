@@ -325,7 +325,7 @@ templ AccountTwoFactorSetupPage(vm AccountTwoFactorSetupView) {
 		if vm.Error != "" {
 			<p role="alert">{ vm.Error }</p>
 		}
-		<img src={ vm.QRDataURI } alt="Authenticator enrollment QR code" width="220" height="220"/>
+		<img src={ templ.SafeURL(vm.QRDataURI) } alt="Authenticator enrollment QR code" width="220" height="220"/>
 		<p>Can&apos;t scan? Enter this key manually:</p>
 		<p><code>{ vm.Secret }</code></p>
 		<form method="post" action={ templ.URL("/v1/players/account/2fa/confirm") }>
