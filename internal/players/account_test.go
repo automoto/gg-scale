@@ -31,6 +31,17 @@ func TestAccountHomePage_renders_signed_in_header(t *testing.T) {
 	assert.Contains(t, html, `rel="icon" type="image/svg+xml" href="/v1/assets/favicon.svg?v=`)
 }
 
+func TestAccountTwoFactorSetupPage_preserves_qr_data_uri(t *testing.T) {
+	const qrDataURI = "data:image/png;base64,AAAA"
+	var sb strings.Builder
+
+	err := AccountTwoFactorSetupPage(AccountTwoFactorSetupView{QRDataURI: qrDataURI}).Render(context.Background(), &sb)
+
+	require.NoError(t, err)
+	assert.Contains(t, sb.String(), `src="`+qrDataURI+`"`)
+	assert.NotContains(t, sb.String(), "about:invalid")
+}
+
 func TestFriendsPage_uses_header_navigation(t *testing.T) {
 	var sb strings.Builder
 

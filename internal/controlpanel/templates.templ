@@ -1134,7 +1134,7 @@ templ TwoFactorSetupPage(vm TwoFactorSetupView) {
 			<h2>Set up two-factor authentication</h2>
 			<p class="card-subtitle">Scan the QR code with an authenticator app (Google Authenticator, Aegis, 1Password, …), then confirm with the 6-digit code it shows.</p>
 			@errorAlert(vm.Error)
-			<img src={ vm.QRDataURI } alt="Authenticator enrollment QR code" width="220" height="220"/>
+			<img src={ templ.SafeURL(vm.QRDataURI) } alt="Authenticator enrollment QR code" width="220" height="220"/>
 			<p>Can&apos;t scan? Enter this key manually:</p>
 			<p><code>{ vm.Secret }</code></p>
 			<form method="post" action="/v1/control-panel/account/2fa/confirm">
