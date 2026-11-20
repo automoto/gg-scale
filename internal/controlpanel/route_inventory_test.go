@@ -182,3 +182,29 @@ func TestControlPanel_should_throttle_credential_post_above_auth_ip_burst(t *tes
 
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 }
+
+func TestControlPanel_should_rate_limit_signed_in_credential_checks(t *testing.T) {
+	limited := map[string]bool{
+		"/account/password":         true,
+		"/account/2fa/confirm":      true,
+		"/account/2fa/disable":      true,
+		"/account/2fa/backup-codes": true,
+	}
+	// The session routes need a database to sign in, so compare middleware
+	// counts: the limited routes carry exactly one more than /account/2fa/setup.
+	middlewares := map[string]int{}
+	routes, ok := newRateLimitedControlPanel().(chi.Routes)
+	require.True(t, ok)
+	require.NoError(t, chi.Walk(routes, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		if method == http.MethodPost {
+			middlewares[route] = len(mws)
+		}
+		return nil
+	}))
+
+	base := middlewares["/account/2fa/setup"]
+	require.NotZero(t, base)
+	for route := range limited {
+		assert.Equalf(t, base+1, middlewares[route], "route %q", route)
+	}
+}

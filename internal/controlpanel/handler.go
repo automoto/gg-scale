@@ -177,11 +177,18 @@ func New(d Deps) http.Handler {
 		})
 		r.Get("/tenants", h.openTenant)
 		r.Get("/account/password", h.accountPage)
-		r.Post("/account/password", h.updatePassword)
 		r.Post("/account/2fa/setup", h.twoFactorSetup)
-		r.Post("/account/2fa/confirm", h.twoFactorConfirm)
-		r.Post("/account/2fa/disable", h.twoFactorDisable)
-		r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
+		// These check the current password or a 2FA code, so a stolen
+		// session cannot guess the password without limit.
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/account/password", h.updatePassword)
+			r.Post("/account/2fa/confirm", h.twoFactorConfirm)
+			r.Post("/account/2fa/disable", h.twoFactorDisable)
+			r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
+		})
 		r.Post("/account/sso/{provider}/link", h.ssoLinkStart)
 		r.Post("/account/sso/{provider}/unlink", h.ssoUnlink)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
