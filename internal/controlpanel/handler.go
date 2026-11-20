@@ -139,24 +139,26 @@ func New(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(webutil.SecurityHeadersWithFormActions(h.sso.Origins()...))
 	r.Get("/assets/*", h.assetHandler)
+	r.Get("/setup", h.setupTokenPage)
+	r.Get("/login", h.loginPage)
+	r.Get("/forgot-password", h.forgotPasswordPage)
+	r.Get("/reset-password", h.resetPasswordPage)
+	r.Get("/login/2fa", h.twoFactorChallengePage)
+	r.Get("/verify", h.verifyPage)
+	// The per-IP auth bucket covers only requests that carry a credential,
+	// code or token. Page GETs above do not spend from it.
 	r.Group(func(r chi.Router) {
 		if d.Limiter != nil {
 			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 		}
 		r.Post("/login/sso/{provider}/start", h.ssoLoginStart)
 		r.Get("/sso/{provider}/callback", h.ssoCallback)
-		r.Get("/setup", h.setupTokenPage)
 		r.Post("/setup/token", h.verifySetupToken)
 		r.Post("/setup", h.completeSetup)
-		r.Get("/login", h.loginPage)
 		r.Post("/login", h.login)
-		r.Get("/forgot-password", h.forgotPasswordPage)
 		r.Post("/forgot-password", h.forgotPasswordHandler)
-		r.Get("/reset-password", h.resetPasswordPage)
 		r.Post("/reset-password", h.resetPasswordHandler)
-		r.Get("/login/2fa", h.twoFactorChallengePage)
 		r.Post("/login/2fa", h.twoFactorChallenge)
-		r.Get("/verify", h.verifyPage)
 		r.Post("/verify", h.verifyHandler)
 		r.Post("/verify/resend", h.verifyResendHandler)
 	})
@@ -175,11 +177,18 @@ func New(d Deps) http.Handler {
 		})
 		r.Get("/tenants", h.openTenant)
 		r.Get("/account/password", h.accountPage)
-		r.Post("/account/password", h.updatePassword)
 		r.Post("/account/2fa/setup", h.twoFactorSetup)
-		r.Post("/account/2fa/confirm", h.twoFactorConfirm)
-		r.Post("/account/2fa/disable", h.twoFactorDisable)
-		r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
+		// These check the current password or a 2FA code, so a stolen
+		// session cannot guess the password without limit.
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/account/password", h.updatePassword)
+			r.Post("/account/2fa/confirm", h.twoFactorConfirm)
+			r.Post("/account/2fa/disable", h.twoFactorDisable)
+			r.Post("/account/2fa/backup-codes", h.twoFactorRegenerateBackupCodes)
+		})
 		r.Post("/account/sso/{provider}/link", h.ssoLinkStart)
 		r.Post("/account/sso/{provider}/unlink", h.ssoUnlink)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
@@ -327,24 +336,22 @@ func New(d Deps) http.Handler {
 		}))
 		r.Use(webutil.RequireCSRF)
 		r.Get("/invite/accept", h.acceptInvitePage)
-		r.Post("/invite/accept", h.acceptInviteHandler)
-		// The provider round trip is new public work, so it sits behind the
+		// The POST checks the magic-link code and sets a password, and the
+		// provider round trip is new public work, so both sit behind the
 		// per-IP cap like the login routes.
 		r.Group(func(r chi.Router) {
 			if d.Limiter != nil {
 				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
 			}
+			r.Post("/invite/accept", h.acceptInviteHandler)
 			r.Post("/invite/accept/sso/{provider}/start", h.ssoInviteStart)
 		})
 	})
 
 	// Public tenant sign-up: unauthenticated request form + approved-invite
-	// acceptance. Rate-limited by IP (the submit is public) and CSRF-guarded
-	// via the same double-submit cookie as invite acceptance.
+	// acceptance. The submits are rate-limited by IP (they are public) and
+	// CSRF-guarded via the same double-submit cookie as invite acceptance.
 	r.Group(func(r chi.Router) {
-		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
-		}
 		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
 			Path:     pathControlPanel,
 			Secure:   h.cfg.CookieSecure,
@@ -352,10 +359,15 @@ func New(d Deps) http.Handler {
 		}))
 		r.Use(webutil.RequireCSRF)
 		r.Get("/request-access", h.tenantSignupPage)
-		r.Post("/request-access", h.tenantSignupHandler)
 		r.Get("/request-access/accept", h.tenantSignupAcceptPage)
-		r.Post("/request-access/accept", h.tenantSignupAcceptHandler)
-		r.Post("/request-access/accept/sso/{provider}/start", h.ssoSignupAcceptStart)
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/request-access", h.tenantSignupHandler)
+			r.Post("/request-access/accept", h.tenantSignupAcceptHandler)
+			r.Post("/request-access/accept/sso/{provider}/start", h.ssoSignupAcceptStart)
+		})
 	})
 
 	return r

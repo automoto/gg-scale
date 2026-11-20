@@ -116,15 +116,32 @@ func New(d Deps) http.Handler {
 	// Global player-account routes (project-agnostic) — the platform-wide
 	// account identity: signup / login / verify / friends / account home.
 	r.Route("/account", func(r chi.Router) {
-		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
-		}
 		r.Use(webutil.CSRFCookie(webutil.CSRFConfig{
 			Path:     "/v1/players",
 			Secure:   d.Config.CookieSecure,
 			SameSite: http.SameSiteLaxMode,
 		}))
 		r.Use(webutil.RequireCSRF)
+		// The per-IP auth bucket covers only requests that carry a
+		// credential, code or token. Pages and other signed-in actions do
+		// not spend from it, so a player can browse their account freely.
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/login", h.accountLogin)
+			r.Post("/login/2fa", h.accountTwoFactorChallenge)
+			r.Post("/signup", h.accountSignup)
+			r.Post("/verify", h.accountVerify)
+			r.Post("/verify/resend", h.accountVerifyResend)
+			r.Post("/forgot-password", h.accountForgotPassword)
+			r.Post("/reset-password", h.accountResetPassword)
+			r.Post("/sso/{provider}/start", h.accountSSOStart)
+			r.Get("/sso/{provider}/callback", h.accountSSOCallback)
+			r.Post("/2fa/confirm", h.accountTwoFactorConfirm)
+			r.Post("/2fa/disable", h.accountTwoFactorDisable)
+			r.Post("/2fa/backup-codes", h.accountTwoFactorBackupCodes)
+		})
 		r.Get("/", h.accountHomePage)
 		r.Get("/projects/{playerID}/unlink", h.accountProjectUnlinkPage)
 		r.Post("/projects/{playerID}/unlink", h.accountProjectUnlink)
@@ -146,34 +163,19 @@ func New(d Deps) http.Handler {
 		r.Post("/friends/{accountID}/block", h.friendAction("block"))
 		r.Post("/friends/{accountID}/unblock", h.friendAction("unblock"))
 		r.Get("/login", h.accountLoginPage)
-		r.Post("/login", h.accountLogin)
-		r.Post("/sso/{provider}/start", h.accountSSOStart)
 		r.Post("/sso/{provider}/link", h.accountSSOLink)
-		r.Get("/sso/{provider}/callback", h.accountSSOCallback)
 		r.Post("/sso/{provider}/unlink", h.accountSSOUnlink)
 		r.Get("/forgot-password", h.accountForgotPasswordPage)
-		r.Post("/forgot-password", h.accountForgotPassword)
 		r.Get("/reset-password", h.accountResetPasswordPage)
-		r.Post("/reset-password", h.accountResetPassword)
 		r.Get("/login/2fa", h.accountTwoFactorChallengePage)
-		r.Post("/login/2fa", h.accountTwoFactorChallenge)
 		r.Get("/2fa", h.accountTwoFactorPage)
 		r.Post("/2fa/setup", h.accountTwoFactorSetup)
-		r.Post("/2fa/confirm", h.accountTwoFactorConfirm)
-		r.Post("/2fa/disable", h.accountTwoFactorDisable)
-		r.Post("/2fa/backup-codes", h.accountTwoFactorBackupCodes)
 		r.Get("/signup", h.accountSignupPage)
-		r.Post("/signup", h.accountSignup)
 		r.Get("/verify", h.accountVerifyPage)
-		r.Post("/verify", h.accountVerify)
-		r.Post("/verify/resend", h.accountVerifyResend)
 		r.Post("/logout", h.accountLogout)
 	})
 
 	r.Route("/p/{projectID}", func(r chi.Router) {
-		if d.Limiter != nil {
-			r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
-		}
 		// Anonymous-form CSRF (double-submit cookie). The player site has
 		// no session before login/verify, so the control panel's session-bound
 		// CSRF token doesn't apply — RequireCSRF + CSRFCookie work
@@ -191,7 +193,12 @@ func New(d Deps) http.Handler {
 		// Only the emailed-invite acceptance entry point remains here; it links
 		// the invitee to their global account.
 		r.Get("/invite/accept", h.inviteAcceptPage)
-		r.Post("/invite/accept", h.inviteAcceptHandler)
+		r.Group(func(r chi.Router) {
+			if d.Limiter != nil {
+				r.Use(ratelimit.NewIPLimiter(d.Limiter, ratelimit.AuthIPRate, ratelimit.AuthIPBurst, d.ProxyTrust, d.Registry))
+			}
+			r.Post("/invite/accept", h.inviteAcceptHandler)
+		})
 	})
 	return r
 }

@@ -48,9 +48,10 @@ var DefaultInviteLimits = InviteLimits{
 }
 
 // InviteThrottle applies per-inviter, per-domain, and per-recipient token
-// buckets to invite creation. It is backed by the same cache.Store token
-// bucket as the HTTP limiter, so state is shared across a clustered
-// deployment.
+// buckets to invite creation. It uses the same cache.Store token bucket as
+// the HTTP limiter. That store is in process memory, so each server process
+// keeps its own counts: with N API VMs, a sender can get up to N times these
+// limits, and a restart resets them.
 type InviteThrottle struct {
 	lim          Limiter
 	limits       InviteLimits

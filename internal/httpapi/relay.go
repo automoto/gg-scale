@@ -106,7 +106,7 @@ func relayCredentials(d Deps) func(context.Context, *relayCredentialsInput) (*re
 			}
 			if !dec.Allowed {
 				d.Metrics.RelayIssueThrottled()
-				return nil, huma.Error429TooManyRequests("relay credential requests are being throttled; retry shortly")
+				return nil, tooManyRequests("relay credential requests are being throttled; retry shortly", dec.RetryAfter)
 			}
 		}
 		// Tenant-ban enforcement point: a banned account can't get relay
