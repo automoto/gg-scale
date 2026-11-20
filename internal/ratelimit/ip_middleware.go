@@ -78,11 +78,15 @@ func ipInAnyNet(ip net.IP, networks []*net.IPNet) bool {
 	return false
 }
 
-// AuthIPRate / AuthIPBurst are the defaults the router mounts on the
-// bcrypt-heavy auth endpoints (signup, login): 10 requests / minute /
-// IP, burst 10. Tuned to fit a legitimate "signup → login + a couple of
-// retries" flow in one minute, but still cap a bcrypt-fishing attacker
-// from a single source to ~2.5s of CPU per minute (bcryptCost=12).
+// AuthIPRate / AuthIPBurst are the defaults the routers mount on requests
+// that submit a credential, code or token (signup, login, 2FA, password
+// reset, email verify, invite and sign-up acceptance, SSO): 10 requests /
+// minute / IP, burst 10. Page GETs that render a form, and routes that need
+// a signed-in session, do not spend from this bucket. Tuned to fit a
+// legitimate "signup → login + a couple of retries" flow in one minute, but
+// still cap a bcrypt-fishing attacker from a single source to ~2.5s of CPU
+// per minute (bcryptCost=12). The bucket is in process memory, so it is per
+// server process, not shared across VMs.
 const (
 	AuthIPRate  = 10.0 / 60.0
 	AuthIPBurst = 10.0

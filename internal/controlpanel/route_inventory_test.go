@@ -2,13 +2,17 @@ package controlpanel_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/cache/memory"
 	"github.com/automoto/gg-scale/internal/controlpanel"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
@@ -138,4 +142,43 @@ func TestControlPanelPostRoutesAreClassified(t *testing.T) {
 	for route := range postRouteGuards {
 		assert.Truef(t, seen[route], "classified route %q no longer registered — remove it from postRouteGuards", route)
 	}
+}
+
+func newRateLimitedControlPanel() http.Handler {
+	return controlpanel.New(controlpanel.Deps{
+		VerifySigningKey: make([]byte, verifycode.SigningKeySize),
+		Limiter:          ratelimit.NewCacheLimiter(memory.New()),
+		Registry:         prometheus.NewRegistry(),
+	})
+}
+
+func TestControlPanel_should_not_throttle_page_gets_above_auth_ip_burst(t *testing.T) {
+	h := newRateLimitedControlPanel()
+	pages := []string{"/login", "/login/2fa", "/setup", "/forgot-password", "/reset-password", "/verify"}
+
+	statuses := map[int]int{}
+	for range int(ratelimit.AuthIPBurst) + 1 {
+		for _, page := range pages {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, page, nil))
+			statuses[rec.Code]++
+		}
+	}
+
+	assert.Zero(t, statuses[http.StatusTooManyRequests])
+}
+
+func TestControlPanel_should_throttle_credential_post_above_auth_ip_burst(t *testing.T) {
+	h := newRateLimitedControlPanel()
+	// With setup disabled, POST /setup/token answers 410 before any work.
+	for i := range int(ratelimit.AuthIPBurst) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/setup/token", nil))
+		require.Equalf(t, http.StatusGone, rec.Code, "request %d", i+1)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/setup/token", nil))
+
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
 }

@@ -3,14 +3,20 @@ package players
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/webassets"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 var playerTestVerifySigningKey = []byte("0123456789abcdef0123456789abcdef")
@@ -115,4 +121,62 @@ func TestPlayerPagesLinkSharedStylesheetsAndRunNoScript(t *testing.T) {
 	// Player pages remain script-free.
 	assert.NotContains(t, html, "<script")
 	assert.NotContains(t, html, "<style")
+}
+
+func newRateLimitedPlayerSite() http.Handler {
+	return New(Deps{
+		Config:           Config{Mount: true},
+		VerifySigningKey: playerTestVerifySigningKey,
+		Limiter:          ratelimit.NewCacheLimiter(memory.New()),
+		Registry:         prometheus.NewRegistry(),
+	})
+}
+
+func TestPlayerSite_should_not_throttle_page_gets_above_auth_ip_burst(t *testing.T) {
+	h := newRateLimitedPlayerSite()
+	pages := []string{"/account/", "/account/friends", "/account/2fa", "/account/remote-addrs", "/account/login", "/account/signup"}
+
+	statuses := map[int]int{}
+	for range int(ratelimit.AuthIPBurst) + 1 {
+		for _, page := range pages {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, page, nil))
+			statuses[rec.Code]++
+		}
+	}
+
+	assert.Zero(t, statuses[http.StatusTooManyRequests])
+}
+
+// signupBurst sends one more invalid signup than the auth bucket holds, all
+// from one IP, and returns the last response. Each invalid signup stops at
+// form validation, before any database work.
+func signupBurst(t *testing.T) *httptest.ResponseRecorder {
+	t.Helper()
+	h := newRateLimitedPlayerSite()
+	form := url.Values{webutil.CSRFFormField: {"tok"}, "email": {"not-an-email"}}
+	var rec *httptest.ResponseRecorder
+	for i := range int(ratelimit.AuthIPBurst) + 1 {
+		req := httptest.NewRequest(http.MethodPost, "/account/signup", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(&http.Cookie{Name: webutil.CSRFCookieName, Value: "tok"})
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if i < int(ratelimit.AuthIPBurst) {
+			require.Equalf(t, http.StatusUnprocessableEntity, rec.Code, "request %d", i+1)
+		}
+	}
+	return rec
+}
+
+func TestPlayerSite_should_throttle_credential_post_above_auth_ip_burst(t *testing.T) {
+	rec := signupBurst(t)
+
+	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+}
+
+func TestPlayerSite_should_set_retry_after_on_throttled_credential_post(t *testing.T) {
+	rec := signupBurst(t)
+
+	assert.NotEmpty(t, rec.Header().Get("Retry-After"))
 }
