@@ -348,7 +348,7 @@ func TestAPIKeysPage_revocation_has_specific_confirmation(t *testing.T) {
 		Keys:      []APIKeyView{{ID: 1, Label: "key"}},
 	}))
 
-	assert.Contains(t, html, `data-confirm="Revoke this API key? Clients using it will immediately lose access."`)
+	assert.Contains(t, html, `data-confirm="Revoke this API key? Clients using it lose access within 30 seconds."`)
 }
 
 func TestTeamPage_fleet_operator_control_gated_on_feature(t *testing.T) {
