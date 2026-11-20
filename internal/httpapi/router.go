@@ -422,7 +422,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Get("/ws", route.ServeHTTP)
 			}
 			r.Group(func(r chi.Router) {
-				r.Use(tenant.New(d.Lookup))
+				r.Use(tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg)))
 				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
 				registerRemoteConfig(groupAPI(r, humaCfg), d)
 

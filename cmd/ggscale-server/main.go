@@ -690,7 +690,7 @@ func run() error {
 		RequestTimeout:        cfg.HTTPRequestTimeout,
 		Pool:                  appPool,
 		ReadPool:              readPool,
-		Lookup:                tenant.NewSQLLookup(pool),
+		Lookup:                tenant.NewCachedLookup(tenant.NewSQLLookup(pool), tenant.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries),
 		Limiter:               ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:    rateLimitOverrides,
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,

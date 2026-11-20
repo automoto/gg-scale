@@ -124,6 +124,12 @@ func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(h
 // shares: Retry-After (seconds, rounded up, minimum 1) and the JSON
 // error body.
 func writeRateLimited(w http.ResponseWriter, d Decision) {
+	writeRateLimitedCode(w, d, "rate_limit_exceeded")
+}
+
+// writeRateLimitedCode is writeRateLimited with its own error code, so a
+// client can tell which limit refused it.
+func writeRateLimitedCode(w http.ResponseWriter, d Decision, code string) {
 	retrySec := int(math.Ceil(d.RetryAfter.Seconds()))
 	if retrySec < 1 {
 		retrySec = 1
@@ -132,7 +138,7 @@ func writeRateLimited(w http.ResponseWriter, d Decision) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"error":               "rate_limit_exceeded",
+		"error":               code,
 		"retry_after_seconds": retrySec,
 	})
 }

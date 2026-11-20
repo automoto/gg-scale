@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -267,4 +268,100 @@ func TestMiddleware_hashes_token_with_sha256_before_lookup(t *testing.T) {
 	require.Len(t, seen, 2)
 	assert.Equal(t, hashOf("aaaa"), seen[0])
 	assert.Equal(t, hashOf("aaab"), seen[1])
+}
+
+type fakeFailureLimiter struct {
+	allow bool
+	fails int
+}
+
+func (f *fakeFailureLimiter) Allow(w http.ResponseWriter, _ *http.Request) bool {
+	if !f.allow {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}
+	return f.allow
+}
+
+func (f *fakeFailureLimiter) Fail(_ *http.Request) { f.fails++ }
+
+func bearerReq(token string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	return req
+}
+
+func TestNewLimited_should_not_call_lookup_when_limit_refuses_a_cache_miss(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: false}
+	mw := tenant.NewLimited(tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		t.Fatal("lookup must not run when the limit refuses")
+		return nil, nil
+	}, time.Minute, 10), limit)
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, bearerReq("bad"))
+
+	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
+}
+
+func TestNewLimited_should_charge_failure_when_key_is_unknown(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: true}
+	mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return nil, tenant.ErrUnknownKey
+	}, limit)
+
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), bearerReq("bad"))
+
+	assert.Equal(t, 1, limit.fails)
+}
+
+func TestNewLimited_should_not_charge_failure_when_key_is_valid_or_revoked(t *testing.T) {
+	for _, revoked := range []bool{false, true} {
+		limit := &fakeFailureLimiter{allow: true}
+		mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+			return &tenant.APIKey{ID: 1, TenantID: 1, Revoked: revoked}, nil
+		}, limit)
+
+		mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), bearerReq("k"))
+
+		assert.Equal(t, 0, limit.fails, "revoked=%v", revoked)
+	}
+}
+
+func TestNewLimited_should_not_consult_limit_when_header_is_missing(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: false}
+	mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return nil, tenant.ErrUnknownKey
+	}, limit)
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/x", nil))
+
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestNewLimited_should_admit_cached_key_when_limit_refuses(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: true}
+	lookup := tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{ID: 1, TenantID: 1}, nil
+	}, time.Minute, 10)
+	mw := tenant.NewLimited(lookup, limit)
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), bearerReq("k"))
+	limit.allow = false
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, bearerReq("k"))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestNewLimited_should_not_consult_limit_with_uncached_lookup(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: false}
+	mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{ID: 1, TenantID: 1}, nil
+	}, limit)
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, bearerReq("k"))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
 }

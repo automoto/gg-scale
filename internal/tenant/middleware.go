@@ -143,9 +143,42 @@ func APIKeyFromContext(ctx context.Context) (APIKey, bool) {
 // return ErrUnknownKey (not nil + nil APIKey) when no row matches.
 type Lookup func(ctx context.Context, keyHash []byte) (*APIKey, error)
 
+// FailureLimiter caps unknown-key attempts per client, so a flood of bad keys
+// is refused before the lookup reaches the database.
+type FailureLimiter interface {
+	// Allow reports whether r's client may present a key now. It must not
+	// spend the client's budget. When it returns false it has written the
+	// response.
+	Allow(w http.ResponseWriter, r *http.Request) bool
+	// Fail charges one unknown key to r's client.
+	Fail(r *http.Request)
+}
+
+type missGateKey struct{}
+
+// errMissRefused is what a cached Lookup returns when the request's miss gate
+// refuses a database lookup. It is never cached.
+var errMissRefused = errors.New("tenant: key lookup refused by the miss gate")
+
+// allowMiss reports whether a cache miss may go on to the database. Requests
+// without a gate always may.
+func allowMiss(ctx context.Context) bool {
+	gate, ok := ctx.Value(missGateKey{}).(func() bool)
+	return !ok || gate()
+}
+
 // New builds the tenant middleware around a Lookup. Mount under /v1/* on
 // every route that requires a tenant-authenticated caller.
 func New(lookup Lookup) func(http.Handler) http.Handler {
+	return NewLimited(lookup, nil)
+}
+
+// NewLimited is New with a per-client limit on unknown keys. The limit is
+// checked only when a NewCachedLookup misses, right before the database
+// lookup: a key the cache holds is admitted even while its client is over
+// budget. With an uncached Lookup the limit never applies. A nil limit turns
+// it off.
+func NewLimited(lookup Lookup, limit FailureLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := bearerToken(r.Header.Get("Authorization"))
@@ -153,9 +186,27 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			ctx := r.Context()
+			gateOpen, refused := true, false
+			if limit != nil {
+				ctx = context.WithValue(ctx, missGateKey{}, func() bool {
+					if !gateOpen || limit.Allow(w, r) {
+						return true
+					}
+					refused = true
+					return false
+				})
+			}
 
 			sum := sha256.Sum256([]byte(token))
-			ctx, status := Admit(r.Context(), lookup, sum[:])
+			ctx, status := Admit(ctx, lookup, sum[:])
+			gateOpen = false
+			if refused {
+				return
+			}
+			if status == http.StatusUnauthorized && limit != nil {
+				limit.Fail(r)
+			}
 			if status != 0 {
 				WriteRefusal(w, status)
 				return

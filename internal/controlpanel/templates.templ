@@ -603,7 +603,7 @@ templ APIKeysPage(vm APIKeysView) {
 								} else {
 									<td><span class="badge badge-active">Active</span></td>
 									<td class="actions-cell">
-										<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke") } data-confirm="Revoke this API key? Clients using it will immediately lose access.">
+										<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/" + stringFromInt(key.ID) + "/revoke") } data-confirm="Revoke this API key? Clients using it lose access within 30 seconds.">
 											<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 											<button type="submit" class="contrast outline">Revoke</button>
 										</form>
@@ -2856,7 +2856,7 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 				if vm.DisabledBy == "platform" && !vm.IsPlatformAdmin {
 					<p class="muted">Disabled by the platform. Contact support to re-enable it.</p>
 				} else {
-					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/enable") } data-confirm="Re-enable this Account Tenant? API keys and player traffic resume immediately.">
+					<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/enable") } data-confirm="Re-enable this Account Tenant? API keys and player traffic resume within 30 seconds.">
 						<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 						<button type="submit" class="btn-inline">Re-enable Account Tenant</button>
 					</form>
@@ -2866,7 +2866,7 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 					Disabling blocks the Account Tenant's API keys and all player traffic.
 					Control-panel access stays, so you can re-enable or export data later.
 				</p>
-				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/disable") } data-confirm="Disable this Account Tenant? API keys and player traffic stop immediately.">
+				<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/settings/disable") } data-confirm="Disable this Account Tenant? API keys and player traffic stop within 30 seconds.">
 					<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 					<button type="submit" class="contrast outline btn-inline">Disable Account Tenant</button>
 				</form>
