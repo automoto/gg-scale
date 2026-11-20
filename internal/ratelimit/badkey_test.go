@@ -3,6 +3,7 @@ package ratelimit_test
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,7 +49,8 @@ func newBadKeyMiddleware(t *testing.T, calls *int) http.Handler {
 	t.Cleanup(func() { _ = store.Close(context.Background()) })
 	limit := ratelimit.NewBadKeyLimiter(ratelimit.NewCacheLimiter(store), nil, prometheus.NewRegistry())
 	require.NotNil(t, limit)
-	return tenant.NewLimited(keyLookup(calls), limit)(nopHandler())
+	lookup := tenant.NewCachedLookup(keyLookup(calls), tenant.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries)
+	return tenant.NewLimited(lookup, limit)(nopHandler())
 }
 
 func send(h http.Handler, addr, token string) *httptest.ResponseRecorder {
@@ -60,9 +62,11 @@ func send(h http.Handler, addr, token string) *httptest.ResponseRecorder {
 	return rr
 }
 
+// exhaust spends addr's budget with distinct unknown keys, so each one misses
+// the cache and would reach the database.
 func exhaust(h http.Handler, addr string) {
-	for range int(ratelimit.BadKeyBurst) {
-		send(h, addr, "wrong-key")
+	for i := range int(ratelimit.BadKeyBurst) {
+		send(h, addr, fmt.Sprintf("wrong-key-%d", i))
 	}
 }
 
@@ -72,7 +76,7 @@ func TestBadKeyLimiter_should_return_429_without_lookup_when_ip_is_over_budget(t
 	exhaust(h, attackerAddr)
 	before := calls
 
-	rr := send(h, attackerAddr, "wrong-key")
+	rr := send(h, attackerAddr, "another-wrong-key")
 
 	require.Equal(t, http.StatusTooManyRequests, rr.Code)
 	assert.Equal(t, before, calls, "the lookup must not run")
@@ -83,10 +87,10 @@ func TestBadKeyLimiter_should_send_retry_after_and_json_body_when_limited(t *tes
 	h := newBadKeyMiddleware(t, &calls)
 	exhaust(h, attackerAddr)
 
-	rr := send(h, attackerAddr, "wrong-key")
+	rr := send(h, attackerAddr, "another-wrong-key")
 
 	require.NotEmpty(t, rr.Header().Get("Retry-After"))
-	assert.Contains(t, rr.Body.String(), `"error":"rate_limit_exceeded"`)
+	assert.Contains(t, rr.Body.String(), `"error":"too_many_unknown_keys"`)
 }
 
 func TestBadKeyLimiter_should_allow_valid_key_from_other_ip_when_one_ip_is_over_budget(t *testing.T) {
@@ -115,4 +119,25 @@ func TestNewBadKeyLimiter_should_return_nil_when_limiter_cannot_refund(t *testin
 	limit := ratelimit.NewBadKeyLimiter(&fakeLimiter{}, nil, prometheus.NewRegistry())
 
 	assert.Nil(t, limit)
+}
+
+func TestBadKeyLimiter_should_admit_cached_valid_key_from_ip_over_budget(t *testing.T) {
+	calls := 0
+	h := newBadKeyMiddleware(t, &calls)
+	require.Equal(t, http.StatusOK, send(h, attackerAddr, validToken).Code)
+	exhaust(h, attackerAddr)
+
+	rr := send(h, attackerAddr, validToken)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestBadKeyLimiter_should_refuse_uncached_valid_key_from_ip_over_budget(t *testing.T) {
+	calls := 0
+	h := newBadKeyMiddleware(t, &calls)
+	exhaust(h, attackerAddr)
+
+	rr := send(h, attackerAddr, validToken)
+
+	assert.Equal(t, http.StatusTooManyRequests, rr.Code)
 }

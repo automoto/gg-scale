@@ -111,3 +111,31 @@ func TestCachedLookup_should_stay_within_max_entries(t *testing.T) {
 
 	assert.Len(t, c.entries, 2)
 }
+
+func TestCachedLookup_should_ask_miss_gate_only_on_a_miss(t *testing.T) {
+	calls, gates := 0, 0
+	now := time.Unix(1000, 0)
+	c := newTestCache(countingLookup(&APIKey{ID: 7}, &calls), 30*time.Second, 10, &now)
+	ctx := context.WithValue(context.Background(), missGateKey{}, func() bool { gates++; return true })
+
+	_, _ = c.lookup(ctx, []byte("k"))
+	_, err := c.lookup(ctx, []byte("k"))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, gates)
+	assert.Equal(t, 1, calls)
+}
+
+func TestCachedLookup_should_not_call_inner_or_cache_when_miss_gate_refuses(t *testing.T) {
+	calls := 0
+	now := time.Unix(1000, 0)
+	c := newTestCache(countingLookup(&APIKey{ID: 7}, &calls), 30*time.Second, 10, &now)
+	refuse := context.WithValue(context.Background(), missGateKey{}, func() bool { return false })
+
+	_, err := c.lookup(refuse, []byte("k"))
+	require.ErrorIs(t, err, errMissRefused)
+	_, err = c.lookup(context.Background(), []byte("k"))
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, calls)
+}

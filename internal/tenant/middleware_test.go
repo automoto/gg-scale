@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -289,12 +290,12 @@ func bearerReq(token string) *http.Request {
 	return req
 }
 
-func TestNewLimited_should_not_call_lookup_when_limit_refuses(t *testing.T) {
+func TestNewLimited_should_not_call_lookup_when_limit_refuses_a_cache_miss(t *testing.T) {
 	limit := &fakeFailureLimiter{allow: false}
-	mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+	mw := tenant.NewLimited(tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
 		t.Fatal("lookup must not run when the limit refuses")
 		return nil, nil
-	}, limit)
+	}, time.Minute, 10), limit)
 
 	rr := httptest.NewRecorder()
 	mw(nopHandler()).ServeHTTP(rr, bearerReq("bad"))
@@ -336,4 +337,31 @@ func TestNewLimited_should_not_consult_limit_when_header_is_missing(t *testing.T
 	mw(nopHandler()).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/v1/x", nil))
 
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
+}
+
+func TestNewLimited_should_admit_cached_key_when_limit_refuses(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: true}
+	lookup := tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{ID: 1, TenantID: 1}, nil
+	}, time.Minute, 10)
+	mw := tenant.NewLimited(lookup, limit)
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), bearerReq("k"))
+	limit.allow = false
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, bearerReq("k"))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestNewLimited_should_not_consult_limit_with_uncached_lookup(t *testing.T) {
+	limit := &fakeFailureLimiter{allow: false}
+	mw := tenant.NewLimited(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+		return &tenant.APIKey{ID: 1, TenantID: 1}, nil
+	}, limit)
+
+	rr := httptest.NewRecorder()
+	mw(nopHandler()).ServeHTTP(rr, bearerReq("k"))
+
+	assert.Equal(t, http.StatusOK, rr.Code)
 }

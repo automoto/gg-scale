@@ -49,6 +49,9 @@ func (c *keyCache) lookup(ctx context.Context, keyHash []byte) (*APIKey, error) 
 		return copyKey(e.key)
 	}
 
+	if !allowMiss(ctx) {
+		return nil, errMissRefused
+	}
 	key, err := c.inner(ctx, keyHash)
 	if err != nil && !errors.Is(err, ErrUnknownKey) {
 		return nil, err

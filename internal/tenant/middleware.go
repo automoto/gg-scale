@@ -154,14 +154,30 @@ type FailureLimiter interface {
 	Fail(r *http.Request)
 }
 
+type missGateKey struct{}
+
+// errMissRefused is what a cached Lookup returns when the request's miss gate
+// refuses a database lookup. It is never cached.
+var errMissRefused = errors.New("tenant: key lookup refused by the miss gate")
+
+// allowMiss reports whether a cache miss may go on to the database. Requests
+// without a gate always may.
+func allowMiss(ctx context.Context) bool {
+	gate, ok := ctx.Value(missGateKey{}).(func() bool)
+	return !ok || gate()
+}
+
 // New builds the tenant middleware around a Lookup. Mount under /v1/* on
 // every route that requires a tenant-authenticated caller.
 func New(lookup Lookup) func(http.Handler) http.Handler {
 	return NewLimited(lookup, nil)
 }
 
-// NewLimited is New with a per-client limit on unknown keys. A nil limit
-// turns the limit off.
+// NewLimited is New with a per-client limit on unknown keys. The limit is
+// checked only when a NewCachedLookup misses, right before the database
+// lookup: a key the cache holds is admitted even while its client is over
+// budget. With an uncached Lookup the limit never applies. A nil limit turns
+// it off.
 func NewLimited(lookup Lookup, limit FailureLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,12 +186,24 @@ func NewLimited(lookup Lookup, limit FailureLimiter) func(http.Handler) http.Han
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			if limit != nil && !limit.Allow(w, r) {
-				return
+			ctx := r.Context()
+			gateOpen, refused := true, false
+			if limit != nil {
+				ctx = context.WithValue(ctx, missGateKey{}, func() bool {
+					if !gateOpen || limit.Allow(w, r) {
+						return true
+					}
+					refused = true
+					return false
+				})
 			}
 
 			sum := sha256.Sum256([]byte(token))
-			ctx, status := Admit(r.Context(), lookup, sum[:])
+			ctx, status := Admit(ctx, lookup, sum[:])
+			gateOpen = false
+			if refused {
+				return
+			}
 			if status == http.StatusUnauthorized && limit != nil {
 				limit.Fail(r)
 			}

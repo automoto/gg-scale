@@ -26,10 +26,11 @@ type badKeyLimiter struct {
 
 // NewBadKeyLimiter returns the per-IP unknown-key limit for
 // tenant.NewLimited. Only unknown keys spend the budget, so valid keys are
-// never charged for other clients' failures. An IP over the budget gets a 429
-// for every key until the bucket refills, also for a valid key the cache does
-// not hold yet. Returns nil when lim cannot refund: Allow alone would spend
-// budget on valid keys.
+// never charged for other clients' failures. The limit is checked only on a
+// cache miss: an IP over the budget gets a 429 (error
+// "too_many_unknown_keys") for keys the cache does not hold, and keys it
+// holds keep working. Returns nil when lim cannot refund: Allow alone would
+// spend budget on valid keys.
 func NewBadKeyLimiter(lim Limiter, trust *ProxyTrust, reg prometheus.Registerer) tenant.FailureLimiter {
 	rf, ok := lim.(Refunder)
 	if !ok {
@@ -49,7 +50,7 @@ func (b *badKeyLimiter) Allow(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	if !decision.Allowed {
-		writeRateLimited(w, decision)
+		writeRateLimitedCode(w, decision, "too_many_unknown_keys")
 		b.throttled.WithLabelValues("badkey").Inc()
 		return false
 	}
