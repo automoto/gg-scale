@@ -143,9 +143,26 @@ func APIKeyFromContext(ctx context.Context) (APIKey, bool) {
 // return ErrUnknownKey (not nil + nil APIKey) when no row matches.
 type Lookup func(ctx context.Context, keyHash []byte) (*APIKey, error)
 
+// FailureLimiter caps unknown-key attempts per client, so a flood of bad keys
+// is refused before the lookup reaches the database.
+type FailureLimiter interface {
+	// Allow reports whether r's client may present a key now. It must not
+	// spend the client's budget. When it returns false it has written the
+	// response.
+	Allow(w http.ResponseWriter, r *http.Request) bool
+	// Fail charges one unknown key to r's client.
+	Fail(r *http.Request)
+}
+
 // New builds the tenant middleware around a Lookup. Mount under /v1/* on
 // every route that requires a tenant-authenticated caller.
 func New(lookup Lookup) func(http.Handler) http.Handler {
+	return NewLimited(lookup, nil)
+}
+
+// NewLimited is New with a per-client limit on unknown keys. A nil limit
+// turns the limit off.
+func NewLimited(lookup Lookup, limit FailureLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := bearerToken(r.Header.Get("Authorization"))
@@ -153,9 +170,15 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			if limit != nil && !limit.Allow(w, r) {
+				return
+			}
 
 			sum := sha256.Sum256([]byte(token))
 			ctx, status := Admit(r.Context(), lookup, sum[:])
+			if status == http.StatusUnauthorized && limit != nil {
+				limit.Fail(r)
+			}
 			if status != 0 {
 				WriteRefusal(w, status)
 				return

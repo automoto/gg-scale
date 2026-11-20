@@ -139,7 +139,7 @@ func realtimeTicketAuth(d Deps) func(http.Handler) http.Handler {
 func realtimeRoute(d Deps, ws http.Handler, reg prometheus.Registerer) http.HandlerFunc {
 	limited := ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
 		ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))
-	byHeaders := tenant.New(d.Lookup)(
+	byHeaders := tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg))(
 		ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
 			playerauth.New(d.Signer, epochValidator{d.Pool})(
 				ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))))
