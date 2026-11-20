@@ -494,12 +494,15 @@ func allowRateAction(ctx context.Context, d Deps, key string, rate, burst float6
 	if decision.Allowed {
 		return nil
 	}
-	retrySec := int(math.Ceil(decision.RetryAfter.Seconds()))
-	if retrySec < 1 {
-		retrySec = 1
-	}
+	return tooManyRequests("rate_limit_exceeded", decision.RetryAfter)
+}
+
+// tooManyRequests is a 429 problem+json with Retry-After in whole seconds,
+// rounded up and at least 1.
+func tooManyRequests(msg string, retryAfter time.Duration) error {
+	retrySec := max(int(math.Ceil(retryAfter.Seconds())), 1)
 	return huma.ErrorWithHeaders(
-		huma.Error429TooManyRequests("rate_limit_exceeded"),
+		huma.Error429TooManyRequests(msg),
 		http.Header{"Retry-After": []string{strconv.Itoa(retrySec)}},
 	)
 }

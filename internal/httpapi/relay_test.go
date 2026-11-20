@@ -15,6 +15,9 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/matchmaker"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/ratelimit"
+	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/relaynode"
 )
 
@@ -136,4 +139,35 @@ func TestSelectRelayNodes_should_return_the_selection(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
+}
+
+type denyLimiter struct{ retryAfter time.Duration }
+
+func (l denyLimiter) Allow(context.Context, string, float64, float64) (ratelimit.Decision, error) {
+	return ratelimit.Decision{RetryAfter: l.retryAfter}, nil
+}
+
+func throttledRelayCredentials(t *testing.T) error {
+	t.Helper()
+	auth, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+	auth.OverrideFeatureForTest(rbac.FeatureP2PRelay, true)
+	d := Deps{RBAC: auth, Limiter: denyLimiter{retryAfter: 4500 * time.Millisecond}}
+	ctx := playerauth.WithID(db.WithProject(db.WithTenant(t.Context(), 1), 7), 42)
+	_, err = relayCredentials(d)(ctx, &relayCredentialsInput{})
+	return err
+}
+
+func TestRelayCredentials_should_return_429_when_throttled(t *testing.T) {
+	err := throttledRelayCredentials(t)
+
+	assert.Equal(t, http.StatusTooManyRequests, wrappedHumaStatus(t, err))
+}
+
+func TestRelayCredentials_should_set_retry_after_when_throttled(t *testing.T) {
+	err := throttledRelayCredentials(t)
+
+	var he huma.HeadersError
+	require.ErrorAs(t, err, &he)
+	assert.Equal(t, "5", he.GetHeaders().Get("Retry-After"))
 }
