@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
@@ -826,6 +828,12 @@ func decodeQueueCursor(s string) (queueCursor, bool) {
 	if err != nil || json.Unmarshal(raw, &c) != nil {
 		return queueCursor{}, false
 	}
+	// Postgres rejects a NUL byte in a text value.
+	for _, v := range []string{c.Mode, c.Region, c.GameMode, c.Status} {
+		if !utf8.ValidString(v) || strings.ContainsRune(v, 0) {
+			return queueCursor{}, false
+		}
+	}
 	return c, true
 }
 
@@ -862,7 +870,7 @@ func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principa
 	}
 	if more {
 		last := rows[len(rows)-1]
-		raw, err := json.Marshal(queueCursor{last.Mode, last.Region, last.GameMode, last.Status})
+		raw, err := json.Marshal(queueCursor{Mode: last.Mode, Region: last.Region, GameMode: last.GameMode, Status: last.Status})
 		if err != nil {
 			return projectQueue{}, err
 		}
