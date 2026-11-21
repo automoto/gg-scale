@@ -398,8 +398,11 @@ func (c *Config) checkFields() error {
 		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},
 		{"LEADERBOARD_MAX_PER_PROJECT", int64(c.LeaderboardMaxPerProject)},
 	} {
+		// The message has no value: the name tells the operator what to fix,
+		// and a value read from a field such as ...APIKeys is reported by
+		// CodeQL as a secret in the startup log.
 		if n.val <= 0 {
-			return fmt.Errorf("%s %d: must be a positive integer", n.name, n.val)
+			return fmt.Errorf("%s: must be a positive integer", n.name)
 		}
 	}
 

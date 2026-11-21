@@ -469,6 +469,19 @@ func TestLoad_should_name_new_variable_when_limit_is_not_positive(t *testing.T) 
 	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS")
 }
 
+func TestLoad_should_not_put_the_limit_value_in_the_error(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_MAX_PROJECT_API_KEYS", "-7")
+
+	// Act
+	_, err := config.Load()
+
+	// Assert
+	assert.EqualError(t, err, "MANAGEMENT_MAX_PROJECT_API_KEYS: must be a positive integer")
+}
+
 func parseEnvFileKeys(content string) []string {
 	var keys []string
 	for _, line := range strings.Split(content, "\n") {
