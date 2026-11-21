@@ -494,3 +494,28 @@ func TestQuotaState(t *testing.T) {
 		assert.Equal(t, c.want, quotaState(c.limit, c.current), "%d of %d", c.current, c.limit)
 	}
 }
+
+func TestActiveScopes_should_drop_a_scope_whose_pair_the_creator_lost(t *testing.T) {
+	// Arrange: a member has matchmaker read but no config update.
+	a, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+	require.NoError(t, a.SetControlPanelMembershipRole(7, 1, "member"))
+	p := creatorToken(managementtoken.ScopeConfigWrite, managementtoken.ScopeMatchmakingRead)
+
+	// Act
+	got, err := activeScopes(context.Background(), Deps{RBAC: a}, *p)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, []string{managementtoken.ScopeMatchmakingRead}, got)
+}
+
+func TestActiveScopes_should_return_an_empty_list_for_a_token_with_no_scopes(t *testing.T) {
+	a, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+
+	got, err := activeScopes(context.Background(), Deps{RBAC: a}, *creatorToken())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, got)
+}

@@ -134,6 +134,21 @@ func (q *Queries) GetManagementTokenCreator(ctx context.Context, arg GetManageme
 	return created_by_user_id, err
 }
 
+const getProjectName = `-- name: GetProjectName :one
+SELECT name
+FROM projects
+WHERE id = $1
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) GetProjectName(ctx context.Context, projectID int64) (string, error) {
+	row := q.db.QueryRow(ctx, getProjectName, projectID)
+	var name string
+	err := row.Scan(&name)
+	return name, err
+}
+
 const listManagementTokensForProject = `-- name: ListManagementTokensForProject :many
 SELECT k.id, k.label, k.token_hint, k.scopes, k.created_by_user_id,
        u.email AS creator_email, k.expires_at, k.last_used_at, k.created_at

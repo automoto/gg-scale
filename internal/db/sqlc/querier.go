@@ -515,6 +515,7 @@ type Querier interface {
 	// Feeds the PATCH /v1/profile email guard: is the address changing, is it
 	// already verified, and when did the last code go out (resend cooldown).
 	GetProfileEmailState(ctx context.Context, id int64) (GetProfileEmailStateRow, error)
+	GetProjectName(ctx context.Context, projectID int64) (string, error)
 	// Runtime read for the Steam sign-in endpoint, tenant-scoped via RLS GUC.
 	GetProjectSteamAuthConfig(ctx context.Context, projectID int64) (GetProjectSteamAuthConfigRow, error)
 	// Control-panel read: reports whether a key is stored, never its value.
@@ -649,6 +650,10 @@ type Querier interface {
 	ListAcceptedFriendAccountIDs(ctx context.Context, me pgtype.UUID) ([]pgtype.UUID, error)
 	// Bulk-fetch email + display_name for a set of accounts (friend-list enrich).
 	ListAccountIdentities(ctx context.Context, accountIds []pgtype.UUID) ([]ListAccountIdentitiesRow, error)
+	// One page of the unrevoked keys that work for a project: keys bound to it and
+	// tenant-wide keys. Keyset-paginated on id, newest first. before_id 0 starts at
+	// the newest key. The caller reads one row more than the page.
+	ListActiveAPIKeysPageForProject(ctx context.Context, arg ListActiveAPIKeysPageForProjectParams) ([]ListActiveAPIKeysPageForProjectRow, error)
 	ListActiveAllocations(ctx context.Context, arg ListActiveAllocationsParams) ([]ListActiveAllocationsRow, error)
 	// Every live board, for the dashboard. The live count is
 	// capped at create and restore (quota.AxisLeaderboards).

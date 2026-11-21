@@ -248,6 +248,62 @@ func (q *Queries) ListAPIKeys(ctx context.Context) ([]ListAPIKeysRow, error) {
 	return items, nil
 }
 
+const listActiveAPIKeysPageForProject = `-- name: ListActiveAPIKeysPageForProject :many
+SELECT k.id, k.project_id, k.label, k.key_type, k.scopes, k.created_at
+FROM api_keys k
+WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND k.revoked_at IS NULL
+  AND (k.project_id IS NULL OR k.project_id = $1)
+  AND ($2::bigint = 0 OR k.id < $2::bigint)
+ORDER BY k.id DESC
+LIMIT $3
+`
+
+type ListActiveAPIKeysPageForProjectParams struct {
+	ProjectID *int64
+	BeforeID  int64
+	RowLimit  int32
+}
+
+type ListActiveAPIKeysPageForProjectRow struct {
+	ID        int64
+	ProjectID *int64
+	Label     *string
+	KeyType   string
+	Scopes    []string
+	CreatedAt pgtype.Timestamptz
+}
+
+// One page of the unrevoked keys that work for a project: keys bound to it and
+// tenant-wide keys. Keyset-paginated on id, newest first. before_id 0 starts at
+// the newest key. The caller reads one row more than the page.
+func (q *Queries) ListActiveAPIKeysPageForProject(ctx context.Context, arg ListActiveAPIKeysPageForProjectParams) ([]ListActiveAPIKeysPageForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAPIKeysPageForProject, arg.ProjectID, arg.BeforeID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveAPIKeysPageForProjectRow
+	for rows.Next() {
+		var i ListActiveAPIKeysPageForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.Label,
+			&i.KeyType,
+			&i.Scopes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIKey = `-- name: RevokeAPIKey :exec
 UPDATE api_keys
 SET revoked_at = now()

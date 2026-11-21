@@ -21,7 +21,8 @@ const mcpMaxBodyBytes = 131072
 
 // mcpInstructions is sent to MCP clients when they connect.
 const mcpInstructions = "ggscale backend for one Game Project. Use project_health_check first " +
-	"to find setup problems. All tools act on the Game Project of the token; no tool takes a project ID."
+	"to find setup problems. All tools act on the Game Project of the token; no tool takes a project ID. " +
+	"A tool that you expect is missing when the token lacks its scope: call get_token to see the scopes of the token."
 
 // attachManagementMCP serves the /v1/project operations as MCP tools on
 // POST /mcp. api must be bound to a root-level chi group: a tool call sends

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -21,8 +22,30 @@ import (
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
-// projectMaxListRows caps each list result. There is no paging.
+// projectMaxListRows caps the key list in the health check. The list
+// operations are paged instead.
 const projectMaxListRows = 50
+
+// ProjectPageInput is the paging input of a list operation, as for
+// GET /v1/leaderboards. The cursor is the sort key of the last row of the
+// previous page.
+type ProjectPageInput struct {
+	Limit  string `query:"limit" doc:"Rows per page, at most 100. The default is 100." example:"100"`
+	Cursor string `query:"cursor" doc:"The next_cursor of the previous page. Leave it out for the first page." example:"weekly-high-score"`
+}
+
+func (in ProjectPageInput) limit() int32 {
+	return parseLimit(in.Limit, leaderboardListPageSize, leaderboardListPageSize)
+}
+
+// trimPage cuts rows, read with one row more than limit, to one page. more is
+// true when a next page exists.
+func trimPage[T any](rows []T, limit int32) (page []T, more bool) {
+	if len(rows) <= int(limit) {
+		return rows, false
+	}
+	return rows[:limit], true
+}
 
 // projectQ runs fn in a transaction scoped to the token's tenant. It uses the
 // primary, not the read replica: a stale revision number from a replica
@@ -102,30 +125,35 @@ type projectDeletedLeaderboard struct {
 
 type projectLeaderboardList struct {
 	Leaderboards []projectLeaderboard `json:"leaderboards"`
-	Truncated    bool                 `json:"truncated" doc:"True when there are more than 50 leaderboards."`
+	NextCursor   string               `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
 	// A pointer, so the key is absent unless include_deleted is set.
 	DeletedLeaderboards *[]projectDeletedLeaderboard `json:"deleted_leaderboards,omitempty" doc:"Deleted leaderboards that can be restored. Only when include_deleted is set."`
 }
 
 type projectListLeaderboardsInput struct {
-	IncludeDeleted bool `query:"include_deleted" doc:"Also list deleted leaderboards that can be restored."`
+	ProjectPageInput
+	IncludeDeleted bool `query:"include_deleted" doc:"Also list deleted leaderboards that can be restored. They are in the first page only."`
 }
 
 func listLeaderboards(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListLeaderboardsInput) (projectLeaderboardList, error) {
+	limit := in.limit()
 	var rows []sqlcgen.ListLeaderboardsPageForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
-		rows, err = q.ListLeaderboardsPageForProject(ctx, sqlcgen.ListLeaderboardsPageForProjectParams{ProjectID: p.ProjectID, RowLimit: projectMaxListRows + 1})
+		rows, err = q.ListLeaderboardsPageForProject(ctx, sqlcgen.ListLeaderboardsPageForProjectParams{
+			ProjectID: p.ProjectID, AfterName: in.Cursor, RowLimit: limit + 1,
+		})
 		return err
 	})
 	if err != nil {
 		return projectLeaderboardList{}, err
 	}
-	out := projectLeaderboardList{
-		Truncated:    len(rows) > projectMaxListRows,
-		Leaderboards: make([]projectLeaderboard, 0, min(len(rows), projectMaxListRows)),
+	rows, more := trimPage(rows, limit)
+	out := projectLeaderboardList{Leaderboards: make([]projectLeaderboard, 0, len(rows))}
+	if more {
+		out.NextCursor = rows[len(rows)-1].Name
 	}
-	for _, r := range rows[:min(len(rows), projectMaxListRows)] {
+	for _, r := range rows {
 		out.Leaderboards = append(out.Leaderboards, projectLeaderboard{
 			ID: r.ID, Name: r.Name, SortOrder: r.SortOrder, ScoreOperator: r.ScoreOperator,
 			ClientSubmissions: r.ClientSubmissions, ScoreMin: r.ScoreMin, ScoreMax: r.ScoreMax,
@@ -133,7 +161,7 @@ func listLeaderboards(ctx context.Context, d Deps, p managementtoken.Principal, 
 			CurrentPeriod: r.CurrentPeriod, NextResetAt: timestamptzPtr(r.NextResetAt), CreatedAt: timestamptzPtr(r.CreatedAt),
 		})
 	}
-	if !in.IncludeDeleted {
+	if !in.IncludeDeleted || in.Cursor != "" {
 		return out, nil
 	}
 	deleted, err := projectadmin.ListDeletedLeaderboards(ctx, d.Pool, p.TenantID, p.ProjectID)
@@ -215,19 +243,38 @@ func projectActiveKeys(ctx context.Context, d Deps, p managementtoken.Principal)
 }
 
 type projectAPIKeyList struct {
-	APIKeys   []projectAPIKey `json:"api_keys"`
-	Truncated bool            `json:"truncated" doc:"True when there are more than 50 keys."`
+	APIKeys    []projectAPIKey `json:"api_keys"`
+	NextCursor string          `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
 }
 
-func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectAPIKeyList, error) {
-	keys, err := projectActiveKeys(ctx, d, p)
+// listAPIKeys pages by key ID, newest first: the cursor is the ID of the
+// last key of the page.
+func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectAPIKeyList, error) {
+	limit := in.limit()
+	var rows []sqlcgen.ListActiveAPIKeysPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListActiveAPIKeysPageForProject(ctx, sqlcgen.ListActiveAPIKeysPageForProjectParams{
+			ProjectID: &p.ProjectID, BeforeID: parseCursor(in.Cursor), RowLimit: limit + 1,
+		})
+		return err
+	})
 	if err != nil {
 		return projectAPIKeyList{}, err
 	}
-	return projectAPIKeyList{
-		APIKeys:   keys[:min(len(keys), projectMaxListRows)],
-		Truncated: len(keys) > projectMaxListRows,
-	}, nil
+	rows, more := trimPage(rows, limit)
+	out := projectAPIKeyList{APIKeys: make([]projectAPIKey, 0, len(rows))}
+	if more {
+		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
+	}
+	for _, r := range rows {
+		k := projectAPIKey{ID: r.ID, Type: r.KeyType, Scopes: r.Scopes, AllProjects: r.ProjectID == nil, CreatedAt: timestamptzPtr(r.CreatedAt)}
+		if r.Label != nil {
+			k.Label = *r.Label
+		}
+		out.APIKeys = append(out.APIKeys, k)
+	}
+	return out, nil
 }
 
 type projectListRevisionsInput struct {
@@ -596,4 +643,63 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 	checks.ServerSwitches = projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured}
 	checks.Quotas = quotas
 	return projectHealth{Problems: problems, Checks: checks}, nil
+}
+
+type projectToken struct {
+	TokenID      int64     `json:"token_id" example:"5"`
+	Label        string    `json:"label" example:"claude agent"`
+	ProjectID    int64     `json:"project_id" example:"3"`
+	ProjectName  string    `json:"project_name" example:"My Game"`
+	TenantID     int64     `json:"tenant_id" example:"2"`
+	Scopes       []string  `json:"scopes" doc:"The scopes of the token."`
+	ActiveScopes []string  `json:"active_scopes" doc:"The scopes of the token that the person who created it can still use now."`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// activeScopes returns the scopes of the token whose creator pair the creator
+// passes now, with the same check as the per-request creator check.
+func activeScopes(ctx context.Context, d Deps, p managementtoken.Principal) ([]string, error) {
+	out := []string{}
+	for _, name := range p.Scopes {
+		sp, ok := managementtoken.Scope(name)
+		if !ok {
+			continue
+		}
+		allowed, err := d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, sp.Pair(p.ProjectID), sp.Action)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
+// getToken is open to every token.
+func getToken(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectToken, error) {
+	var name string
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		name, err = q.GetProjectName(ctx, p.ProjectID)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return projectToken{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectToken{}, err
+	}
+	active, err := activeScopes(ctx, d, p)
+	if err != nil {
+		return projectToken{}, err
+	}
+	scopes := p.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return projectToken{
+		TokenID: p.TokenID, Label: p.Label, ProjectID: p.ProjectID, ProjectName: name, TenantID: p.TenantID,
+		Scopes: scopes, ActiveScopes: active, ExpiresAt: p.ExpiresAt,
+	}, nil
 }

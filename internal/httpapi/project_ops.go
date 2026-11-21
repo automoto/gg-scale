@@ -213,6 +213,18 @@ var projectOps = []projectOp{
 		handler: projectHandler(projectHealthCheck),
 	},
 	{
+		tool: "get_token",
+		description: "Show this token: ID, label, Game Project, tenant, scopes, expiry time, and active_scopes, " +
+			"the scopes the person who created the token can still use now. Call it when a tool is missing or a call is refused.",
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/token", OperationID: "getProjectToken",
+			Summary: "Show the token",
+			Description: "Returns the token ID, label, Game Project ID and name, tenant ID, scopes, and expiry time. " +
+				"active_scopes lists the scopes that the creator of the token can still use now. Open to every token.",
+		},
+		handler: projectHandler(getToken),
+	},
+	{
 		tool: "matchmaking_ticket_trace",
 		description: "Show the state of one matchmaking ticket. Give ticket_id (any state) or player_id " +
 			"(only the ticket the player has in the queue now). Finished tickets are kept for 24 hours. " +
@@ -274,7 +286,7 @@ var projectOps = []projectOp{
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/leaderboards", OperationID: "listProjectLeaderboards",
 			Summary:     "List leaderboards",
-			Description: "Returns the settings of the leaderboards (no scores), at most 50. Set include_deleted to also list the deleted leaderboards that can be restored.",
+			Description: "Returns the settings of the leaderboards (no scores), sorted by name and paged: limit is at most 100 (the default); send next_cursor as cursor for the next page. Set include_deleted to also list the deleted leaderboards that can be restored; they are in the first page only.",
 		},
 		handler: projectHandler(listLeaderboards),
 	},
@@ -357,7 +369,7 @@ var projectOps = []projectOp{
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/api-keys", OperationID: "listProjectAPIKeys",
 			Summary:     "List API keys",
-			Description: "Returns the active API keys that work for the Game Project, at most 50: label, type, scopes, and creation time. Key values are never returned.",
+			Description: "Returns the active API keys that work for the Game Project, newest first and paged: limit is at most 100 (the default); send next_cursor as cursor for the next page. Each key has label, type, scopes, and creation time. Key values are never returned.",
 		},
 		handler: projectHandler(listAPIKeys),
 	},

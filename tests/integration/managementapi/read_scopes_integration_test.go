@@ -22,7 +22,7 @@ func TestReadScopes_leaderboards_read_token_should_list_only_leaderboard_read_to
 
 	_, out := f.post(f.scopedToken(managementtoken.ScopeLeaderboardsRead), toolsList)
 
-	assert.ElementsMatch(t, []string{"project_health_check", "list_leaderboards", "get_leaderboard", "list_revisions"}, toolNames(out))
+	assert.ElementsMatch(t, []string{"project_health_check", "list_leaderboards", "get_leaderboard", "list_revisions", "get_token"}, toolNames(out))
 }
 
 func TestReadScopes_should_return_403_when_keys_read_is_missing(t *testing.T) {

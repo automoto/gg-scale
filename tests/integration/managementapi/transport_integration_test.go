@@ -65,7 +65,7 @@ func toolNames(out map[string]any) []string {
 
 var readTools = []string{
 	"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
-	"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions",
+	"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions", "get_token",
 }
 
 func TestTransport_tool_call_should_take_one_unit_from_each_token_bucket(t *testing.T) {
@@ -139,7 +139,7 @@ func TestTransport_tools_list_should_hide_tools_whose_scope_the_token_lacks(t *t
 
 	_, out := f.post(f.scopedToken(managementtoken.ScopeConfigWrite), toolsList)
 
-	assert.ElementsMatch(t, []string{"set_remote_config", "rollback_remote_config", "project_health_check"}, toolNames(out))
+	assert.ElementsMatch(t, []string{"set_remote_config", "rollback_remote_config", "project_health_check", "get_token"}, toolNames(out))
 }
 
 func TestTransport_should_refuse_a_tool_with_no_row(t *testing.T) {

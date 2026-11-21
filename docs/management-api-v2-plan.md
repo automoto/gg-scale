@@ -287,11 +287,11 @@ Do the stages in order. Write failing tests first. After each stage:
 - [ ] Token list: access in words, the inactive count, "New token like this".
 - [ ] Tests: a disabled option is refused on POST; Quick fill never sets a risky scope; "New token like this" fills the same access; the default form makes a read-only token.
 - [x] `project_health_check`: leave out each section that the token cannot read.
-- [ ] `get_token` operation.
-- [ ] Paging for `list_leaderboards` and `list_api_keys`.
-- [ ] `mcpInstructions`: mention `get_token`.
+- [x] `get_token` operation.
+- [x] Paging for `list_leaderboards` and `list_api_keys`.
+- [x] `mcpInstructions`: mention `get_token`.
 - [x] Tests: a narrow token's tool list; 403 for a missing read scope.
-- [ ] Tests: paging.
+- [x] Tests: paging.
 
 ### Stage 2: keys, players, limits, matchmaking (class 1)
 

@@ -94,6 +94,7 @@ var expectedV1Paths = []string{
 	"/v1/project/remote-config",
 	"/v1/project/remote-config/rollback",
 	"/v1/project/revisions",
+	"/v1/project/token",
 	"/v1/profile",
 	"/v1/profile/friend-code",
 	"/v1/relay/credentials",

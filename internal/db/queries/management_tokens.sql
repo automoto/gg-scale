@@ -19,6 +19,13 @@ SELECT EXISTS (
       AND deleted_at IS NULL
 )::bool;
 
+-- name: GetProjectName :one
+SELECT name
+FROM projects
+WHERE id = sqlc.arg(project_id)
+  AND tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL;
+
 -- name: TouchManagementTokenLastUsed :exec
 -- At most one write per minute for each token.
 UPDATE management_tokens

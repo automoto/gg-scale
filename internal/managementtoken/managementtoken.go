@@ -6,6 +6,7 @@ package managementtoken
 
 import (
 	"slices"
+	"time"
 
 	"github.com/automoto/gg-scale/internal/rbac"
 )
@@ -77,6 +78,7 @@ type Principal struct {
 	CreatedByUserID int64
 	Label           string
 	Scopes          []string
+	ExpiresAt       time.Time
 }
 
 // HasScope reports whether the token has scope.

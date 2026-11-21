@@ -175,6 +175,7 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 		CreatedByUserID: row.CreatedByUserID,
 		Label:           row.Label,
 		Scopes:          row.Scopes,
+		ExpiresAt:       row.ExpiresAt.Time,
 	}
 	tctx := db.WithTenant(ctx, p.TenantID)
 	if !cached {
