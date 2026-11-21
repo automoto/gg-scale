@@ -199,7 +199,6 @@ func TestPlayers_tools_should_follow_the_scopes(t *testing.T) {
 	assert.ElementsMatch(t, []string{"project_health_check", "get_token", "list_players", "get_player"}, toolNames(out))
 }
 
-
 func (f *fixture) audit(action string, target int64) (service string, count int) {
 	f.t.Helper()
 	rows, err := f.owner.Query(context.Background(),
