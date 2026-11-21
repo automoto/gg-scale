@@ -28,6 +28,8 @@ const (
 	ScopePlayersRead       = "players:read"
 	ScopePlayersPII        = "players:pii"
 	ScopePlayersWrite      = "players:write"
+	ScopeLimitsRead        = "limits:read"
+	ScopeLimitsWrite       = "limits:write"
 )
 
 // Scope classes.
@@ -82,6 +84,8 @@ var Scopes = []ScopePair{
 		Label: "See player email and display name. They go into agent logs.", Needs: ScopePlayersRead,
 	},
 	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
+	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
+	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 }
 
 // Resource is one row of the access table on the token page.
@@ -106,6 +110,7 @@ var Resources = []Resource{
 	{Name: "keys", Label: "API keys", Read: ScopeKeysRead},
 	{Name: "matchmaking", Label: "Matchmaking", Read: ScopeMatchmakingRead},
 	{Name: "players", Label: "Players (IDs and status)", Noun: "Players", Read: ScopePlayersRead},
+	{Name: "limits", Label: "Project limits", Read: ScopeLimitsRead},
 }
 
 // WriteScopes returns the normal-class scopes of the row other than its read

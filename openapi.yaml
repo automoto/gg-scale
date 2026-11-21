@@ -1887,6 +1887,7 @@ components:
           type: object
         quotas:
           $ref: "#/components/schemas/ProjectHealthQuotas"
+          description: Absent without the limits:read scope.
         remote_config_bytes:
           description: Absent without the config:read scope.
           format: int64
@@ -1899,7 +1900,6 @@ components:
       required:
         - feature_grants
         - server_switches
-        - quotas
       type: object
     ProjectHealthOrigins:
       additionalProperties: false
@@ -1948,6 +1948,31 @@ components:
         - enforced
         - open_sessions
         - leaderboards
+      type: object
+    ProjectInviteLimits:
+      additionalProperties: false
+      properties:
+        default_domain_per_day:
+          description: The default, and the highest value that can be set.
+          format: double
+          type: number
+        default_inviter_per_hour:
+          description: The default, and the highest value that can be set.
+          format: double
+          type: number
+        domain_per_day:
+          description: Invites that one email domain may get each day in this Game Project. 0 means the default.
+          format: double
+          type: number
+        inviter_per_hour:
+          description: Invites that one inviter may send each hour in this Game Project. 0 means the default.
+          format: double
+          type: number
+      required:
+        - inviter_per_hour
+        - domain_per_day
+        - default_inviter_per_hour
+        - default_domain_per_day
       type: object
     ProjectLeaderboard:
       additionalProperties: false
@@ -2056,6 +2081,31 @@ components:
       required:
         - revision
         - note
+      type: object
+    ProjectLimitUsage:
+      additionalProperties: false
+      properties:
+        leaderboards:
+          $ref: "#/components/schemas/ProjectQuotaCount"
+        open_sessions:
+          $ref: "#/components/schemas/ProjectQuotaCount"
+      required:
+        - open_sessions
+        - leaderboards
+      type: object
+    ProjectLimits:
+      additionalProperties: false
+      properties:
+        invites:
+          $ref: "#/components/schemas/ProjectInviteLimits"
+        storage:
+          $ref: "#/components/schemas/ProjectStorageLimits"
+        usage:
+          $ref: "#/components/schemas/ProjectLimitUsage"
+      required:
+        - invites
+        - storage
+        - usage
       type: object
     ProjectPlayer:
       additionalProperties: false
@@ -2265,6 +2315,25 @@ components:
       required:
         - origins
       type: object
+    ProjectSetInviteLimitsInputBody:
+      additionalProperties: false
+      properties:
+        domain_per_day:
+          description: Invites that one email domain may get each day. 0 clears the limit, so the default applies.
+          examples:
+            - 100
+          format: double
+          type: number
+        inviter_per_hour:
+          description: Invites that one inviter may send each hour. 0 clears the limit, so the default applies.
+          examples:
+            - 20
+          format: double
+          type: number
+      required:
+        - inviter_per_hour
+        - domain_per_day
+      type: object
     ProjectSetPlayerDisabledInputBody:
       additionalProperties: false
       properties:
@@ -2288,6 +2357,38 @@ components:
       required:
         - config
         - expected_revision
+      type: object
+    ProjectSetStorageLimitInputBody:
+      additionalProperties: false
+      properties:
+        max_value_mb:
+          description: The limit for one storage value, in MiB. 0 clears the limit of this Game Project.
+          examples:
+            - 0.5
+          format: double
+          type: number
+      required:
+        - max_value_mb
+      type: object
+    ProjectStorageLimits:
+      additionalProperties: false
+      properties:
+        effective_max_value_mb:
+          description: The limit that applies now.
+          format: double
+          type: number
+        max_value_mb:
+          description: The limit of this Game Project for one storage value, in MiB. 0 means no limit of its own.
+          format: double
+          type: number
+        tenant_max_value_mb:
+          description: The limit of the Account Tenant. The limit of this Game Project cannot be higher.
+          format: double
+          type: number
+      required:
+        - max_value_mb
+        - effective_max_value_mb
+        - tenant_max_value_mb
       type: object
     ProjectTicketTrace:
       additionalProperties: false
@@ -5743,7 +5844,7 @@ paths:
         - Project Management
   /v1/project/health:
     get:
-      description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. Tenant-level quotas show only ok, near_limit, or at_limit. The API key check needs the keys:read scope, and the CORS, Steam, and remote config checks need config:read. Without the scope, the check is left out."
+      description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. Tenant-level quotas show only ok, near_limit, or at_limit. The API key check needs the keys:read scope, the CORS, Steam, and remote config checks need config:read, and the quota state needs limits:read. Without the scope, the check is left out."
       operationId: getProjectHealth
       responses:
         "200":
@@ -6009,6 +6110,84 @@ paths:
       security:
         - ManagementToken: []
       summary: Roll back leaderboard settings
+      tags:
+        - Project Management
+  /v1/project/limits:
+    get:
+      description: Returns the invite limits and the storage value size limit of the Game Project, with the defaults and the limit of the Account Tenant, and the open session and leaderboard counts with their limits.
+      operationId: getProjectLimits
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLimits"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Get the Game Project limits
+      tags:
+        - Project Management
+  /v1/project/limits/invites:
+    put:
+      description: Sets the invite limits of the Game Project. 0 clears a limit. A limit cannot be higher than the default (422). Returns the limits as the read does.
+      operationId: setProjectInviteLimit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetInviteLimitsInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLimits"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Set the invite limits
+      tags:
+        - Project Management
+  /v1/project/limits/storage:
+    put:
+      description: Sets the limit for the size of one storage value, in MiB. 0 clears it. The limit cannot be higher than the limit of the Account Tenant (422). Returns the limits as the read does.
+      operationId: setProjectStorageLimit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetStorageLimitInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLimits"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Set the storage value size limit
       tags:
         - Project Management
   /v1/project/matchmaking/ticket-trace:

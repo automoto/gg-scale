@@ -685,7 +685,7 @@ func TestProjectAPI_health_check_should_return_no_count_for_tenant_quotas(t *tes
 	f := newFixture(t)
 	f.exec(`UPDATE tenants SET enforce_quotas = true WHERE id = $1`, f.tenantA)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/health", "")
+	got := f.do(f.scopedToken("limits:read"), http.MethodGet, "/v1/project/health", "")
 
 	quotas := got.body["checks"].(map[string]any)["quotas"].(map[string]any)
 	assert.Equal(t, []any{"ok", "ok"}, []any{quotas["projects"], quotas["players"]}, got.raw)
@@ -694,7 +694,7 @@ func TestProjectAPI_health_check_should_return_no_count_for_tenant_quotas(t *tes
 func TestProjectAPI_health_check_should_omit_tenant_quotas_when_not_enforced(t *testing.T) {
 	f := newFixture(t)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/health", "")
+	got := f.do(f.scopedToken("limits:read"), http.MethodGet, "/v1/project/health", "")
 
 	quotas := got.body["checks"].(map[string]any)["quotas"].(map[string]any)
 	_, hasProjects := quotas["projects"]
@@ -708,7 +708,7 @@ func TestProjectAPI_health_check_should_count_leaderboards_when_quotas_are_not_e
 	f.exec(`INSERT INTO leaderboards (tenant_id, project_id, name) VALUES ($1, $2, 'one'), ($1, $2, 'two')`, f.tenantA, f.projectA)
 
 	// Act
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/health", "")
+	got := f.do(f.scopedToken("limits:read"), http.MethodGet, "/v1/project/health", "")
 
 	// Assert
 	quotas := got.body["checks"].(map[string]any)["quotas"].(map[string]any)
@@ -722,7 +722,7 @@ func TestProjectAPI_health_check_should_report_a_problem_at_the_leaderboard_limi
 	f.exec(`INSERT INTO leaderboards (tenant_id, project_id, name) VALUES ($1, $2, 'one')`, f.tenantA, f.projectA)
 
 	// Act
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/health", "")
+	got := f.do(f.scopedToken("limits:read"), http.MethodGet, "/v1/project/health", "")
 
 	// Assert
 	assert.Contains(t, got.body["problems"], "The Game Project is at its leaderboard limit (1). New leaderboards are refused.", got.raw)

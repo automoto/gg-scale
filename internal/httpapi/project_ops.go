@@ -165,6 +165,7 @@ func errProjectNotFound() error { return huma.Error404NotFound(projectNotFoundTe
 // projectWriteError maps the errors of the projectadmin writes to safe
 // client errors. Other errors are returned unchanged and become a 500.
 func projectWriteError(err error) error {
+	var limitErr projectadmin.LimitError
 	switch {
 	case err == nil:
 		return nil
@@ -192,7 +193,8 @@ func projectWriteError(err error) error {
 	case errors.Is(err, projectadmin.ErrOriginLimit):
 		// Before ErrInvalidOrigins, which it wraps.
 		return huma.Error409Conflict(err.Error())
-	case errors.Is(err, projectadmin.ErrInvalidLeaderboard),
+	case errors.As(err, &limitErr),
+		errors.Is(err, projectadmin.ErrInvalidLeaderboard),
 		errors.Is(err, projectadmin.ErrInvalidOrigins),
 		errors.Is(err, projectadmin.ErrScopeNotGrantable),
 		errors.Is(err, projectadmin.ErrInvalidKeyScope):
@@ -208,15 +210,16 @@ var projectOps = []projectOp{
 		description: "Find setup problems in this Game Project: API keys, key scopes, feature grants, " +
 			"server feature switches, relay, CORS origins, Steam sign-in, remote config size, and quota state. " +
 			"Tenant-level quotas are reported as ok, near_limit, or at_limit only. " +
-			"The API key check needs the keys:read scope; the CORS, Steam, and remote config checks need config:read. " +
-			"Without the scope, the check is left out.",
+			"The API key check needs the keys:read scope; the CORS, Steam, and remote config checks need config:read; " +
+			"the quota state needs limits:read. Without the scope, the check is left out.",
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/health", OperationID: "getProjectHealth",
 			Summary: "Check the Game Project setup",
 			Description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, " +
 				"server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. " +
 				"Tenant-level quotas show only ok, near_limit, or at_limit. The API key check needs the keys:read scope, " +
-				"and the CORS, Steam, and remote config checks need config:read. Without the scope, the check is left out.",
+				"the CORS, Steam, and remote config checks need config:read, and the quota state needs limits:read. " +
+				"Without the scope, the check is left out.",
 		},
 		handler: projectHandler(projectHealthCheck),
 	},
@@ -522,5 +525,44 @@ var projectOps = []projectOp{
 				"The response has the old list. Answers 409 when the list has more origins than the limit.",
 		},
 		handler: projectHandler(setAllowedOrigins),
+	},
+	{
+		tool: "get_project_limits",
+		description: "Get the limits of this Game Project and their use: invite limits, the storage value size limit, " +
+			"and the open session and leaderboard counts with their limits. A 0 in a limit setting means the default applies.",
+		scope: managementtoken.ScopeLimitsRead,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/limits", OperationID: "getProjectLimits",
+			Summary: "Get the Game Project limits",
+			Description: "Returns the invite limits and the storage value size limit of the Game Project, with the " +
+				"defaults and the limit of the Account Tenant, and the open session and leaderboard counts with their limits.",
+		},
+		handler: projectHandler(getProjectLimits),
+	},
+	{
+		tool: "set_project_invite_limit",
+		description: "Set the invite limits of this Game Project: invites for each inviter in an hour, and for each email domain in a day. " +
+			"0 clears a limit, so the default applies. A limit cannot be higher than the default. Returns the limits.",
+		scope: managementtoken.ScopeLimitsWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/limits/invites", OperationID: "setProjectInviteLimit",
+			Summary: "Set the invite limits",
+			Description: "Sets the invite limits of the Game Project. 0 clears a limit. A limit cannot be higher than the default " +
+				"(422). Returns the limits as the read does.",
+		},
+		handler: projectHandler(setProjectInviteLimits),
+	},
+	{
+		tool: "set_project_storage_limit",
+		description: "Set the limit of this Game Project for the size of one storage value, in MiB (max_value_mb). " +
+			"0 clears it, so the limit of the Account Tenant applies. It cannot be higher than the limit of the Account Tenant. Returns the limits.",
+		scope: managementtoken.ScopeLimitsWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/limits/storage", OperationID: "setProjectStorageLimit",
+			Summary: "Set the storage value size limit",
+			Description: "Sets the limit for the size of one storage value, in MiB. 0 clears it. The limit cannot be higher than " +
+				"the limit of the Account Tenant (422). Returns the limits as the read does.",
+		},
+		handler: projectHandler(setProjectStorageLimit),
 	},
 }

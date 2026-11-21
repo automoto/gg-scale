@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/automoto/gg-scale/internal/auditlog"
-	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/quota"
@@ -22,7 +21,6 @@ import (
 
 var (
 	errInvalidLimit          = errors.New("control panel: rate and burst must be finite non-negative numbers")
-	errExceedsCap            = errors.New("control panel: per-project quota exceeds the tenant cap")
 	errIncompleteLimit       = errors.New("control panel: rate and burst must both be positive (or both blank to clear)")
 	errConnectionCeiling     = errors.New("control panel: temporary connection maximum must be at least the sustained limit")
 	errConnectionBurstRatio  = errors.New("control panel: temporary connection maximum must not exceed twice the sustained limit")
@@ -320,72 +318,6 @@ func (h *Handler) invalidateOverrides(tenantID int64) {
 	if inv, ok := h.overrides.(ratelimit.OverrideInvalidator); ok {
 		inv.Invalidate(tenantID)
 	}
-}
-
-// setProjectInviteOverride writes per-project invite quotas from human-facing
-// counts (invites/hour, invites/day). A zero clears that kind's override.
-func (h *Handler) setProjectInviteOverride(ctx context.Context, actorID, tenantID, projectID int64, inviterPerHour, domainPerDay float64) error {
-	if !finiteNonNegative(inviterPerHour, domainPerDay) {
-		return errInvalidLimit
-	}
-	// Per-project quotas are clamped to the tenant cap: a tenant admin can
-	// tighten a project below the tenant default but never lift it above.
-	// (The compiled default is the tenant cap; there is no tenant-wide invite
-	// override to raise it.)
-	tenantCap := ratelimit.DefaultInviteLimits
-	if inviterPerHour > tenantCap.InviterPerHour || domainPerDay > tenantCap.DomainPerDay {
-		return errExceedsCap
-	}
-	if err := h.requireProjectInTenant(ctx, tenantID, projectID); err != nil {
-		return err
-	}
-	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		if err := upsertOrClearInvite(ctx, q, actorID, tenantID, projectID, ratelimit.OverrideKindInviteInviter, inviterPerHour, 3600); err != nil {
-			return err
-		}
-		if err := upsertOrClearInvite(ctx, q, actorID, tenantID, projectID, ratelimit.OverrideKindInviteDomain, domainPerDay, 86400); err != nil {
-			return err
-		}
-		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.rate_limit.set", strconv.FormatInt(projectID, 10),
-			map[string]any{"tenant_id": tenantID, "project_id": projectID, "inviter_per_hour": inviterPerHour, "domain_per_day": domainPerDay})
-	})
-	if err != nil {
-		return err
-	}
-	h.invalidateOverrides(tenantID)
-	return nil
-}
-
-// upsertOrClearInvite maps a per-window count onto a token bucket (burst=count,
-// rate=count/windowSecs); count 0 deletes the override so the default applies.
-func upsertOrClearInvite(ctx context.Context, q *sqlcgen.Queries, actorID, tenantID, projectID int64, kind string, count, windowSecs float64) error {
-	pid := projectID
-	if count == 0 {
-		return q.DeleteRateLimitOverride(ctx, sqlcgen.DeleteRateLimitOverrideParams{
-			TenantID: tenantID, Kind: kind, ProjectID: &pid,
-		})
-	}
-	return q.UpsertRateLimitOverride(ctx, sqlcgen.UpsertRateLimitOverrideParams{
-		TenantID: tenantID, ProjectID: &pid, Kind: kind,
-		Rate: count / windowSecs, Burst: count, UpdatedBy: &actorID,
-	})
-}
-
-func (h *Handler) requireProjectInTenant(ctx context.Context, tenantID, projectID int64) error {
-	ctx = db.WithTenant(ctx, tenantID)
-	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		var exists bool
-		if err := tx.QueryRow(ctx,
-			`SELECT EXISTS (SELECT 1 FROM projects WHERE id = $1 AND tenant_id = $2)`,
-			projectID, tenantID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return errProjectNotInTenant
-		}
-		return nil
-	})
 }
 
 // rlNum formats a limit for display without trailing zeros.

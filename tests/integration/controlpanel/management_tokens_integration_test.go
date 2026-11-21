@@ -203,7 +203,7 @@ func TestManagementTokens_quick_fill_read_write_should_select_write_rows(t *test
 
 	_, body := tfGet(t, c, p.tokensURL()+"?fill=read_write")
 
-	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"write"}},
+	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"write"}, "access_limits": {"write"}},
 		checkedAccess(body))
 }
 
@@ -212,7 +212,7 @@ var likeLink = regexp.MustCompile(`href="([^"]*)"[^>]*>New token like this<`)
 func TestManagementTokens_new_token_like_this_should_fill_the_same_access(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}, "access_players": {"none"}}
+	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}, "access_players": {"none"}, "access_limits": {"none"}}
 	p.create(t, c, csrf, access)
 	_, list := tfGet(t, c, p.tokensURL())
 	m := likeLink.FindStringSubmatch(list)
@@ -342,7 +342,7 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	c, csrf := loginAsAdmin(t, p.srv, p.raw, id, "pa@example.com")
 
 	resp, _ := p.create(t, c, csrf, url.Values{
-		"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"read"}})
+		"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"read"}, "access_limits": {"read"}})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var projectID int64
@@ -533,4 +533,28 @@ func TestManagementTokens_page_should_warn_when_a_link_checks_a_risky_box(t *tes
 	_, plain := tfGet(t, c, p.tokensURL())
 
 	assert.Equal(t, []bool{true, false}, []bool{strings.Contains(withLink, "A link checked risky access"), strings.Contains(plain, "A link checked risky access")})
+}
+
+func TestProjectLimits_dashboard_writes_should_save_and_audit_the_user(t *testing.T) {
+	// Arrange
+	p := newTokenPanel(t, true)
+	c, csrf, ownerID := p.member(t, "owner@example.com", "owner")
+	base := p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) + "/rate-limits/projects/" + strconv.FormatInt(p.project, 10)
+
+	// Act
+	tfPostForm(t, c, base+"/storage", url.Values{"_csrf": {csrf}, "max_value_mb": {"0.5"}})
+	tfPostForm(t, c, base+"/invites", url.Values{"_csrf": {csrf}, "inviter_per_hour": {"5"}, "domain_per_day": {"7"}})
+
+	// Assert
+	var bytes int64
+	var overrides int
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT max_value_bytes FROM storage_limits WHERE tenant_id = $1 AND project_id = $2`, p.tenantID, p.project).Scan(&bytes))
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM rate_limit_overrides WHERE tenant_id = $1 AND project_id = $2`, p.tenantID, p.project).Scan(&overrides))
+	var audited int
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM platform_audit_log WHERE actor_user_id = $1 AND target = $2
+		 AND action IN ('control_panel.storage_limit.set', 'control_panel.rate_limit.set')`, ownerID, strconv.FormatInt(p.project, 10)).Scan(&audited))
+	assert.Equal(t, []any{int64(524288), 2, 2}, []any{bytes, overrides, audited})
 }

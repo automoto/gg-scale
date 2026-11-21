@@ -3,7 +3,6 @@ package controlpanel
 import (
 	"context"
 	"errors"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,13 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/automoto/gg-scale/internal/auditlog"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/storagelimit"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
-
-// errInvalidStorageMB is returned when a storage-limit form field is not a
-// non-negative number of megabytes.
-var errInvalidStorageMB = errors.New("control panel: storage limit must be a non-negative number (MB)")
 
 // storagePlatformDefault is the platform storage cap from config, or the
 // compiled fallback when unset.
@@ -26,17 +22,6 @@ func (h *Handler) storagePlatformDefault() int64 {
 		return h.cfg.StorageMaxValueBytes
 	}
 	return storagelimit.DefaultMaxValueBytes
-}
-
-// effectiveTenantStorageLimit returns the tenant-level override if present, else
-// the platform default — the ceiling a per-project limit may not exceed.
-func (h *Handler) effectiveTenantStorageLimit(ctx context.Context, tenantID int64) (int64, error) {
-	def := h.storagePlatformDefault()
-	if h.storageLimits == nil {
-		return def, nil
-	}
-	// projectID 0 resolves to the tenant row (or the default) only.
-	return h.storageLimits.Resolve(ctx, tenantID, 0, def)
 }
 
 // updateTenantStorageLimitHandler sets the tenant-wide storage value cap.
@@ -84,30 +69,22 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 	session, _ := sessionFromContext(r.Context())
 	bytes, err := parseStorageMB(r.Form.Get("max_value_mb"))
 	if err != nil {
-		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative number (MB).")
+		h.redirectRateLimits(w, r, tenantID, err.Error())
 		return
 	}
-	if err := h.requireProjectInTenant(r.Context(), tenantID, projectID); err != nil {
+	err = projectadmin.SetStorageLimit(r.Context(), h.pool, h.storageLimits, tenantID, projectID, bytes,
+		h.storagePlatformDefault(), projectadmin.Actor{UserID: session.User.ID})
+	var limitErr projectadmin.LimitError
+	switch {
+	case err == nil:
+		h.redirectRateLimits(w, r, tenantID, "Game Project storage limit updated.")
+	case errors.As(err, &limitErr):
+		h.redirectRateLimits(w, r, tenantID, limitErr.Error())
+	case errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		http.Error(w, "Game Project not found", http.StatusNotFound)
-		return
-	}
-	if bytes > 0 {
-		ceiling, cerr := h.effectiveTenantStorageLimit(r.Context(), tenantID)
-		if cerr != nil {
-			http.Error(w, "storage limit update failed", http.StatusInternalServerError)
-			return
-		}
-		if bytes > ceiling {
-			h.redirectRateLimits(w, r, tenantID, "Per Game Project storage limit can't exceed the Account Tenant limit.")
-			return
-		}
-	}
-	pid := projectID
-	if err := h.setStorageLimit(r.Context(), session.User.ID, tenantID, &pid, bytes); err != nil {
+	default:
 		http.Error(w, "storage limit update failed", http.StatusInternalServerError)
-		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Game Project storage limit updated.")
 }
 
 // setStorageLimit persists the override (bytes <= 0 clears it) and writes an
@@ -138,8 +115,8 @@ func parseStorageMB(s string) (int64, error) {
 		return 0, nil
 	}
 	mb, err := strconv.ParseFloat(s, 64)
-	if err != nil || mb < 0 || math.IsNaN(mb) || math.IsInf(mb, 0) {
-		return 0, errInvalidStorageMB
+	if err != nil {
+		return 0, projectadmin.ErrInvalidStorageMB
 	}
-	return int64(math.Round(mb * float64(bytesPerMiB))), nil
+	return projectadmin.StorageBytesFromMB(mb)
 }

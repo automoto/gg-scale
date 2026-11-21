@@ -362,11 +362,7 @@ func TestMCP_platform_admin_tools_list_has_only_table_tools(t *testing.T) {
 	for _, tl := range out["result"].(map[string]any)["tools"].([]any) {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	assert.ElementsMatch(t, []string{
-		"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
-		"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions", "get_token",
-		"list_players", "get_player",
-	}, names)
+	assert.ElementsMatch(t, readTools, names)
 }
 
 func TestMCP_token_that_no_longer_works_is_limited_by_ip(t *testing.T) {

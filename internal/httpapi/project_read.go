@@ -568,7 +568,7 @@ type projectHealthChecks struct {
 	CORSAllowedOrigins *projectHealthOrigins `json:"cors_allowed_origins,omitempty" doc:"Absent without the config:read scope."`
 	SteamSignIn        *bool                 `json:"steam_sign_in,omitempty" doc:"Absent without the config:read scope."`
 	RemoteConfigBytes  *int                  `json:"remote_config_bytes,omitempty" doc:"Absent without the config:read scope."`
-	Quotas             projectHealthQuotas   `json:"quotas"`
+	Quotas             *projectHealthQuotas  `json:"quotas,omitempty" doc:"Absent without the limits:read scope."`
 }
 
 type projectServerSwitches struct {
@@ -601,12 +601,16 @@ type projectQuotaCount struct {
 	Limit   int64 `json:"limit"`
 }
 
-// projectHealthCheck is open to every token. The pairs of keys:read and
-// config:read are (project, manage), which the token middleware checks, so
-// the scope test alone decides each section.
+// projectHealthCheck is open to every token. The pairs of keys:read,
+// config:read, and limits:read are (project, manage), which the token
+// middleware checks, so the scope test alone decides each section.
 func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectHealth, error) {
 	fleetEnabled, relayEnabled, relayConfigured := d.ControlPanel.FleetEnabled, d.ControlPanel.RelayEnabled, d.RelayIssuer != nil
 	showKeys, showConfig := p.HasScope(managementtoken.ScopeKeysRead), p.HasScope(managementtoken.ScopeConfigRead)
+	showQuotas := p.HasScope(managementtoken.ScopeLimitsRead)
+	// The leaderboard count is leaderboard data, so leaderboards:read also
+	// shows the leaderboard limit problem.
+	showBoardLimit := showQuotas || p.HasScope(managementtoken.ScopeLeaderboardsRead)
 	problems := []string{}
 	var checks projectHealthChecks
 	keyScopes := map[string]bool{}
@@ -701,10 +705,10 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		OpenSessions: projectQuotaCount{Current: openSessions, Limit: limits.OpenSessionsPerProject},
 		Leaderboards: projectQuotaCount{Current: boards, Limit: limits.LeaderboardsPerProject},
 	}
-	if quotaState(limits.LeaderboardsPerProject, boards) == "at_limit" {
+	if showBoardLimit && quotaState(limits.LeaderboardsPerProject, boards) == "at_limit" {
 		problems = append(problems, fmt.Sprintf("The Game Project is at its leaderboard limit (%d). New leaderboards are refused.", limits.LeaderboardsPerProject))
 	}
-	if qc.EnforceQuotas {
+	if showQuotas && qc.EnforceQuotas {
 		quotas.Projects = quotaState(int64(limits.Projects), projects)
 		quotas.Players = quotaState(limits.Players, qc.PlayerCount)
 		for axis, state := range map[string]string{quota.AxisProjects: quotas.Projects, quota.AxisPlayers: quotas.Players} {
@@ -739,7 +743,9 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 	sort.Strings(problems)
 	checks.FeatureGrants = grants
 	checks.ServerSwitches = projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured}
-	checks.Quotas = quotas
+	if showQuotas {
+		checks.Quotas = &quotas
+	}
 	return projectHealth{Problems: problems, Checks: checks}, nil
 }
 

@@ -7,8 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 func TestSetTenantAPIOverride_rejects_partial_zero(t *testing.T) {
@@ -86,23 +84,6 @@ func TestCooldownSecsFromRate_roundtrips_without_float_noise(t *testing.T) {
 		assert.Equal(t, secs, cooldownSecsFromRate(1.0/secs))
 	}
 	assert.Equal(t, 0.0, cooldownSecsFromRate(0))
-}
-
-func TestSetProjectInviteOverride_rejects_above_tenant_cap(t *testing.T) {
-	h := &Handler{} // nil pool: the cap check returns before any DB access
-	cap := ratelimit.DefaultInviteLimits
-
-	err := h.setProjectInviteOverride(context.Background(), 1, 2, 3, cap.InviterPerHour+1, 0)
-	assert.ErrorIs(t, err, errExceedsCap)
-
-	err = h.setProjectInviteOverride(context.Background(), 1, 2, 3, 0, cap.DomainPerDay+1)
-	assert.ErrorIs(t, err, errExceedsCap)
-}
-
-func TestSetProjectInviteOverride_rejects_negative(t *testing.T) {
-	h := &Handler{}
-	err := h.setProjectInviteOverride(context.Background(), 1, 2, 3, -1, 0)
-	assert.ErrorIs(t, err, errInvalidLimit)
 }
 
 func TestParseLimitField(t *testing.T) {

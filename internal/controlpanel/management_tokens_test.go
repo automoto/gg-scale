@@ -188,7 +188,7 @@ func TestFillAccess_should_select_read_in_each_row_by_default(t *testing.T) {
 
 	fillAccess(url.Values{}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read", "players": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read", "players": "read", "limits": "read"}, selections(rows))
 }
 
 func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
@@ -196,7 +196,7 @@ func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none", "players": "none"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none", "players": "none", "limits": "none"}, selections(rows))
 }
 
 func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
@@ -204,7 +204,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write"}, selections(rows))
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {

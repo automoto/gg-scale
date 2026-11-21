@@ -66,7 +66,7 @@ func toolNames(out map[string]any) []string {
 var readTools = []string{
 	"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
 	"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions", "get_token",
-	"list_players", "get_player",
+	"list_players", "get_player", "get_project_limits",
 }
 
 func TestTransport_tool_call_should_take_one_unit_from_each_token_bucket(t *testing.T) {
@@ -132,6 +132,7 @@ func TestTransport_tools_list_should_have_exactly_the_table_tools_for_all_scopes
 		"set_remote_config", "rollback_remote_config", "create_leaderboard", "update_leaderboard",
 		"rollback_leaderboard", "delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features",
 		"set_allowed_origins", "set_player_disabled", "request_player_delete", "cancel_player_delete",
+		"set_project_invite_limit", "set_project_storage_limit",
 	}, readTools...), toolNames(out))
 }
 

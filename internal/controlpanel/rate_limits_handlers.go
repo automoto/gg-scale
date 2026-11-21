@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -170,7 +171,8 @@ func (h *Handler) updateProjectInviteLimitHandler(w http.ResponseWriter, r *http
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := h.setProjectInviteOverride(r.Context(), session.User.ID, tenantID, projectID, inviterPerHour, domainPerDay); err != nil {
+	if err := projectadmin.SetInviteLimits(r.Context(), h.pool, h.overrides, tenantID, projectID, inviterPerHour, domainPerDay,
+		projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		h.rateLimitError(w, r, tenantID, err)
 		return
 	}
@@ -178,7 +180,10 @@ func (h *Handler) updateProjectInviteLimitHandler(w http.ResponseWriter, r *http
 }
 
 func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantID int64, err error) {
+	var limitErr projectadmin.LimitError
 	switch {
+	case errors.As(err, &limitErr):
+		h.redirectRateLimits(w, r, tenantID, limitErr.Error())
 	case errors.Is(err, errInvalidLimit):
 		h.redirectRateLimits(w, r, tenantID, "Values must be finite non-negative numbers.")
 	case errors.Is(err, errIncompleteLimit):
@@ -191,9 +196,7 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 		h.redirectRateLimits(w, r, tenantID, "Connection limits cannot exceed 500,000 without a capacity-reviewed release.")
 	case errors.Is(err, errConnectionEnvOverride):
 		h.redirectRateLimits(w, r, tenantID, "REALTIME_MAX_PER_TENANT is active; unset it before editing tenant connection limits.")
-	case errors.Is(err, errExceedsCap):
-		h.redirectRateLimits(w, r, tenantID, "Per Game Project invite quota can't exceed the Account Tenant cap.")
-	case errors.Is(err, errProjectNotInTenant):
+	case errors.Is(err, errProjectNotInTenant), errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		http.Error(w, "Game Project not found", http.StatusNotFound)
 	default:
 		http.Error(w, "rate limit update failed", http.StatusInternalServerError)
