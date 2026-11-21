@@ -26,7 +26,7 @@ func withRiskyScope(t *testing.T) string {
 	t.Helper()
 	saved := managementtoken.Scopes
 	managementtoken.Scopes = append(append([]managementtoken.ScopePair{}, saved...), managementtoken.ScopePair{
-		Scope: "keys:risky", Class: managementtoken.ClassRisky, Resource: "keys",
+		Scope: "keys:risky", Class: managementtoken.ClassRisky, Resource: "keys", Label: "Do a risky key thing.",
 		Pair: func(int64) string { return rbac.ObjectProject }, Action: rbac.ActionManage,
 	})
 	t.Cleanup(func() { managementtoken.Scopes = saved })
@@ -81,7 +81,86 @@ func TestAccessOptions_should_disable_a_risky_box_the_creator_cannot_give(t *tes
 
 	_, risky := accessOptions(allScopes()[:1], nil)
 
-	assert.Equal(t, []RiskyBoxView{{Scope: scope, Label: scope, Reason: reasonRole}}, risky)
+	assert.Equal(t, RiskyBoxView{Scope: scope, Label: "Do a risky key thing.", Reason: reasonRole}, riskyBox(t, risky, scope))
+}
+
+func riskyBox(t *testing.T, risky []RiskyBoxView, scope string) RiskyBoxView {
+	t.Helper()
+	for _, b := range risky {
+		if b.Scope == scope {
+			return b
+		}
+	}
+	t.Fatalf("no risky box %q", scope)
+	return RiskyBoxView{}
+}
+
+func TestAccessOptions_should_build_the_pii_box_from_the_scope_table(t *testing.T) {
+	_, risky := accessOptions(allScopes(), nil)
+
+	got := riskyBox(t, risky, managementtoken.ScopePlayersPII)
+
+	assert.Equal(t, RiskyBoxView{
+		Scope: managementtoken.ScopePlayersPII, Label: "See player email and display name. They go into agent logs.",
+		Needs: "Needs read access to Players",
+	}, got)
+}
+
+func TestAccessOptions_should_show_the_players_row_with_read_only(t *testing.T) {
+	rows, _ := accessOptions(allScopes(), nil)
+
+	got := accessRow(t, rows, "players")
+
+	assert.Equal(t, []any{"Players (IDs and status)", true, false, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
+}
+
+func TestAccessOptions_should_disable_the_pii_box_when_the_creator_lacks_the_pair(t *testing.T) {
+	_, risky := accessOptions([]string{managementtoken.ScopePlayersRead}, nil)
+
+	got := riskyBox(t, risky, managementtoken.ScopePlayersPII)
+
+	assert.Equal(t, reasonRole, got.Reason)
+}
+
+func TestScopesFromAccessForm_should_refuse_pii_without_players_read(t *testing.T) {
+	rows, risky := accessOptions(allScopes(), nil)
+
+	_, err := scopesFromAccessForm(url.Values{"risky": {managementtoken.ScopePlayersPII}}, rows, risky)
+
+	assert.ErrorContains(t, err, "Needs read access to Players")
+}
+
+func TestScopesFromAccessForm_should_give_pii_with_players_read(t *testing.T) {
+	rows, risky := accessOptions(allScopes(), nil)
+
+	got, err := scopesFromAccessForm(url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}}, rows, risky)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}, got)
+}
+
+func TestScopesFromAccessForm_should_refuse_pii_the_creator_cannot_give(t *testing.T) {
+	rows, risky := accessOptions([]string{managementtoken.ScopePlayersRead}, nil)
+
+	_, err := scopesFromAccessForm(url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}}, rows, risky)
+
+	assert.Error(t, err)
+}
+
+func TestRiskyNotice_should_name_each_box_checked_from_the_link(t *testing.T) {
+	rows, risky := accessOptions(allScopes(), nil)
+	fillAccess(url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}}, rows, risky)
+
+	got := riskyNotice(risky)
+
+	assert.Equal(t, "See player email and display name. They go into agent logs.", got)
+}
+
+func TestRiskyNotice_should_be_empty_when_no_box_is_checked(t *testing.T) {
+	rows, risky := accessOptions(allScopes(), nil)
+	fillAccess(url.Values{}, rows, risky)
+
+	assert.Empty(t, riskyNotice(risky))
 }
 
 func TestScopesFromAccessForm(t *testing.T) {
@@ -107,7 +186,7 @@ func TestScopesFromAccessForm(t *testing.T) {
 		{name: "should_refuse_an_unknown_risky_scope", form: url.Values{"risky": {"tenant:admin"}}, refused: true},
 		{name: "should_use_only_the_first_value_of_a_duplicate_field", form: url.Values{"access_config": {"read", "write"}},
 			want: []string{managementtoken.ScopeConfigRead}},
-		{name: "should_give_nothing_for_an_unknown_row_field", form: url.Values{"access_players": {"write"}}, want: []string{}},
+		{name: "should_give_nothing_for_an_unknown_row_field", form: url.Values{"access_nothing": {"write"}}, want: []string{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,7 +216,7 @@ func TestFillAccess_should_select_read_in_each_row_by_default(t *testing.T) {
 
 	fillAccess(url.Values{}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read", "players": "read"}, selections(rows))
 }
 
 func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
@@ -145,7 +224,7 @@ func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none", "players": "none"}, selections(rows))
 }
 
 func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
@@ -153,7 +232,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "read"}, selections(rows))
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
@@ -162,7 +241,7 @@ func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}, "risky": {scope}}, rows, risky)
 
-	assert.False(t, risky[0].Checked)
+	assert.False(t, riskyBox(t, risky, scope).Checked)
 }
 
 func TestFillAccess_should_check_a_risky_box_from_the_link(t *testing.T) {
@@ -171,7 +250,7 @@ func TestFillAccess_should_check_a_risky_box_from_the_link(t *testing.T) {
 
 	fillAccess(url.Values{"risky": {scope}}, rows, risky)
 
-	assert.True(t, risky[0].Checked)
+	assert.True(t, riskyBox(t, risky, scope).Checked)
 }
 
 func TestTokenAccessValues_should_round_trip_through_the_form(t *testing.T) {

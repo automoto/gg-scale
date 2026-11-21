@@ -93,6 +93,8 @@ var expectedV1Paths = []string{
 	"/v1/project/leaderboards/{leaderboard_id}/restore",
 	"/v1/project/leaderboards/{leaderboard_id}/rollback",
 	"/v1/project/matchmaking/ticket-trace",
+	"/v1/project/players",
+	"/v1/project/players/{player_id}",
 	"/v1/project/remote-config",
 	"/v1/project/remote-config/rollback",
 	"/v1/project/revisions",

@@ -25,6 +25,8 @@ const (
 	ScopeKeysCreate        = "keys:create"
 	ScopeKeysWrite         = "keys:write"
 	ScopeMatchmakingRead   = "matchmaking:read"
+	ScopePlayersRead       = "players:read"
+	ScopePlayersPII        = "players:pii"
 )
 
 // Scope classes.
@@ -45,6 +47,12 @@ type ScopePair struct {
 	Pair     func(projectID int64) string
 	Action   string
 	Resource string
+	// Label is the sentence of the scope's box on the token page. Only a
+	// risky scope has one.
+	Label string
+	// Needs is a scope that the token must also have. The token page and
+	// the server refuse the scope without it.
+	Needs string
 }
 
 func projectObject(int64) string { return rbac.ObjectProject }
@@ -52,7 +60,11 @@ func projectObject(int64) string { return rbac.ObjectProject }
 // Scopes lists each scope with the Casbin pair the creator must pass to
 // grant it. The dashboard offers only the scopes the person passes. No role
 // has a read pair on the project config or leaderboard objects, so their
-// read scopes use (project, manage), the check of the dashboard pages.
+// read scopes use (project, manage), the check of the dashboard pages. The
+// players pages are open to (project, manage), and the roles that have it
+// (tenant_admin and up) all have (players, manage) but only some have
+// (players, read), so the player scopes use (players, manage): a pair that
+// is not weaker than the pages and that each such role passes.
 var Scopes = []ScopePair{
 	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "config"},
 	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config"},
@@ -63,6 +75,11 @@ var Scopes = []ScopePair{
 	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeKeysWrite, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead, Resource: "matchmaking"},
+	{Scope: ScopePlayersRead, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
+	{
+		Scope: ScopePlayersPII, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
+		Label: "See player email and display name. They go into agent logs.", Needs: ScopePlayersRead,
+	},
 }
 
 // Resource is one row of the access table on the token page.
@@ -70,6 +87,9 @@ type Resource struct {
 	// Name is the row key: the form field is access_<Name>.
 	Name  string
 	Label string
+	// Noun names the row in the text "Needs read access to <Noun>". The
+	// Label is used when it is empty.
+	Noun string
 	// Read is the scope that "Read" gives.
 	Read string
 	// Feature, when set, is the feature grant the row needs. Its server
@@ -83,6 +103,7 @@ var Resources = []Resource{
 	{Name: "leaderboards", Label: "Leaderboards", Read: ScopeLeaderboardsRead},
 	{Name: "keys", Label: "API keys", Read: ScopeKeysRead},
 	{Name: "matchmaking", Label: "Matchmaking", Read: ScopeMatchmakingRead},
+	{Name: "players", Label: "Players (IDs and status)", Noun: "Players", Read: ScopePlayersRead},
 }
 
 // WriteScopes returns the normal-class scopes of the row other than its read

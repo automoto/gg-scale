@@ -57,6 +57,8 @@ func TestProjectOps_read_rows_should_need_their_read_scope(t *testing.T) {
 		"list_leaderboards":        managementtoken.ScopeLeaderboardsRead,
 		"get_leaderboard":          managementtoken.ScopeLeaderboardsRead,
 		"list_api_keys":            managementtoken.ScopeKeysRead,
+		"list_players":             managementtoken.ScopePlayersRead,
+		"get_player":               managementtoken.ScopePlayersRead,
 	}
 	got := map[string]string{}
 	for _, row := range projectOps {

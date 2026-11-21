@@ -496,6 +496,8 @@ type Querier interface {
 	// may a game server act for them? The tenants/projects JOINs mirror
 	// GetPlayerForVerify so a wound-down project can't keep taking writes.
 	GetPlayerModerationState(ctx context.Context, arg GetPlayerModerationStateParams) (GetPlayerModerationStateRow, error)
+	// One live player of a project, with the same columns as the list page.
+	GetPlayerPageRowForProject(ctx context.Context, arg GetPlayerPageRowForProjectParams) (GetPlayerPageRowForProjectRow, error)
 	// Reset-request/confirm state read, keyed like login. Filters mirror
 	// GetPlayerByEmail: disabled/unlinked players read as unknown.
 	GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error)
@@ -756,6 +758,12 @@ type Querier interface {
 	// runs them as platform/tenant admin via BootstrapQ, so we filter by
 	// tenant_id explicitly rather than relying on RLS.
 	ListPlayersForProject(ctx context.Context, arg ListPlayersForProjectParams) ([]ListPlayersForProjectRow, error)
+	// One page of the live players of a project for the management API. Keyset
+	// paginated on id, newest first. before_id 0 starts at the newest player.
+	// player_id and external_id are exact-match filters (0 and '' mean no filter).
+	// The caller reads one row more than the page. display_name rides along from
+	// the linked global account; the handler leaves it out without players:pii.
+	ListPlayersPageForProject(ctx context.Context, arg ListPlayersPageForProjectParams) ([]ListPlayersPageForProjectRow, error)
 	ListPresenceForUsers(ctx context.Context, playerIds []int64) ([]ListPresenceForUsersRow, error)
 	ListProjectsForTenant(ctx context.Context) ([]ListProjectsForTenantRow, error)
 	// The public session browser: open, public, unexpired sessions in the

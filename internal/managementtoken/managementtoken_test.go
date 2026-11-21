@@ -29,6 +29,8 @@ func TestScopes_read_scopes_should_use_the_pair_of_the_dashboard_page(t *testing
 		ScopeLeaderboardsRead: {rbac.ObjectProject, rbac.ActionManage},
 		ScopeKeysRead:         {rbac.ObjectProject, rbac.ActionManage},
 		ScopeMatchmakingRead:  {"project:42:matchmaker", rbac.ActionRead},
+		ScopePlayersRead:      {"project:42:players", rbac.ActionManage},
+		ScopePlayersPII:       {"project:42:players", rbac.ActionManage},
 	}
 	for scope, want := range cases {
 		t.Run(scope, func(t *testing.T) {
@@ -39,10 +41,27 @@ func TestScopes_read_scopes_should_use_the_pair_of_the_dashboard_page(t *testing
 	}
 }
 
-func TestScopes_should_all_be_normal_class(t *testing.T) {
+func TestScopes_should_have_a_known_class(t *testing.T) {
 	for _, s := range Scopes {
-		assert.Equal(t, ClassNormal, s.Class, s.Scope)
+		assert.Contains(t, []int{ClassNormal, ClassRisky}, s.Class, s.Scope)
 	}
+}
+
+func TestScopes_risky_scopes_should_have_a_label_and_a_known_dependency(t *testing.T) {
+	for _, s := range Scopes {
+		if s.Class != ClassRisky {
+			continue
+		}
+		dep, ok := Scope(s.Needs)
+		assert.NotEmpty(t, s.Label, s.Scope)
+		assert.True(t, s.Needs == "" || ok && dep.Class == ClassNormal, s.Scope)
+	}
+}
+
+func TestScopes_players_pii_should_need_players_read(t *testing.T) {
+	got, _ := Scope(ScopePlayersPII)
+
+	assert.Equal(t, []any{ClassRisky, ScopePlayersRead}, []any{got.Class, got.Needs})
 }
 
 func TestScope_should_return_the_pair_of_the_scope(t *testing.T) {
@@ -164,7 +183,7 @@ func TestResource_should_have_no_write_scopes_for_matchmaking(t *testing.T) {
 func TestReadScopes_should_list_the_read_scope_of_each_row(t *testing.T) {
 	got := ReadScopes()
 
-	assert.Equal(t, []string{ScopeConfigRead, ScopeLeaderboardsRead, ScopeKeysRead, ScopeMatchmakingRead}, got)
+	assert.Equal(t, []string{ScopeConfigRead, ScopeLeaderboardsRead, ScopeKeysRead, ScopeMatchmakingRead, ScopePlayersRead}, got)
 }
 
 func resourceNamed(name string) Resource {

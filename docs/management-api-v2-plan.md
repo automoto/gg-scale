@@ -87,7 +87,7 @@ creator passes, and each request checks the pair again.
 | `keys:write` | 1 | `update_api_key_label`, `update_api_key_features` | the key type's pair, as `authorizeAPIKeyManagement` |
 | `keys:revoke` | 2 | `revoke_api_key` | the key type's pair |
 | `keys:secret` | 2 | `create_secret_api_key` | `(api_key:secret, manage)` |
-| `players:read` | 1 | `list_players`, `get_player` | `(project:<id>:players, read)` |
+| `players:read` | 1 | `list_players`, `get_player` | `(project:<id>:players, manage)` |
 | `players:pii` | 2 | adds `email` and `display_name` to the player reads | `(project:<id>:players, manage)` |
 | `players:write` | 1 | `set_player_disabled`, `request_player_delete`, `cancel_player_delete` | `(project:<id>:players, manage)` |
 | `players:invite` | 2 | `invite_player`, `link_player` (send email) | `(project:<id>:players, manage)` |
@@ -106,6 +106,14 @@ Notes:
   `(project:<id>:leaderboard, read)`, so `config:read` and
   `leaderboards:read` use `(project, manage)`, the check of the dashboard
   pages today.
+- `players:read` uses `(players, manage)`, not `read`: the dashboard players
+  pages are open to `(project, manage)` (tenant_admin and up), and tenant_admin
+  has `(players, manage)` but not `(players, read)`, so a `read` pair would
+  refuse a person who can open the page.
+- A risky scope has two more table fields: `Label` (the sentence of its box on
+  the token page) and `Needs` (a scope that the token must also have). The
+  token page text "Needs read access to ..." and the refusal on POST come from
+  them, so a later risky scope is a table entry only.
 - Check the pair of each later read scope in `internal/rbac`. If a read pair does
   not exist, use the pair that the dashboard page checks today (for most
   project pages that is the route gate `(project, manage)`). The pair must
@@ -296,8 +304,8 @@ Do the stages in order. Write failing tests first. After each stage:
 ### Stage 2: keys, players, limits, matchmaking (class 1)
 
 - [x] `update_api_key_label`, `update_api_key_features` (`keys:write`). Move `updateAPIKeyLabel` and `updateAPIKeyManagedScopes` from `controlpanel/key_management.go` to `projectadmin/apikeys.go`.
-- [ ] `list_players`, `get_player` (`players:read`), search by player ID and external ID, paged. Add `email` and `display_name` only with `players:pii`.
-- [ ] `players:pii` in the class 2 group of the token page.
+- [x] `list_players`, `get_player` (`players:read`), search by player ID and external ID, paged. Add `email` and `display_name` only with `players:pii`.
+- [x] `players:pii` in the class 2 group of the token page.
 - [ ] `set_player_disabled`, `request_player_delete`, `cancel_player_delete` (`players:write`) in `projectadmin/players.go`, with audit rows. The dashboard player disable gets an audit row too.
 - [ ] `get_project_limits`, `set_project_invite_limit`, `set_project_storage_limit` (`limits:read`, `limits:write`) in `projectadmin/limits.go`. Same bounds as the dashboard. Make the storage limit write and its audit row one transaction.
 - [ ] `get_matchmaking_queue` (`matchmaking:read`), the bucket view of the dashboard queue page. `matchmaking_ticket_trace` already uses `matchmaking:read`.

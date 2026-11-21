@@ -203,7 +203,7 @@ func TestManagementTokens_quick_fill_read_write_should_select_write_rows(t *test
 
 	_, body := tfGet(t, c, p.tokensURL()+"?fill=read_write")
 
-	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}},
+	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"read"}},
 		checkedAccess(body))
 }
 
@@ -212,7 +212,7 @@ var likeLink = regexp.MustCompile(`href="([^"]*)"[^>]*>New token like this<`)
 func TestManagementTokens_new_token_like_this_should_fill_the_same_access(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}}
+	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}, "access_players": {"none"}}
 	p.create(t, c, csrf, access)
 	_, list := tfGet(t, c, p.tokensURL())
 	m := likeLink.FindStringSubmatch(list)
@@ -342,7 +342,7 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	c, csrf := loginAsAdmin(t, p.srv, p.raw, id, "pa@example.com")
 
 	resp, _ := p.create(t, c, csrf, url.Values{
-		"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}})
+		"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"read"}})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var projectID int64
@@ -481,4 +481,53 @@ func TestAPIKeys_dashboard_label_and_features_should_write_audit_rows_as_the_use
 		`SELECT count(*) FROM platform_audit_log WHERE actor_user_id = $1 AND target = $2
 		 AND action IN ('control_panel.api_key.relabel', 'control_panel.api_key.scope_revoke')`, ownerID, strconv.FormatInt(keyID, 10)).Scan(&audited))
 	assert.Equal(t, []any{"renamed", []string{"matchmaker"}, 2}, []any{label, scopes, audited})
+}
+
+func TestManagementTokens_should_refuse_a_risky_scope_the_creator_cannot_give(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "admin@example.com", "admin")
+	p.dropAdminPair(t, "project:*:players")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopePlayersPII}})
+
+	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+}
+
+func TestManagementTokens_should_refuse_pii_without_players_read(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"none"}, "risky": {managementtoken.ScopePlayersPII}})
+
+	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+}
+
+func TestManagementTokens_should_give_pii_with_players_read(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}})
+
+	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}},
+		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
+}
+
+func TestManagementTokens_page_should_show_the_pii_box_with_its_dependency(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "See player email and display name. They go into agent logs.")
+	assert.Contains(t, body, "Needs read access to Players")
+}
+
+func TestManagementTokens_page_should_warn_when_a_link_checks_a_risky_box(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, withLink := tfGet(t, c, p.tokensURL()+"?access_players=read&risky="+managementtoken.ScopePlayersPII)
+	_, plain := tfGet(t, c, p.tokensURL())
+
+	assert.Equal(t, []bool{true, false}, []bool{strings.Contains(withLink, "A link checked risky access"), strings.Contains(plain, "A link checked risky access")})
 }

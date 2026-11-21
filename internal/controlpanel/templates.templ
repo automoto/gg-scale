@@ -3262,6 +3262,9 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 		<section class="card">
 			<h2>New token</h2>
 			@errorAlert(vm.Error)
+			if vm.RiskyNotice != "" {
+				<p role="status">A link checked risky access in this form: { vm.RiskyNotice } Read it before you create the token. Uncheck the box if you do not want it.</p>
+			}
 			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
@@ -3327,6 +3330,9 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 							<label>
 								<input type="checkbox" name="risky" value={ b.Scope } checked?={ b.Checked } disabled?={ b.Reason != "" }/>
 								{ b.Label }
+								if b.Needs != "" {
+									<small>{ b.Needs }</small>
+								}
 								if b.Reason != "" {
 									<small>{ b.Reason }</small>
 								}

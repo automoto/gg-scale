@@ -365,6 +365,7 @@ func TestMCP_platform_admin_tools_list_has_only_table_tools(t *testing.T) {
 	assert.ElementsMatch(t, []string{
 		"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
 		"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions", "get_token",
+		"list_players", "get_player",
 	}, names)
 }
 

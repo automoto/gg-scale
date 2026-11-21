@@ -11,6 +11,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
@@ -28,10 +29,11 @@ const projectMaxListRows = 50
 
 // ProjectPageInput is the paging input of a list operation, as for
 // GET /v1/leaderboards. The cursor is the sort key of the last row of the
-// previous page.
+// previous page. Its form depends on the list, so a client sends back the
+// next_cursor value unchanged.
 type ProjectPageInput struct {
 	Limit  string `query:"limit" doc:"Rows per page, at most 100. The default is 100." example:"100"`
-	Cursor string `query:"cursor" doc:"The next_cursor of the previous page. Leave it out for the first page." example:"weekly-high-score"`
+	Cursor string `query:"cursor" doc:"The next_cursor of the previous page, sent back unchanged. Leave it out for the first page."`
 }
 
 func (in ProjectPageInput) limit() int32 {
@@ -275,6 +277,98 @@ func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *P
 		out.APIKeys = append(out.APIKeys, k)
 	}
 	return out, nil
+}
+
+// projectPlayer is a player of the token's project. email and display_name
+// are pointers, so each key is absent unless the token has players:pii. Both
+// are text that players wrote.
+type projectPlayer struct {
+	ID                int64      `json:"id" example:"42"`
+	ExternalID        string     `json:"external_id" example:"7a1c0b52-5d3e-4a35-9a54-6f1f63f2f0a1"`
+	EmailVerified     bool       `json:"email_verified"`
+	Disabled          bool       `json:"disabled"`
+	DeleteRequested   bool       `json:"delete_requested" doc:"A delete request is pending and the player is in the grace period."`
+	CreatedAt         *time.Time `json:"created_at"`
+	DisabledAt        *time.Time `json:"disabled_at"`
+	DeleteRequestedAt *time.Time `json:"delete_requested_at"`
+	Email             *string    `json:"email,omitempty" doc:"Text that the player wrote. Only with the players:pii scope; the empty string means the player has no email."`
+	DisplayName       *string    `json:"display_name,omitempty" doc:"Text that the player wrote. Only with the players:pii scope; the empty string means the player has no display name."`
+}
+
+// playerView builds the result for one row. It leaves email and display name
+// out unless pii is true.
+func playerView(pii bool, id int64, externalID, email, displayName string, verifiedAt, disabledAt, deleteAt, createdAt pgtype.Timestamptz) projectPlayer {
+	v := projectPlayer{
+		ID: id, ExternalID: externalID,
+		EmailVerified: verifiedAt.Valid, Disabled: disabledAt.Valid, DeleteRequested: deleteAt.Valid,
+		CreatedAt: timestamptzPtr(createdAt), DisabledAt: timestamptzPtr(disabledAt), DeleteRequestedAt: timestamptzPtr(deleteAt),
+	}
+	if pii {
+		v.Email, v.DisplayName = &email, &displayName
+	}
+	return v
+}
+
+type projectListPlayersInput struct {
+	ProjectPageInput
+	PlayerID   int64  `query:"player_id" doc:"Only the player with this ID."`
+	ExternalID string `query:"external_id" maxLength:"255" doc:"Only the player with exactly this external ID."`
+}
+
+type projectPlayerList struct {
+	Players    []projectPlayer `json:"players"`
+	NextCursor string          `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
+}
+
+// listPlayers pages by player ID, newest first: the cursor is the ID of the
+// last player of the page. The pair of players:pii is the pair of
+// players:read, so the scope test alone decides the personal fields.
+func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListPlayersInput) (projectPlayerList, error) {
+	limit := in.limit()
+	var rows []sqlcgen.ListPlayersPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListPlayersPageForProject(ctx, sqlcgen.ListPlayersPageForProjectParams{
+			ProjectID: p.ProjectID, PlayerID: in.PlayerID, ExternalID: in.ExternalID,
+			BeforeID: parseCursor(in.Cursor), RowLimit: limit + 1,
+		})
+		return err
+	})
+	if err != nil {
+		return projectPlayerList{}, err
+	}
+	rows, more := trimPage(rows, limit)
+	out := projectPlayerList{Players: make([]projectPlayer, 0, len(rows))}
+	if more {
+		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
+	}
+	pii := p.HasScope(managementtoken.ScopePlayersPII)
+	for _, r := range rows {
+		out.Players = append(out.Players, playerView(pii, r.ID, r.ExternalID, r.Email, r.DisplayName,
+			r.EmailVerifiedAt, r.DisabledAt, r.DeleteRequestedAt, r.CreatedAt))
+	}
+	return out, nil
+}
+
+type projectPlayerPath struct {
+	PlayerID int64 `path:"player_id" doc:"Player ID." example:"42"`
+}
+
+func getPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectPlayerPath) (projectPlayer, error) {
+	var r sqlcgen.GetPlayerPageRowForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		r, err = q.GetPlayerPageRowForProject(ctx, sqlcgen.GetPlayerPageRowForProjectParams{ProjectID: p.ProjectID, ID: in.PlayerID})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return projectPlayer{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectPlayer{}, err
+	}
+	return playerView(p.HasScope(managementtoken.ScopePlayersPII), r.ID, r.ExternalID, r.Email, r.DisplayName,
+		r.EmailVerifiedAt, r.DisabledAt, r.DeleteRequestedAt, r.CreatedAt), nil
 }
 
 type projectListRevisionsInput struct {
@@ -667,7 +761,7 @@ func activeScopes(ctx context.Context, d Deps, p managementtoken.Principal) ([]s
 		}
 		allowed, err := d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, sp.Pair(p.ProjectID), sp.Action)
 		if err != nil {
-			return nil, err
+			return nil, serverError(ctx, "project management: active scopes", err)
 		}
 		if allowed {
 			out = append(out, name)

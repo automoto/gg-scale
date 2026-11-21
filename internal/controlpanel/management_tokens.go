@@ -58,6 +58,9 @@ type ManagementTokensView struct {
 	Risky       []RiskyBoxView
 	MaxDays     int
 	DefaultDays int
+	// RiskyNotice names the risky boxes that a link checked. It is empty when
+	// none is checked.
+	RiskyNotice string
 	// NewToken is the token value, shown once right after creation, with
 	// its access in words.
 	NewToken       string
@@ -111,6 +114,9 @@ type AccessRowView struct {
 type RiskyBoxView struct {
 	Scope string
 	Label string
+	// Needs says which other access the box needs, for example "Needs read
+	// access to Players". It is empty when the box needs none.
+	Needs string
 	// Reason says why the box is disabled.
 	Reason  string
 	Checked bool
@@ -222,13 +228,44 @@ func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView
 		if s.Class != managementtoken.ClassRisky {
 			continue
 		}
-		box := RiskyBoxView{Scope: s.Scope, Label: s.Scope, Reason: gates[s.Resource]}
+		box := RiskyBoxView{Scope: s.Scope, Label: s.Label, Needs: needsText(s.Needs), Reason: gates[s.Resource]}
+		if box.Label == "" {
+			box.Label = s.Scope
+		}
 		if box.Reason == "" && !slices.Contains(grantable, s.Scope) {
 			box.Reason = reasonRole
 		}
 		risky = append(risky, box)
 	}
 	return rows, risky
+}
+
+// needsText returns "Needs read access to <row>" for the read scope a risky
+// scope needs, or "" when it needs none.
+func needsText(scope string) string {
+	if scope == "" {
+		return ""
+	}
+	i := slices.IndexFunc(managementtoken.Resources, func(r managementtoken.Resource) bool { return r.Read == scope })
+	if i < 0 {
+		return "Needs the " + scope + " scope"
+	}
+	res := managementtoken.Resources[i]
+	if res.Noun != "" {
+		return "Needs read access to " + res.Noun
+	}
+	return "Needs read access to " + res.Label
+}
+
+// riskyNotice joins the labels of the risky boxes that are checked.
+func riskyNotice(risky []RiskyBoxView) string {
+	var labels []string
+	for _, b := range risky {
+		if b.Checked {
+			labels = append(labels, b.Label)
+		}
+	}
+	return strings.Join(labels, " ")
 }
 
 // scopesFromAccessForm turns the access_<resource> and risky form fields
@@ -255,6 +292,12 @@ func scopesFromAccessForm(form url.Values, rows []AccessRowView, risky []RiskyBo
 		}
 		if !slices.Contains(scopes, v) {
 			scopes = append(scopes, v)
+		}
+	}
+	for _, v := range form["risky"] {
+		sp, _ := managementtoken.Scope(v)
+		if sp.Needs != "" && !slices.Contains(scopes, sp.Needs) {
+			return nil, fmt.Errorf("the scope %s is refused: %s", strconv.Quote(v), needsText(sp.Needs))
 		}
 	}
 	return scopes, nil
@@ -418,6 +461,7 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 		return view, err
 	}
 	fillAccess(fill, view.Access, view.Risky)
+	view.RiskyNotice = riskyNotice(view.Risky)
 	var rows []sqlcgen.ListManagementTokensForProjectRow
 	tctx := db.WithTenant(ctx, tenantID)
 	err = h.pool.Q(tctx, func(tx pgx.Tx) error {

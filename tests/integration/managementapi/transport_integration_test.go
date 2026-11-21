@@ -66,6 +66,7 @@ func toolNames(out map[string]any) []string {
 var readTools = []string{
 	"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
 	"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions", "get_token",
+	"list_players", "get_player",
 }
 
 func TestTransport_tool_call_should_take_one_unit_from_each_token_bucket(t *testing.T) {
