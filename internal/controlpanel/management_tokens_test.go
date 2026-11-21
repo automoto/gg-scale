@@ -247,3 +247,20 @@ func TestFeatureGate(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenAccessValues_should_fill_keys_write_back_to_write(t *testing.T) {
+	rows, risky := accessOptions(allScopes(), nil)
+	made, err := scopesFromAccessForm(url.Values{"access_keys": {"write"}}, rows, risky)
+	require.NoError(t, err)
+
+	got := tokenAccessValues(made).Get("access_keys")
+
+	assert.ElementsMatch(t, []string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate, managementtoken.ScopeKeysWrite}, made)
+	assert.Equal(t, "write", got)
+}
+
+func TestTokenAccessValues_should_map_keys_without_keys_write_to_read(t *testing.T) {
+	got := tokenAccessValues([]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate})
+
+	assert.Equal(t, "read", got.Get("access_keys"))
+}

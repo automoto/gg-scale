@@ -85,6 +85,8 @@ var expectedV1Paths = []string{
 	"/v1/presence",
 	"/v1/project/allowed-origins",
 	"/v1/project/api-keys",
+	"/v1/project/api-keys/{api_key_id}/features",
+	"/v1/project/api-keys/{api_key_id}/label",
 	"/v1/project/health",
 	"/v1/project/leaderboards",
 	"/v1/project/leaderboards/{leaderboard_id}",

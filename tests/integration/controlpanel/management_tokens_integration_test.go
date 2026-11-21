@@ -350,7 +350,7 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	require.NoError(t, p.raw.QueryRow(context.Background(),
 		`SELECT project_id, scopes FROM management_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
 	assert.Equal(t, p.project, projectID)
-	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, managementtoken.ReadScopes()...), scopes)
+	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "keys:write", "origins:write"}, managementtoken.ReadScopes()...), scopes)
 }
 
 func TestManagementTokens_revoke_sets_revoked_at(t *testing.T) {
@@ -459,4 +459,26 @@ func TestManagementTokens_list_hides_tokens_expired_over_30_days(t *testing.T) {
 
 	assert.Equal(t, []bool{true, false},
 		[]bool{strings.Contains(body, "recently-expired"), strings.Contains(body, "long-expired")})
+}
+
+func TestAPIKeys_dashboard_label_and_features_should_write_audit_rows_as_the_user(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, ownerID := p.member(t, "owner@example.com", "owner")
+	var keyID int64
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type, label, scopes)
+		 VALUES ($1, $2, sha256('k'::bytea), 'publishable', 'old', '{matchmaker,fleet}') RETURNING id`, p.tenantID, p.project).Scan(&keyID))
+	base := p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) + "/api-keys/" + strconv.FormatInt(keyID, 10)
+
+	tfPostForm(t, c, base+"/label", url.Values{"_csrf": {csrf}, "label": {"renamed"}})
+	tfPostForm(t, c, base+"/features", url.Values{"_csrf": {csrf}, "scopes": {"matchmaker"}})
+
+	var label string
+	var scopes []string
+	var audited int
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT label, scopes FROM api_keys WHERE id = $1`, keyID).Scan(&label, &scopes))
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM platform_audit_log WHERE actor_user_id = $1 AND target = $2
+		 AND action IN ('control_panel.api_key.relabel', 'control_panel.api_key.scope_revoke')`, ownerID, strconv.FormatInt(keyID, 10)).Scan(&audited))
+	assert.Equal(t, []any{"renamed", []string{"matchmaker"}, 2}, []any{label, scopes, audited})
 }

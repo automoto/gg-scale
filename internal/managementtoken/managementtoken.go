@@ -23,6 +23,7 @@ const (
 	ScopeLeaderboardsWrite = "leaderboards:write"
 	ScopeKeysRead          = "keys:read"
 	ScopeKeysCreate        = "keys:create"
+	ScopeKeysWrite         = "keys:write"
 	ScopeMatchmakingRead   = "matchmaking:read"
 )
 
@@ -60,6 +61,7 @@ var Scopes = []ScopePair{
 	{Scope: ScopeLeaderboardsWrite, Class: ClassNormal, Pair: rbac.ProjectLeaderboardObject, Action: rbac.ActionManage, Resource: "leaderboards"},
 	{Scope: ScopeKeysRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
+	{Scope: ScopeKeysWrite, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead, Resource: "matchmaking"},
 }
 

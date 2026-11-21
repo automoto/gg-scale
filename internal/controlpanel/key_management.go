@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
-	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -27,22 +25,11 @@ var (
 	errInvalidProjectName = errors.New("control panel: project name is required")
 	errDuplicateProject   = errors.New("control panel: project with that name already exists")
 	errInvalidKeyType     = errors.New("control panel: key type must be 'publishable' or 'secret'")
-	errInvalidScope       = errors.New("control panel: unknown feature scope")
-	errKeyNotInTenant     = errors.New("control panel: api key not found in tenant")
-	errAPIKeyManageDenied = errors.New("control panel: api key management forbidden")
-	errScopeNotGrantable  = errors.New("control panel: feature is not enabled for this key")
+	errInvalidScope       = projectadmin.ErrInvalidKeyScope
+	errKeyNotInTenant     = projectadmin.ErrAPIKeyNotFound
+	errAPIKeyManageDenied = projectadmin.ErrAPIKeyManageDenied
+	errScopeNotGrantable  = projectadmin.ErrScopeNotGrantable
 )
-
-var managedAPIKeyScopes = []string{
-	tenant.ScopeMatchmaker,
-	tenant.ScopeFleet,
-	tenant.ScopeP2PRelay,
-}
-
-type scopeChange struct {
-	Scope string
-	Grant bool
-}
 
 type createKeyInput struct {
 	TenantID  int64
@@ -119,7 +106,7 @@ func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
 	out := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, scope := range values {
-		if !isManagedAPIKeyScope(scope) {
+		if !projectadmin.IsManagedKeyScope(scope) {
 			return nil, errInvalidScope
 		}
 		if _, ok := seen[scope]; ok {
@@ -131,143 +118,11 @@ func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
 	return out, nil
 }
 
-func managedScopeChanges(current, desired []string) []scopeChange {
-	desiredSet := make(map[string]struct{}, len(desired))
-	for _, scope := range desired {
-		if isManagedAPIKeyScope(scope) {
-			desiredSet[scope] = struct{}{}
-		}
-	}
-	changes := make([]scopeChange, 0, len(managedAPIKeyScopes))
-	for _, scope := range managedAPIKeyScopes {
-		hasCurrent := slices.Contains(current, scope)
-		_, wants := desiredSet[scope]
-		if hasCurrent == wants {
-			continue
-		}
-		changes = append(changes, scopeChange{Scope: scope, Grant: wants})
-	}
-	return changes
-}
-
-func applyManagedScopes(current, desired []string) []string {
-	next := make([]string, 0, len(current)+len(desired))
-	desiredSet := make(map[string]struct{}, len(desired))
-	for _, scope := range desired {
-		if isManagedAPIKeyScope(scope) {
-			desiredSet[scope] = struct{}{}
-		}
-	}
-	for _, scope := range current {
-		if isManagedAPIKeyScope(scope) {
-			continue
-		}
-		if !slices.Contains(next, scope) {
-			next = append(next, scope)
-		}
-	}
-	for _, scope := range managedAPIKeyScopes {
-		if _, ok := desiredSet[scope]; ok {
-			next = append(next, scope)
-		}
-	}
-	return next
-}
-
-func isManagedAPIKeyScope(scope string) bool {
-	for _, managed := range managedAPIKeyScopes {
-		if scope == managed {
-			return true
-		}
-	}
-	return false
-}
-
-func apiKeyObjectForType(keyType tenant.KeyType) (string, bool) {
-	switch keyType {
-	case tenant.KeyTypePublishable:
-		return rbac.ObjectAPIKeyPublic, true
-	case tenant.KeyTypeSecret:
-		return rbac.ObjectAPIKeySecret, true
-	default:
-		return "", false
-	}
-}
-
-func (h *Handler) authorizeAPIKeyManagement(ctx context.Context, q *sqlcgen.Queries, actorID, tenantID, apiKeyID int64) error {
-	keyType, err := q.GetAPIKeyType(ctx, apiKeyID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return errKeyNotInTenant
-	}
-	if err != nil {
-		return fmt.Errorf("get api key type: %w", err)
-	}
-	object, ok := apiKeyObjectForType(tenant.KeyType(keyType))
-	if !ok {
-		return fmt.Errorf("%w: %q", errInvalidKeyType, keyType)
-	}
-	if h.rbac == nil {
-		return rbac.ErrAuthorizerUnavailable
-	}
-	allowed, err := h.rbac.CanControlPanel(actorID, tenantID, object, rbac.ActionManage)
-	if err != nil {
-		return fmt.Errorf("authorize api key management: %w", err)
-	}
-	if !allowed {
-		return errAPIKeyManageDenied
-	}
-	return nil
-}
-
 func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenantID, apiKeyID int64, desired []string) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	for _, scope := range desired {
-		if !isManagedAPIKeyScope(scope) {
-			return errInvalidScope
-		}
-	}
-	ctx = db.WithTenant(ctx, tenantID)
-	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
-			return err
-		}
-		row, err := q.GetAPIKeyScopes(ctx, apiKeyID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return errKeyNotInTenant
-		}
-		if err != nil {
-			return fmt.Errorf("get api key scopes: %w", err)
-		}
-		changes := managedScopeChanges(row.Scopes, desired)
-		if len(changes) == 0 {
-			return nil
-		}
-		for _, change := range changes {
-			if change.Grant && !h.scopeGrantable(ctx, tenantID, row.ProjectID, change.Scope) {
-				return errScopeNotGrantable
-			}
-		}
-		next := applyManagedScopes(row.Scopes, desired)
-		if err := q.SetAPIKeyScopes(ctx, sqlcgen.SetAPIKeyScopesParams{ID: apiKeyID, Scopes: next}); err != nil {
-			return fmt.Errorf("set api key scopes: %w", err)
-		}
-		for _, change := range changes {
-			action := "control_panel.api_key.scope_revoke"
-			if change.Grant {
-				action = "control_panel.api_key.scope_grant"
-			}
-			if err := auditlog.WritePlatform(ctx, tx, actorID, action, strconv.FormatInt(apiKeyID, 10), map[string]any{
-				"scope":     change.Scope,
-				"tenant_id": tenantID,
-			}); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, 0, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
 		return err
 	}
 	if h.cache != nil {
@@ -398,20 +253,7 @@ func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiK
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	ctx = db.WithTenant(ctx, tenantID)
-	return h.pool.Q(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
-			return err
-		}
-		if err := q.UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{
-			ID:    apiKeyID,
-			Label: strings.TrimSpace(label),
-		}); err != nil {
-			return err
-		}
-		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label, "tenant_id": tenantID})
-	})
+	return projectadmin.UpdateAPIKeyLabel(ctx, h.pool, h.rbac, tenantID, 0, apiKeyID, label, projectadmin.Actor{UserID: actorID})
 }
 
 func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID int64) error {
@@ -421,7 +263,7 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if err := h.authorizeAPIKeyManagement(ctx, q, actorID, tenantID, apiKeyID); err != nil {
+		if _, err := projectadmin.AuthorizeAPIKey(ctx, q, h.rbac, tenantID, 0, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
 			return err
 		}
 		if err := q.RevokeAPIKey(ctx, apiKeyID); err != nil {

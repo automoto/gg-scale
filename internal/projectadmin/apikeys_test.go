@@ -73,3 +73,24 @@ func TestScopeGrantable_should_refuse_when_the_server_switch_is_off(t *testing.T
 
 	assert.Equal(t, []bool{false, false}, got)
 }
+
+func TestManagedScopeChanges_reports_grants_and_revokes(t *testing.T) {
+	changes := managedScopeChanges(
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []scopeChange{
+		{Scope: tenant.ScopeFleet, Grant: false},
+		{Scope: tenant.ScopeP2PRelay, Grant: true},
+	}, changes)
+}
+
+func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
+	next := applyManagedScopes(
+		[]string{"storage:read", tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
+}

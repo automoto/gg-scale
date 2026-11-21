@@ -1690,6 +1690,14 @@ components:
       required:
         - api_keys
       type: object
+    ProjectAPIKeyUpdated:
+      additionalProperties: false
+      properties:
+        updated:
+          type: boolean
+      required:
+        - updated
+      type: object
     ProjectAllowedOrigins:
       additionalProperties: false
       properties:
@@ -2369,6 +2377,32 @@ components:
         - scopes
         - active_scopes
         - expires_at
+      type: object
+    ProjectUpdateAPIKeyFeaturesInputBody:
+      additionalProperties: false
+      properties:
+        scopes:
+          description: "The full list of feature scopes: matchmaker, fleet, p2p_relay. Scopes not listed are removed."
+          examples:
+            - - matchmaker
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - scopes
+      type: object
+    ProjectUpdateAPIKeyLabelInputBody:
+      additionalProperties: false
+      properties:
+        label:
+          description: 1 to 64 characters.
+          examples:
+            - web build
+          type: string
+      required:
+        - label
       type: object
     ProjectUpdateLeaderboardBody:
       additionalProperties: false
@@ -5554,6 +5588,84 @@ paths:
       security:
         - ManagementToken: []
       summary: Create a publishable API key
+      tags:
+        - Project Management
+  /v1/project/api-keys/{api_key_id}/features:
+    put:
+      description: Replaces the feature scopes of an API key of the Game Project. A feature can be added only when the Game Project has it (422 otherwise). Answers 404 for a key of another Game Project. Answers 403 when the person who created the token may not manage keys of that type.
+      operationId: updateProjectAPIKeyFeatures
+      parameters:
+        - description: API key ID.
+          in: path
+          name: api_key_id
+          required: true
+          schema:
+            description: API key ID.
+            examples:
+              - 12
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateAPIKeyFeaturesInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAPIKeyUpdated"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Set the features of an API key
+      tags:
+        - Project Management
+  /v1/project/api-keys/{api_key_id}/label:
+    put:
+      description: Sets the label of an API key of the Game Project. Answers 404 for a key of another Game Project. Answers 403 when the person who created the token may not manage keys of that type.
+      operationId: updateProjectAPIKeyLabel
+      parameters:
+        - description: API key ID.
+          in: path
+          name: api_key_id
+          required: true
+          schema:
+            description: API key ID.
+            examples:
+              - 12
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateAPIKeyLabelInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAPIKeyUpdated"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Change an API key label
       tags:
         - Project Management
   /v1/project/health:

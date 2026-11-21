@@ -295,7 +295,7 @@ Do the stages in order. Write failing tests first. After each stage:
 
 ### Stage 2: keys, players, limits, matchmaking (class 1)
 
-- [ ] `update_api_key_label`, `update_api_key_features` (`keys:write`). Move `updateAPIKeyLabel` and `updateAPIKeyManagedScopes` from `controlpanel/key_management.go` to `projectadmin/apikeys.go`.
+- [x] `update_api_key_label`, `update_api_key_features` (`keys:write`). Move `updateAPIKeyLabel` and `updateAPIKeyManagedScopes` from `controlpanel/key_management.go` to `projectadmin/apikeys.go`.
 - [ ] `list_players`, `get_player` (`players:read`), search by player ID and external ID, paged. Add `email` and `display_name` only with `players:pii`.
 - [ ] `players:pii` in the class 2 group of the token page.
 - [ ] `set_player_disabled`, `request_player_delete`, `cancel_player_delete` (`players:write`) in `projectadmin/players.go`, with audit rows. The dashboard player disable gets an audit row too.

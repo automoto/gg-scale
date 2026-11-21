@@ -31,16 +31,19 @@ func (f *fixture) writeCalls() map[string]writeCall {
 	board := f.board(f.projectA, "b"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	deleted := f.board(f.projectA, "d"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	f.exec(`UPDATE leaderboards SET deleted_at = now() WHERE id = $1`, deleted)
+	key := f.key(f.tenantA, f.projectA, "publishable", "k"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	return map[string]writeCall{
-		"set_remote_config":      {"config:write", http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`},
-		"rollback_remote_config": {"config:write", http.MethodPost, "/v1/project/remote-config/rollback", `{"revision":1,"expected_revision":0}`},
-		"create_leaderboard":     {"leaderboards:write", http.MethodPost, "/v1/project/leaderboards", fmt.Sprintf(`{"name":"new-%d"}`, board)},
-		"update_leaderboard":     {"leaderboards:write", http.MethodPut, boardPath(board, ""), `{"expected_revision":0,"name":"renamed"}`},
-		"rollback_leaderboard":   {"leaderboards:write", http.MethodPost, boardPath(board, "/rollback"), `{"revision":1,"expected_revision":0}`},
-		"delete_leaderboard":     {"leaderboards:write", http.MethodDelete, boardPath(board, ""), ""},
-		"restore_leaderboard":    {"leaderboards:write", http.MethodPost, boardPath(deleted, "/restore"), ""},
-		"create_api_key":         {"keys:create", http.MethodPost, "/v1/project/api-keys", `{"label":"web build"}`},
-		"set_allowed_origins":    {"origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":["http://localhost:5173"]}`},
+		"set_remote_config":       {"config:write", http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`},
+		"rollback_remote_config":  {"config:write", http.MethodPost, "/v1/project/remote-config/rollback", `{"revision":1,"expected_revision":0}`},
+		"create_leaderboard":      {"leaderboards:write", http.MethodPost, "/v1/project/leaderboards", fmt.Sprintf(`{"name":"new-%d"}`, board)},
+		"update_leaderboard":      {"leaderboards:write", http.MethodPut, boardPath(board, ""), `{"expected_revision":0,"name":"renamed"}`},
+		"rollback_leaderboard":    {"leaderboards:write", http.MethodPost, boardPath(board, "/rollback"), `{"revision":1,"expected_revision":0}`},
+		"delete_leaderboard":      {"leaderboards:write", http.MethodDelete, boardPath(board, ""), ""},
+		"restore_leaderboard":     {"leaderboards:write", http.MethodPost, boardPath(deleted, "/restore"), ""},
+		"create_api_key":          {"keys:create", http.MethodPost, "/v1/project/api-keys", `{"label":"web build"}`},
+		"update_api_key_label":    {"keys:write", http.MethodPut, keyPath(key, "/label"), `{"label":"renamed"}`},
+		"update_api_key_features": {"keys:write", http.MethodPut, keyPath(key, "/features"), `{"scopes":["matchmaker"]}`},
+		"set_allowed_origins":     {"origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":["http://localhost:5173"]}`},
 	}
 }
 
@@ -137,7 +140,7 @@ func TestProjectAPI_writes_should_answer_200_with_a_json_object(t *testing.T) {
 	calls := f.writeCalls()
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
-		"delete_leaderboard", "restore_leaderboard", "create_api_key", "set_allowed_origins"} {
+		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 

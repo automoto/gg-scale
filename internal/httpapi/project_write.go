@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -219,15 +221,22 @@ type projectCreatedAPIKey struct {
 	Note     string         `json:"note"`
 }
 
+// checkProjectAPIKeyLabel answers 422 unless label is 1 to 64 valid
+// characters with no control character.
+func checkProjectAPIKeyLabel(label string) error {
+	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
+		return huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
+	}
+	if strings.ContainsFunc(label, unicode.IsControl) {
+		return huma.Error422UnprocessableEntity("label must not contain control characters")
+	}
+	return nil
+}
+
 func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
 	label := in.Body.Label
-	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
-		return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
-	}
-	for _, r := range label {
-		if unicode.IsControl(r) {
-			return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity("label must not contain control characters")
-		}
+	if err := checkProjectAPIKeyLabel(label); err != nil {
+		return projectCreatedAPIKey{}, err
 	}
 	// The token label goes into the key label, so a person can find the
 	// key in the dashboard and revoke it.
@@ -283,4 +292,48 @@ func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal,
 		Note: "To undo, call set_allowed_origins with old_origins. Each server uses the new list within " +
 			projectadmin.OriginCacheTTL.String() + ".",
 	}, nil
+}
+
+// ProjectAPIKeyPath is exported because huma reads an embedded struct only when its type is exported.
+type ProjectAPIKeyPath struct {
+	APIKeyID int64 `path:"api_key_id" doc:"API key ID." example:"12"`
+}
+
+type projectUpdateAPIKeyLabelInput struct {
+	ProjectAPIKeyPath
+	Body struct {
+		Label string `json:"label" doc:"1 to 64 characters." example:"web build"`
+	}
+}
+
+type projectAPIKeyUpdated struct {
+	Updated bool `json:"updated"`
+}
+
+func updateAPIKeyLabel(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyLabelInput) (projectAPIKeyUpdated, error) {
+	if err := checkProjectAPIKeyLabel(in.Body.Label); err != nil {
+		return projectAPIKeyUpdated{}, err
+	}
+	if err := projectadmin.UpdateAPIKeyLabel(ctx, d.Pool, d.RBAC, p.TenantID, p.ProjectID, in.APIKeyID, in.Body.Label, projectActor(p)); err != nil {
+		return projectAPIKeyUpdated{}, projectWriteError(err)
+	}
+	return projectAPIKeyUpdated{Updated: true}, nil
+}
+
+type projectUpdateAPIKeyFeaturesInput struct {
+	ProjectAPIKeyPath
+	Body struct {
+		Scopes []string `json:"scopes" doc:"The full list of feature scopes: matchmaker, fleet, p2p_relay. Scopes not listed are removed." example:"[\"matchmaker\"]"`
+	}
+}
+
+func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyFeaturesInput) (projectAPIKeyUpdated, error) {
+	sw := projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled}
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, sw, p.TenantID, p.ProjectID, in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
+		return projectAPIKeyUpdated{}, projectWriteError(err)
+	}
+	if d.Cache != nil {
+		_ = d.Cache.Delete(ctx, ratelimit.APIKeyBucketKey(in.APIKeyID))
+	}
+	return projectAPIKeyUpdated{Updated: true}, nil
 }

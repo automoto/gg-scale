@@ -44,27 +44,6 @@ func TestParseManagedAPIKeyScopes_rejects_unknown_scope(t *testing.T) {
 	assert.ErrorIs(t, err, errInvalidScope)
 }
 
-func TestManagedScopeChanges_reports_grants_and_revokes(t *testing.T) {
-	changes := managedScopeChanges(
-		[]string{tenant.ScopeMatchmaker, tenant.ScopeFleet},
-		[]string{tenant.ScopeMatchmaker, tenant.ScopeP2PRelay},
-	)
-
-	assert.Equal(t, []scopeChange{
-		{Scope: tenant.ScopeFleet, Grant: false},
-		{Scope: tenant.ScopeP2PRelay, Grant: true},
-	}, changes)
-}
-
-func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
-	next := applyManagedScopes(
-		[]string{"storage:read", tenant.ScopeMatchmaker, tenant.ScopeFleet},
-		[]string{tenant.ScopeP2PRelay},
-	)
-
-	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
-}
-
 func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {
 	// Validation runs before the DB pool is touched, so a nil-pool handler
 	// is fine for input-validation assertions. Each case bypasses the

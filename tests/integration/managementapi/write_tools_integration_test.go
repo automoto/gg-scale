@@ -33,19 +33,22 @@ func (f *fixture) writeToolCalls() map[string]struct {
 	board := f.board(f.projectA, "b"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	deleted := f.board(f.projectA, "d"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	f.exec(`UPDATE leaderboards SET deleted_at = now() WHERE id = $1`, deleted)
+	key := f.key(f.tenantA, f.projectA, "publishable", "k"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	return map[string]struct {
 		scope string
 		args  map[string]any
 	}{
-		"set_remote_config":      {"config:write", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0}},
-		"rollback_remote_config": {"config:write", map[string]any{"revision": 1, "expected_revision": 0}},
-		"create_leaderboard":     {"leaderboards:write", map[string]any{"name": "new-" + strconv.FormatInt(board, 10)}},
-		"update_leaderboard":     {"leaderboards:write", map[string]any{"leaderboard_id": board, "expected_revision": 0, "name": "renamed"}},
-		"rollback_leaderboard":   {"leaderboards:write", map[string]any{"leaderboard_id": board, "revision": 1, "expected_revision": 0}},
-		"delete_leaderboard":     {"leaderboards:write", map[string]any{"leaderboard_id": board}},
-		"restore_leaderboard":    {"leaderboards:write", map[string]any{"leaderboard_id": deleted}},
-		"create_api_key":         {"keys:create", map[string]any{"label": "web build"}},
-		"set_allowed_origins":    {"origins:write", map[string]any{"origins": []string{"http://localhost:5173"}}},
+		"set_remote_config":       {"config:write", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0}},
+		"rollback_remote_config":  {"config:write", map[string]any{"revision": 1, "expected_revision": 0}},
+		"create_leaderboard":      {"leaderboards:write", map[string]any{"name": "new-" + strconv.FormatInt(board, 10)}},
+		"update_leaderboard":      {"leaderboards:write", map[string]any{"leaderboard_id": board, "expected_revision": 0, "name": "renamed"}},
+		"rollback_leaderboard":    {"leaderboards:write", map[string]any{"leaderboard_id": board, "revision": 1, "expected_revision": 0}},
+		"delete_leaderboard":      {"leaderboards:write", map[string]any{"leaderboard_id": board}},
+		"restore_leaderboard":     {"leaderboards:write", map[string]any{"leaderboard_id": deleted}},
+		"create_api_key":          {"keys:create", map[string]any{"label": "web build"}},
+		"update_api_key_label":    {"keys:write", map[string]any{"api_key_id": key, "label": "renamed"}},
+		"update_api_key_features": {"keys:write", map[string]any{"api_key_id": key, "scopes": []string{"matchmaker"}}},
+		"set_allowed_origins":     {"origins:write", map[string]any{"origins": []string{"http://localhost:5173"}}},
 	}
 }
 
@@ -86,7 +89,7 @@ func TestWriteTools_should_succeed_with_their_scope(t *testing.T) {
 	calls := f.writeToolCalls()
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
-		"delete_leaderboard", "restore_leaderboard", "create_api_key", "set_allowed_origins"} {
+		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 

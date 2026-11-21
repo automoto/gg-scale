@@ -280,7 +280,7 @@ func (v APIKeyView) HasScope(scope string) bool {
 
 // HasManagedScope reports whether the key holds any managed feature scope.
 func (v APIKeyView) HasManagedScope() bool {
-	for _, scope := range managedAPIKeyScopes {
+	for _, scope := range projectadmin.ManagedKeyScopes {
 		if v.HasScope(scope) {
 			return true
 		}

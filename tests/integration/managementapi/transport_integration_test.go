@@ -129,7 +129,7 @@ func TestTransport_tools_list_should_have_exactly_the_table_tools_for_all_scopes
 
 	assert.ElementsMatch(t, append([]string{
 		"set_remote_config", "rollback_remote_config", "create_leaderboard", "update_leaderboard",
-		"rollback_leaderboard", "delete_leaderboard", "restore_leaderboard", "create_api_key",
+		"rollback_leaderboard", "delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features",
 		"set_allowed_origins",
 	}, readTools...), toolNames(out))
 }

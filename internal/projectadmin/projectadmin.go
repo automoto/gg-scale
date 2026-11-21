@@ -54,6 +54,15 @@ type Actor struct {
 	TokenCreatorID int64
 }
 
+// authzUserID is the user whose rights limit the change: the dashboard user,
+// or the creator of the token.
+func (a Actor) authzUserID() int64 {
+	if a.TokenID != 0 {
+		return a.TokenCreatorID
+	}
+	return a.UserID
+}
+
 func (a Actor) source() string {
 	if a.TokenID != 0 {
 		return sourceToken

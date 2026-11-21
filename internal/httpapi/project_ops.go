@@ -168,8 +168,10 @@ func projectWriteError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, projectadmin.ErrProjectNotInTenant):
+	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, projectadmin.ErrProjectNotInTenant), errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		return errProjectNotFound()
+	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
+		return huma.Error403Forbidden("The person who created this token may not manage keys of this type, so this request is refused.")
 	case errors.Is(err, projectadmin.ErrRevisionConflict):
 		return huma.Error409Conflict("expected_revision is not the newest revision. Read the resource again and retry with its revision.")
 	case errors.Is(err, projectadmin.ErrRevisionNotFound):
@@ -187,7 +189,8 @@ func projectWriteError(err error) error {
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, projectadmin.ErrInvalidLeaderboard),
 		errors.Is(err, projectadmin.ErrInvalidOrigins),
-		errors.Is(err, projectadmin.ErrScopeNotGrantable):
+		errors.Is(err, projectadmin.ErrScopeNotGrantable),
+		errors.Is(err, projectadmin.ErrInvalidKeyScope):
 		return huma.Error422UnprocessableEntity(err.Error())
 	}
 	return err
@@ -386,6 +389,34 @@ var projectOps = []projectOp{
 				"Answers 409 when the Game Project has the maximum number of active keys.",
 		},
 		handler: projectHandler(createAPIKey),
+	},
+	{
+		tool: "update_api_key_label",
+		description: "Change the label of an API key of this Game Project. The key value and its features do not change. " +
+			"A secret key can be changed only when the person who created the token may manage secret keys.",
+		scope: managementtoken.ScopeKeysWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/api-keys/{api_key_id}/label", OperationID: "updateProjectAPIKeyLabel",
+			Summary: "Change an API key label",
+			Description: "Sets the label of an API key of the Game Project. Answers 404 for a key of another Game Project. " +
+				"Answers 403 when the person who created the token may not manage keys of that type.",
+		},
+		handler: projectHandler(updateAPIKeyLabel),
+	},
+	{
+		tool: "update_api_key_features",
+		description: "Set the features of an API key of this Game Project: matchmaker, fleet, p2p_relay. The list replaces " +
+			"the current features. A feature can be added only when this Game Project has it. " +
+			"A secret key can be changed only when the person who created the token may manage secret keys.",
+		scope: managementtoken.ScopeKeysWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/api-keys/{api_key_id}/features", OperationID: "updateProjectAPIKeyFeatures",
+			Summary: "Set the features of an API key",
+			Description: "Replaces the feature scopes of an API key of the Game Project. A feature can be added only when the " +
+				"Game Project has it (422 otherwise). Answers 404 for a key of another Game Project. " +
+				"Answers 403 when the person who created the token may not manage keys of that type.",
+		},
+		handler: projectHandler(updateAPIKeyFeatures),
 	},
 	{
 		tool: "list_revisions",

@@ -21,6 +21,7 @@ import (
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
@@ -671,7 +672,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	// The shared roleAdmin route guard only checks project:manage, so enforce
 	// the key-type capability here (api_key:secret vs api_key:publishable) —
 	// roles without the matching grant (e.g. analyst) are denied.
-	keyObject, _ := apiKeyObjectForType(keyType)
+	keyObject, _ := projectadmin.APIKeyObject(string(keyType))
 	if !h.requireControlPanelPermission(w, r, tenantID, keyObject, rbac.ActionManage) {
 		return
 	}
