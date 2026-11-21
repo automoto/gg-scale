@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -796,4 +797,103 @@ func getToken(ctx context.Context, d Deps, p managementtoken.Principal, _ *struc
 		TokenID: p.TokenID, Label: p.Label, ProjectID: p.ProjectID, ProjectName: name, TenantID: p.TenantID,
 		Scopes: scopes, ActiveScopes: active, ExpiresAt: p.ExpiresAt,
 	}, nil
+}
+
+type projectQueueBucket struct {
+	Mode     string     `json:"mode" example:"game_session"`
+	Region   string     `json:"region" example:"eu"`
+	GameMode string     `json:"game_mode" example:"duel"`
+	Status   string     `json:"status" example:"queued"`
+	Tickets  int64      `json:"tickets" doc:"Tickets in this bucket."`
+	OldestAt *time.Time `json:"oldest_at" doc:"Creation time of the oldest ticket in this bucket."`
+	MinCount int32      `json:"min_count" doc:"Lowest min_count of the tickets in this bucket."`
+	MaxCount int32      `json:"max_count" doc:"Highest max_count of the tickets in this bucket."`
+}
+
+type projectQueue struct {
+	Buckets    []projectQueueBucket `json:"buckets"`
+	NextCursor string               `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
+}
+
+// queueCursor is the bucket key of the last bucket of a page.
+type queueCursor struct {
+	Mode, Region, GameMode, Status string
+}
+
+func decodeQueueCursor(s string) (queueCursor, bool) {
+	var c queueCursor
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || json.Unmarshal(raw, &c) != nil {
+		return queueCursor{}, false
+	}
+	return c, true
+}
+
+// getMatchmakingQueue lists the buckets of the dashboard queue page, ordered
+// by bucket key. The cursor is that key of the last bucket of the page. Text
+// that a game client sent is shown as the trace shows it.
+func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectQueue, error) {
+	limit := in.limit()
+	params := sqlcgen.ListMatchmakerBucketsPageForProjectParams{ProjectID: p.ProjectID, RowLimit: limit + 1}
+	if in.Cursor != "" {
+		c, ok := decodeQueueCursor(in.Cursor)
+		if !ok {
+			return projectQueue{}, huma.Error422UnprocessableEntity("cursor is not valid")
+		}
+		params.HasAfter, params.AfterMode, params.AfterRegion, params.AfterGameMode, params.AfterStatus =
+			true, c.Mode, c.Region, c.GameMode, c.Status
+	}
+	var rows []sqlcgen.ListMatchmakerBucketsPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListMatchmakerBucketsPageForProject(ctx, params)
+		return err
+	})
+	if err != nil {
+		return projectQueue{}, err
+	}
+	rows, more := trimPage(rows, limit)
+	out := projectQueue{Buckets: make([]projectQueueBucket, 0, len(rows))}
+	for _, r := range rows {
+		out.Buckets = append(out.Buckets, projectQueueBucket{
+			Mode: clientText(r.Mode), Region: clientText(r.Region), GameMode: clientText(r.GameMode), Status: r.Status,
+			Tickets: r.TicketCount, OldestAt: timestamptzPtr(r.Oldest), MinCount: r.MinCountLow, MaxCount: r.MaxCountHigh,
+		})
+	}
+	if more {
+		last := rows[len(rows)-1]
+		raw, err := json.Marshal(queueCursor{last.Mode, last.Region, last.GameMode, last.Status})
+		if err != nil {
+			return projectQueue{}, err
+		}
+		out.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
+	}
+	return out, nil
+}
+
+type projectSteamAuth struct {
+	AppID        *string `json:"app_id" doc:"The Steam App ID, or null when it is not set."`
+	WebAPIKeySet bool    `json:"web_api_key_set" doc:"True when a Steam Web API key is stored. The key is never returned."`
+}
+
+func getSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectSteamAuth, error) {
+	var row sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		row, err = q.GetProjectSteamAuthConfigForControlPanel(ctx, sqlcgen.GetProjectSteamAuthConfigForControlPanelParams{
+			ProjectID: p.ProjectID, TenantID: p.TenantID,
+		})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return projectSteamAuth{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectSteamAuth{}, err
+	}
+	out := projectSteamAuth{WebAPIKeySet: row.SteamKeyConfigured != nil && *row.SteamKeyConfigured}
+	if row.SteamAppID != "" {
+		out.AppID = &row.SteamAppID
+	}
+	return out, nil
 }

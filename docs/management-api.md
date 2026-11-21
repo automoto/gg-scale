@@ -57,7 +57,9 @@ prompts). `GET /mcp` answers 405.
 |---|---|---|---|
 | none | `project_health_check` | `GET /v1/project/health` | Lists setup problems: API keys and their scopes, feature grants, server feature switches, relay, CORS origins, Steam sign-in, remote config size, quota state, and the number of live leaderboards against `LEADERBOARD_MAX_PER_PROJECT`. The API key check needs `keys:read`; the CORS, Steam, and remote config checks need `config:read`. Without the scope, the check is left out. |
 | `matchmaking:read` | `matchmaking_ticket_trace` | `GET /v1/project/matchmaking/ticket-trace` | Shows one matchmaking ticket by `ticket_id`, or the queued ticket of a player by `player_id`. Finished tickets are kept for 24 hours. |
+| `matchmaking:read` | `get_matchmaking_queue` | `GET /v1/project/matchmaking/queue` | The queue buckets of the dashboard queue page: ticket count, oldest ticket, and the min and max count of each bucket. No player data. Paged with `limit` and `cursor`. |
 | `config:read` | `get_remote_config` | `GET /v1/project/remote-config` | The remote config and its revision number. |
+| `config:read` | `get_steam_auth` | `GET /v1/project/steam-auth` | The Steam App ID (null if not set) and whether a Web API key is set. The key is never returned. |
 | `leaderboards:read` | `list_leaderboards` | `GET /v1/project/leaderboards` | Leaderboard settings (no scores), at most 50. With `include_deleted`, also the deleted boards that you can restore. |
 | `leaderboards:read` | `get_leaderboard` | `GET /v1/project/leaderboards/{leaderboard_id}` | The settings and the revision number of one leaderboard. |
 | `keys:read` | `list_api_keys` | `GET /v1/project/api-keys` | Active keys for the Game Project, at most 50. Key values are never shown. |

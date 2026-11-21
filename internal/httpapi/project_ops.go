@@ -254,6 +254,31 @@ var projectOps = []projectOp{
 		handler: projectHandler(matchmakingTicketTrace),
 	},
 	{
+		tool: "get_matchmaking_queue",
+		description: "List the matchmaking queue of this Game Project by bucket (mode, region, game mode, status): " +
+			"ticket count, oldest ticket, and the spread of min_count and max_count. It shows no players. " +
+			"Text that the game client sent is shown only if it is a short identifier.",
+		scope: managementtoken.ScopeMatchmakingRead,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/matchmaking/queue", OperationID: "getProjectMatchmakingQueue",
+			Summary: "Get the matchmaking queue",
+			Description: "Returns the queue buckets that the dashboard queue page shows, ordered by mode, region, game mode, " +
+				"and status. Text that the game client sent is shown only when it is a short identifier. No player data.",
+		},
+		handler: projectHandler(getMatchmakingQueue),
+	},
+	{
+		tool:        "get_steam_auth",
+		description: "Get the Steam sign-in App ID of this Game Project and whether a Web API key is set. The key is never shown.",
+		scope:       managementtoken.ScopeConfigRead,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/steam-auth", OperationID: "getProjectSteamAuth",
+			Summary:     "Get the Steam sign-in settings",
+			Description: "Returns the Steam App ID (null when not set) and whether a Web API key is stored. The key is never returned.",
+		},
+		handler: projectHandler(getSteamAuth),
+	},
+	{
 		tool:        "get_remote_config",
 		description: "Get the remote config JSON of this Game Project and its revision number (0 if it has no revision).",
 		scope:       managementtoken.ScopeConfigRead,

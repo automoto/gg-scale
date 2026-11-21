@@ -728,6 +728,11 @@ type Querier interface {
 	// bucket for the current tenant's project, plus oldest queued ticket and
 	// the min/max count spread so operators can spot stuck buckets at a glance.
 	ListMatchmakerBucketsForProject(ctx context.Context, projectID int64) ([]ListMatchmakerBucketsForProjectRow, error)
+	// Same buckets as ListMatchmakerBucketsForProject, one page at a time.
+	// Keyset-paginated on the bucket key (mode, region, game_mode, status).
+	// has_after false starts at the first bucket. The caller reads one row more
+	// than the page.
+	ListMatchmakerBucketsPageForProject(ctx context.Context, arg ListMatchmakerBucketsPageForProjectParams) ([]ListMatchmakerBucketsPageForProjectRow, error)
 	// Target player IDs of open, unexpired invitations, for the "invite pending"
 	// list badge. Expired-but-unswept invites are excluded so the badge matches
 	// what the accept flow would actually honor.

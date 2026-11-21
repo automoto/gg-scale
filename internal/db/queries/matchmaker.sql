@@ -283,6 +283,29 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 GROUP BY mode, region, game_mode, status
 ORDER BY mode, region, game_mode, status;
 
+-- name: ListMatchmakerBucketsPageForProject :many
+-- Same buckets as ListMatchmakerBucketsForProject, one page at a time.
+-- Keyset-paginated on the bucket key (mode, region, game_mode, status).
+-- has_after false starts at the first bucket. The caller reads one row more
+-- than the page.
+SELECT mode,
+       region,
+       game_mode,
+       status::text AS status,
+       count(*)::bigint AS ticket_count,
+       min(created_at)::timestamptz AS oldest,
+       min(min_count)::int AS min_count_low,
+       max(max_count)::int AS max_count_high
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+GROUP BY mode, region, game_mode, status
+HAVING NOT sqlc.arg(has_after)::boolean
+    OR (mode, region, game_mode, status::text)
+       > (sqlc.arg(after_mode)::text, sqlc.arg(after_region)::text, sqlc.arg(after_game_mode)::text, sqlc.arg(after_status)::text)
+ORDER BY mode, region, game_mode, status
+LIMIT sqlc.arg(row_limit);
+
 -- name: CountMatchmakerMatchesByMode :many
 -- Control panel matchmaker page: matches formed per mode within the retention
 -- window (rows are GC'd after MatchTTL, so this reads as "recent matches").
