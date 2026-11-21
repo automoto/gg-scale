@@ -751,9 +751,9 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 	switch err := h.updateAPIKeyLabel(r.Context(), session.User.ID, tenantID, apiKeyID, r.Form.Get("label")); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, "forbidden", http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
@@ -777,9 +777,9 @@ func (h *Handler) updateAPIKeyFeaturesHandler(w http.ResponseWriter, r *http.Req
 	switch err := h.updateAPIKeyManagedScopes(r.Context(), session.User.ID, tenantID, apiKeyID, scopes); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable), errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrInvalidKeyScope), errors.Is(err, projectadmin.ErrScopeNotGrantable), errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, err.Error(), http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
 		http.Error(w, "api key feature update failed", http.StatusInternalServerError)
@@ -798,9 +798,9 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := h.revokeAPIKey(r.Context(), session.User.ID, tenantID, apiKeyID); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, "forbidden", http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)

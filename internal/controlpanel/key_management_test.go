@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
@@ -41,7 +42,7 @@ func TestParseManagedAPIKeyScopes(t *testing.T) {
 func TestParseManagedAPIKeyScopes_rejects_unknown_scope(t *testing.T) {
 	_, err := parseManagedAPIKeyScopes(url.Values{"scopes": {"admin"}})
 
-	assert.ErrorIs(t, err, errInvalidScope)
+	assert.ErrorIs(t, err, projectadmin.ErrInvalidKeyScope)
 }
 
 func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {

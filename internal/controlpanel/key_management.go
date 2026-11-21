@@ -25,10 +25,6 @@ var (
 	errInvalidProjectName = errors.New("control panel: project name is required")
 	errDuplicateProject   = errors.New("control panel: project with that name already exists")
 	errInvalidKeyType     = errors.New("control panel: key type must be 'publishable' or 'secret'")
-	errInvalidScope       = projectadmin.ErrInvalidKeyScope
-	errKeyNotInTenant     = projectadmin.ErrAPIKeyNotFound
-	errAPIKeyManageDenied = projectadmin.ErrAPIKeyManageDenied
-	errScopeNotGrantable  = projectadmin.ErrScopeNotGrantable
 )
 
 type createKeyInput struct {
@@ -107,7 +103,7 @@ func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
 	seen := make(map[string]struct{}, len(values))
 	for _, scope := range values {
 		if !projectadmin.IsManagedKeyScope(scope) {
-			return nil, errInvalidScope
+			return nil, projectadmin.ErrInvalidKeyScope
 		}
 		if _, ok := seen[scope]; ok {
 			continue
