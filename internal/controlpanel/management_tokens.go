@@ -201,17 +201,19 @@ func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView
 	for _, res := range managementtoken.Resources {
 		writes := res.WriteScopes()
 		row := AccessRowView{Name: res.Name, Label: res.Label, HasWrite: len(writes) > 0, read: res.Read, Reason: gates[res.Name]}
-		if row.Reason == "" {
-			row.CanRead = slices.Contains(grantable, res.Read)
-			for _, s := range writes {
-				if slices.Contains(grantable, s) {
-					row.writes = append(row.writes, s)
-				}
+		if row.Reason != "" {
+			rows = append(rows, row)
+			continue
+		}
+		row.CanRead = slices.Contains(grantable, res.Read)
+		for _, s := range writes {
+			if slices.Contains(grantable, s) {
+				row.writes = append(row.writes, s)
 			}
-			row.CanWrite = row.CanRead && len(row.writes) > 0
-			if !row.CanRead || row.HasWrite && !row.CanWrite {
-				row.Reason = reasonRole
-			}
+		}
+		row.CanWrite = row.CanRead && len(row.writes) > 0
+		if !row.CanRead || row.HasWrite && !row.CanWrite {
+			row.Reason = reasonRole
 		}
 		rows = append(rows, row)
 	}

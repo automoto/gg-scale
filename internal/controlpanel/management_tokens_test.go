@@ -33,12 +33,14 @@ func withRiskyScope(t *testing.T) string {
 	return "keys:risky"
 }
 
-func accessRow(rows []AccessRowView, name string) AccessRowView {
+func accessRow(t *testing.T, rows []AccessRowView, name string) AccessRowView {
+	t.Helper()
 	for _, r := range rows {
 		if r.Name == name {
 			return r
 		}
 	}
+	t.Fatalf("no access row %q", name)
 	return AccessRowView{}
 }
 
@@ -53,7 +55,7 @@ func selections(rows []AccessRowView) map[string]string {
 func TestAccessOptions_should_disable_write_with_role_reason_when_no_write_scope_is_grantable(t *testing.T) {
 	rows, _ := accessOptions([]string{managementtoken.ScopeKeysRead}, nil)
 
-	got := accessRow(rows, "keys")
+	got := accessRow(t, rows, "keys")
 
 	assert.Equal(t, []any{true, false, reasonRole}, []any{got.CanRead, got.CanWrite, got.Reason})
 }
@@ -61,7 +63,7 @@ func TestAccessOptions_should_disable_write_with_role_reason_when_no_write_scope
 func TestAccessOptions_should_disable_the_row_with_the_gate_reason(t *testing.T) {
 	rows, _ := accessOptions(allScopes(), map[string]string{"keys": reasonSwitch})
 
-	got := accessRow(rows, "keys")
+	got := accessRow(t, rows, "keys")
 
 	assert.Equal(t, []any{false, false, reasonSwitch}, []any{got.CanRead, got.CanWrite, got.Reason})
 }
@@ -69,7 +71,7 @@ func TestAccessOptions_should_disable_the_row_with_the_gate_reason(t *testing.T)
 func TestAccessOptions_should_have_no_write_option_for_matchmaking(t *testing.T) {
 	rows, _ := accessOptions(allScopes(), nil)
 
-	got := accessRow(rows, "matchmaking")
+	got := accessRow(t, rows, "matchmaking")
 
 	assert.Equal(t, []any{false, ""}, []any{got.HasWrite, got.Reason})
 }
@@ -103,6 +105,9 @@ func TestScopesFromAccessForm(t *testing.T) {
 		{name: "should_refuse_an_unknown_value", form: url.Values{"access_config": {"admin"}}, refused: true},
 		{name: "should_refuse_a_normal_scope_as_risky", form: url.Values{"risky": {managementtoken.ScopeConfigWrite}}, refused: true},
 		{name: "should_refuse_an_unknown_risky_scope", form: url.Values{"risky": {"tenant:admin"}}, refused: true},
+		{name: "should_use_only_the_first_value_of_a_duplicate_field", form: url.Values{"access_config": {"read", "write"}},
+			want: []string{managementtoken.ScopeConfigRead}},
+		{name: "should_give_nothing_for_an_unknown_row_field", form: url.Values{"access_players": {"write"}}, want: []string{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,7 +126,8 @@ func TestScopesFromAccessForm_should_give_a_checked_risky_scope(t *testing.T) {
 	scope := withRiskyScope(t)
 	rows, risky := accessOptions(allScopes(), nil)
 
-	got, _ := scopesFromAccessForm(url.Values{"risky": {scope}}, rows, risky)
+	got, err := scopesFromAccessForm(url.Values{"risky": {scope}}, rows, risky)
+	require.NoError(t, err)
 
 	assert.Equal(t, []string{scope}, got)
 }
@@ -234,7 +240,8 @@ func TestFeatureGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := &Handler{cfg: Config{FleetEnabled: tc.switchOn}, rbac: auth}
 
-			got, _ := h.featureGate(context.Background(), 1, 2, tc.feature)
+			got, err := h.featureGate(context.Background(), 1, 2, tc.feature)
+			require.NoError(t, err)
 
 			assert.Equal(t, tc.want, got)
 		})
