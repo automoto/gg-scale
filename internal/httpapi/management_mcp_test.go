@@ -102,10 +102,10 @@ func allScopes() []string {
 
 // listedToolArguments sends tools/list to an MCP endpoint wired as in the
 // router and returns the sorted inputSchema property names of each tool.
-func listedToolArguments(t *testing.T, cfg huma.Config) map[string][]string {
+func listedToolArguments(t *testing.T, cfg huma.Config, d Deps) map[string][]string {
 	t.Helper()
 	r := chi.NewRouter()
-	registerProjectManagementRoutes(groupAPI(r, cfg), Deps{})
+	registerProjectManagementRoutes(groupAPI(r, cfg), d)
 	attachManagementMCP(groupAPI(r, cfg), "test")
 	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allScopes()})
 	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { r.ServeHTTP(w, req.WithContext(ctx)) })
@@ -135,19 +135,36 @@ func listedToolArguments(t *testing.T, cfg huma.Config) map[string][]string {
 }
 
 func TestManagementToolArguments_should_match_the_tools_list_input_schemas(t *testing.T) {
-	// Arrange
-	cfg := newHumaConfig("test")
-	listed := listedToolArguments(t, cfg)
+	var fleetOn Deps
+	fleetOn.ControlPanel.FleetEnabled = true
+	cases := map[string]Deps{"fleet switch off": {}, "fleet switch on": fleetOn}
+	for name, d := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			cfg := newHumaConfig("test")
+			listed := listedToolArguments(t, cfg, d)
 
-	// Act
-	want := map[string][]string{}
-	for name, tool := range managementToolArguments(cfg.OpenAPI) {
-		want[name] = slices.Sorted(maps.Keys(tool.args))
+			// Act
+			want := map[string][]string{}
+			for tool, args := range managementToolArguments(cfg.OpenAPI) {
+				want[tool] = slices.Sorted(maps.Keys(args.args))
+			}
+
+			// Assert
+			require.NotEmpty(t, listed)
+			assert.Equal(t, want, listed)
+		})
 	}
+}
 
-	// Assert
-	require.NotEmpty(t, listed)
-	assert.Equal(t, want, listed)
+func TestManagementTools_should_list_the_fleet_tools_only_when_the_fleet_switch_is_on(t *testing.T) {
+	var fleetOn Deps
+	fleetOn.ControlPanel.FleetEnabled = true
+
+	off := listedToolArguments(t, newHumaConfig("test"), Deps{})
+	on := listedToolArguments(t, newHumaConfig("test"), fleetOn)
+
+	assert.Equal(t, []bool{false, true}, []bool{off["list_fleets"] != nil, on["list_fleets"] != nil})
 }
 
 func TestStrictToolArguments_should_pass_on(t *testing.T) {

@@ -1698,6 +1698,102 @@ components:
       required:
         - updated
       type: object
+    ProjectAllocation:
+      additionalProperties: false
+      properties:
+        address:
+          examples:
+            - 203.0.113.5:7777
+          type: string
+        backend:
+          examples:
+            - agones
+          type: string
+        backend_ref:
+          description: The backend name of the server, for example the Agones GameServer name.
+          type: string
+        fleet_id:
+          examples:
+            - 3
+          format: int64
+          type: integer
+        id:
+          examples:
+            - 17
+          format: int64
+          type: integer
+        region:
+          examples:
+            - eu
+          type: string
+        status:
+          examples:
+            - ready
+          type: string
+      required:
+        - id
+        - fleet_id
+        - backend
+        - backend_ref
+        - region
+        - address
+        - status
+      type: object
+    ProjectAllocationEvent:
+      additionalProperties: false
+      properties:
+        address:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        error:
+          description: The error text of the backend. Empty when there was no error.
+          type: string
+        id:
+          format: int64
+          type: integer
+        status:
+          examples:
+            - ready
+          type: string
+      required:
+        - id
+        - status
+        - address
+        - error
+        - created_at
+      type: object
+    ProjectAllocationEventList:
+      additionalProperties: false
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/ProjectAllocationEvent"
+          type:
+            - array
+            - "null"
+        next_cursor:
+          description: Send as cursor for the next page. Absent on the last page.
+          type: string
+      required:
+        - events
+      type: object
+    ProjectAllocationList:
+      additionalProperties: false
+      properties:
+        allocations:
+          items:
+            $ref: "#/components/schemas/ProjectAllocation"
+          type:
+            - array
+            - "null"
+        next_cursor:
+          description: Send as cursor for the next page. Absent on the last page.
+          type: string
+      required:
+        - allocations
+      type: object
     ProjectAllowedOrigins:
       additionalProperties: false
       properties:
@@ -1854,6 +1950,55 @@ components:
       required:
         - deleted
         - note
+      type: object
+    ProjectFleet:
+      additionalProperties: false
+      properties:
+        backend:
+          examples:
+            - agones
+          type: string
+        config:
+          additionalProperties:
+            type: string
+          description: The backend settings of the fleet. Only in get_fleet.
+          type: object
+        created_at:
+          format: date-time
+          type: string
+        id:
+          examples:
+            - 3
+          format: int64
+          type: integer
+        name:
+          examples:
+            - default
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - id
+        - name
+        - backend
+        - created_at
+        - updated_at
+      type: object
+    ProjectFleetList:
+      additionalProperties: false
+      properties:
+        fleets:
+          items:
+            $ref: "#/components/schemas/ProjectFleet"
+          type:
+            - array
+            - "null"
+        next_cursor:
+          description: Send as cursor for the next page. Absent on the last page.
+          type: string
+      required:
+        - fleets
       type: object
     ProjectHealth:
       additionalProperties: false
@@ -5747,6 +5892,132 @@ paths:
       summary: Regenerate the caller's friend code
       tags:
         - Friends & Presence
+  /v1/project/allocations:
+    get:
+      description: "Returns the allocations of the Game Project, newest first and paged: limit is at most 100 (the default); send next_cursor as cursor for the next page. include_terminal also lists shutdown and failed allocations. The request also needs the allocation read permission of the token creator."
+      operationId: listProjectAllocations
+      parameters:
+        - description: Rows per page, at most 100. The default is 100.
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Rows per page, at most 100. The default is 100.
+            examples:
+              - "100"
+            type: string
+        - description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+            type: string
+        - description: Also list finished allocations (shutdown and failed). The default is live ones only.
+          explode: false
+          in: query
+          name: include_terminal
+          schema:
+            description: Also list finished allocations (shutdown and failed). The default is live ones only.
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllocationList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List allocations
+      tags:
+        - Project Management
+  /v1/project/allocations/{allocation_id}:
+    get:
+      description: Returns one allocation. An allocation of another Game Project answers 404. The request also needs the allocation read permission of the token creator.
+      operationId: getProjectAllocation
+      parameters:
+        - description: The allocation ID.
+          in: path
+          name: allocation_id
+          required: true
+          schema:
+            description: The allocation ID.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllocation"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Get an allocation
+      tags:
+        - Project Management
+  /v1/project/allocations/{allocation_id}/events:
+    get:
+      description: Returns the status events of one allocation, newest first and paged. The database keeps the last 50 events. An allocation of another Game Project answers 404. The request also needs the allocation read permission of the token creator.
+      operationId: listProjectAllocationEvents
+      parameters:
+        - description: The allocation ID.
+          in: path
+          name: allocation_id
+          required: true
+          schema:
+            description: The allocation ID.
+            format: int64
+            minimum: 1
+            type: integer
+        - description: Rows per page, at most 100. The default is 100.
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Rows per page, at most 100. The default is 100.
+            examples:
+              - "100"
+            type: string
+        - description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllocationEventList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List allocation events
+      tags:
+        - Project Management
   /v1/project/allowed-origins:
     put:
       description: Replaces the browser origins (CORS for web builds) of the Game Project with the full list. The response has the old list. Answers 409 when the list has more origins than the limit.
@@ -5917,6 +6188,77 @@ paths:
       security:
         - ManagementToken: []
       summary: Change an API key label
+      tags:
+        - Project Management
+  /v1/project/fleets:
+    get:
+      description: "Returns the fleets of the Game Project, sorted by name and paged: limit is at most 100 (the default); send next_cursor as cursor for the next page. Needs FEATURE_FLEET_ENABLED and the dedicated_servers feature grant."
+      operationId: listProjectFleets
+      parameters:
+        - description: Rows per page, at most 100. The default is 100.
+          explode: false
+          in: query
+          name: limit
+          schema:
+            description: Rows per page, at most 100. The default is 100.
+            examples:
+              - "100"
+            type: string
+        - description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+          explode: false
+          in: query
+          name: cursor
+          schema:
+            description: The next_cursor of the previous page, sent back unchanged. Leave it out for the first page.
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFleetList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List fleets
+      tags:
+        - Project Management
+  /v1/project/fleets/{fleet_id}:
+    get:
+      description: Returns one fleet with its backend settings. A fleet of another Game Project answers 404.
+      operationId: getProjectFleet
+      parameters:
+        - description: The fleet ID.
+          in: path
+          name: fleet_id
+          required: true
+          schema:
+            description: The fleet ID.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFleet"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Get a fleet
       tags:
         - Project Management
   /v1/project/health:

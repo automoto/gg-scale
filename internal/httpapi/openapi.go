@@ -21,6 +21,9 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	cfg := newHumaConfig(version)
 	api := groupAPI(chi.NewRouter(), cfg)
 	var d Deps
+	// The reference lists the fleet operations, which a server registers
+	// only when its fleet switch is on.
+	d.ControlPanel.FleetEnabled = true
 
 	registerHealthz(api, d)
 	registerAuthPasswordRoutes(api, d)

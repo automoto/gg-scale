@@ -188,7 +188,7 @@ func TestFillAccess_should_select_read_in_each_row_by_default(t *testing.T) {
 
 	fillAccess(url.Values{}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read", "players": "read", "limits": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "read", "keys": "read", "matchmaking": "read", "players": "read", "limits": "read", "fleets": "read"}, selections(rows))
 }
 
 func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
@@ -196,7 +196,7 @@ func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none", "players": "none", "limits": "none"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "read", "leaderboards": "none", "keys": "none", "matchmaking": "none", "players": "none", "limits": "none", "fleets": "none"}, selections(rows))
 }
 
 func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
@@ -204,7 +204,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write", "fleets": "read"}, selections(rows))
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
@@ -271,6 +271,7 @@ func TestFeatureGate(t *testing.T) {
 		{name: "should_pass_a_row_without_feature", feature: "", want: ""},
 		{name: "should_say_turned_off_when_the_switch_is_off", switchOn: false, feature: rbac.FeatureDedicatedServers, want: reasonSwitch},
 		{name: "should_say_not_enabled_when_the_grant_is_missing", switchOn: true, feature: rbac.FeatureDedicatedServers, want: reasonGrant},
+		{name: "should_not_say_turned_off_for_a_feature_without_a_server_switch", switchOn: false, feature: rbac.FeatureMatchmaker, want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -288,4 +289,31 @@ func TestTokenAccessValues_should_map_keys_without_keys_write_to_read(t *testing
 	got := tokenAccessValues([]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate})
 
 	assert.Equal(t, "read", got.Get("access_keys"))
+}
+
+func TestAccessOptions_should_give_each_reason_on_the_fleets_row(t *testing.T) {
+	cases := []struct {
+		name      string
+		grantable []string
+		gate      string
+		want      string
+	}{
+		{name: "should_say_turned_off_when_the_switch_is_off", gate: reasonSwitch, want: reasonSwitch},
+		{name: "should_say_not_enabled_when_the_grant_is_missing", gate: reasonGrant, want: reasonGrant},
+		{name: "should_say_role_when_the_creator_fails_the_pair", want: reasonRole},
+		{name: "should_give_no_reason_when_the_creator_passes_the_pair", grantable: []string{managementtoken.ScopeFleetRead}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rows, _ := accessOptions(tc.grantable, map[string]string{"fleets": tc.gate})
+
+			var got string
+			for _, r := range rows {
+				if r.Name == "fleets" {
+					got = r.Reason
+				}
+			}
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }

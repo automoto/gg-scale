@@ -30,6 +30,7 @@ const (
 	ScopePlayersWrite      = "players:write"
 	ScopeLimitsRead        = "limits:read"
 	ScopeLimitsWrite       = "limits:write"
+	ScopeFleetRead         = "fleet:read"
 )
 
 // Scope classes.
@@ -67,7 +68,9 @@ func projectObject(int64) string { return rbac.ObjectProject }
 // players pages are open to (project, manage), and the roles that have it
 // (tenant_admin and up) all have (players, manage) but only some have
 // (players, read), so the player scopes use (players, manage): a pair that
-// is not weaker than the pages and that each such role passes.
+// is not weaker than the pages and that each such role passes. The fleet
+// pages check (fleet, read), so fleet:read uses it. The allocation reads
+// also check their own pair, (allocation, read), on each request.
 var Scopes = []ScopePair{
 	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "config"},
 	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config"},
@@ -86,6 +89,7 @@ var Scopes = []ScopePair{
 	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
+	{Scope: ScopeFleetRead, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionRead, Resource: "fleets"},
 }
 
 // Resource is one row of the access table on the token page.
@@ -111,6 +115,7 @@ var Resources = []Resource{
 	{Name: "matchmaking", Label: "Matchmaking", Read: ScopeMatchmakingRead},
 	{Name: "players", Label: "Players (IDs and status)", Noun: "Players", Read: ScopePlayersRead},
 	{Name: "limits", Label: "Project limits", Read: ScopeLimitsRead},
+	{Name: "fleets", Label: "Fleets", Read: ScopeFleetRead, Feature: rbac.FeatureDedicatedServers},
 }
 
 // WriteScopes returns the normal-class scopes of the row other than its read

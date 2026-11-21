@@ -154,13 +154,21 @@ func quotaOverrideDetail(axis *string, limit *int64) string {
 // featureEnabledByEnv reports whether a requestable feature's server-side kill
 // switch is on, so the tenant isn't offered a feature the server can't serve.
 func (h *Handler) featureEnabledByEnv(feature string) bool {
+	on, _ := h.featureSwitch(feature)
+	return on
+}
+
+// featureSwitch returns the state of the server switch of a feature, and
+// whether the feature has a switch. A feature with no switch (only a grant)
+// is not on.
+func (h *Handler) featureSwitch(feature string) (on, known bool) {
 	switch feature {
 	case "p2p_relay":
-		return h.cfg.RelayEnabled
+		return h.cfg.RelayEnabled, true
 	case "dedicated_servers", "fleet_agones_backend", "fleet_plugin_backend":
-		return h.cfg.FleetEnabled
+		return h.cfg.FleetEnabled, true
 	default:
-		return false
+		return false, false
 	}
 }
 

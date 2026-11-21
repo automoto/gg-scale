@@ -162,7 +162,7 @@ func (h *Handler) featureGate(ctx context.Context, tenantID, projectID int64, fe
 	if feature == "" {
 		return "", nil
 	}
-	if !h.featureEnabledByEnv(string(feature)) {
+	if on, known := h.featureSwitch(string(feature)); known && !on {
 		return reasonSwitch, nil
 	}
 	ok, err := h.rbac.FeatureEnabled(ctx, tenantID, projectID, feature)

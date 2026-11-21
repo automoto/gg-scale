@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -39,6 +40,12 @@ type tokenPanel struct {
 // to enabled and a limit of two active tokens for each project.
 func newTokenPanel(t *testing.T, enabled bool) tokenPanel {
 	t.Helper()
+	return newTokenPanelWithFleet(t, enabled, false)
+}
+
+// newTokenPanelWithFleet is newTokenPanel with the fleet server switch set.
+func newTokenPanelWithFleet(t *testing.T, enabled, fleetEnabled bool) tokenPanel {
+	t.Helper()
 	pool, raw := startTwoFactorDB(t)
 	ctx := context.Background()
 	p := tokenPanel{raw: raw}
@@ -59,7 +66,7 @@ func newTokenPanel(t *testing.T, enabled bool) tokenPanel {
 		Pool: pool, Mailer: noopMailer, RBAC: p.authz, CredentialCipher: credCipher,
 		VerifySigningKey: []byte(testEmailVerifySigningKey),
 		Config: controlpanel.Config{
-			Mount: true, ManagementAPIEnabled: enabled, ManagementMaxExpiryDays: 90, ManagementMaxProjectTokens: 2,
+			Mount: true, ManagementAPIEnabled: enabled, FleetEnabled: fleetEnabled, ManagementMaxExpiryDays: 90, ManagementMaxProjectTokens: 2,
 		},
 	}))
 	p.srv = httptest.NewServer(root)
@@ -185,6 +192,41 @@ func TestManagementTokens_default_form_should_make_a_read_only_token(t *testing.
 
 	p.create(t, c, csrf, checkedAccess(page))
 
+	// The fleets row is turned off on this server, so its read is not given.
+	want := slices.DeleteFunc(managementtoken.ReadScopes(), func(s string) bool { return s == managementtoken.ScopeFleetRead })
+	assert.ElementsMatch(t, want, p.onlyTokenScopes(t))
+}
+
+func TestManagementTokens_fleets_row_should_say_why_it_is_disabled(t *testing.T) {
+	cases := []struct {
+		name  string
+		fleet bool
+		want  string
+	}{
+		{name: "should_say_turned_off_when_the_switch_is_off", fleet: false, want: "Turned off on this server."},
+		{name: "should_say_not_enabled_when_the_grant_is_missing", fleet: true, want: "Not enabled for this Account Tenant."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTokenPanelWithFleet(t, true, tc.fleet)
+			c, _, _ := p.member(t, "owner@example.com", "owner")
+
+			_, body := tfGet(t, c, p.tokensURL())
+
+			assert.Contains(t, body, tc.want)
+		})
+	}
+}
+
+func TestManagementTokens_fleets_row_should_give_fleet_read_with_the_switch_and_the_grant(t *testing.T) {
+	p := newTokenPanelWithFleet(t, true, true)
+	_, err := p.raw.Exec(context.Background(), `INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES ($1, 'dedicated_servers', true)`, p.tenantID)
+	require.NoError(t, err)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	_, page := tfGet(t, c, p.tokensURL())
+
+	p.create(t, c, csrf, checkedAccess(page))
+
 	assert.ElementsMatch(t, managementtoken.ReadScopes(), p.onlyTokenScopes(t))
 }
 
@@ -203,7 +245,7 @@ func TestManagementTokens_quick_fill_read_write_should_select_write_rows(t *test
 
 	_, body := tfGet(t, c, p.tokensURL()+"?fill=read_write")
 
-	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"write"}, "access_limits": {"write"}},
+	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"write"}, "access_limits": {"write"}, "access_fleets": {"none"}},
 		checkedAccess(body))
 }
 
@@ -212,7 +254,7 @@ var likeLink = regexp.MustCompile(`href="([^"]*)"[^>]*>New token like this<`)
 func TestManagementTokens_new_token_like_this_should_fill_the_same_access(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}, "access_players": {"none"}, "access_limits": {"none"}}
+	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}, "access_players": {"none"}, "access_limits": {"none"}, "access_fleets": {"none"}}
 	p.create(t, c, csrf, access)
 	_, list := tfGet(t, c, p.tokensURL())
 	m := likeLink.FindStringSubmatch(list)
@@ -350,7 +392,8 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	require.NoError(t, p.raw.QueryRow(context.Background(),
 		`SELECT project_id, scopes FROM management_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
 	assert.Equal(t, p.project, projectID)
-	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "keys:write", "origins:write"}, managementtoken.ReadScopes()...), scopes)
+	reads := slices.DeleteFunc(managementtoken.ReadScopes(), func(s string) bool { return s == managementtoken.ScopeFleetRead })
+	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "keys:write", "origins:write"}, reads...), scopes)
 }
 
 func TestManagementTokens_revoke_sets_revoked_at(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 const projectManagementTag = "Project Management"
@@ -39,7 +40,13 @@ const (
 // the input: the token needs one of them, and the handler checks the one
 // the request needs with requireScope. pair and action are only for a row
 // with no scope that needs more than the base creator check of the token
-// middleware (project, manage).
+// middleware (project, manage). A row with a scope may set pair and action
+// too: the request then passes both creator checks, as for an operation that
+// reads two kinds of data. A row with anyScope gets no creator pair check
+// from the wrapper; its handler calls requireScope for the scope the
+// request needs. fleet marks a dedicated-server row: it is registered only
+// when FEATURE_FLEET_ENABLED is on, and each request needs the
+// dedicated_servers feature grant of the tenant.
 type projectOp struct {
 	// tool and description are the MCP tool name and description. The
 	// descriptions are constants in the binary: none comes from stored data.
@@ -49,6 +56,7 @@ type projectOp struct {
 	anyScope    []string
 	pair        func(projectID int64) string
 	action      string
+	fleet       bool
 	// op holds the method, path, operation ID, summary, and description for
 	// the API reference. The register helper adds the rest.
 	op      huma.Operation
@@ -59,6 +67,9 @@ type projectOp struct {
 // no Deps value here, so OpenAPIDoc can call it with zero Deps.
 func registerProjectManagementRoutes(api huma.API, d Deps) {
 	for _, row := range projectOps {
+		if row.fleet && !d.ControlPanel.FleetEnabled {
+			continue
+		}
 		row.handler(api, d, row)
 	}
 }
@@ -112,20 +123,35 @@ func projectHandler[I, B any](run func(ctx context.Context, d Deps, p management
 	}
 }
 
-// authorize runs the scope check, then the creator pair check.
+// authorize runs the scope check, then the row's own creator pair check,
+// then the feature grant of a fleet row.
 func (row projectOp) authorize(ctx context.Context, d Deps, p managementtoken.Principal) error {
 	if row.scope != "" {
-		return requireScope(ctx, d, p, row.scope)
+		if err := requireScope(ctx, d, p, row.scope); err != nil {
+			return err
+		}
 	}
 	if len(row.anyScope) > 0 && !slices.ContainsFunc(row.anyScope, p.HasScope) {
 		return huma.Error403Forbidden(fmt.Sprintf(
 			"This token has none of the scopes %s. Create a token with one of them in the dashboard.",
 			strings.Join(row.anyScope, ", ")))
 	}
-	if row.pair == nil {
+	if row.pair != nil {
+		if err := requirePair(ctx, d, p, row.pair, row.action); err != nil {
+			return err
+		}
+	}
+	if !row.fleet {
 		return nil
 	}
-	return requirePair(ctx, d, p, row.pair, row.action)
+	on, err := d.RBAC.FeatureEnabled(ctx, p.TenantID, p.ProjectID, rbac.FeatureDedicatedServers)
+	if err != nil {
+		return serverError(ctx, "project management: feature check", err)
+	}
+	if !on {
+		return huma.Error403Forbidden("Dedicated servers are not enabled for this Account Tenant.")
+	}
+	return nil
 }
 
 // requireScope refuses the request when the token does not have scope or
@@ -234,6 +260,79 @@ var projectOps = []projectOp{
 				"active_scopes lists the scopes that the creator of the token can still use now. Open to every token.",
 		},
 		handler: projectHandler(getToken),
+	},
+	{
+		tool: "list_fleets",
+		description: "List the fleets (dedicated server templates) of this Game Project: ID, name, and backend. " +
+			"Paged by name. Use get_fleet for the settings of one fleet.",
+		scope: managementtoken.ScopeFleetRead,
+		fleet: true,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/fleets", OperationID: "listProjectFleets",
+			Summary: "List fleets",
+			Description: "Returns the fleets of the Game Project, sorted by name and paged: limit is at most 100 (the default); " +
+				"send next_cursor as cursor for the next page. Needs FEATURE_FLEET_ENABLED and the dedicated_servers feature grant.",
+		},
+		handler: projectHandler(listFleets),
+	},
+	{
+		tool:        "get_fleet",
+		description: "Get one fleet of this Game Project with its backend settings.",
+		scope:       managementtoken.ScopeFleetRead,
+		fleet:       true,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/fleets/{fleet_id}", OperationID: "getProjectFleet",
+			Summary:     "Get a fleet",
+			Description: "Returns one fleet with its backend settings. A fleet of another Game Project answers 404.",
+		},
+		handler: projectHandler(getFleet),
+	},
+	{
+		tool: "list_allocations",
+		description: "List the game server allocations of this Game Project, newest first: ID, fleet, region, address, and status. " +
+			"Set include_terminal to also list shutdown and failed ones. Paged.",
+		scope:  managementtoken.ScopeFleetRead,
+		pair:   rbac.ProjectAllocationObject,
+		action: rbac.ActionRead,
+		fleet:  true,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/allocations", OperationID: "listProjectAllocations",
+			Summary: "List allocations",
+			Description: "Returns the allocations of the Game Project, newest first and paged: limit is at most 100 (the default); " +
+				"send next_cursor as cursor for the next page. include_terminal also lists shutdown and failed allocations. " +
+				"The request also needs the allocation read permission of the token creator.",
+		},
+		handler: projectHandler(listAllocations),
+	},
+	{
+		tool:        "get_allocation",
+		description: "Get one game server allocation of this Game Project.",
+		scope:       managementtoken.ScopeFleetRead,
+		pair:        rbac.ProjectAllocationObject,
+		action:      rbac.ActionRead,
+		fleet:       true,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/allocations/{allocation_id}", OperationID: "getProjectAllocation",
+			Summary: "Get an allocation",
+			Description: "Returns one allocation. An allocation of another Game Project answers 404. " +
+				"The request also needs the allocation read permission of the token creator.",
+		},
+		handler: projectHandler(getAllocation),
+	},
+	{
+		tool:        "list_allocation_events",
+		description: "List the status events of one game server allocation, newest first. The database keeps the last 50. Paged.",
+		scope:       managementtoken.ScopeFleetRead,
+		pair:        rbac.ProjectAllocationObject,
+		action:      rbac.ActionRead,
+		fleet:       true,
+		op: huma.Operation{
+			Method: http.MethodGet, Path: "/v1/project/allocations/{allocation_id}/events", OperationID: "listProjectAllocationEvents",
+			Summary: "List allocation events",
+			Description: "Returns the status events of one allocation, newest first and paged. The database keeps the last 50 events. " +
+				"An allocation of another Game Project answers 404. The request also needs the allocation read permission of the token creator.",
+		},
+		handler: projectHandler(listAllocationEvents),
 	},
 	{
 		tool: "matchmaking_ticket_trace",

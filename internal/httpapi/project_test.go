@@ -268,6 +268,12 @@ func serveProbe(t *testing.T, row projectOp, role string, p *managementtoken.Pri
 	a, err := rbac.NewMemoryAuthorizer()
 	require.NoError(t, err)
 	require.NoError(t, a.SetControlPanelMembershipRole(7, 1, role))
+	return serveProbeWith(t, row, a, p)
+}
+
+// serveProbeWith is serveProbe with the authorizer chosen by the test.
+func serveProbeWith(t *testing.T, row projectOp, a *rbac.Authorizer, p *managementtoken.Principal) *httptest.ResponseRecorder {
+	t.Helper()
 	r := chi.NewRouter()
 	r.Route("/v1", func(r chi.Router) {
 		if p != nil {

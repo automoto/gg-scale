@@ -124,6 +124,12 @@ Notes:
 - One operation can need two pairs (`fleet:read` for fleets and
   allocations). Then the table row holds both, and each operation checks its
   own pair.
+- `fleet:read` uses `(fleet, read)`: the dashboard fleet pages check it
+  (`requireProjectRead(ProjectFleetObject)`), and the scope pair must not be
+  weaker than the page. The allocation operations also set `projectOp.pair`
+  to `(allocation, read)`, the check of the dashboard allocation pages, so
+  each request checks it. The dashboard read pages do not check the
+  `dedicated_servers` grant; the operations do, as the dashboard writes do.
 - The token page is described in "Token page".
 
 ### Token page
@@ -314,11 +320,11 @@ Do the stages in order. Write failing tests first. After each stage:
 
 ### Stage 3: fleets (class 1)
 
-- [ ] `list_fleets`, `get_fleet`, `list_allocations`, `get_allocation`, `list_allocation_events` (`fleet:read`), paged.
+- [x] `list_fleets`, `get_fleet`, `list_allocations`, `get_allocation`, `list_allocation_events` (`fleet:read`), paged.
 - [ ] `create_fleet`, `update_fleet`, `delete_fleet` (`fleet:write`).
 - [ ] Fleet restore: query, `restore_fleet` operation, and a restore button on the dashboard fleet list.
 - [ ] Fleet writes take an actor and write the audit row in the transaction, for the dashboard and for tokens.
-- [ ] The operations are registered only when `FEATURE_FLEET_ENABLED` is on, and each one checks the `dedicated_servers` feature grant.
+- [x] The operations are registered only when `FEATURE_FLEET_ENABLED` is on, and each one checks the `dedicated_servers` feature grant.
 - [ ] Tests: off switch hides the tools; no grant gives 403; delete then restore.
 
 ### Stage 4: risky operations (class 2)

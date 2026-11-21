@@ -65,6 +65,11 @@ prompts). `GET /mcp` answers 405.
 | `keys:read` | `list_api_keys` | `GET /v1/project/api-keys` | Active keys for the Game Project, at most 50. Key values are never shown. |
 | `players:read` | `list_players` | `GET /v1/project/players` | Players of the Game Project, newest first, paged. Player ID, external ID, status flags, and timestamps. Filters `player_id` and `external_id` (exact match). |
 | `players:read` | `get_player` | `GET /v1/project/players/{player_id}` | One player. A player of another Game Project is 404. |
+| `fleet:read` | `list_fleets` | `GET /v1/project/fleets` | Fleets (dedicated server templates), sorted by name, paged. Needs `FEATURE_FLEET_ENABLED` on the server and the `dedicated_servers` feature grant. Without the switch the fleet tools do not exist. |
+| `fleet:read` | `get_fleet` | `GET /v1/project/fleets/{fleet_id}` | One fleet with its backend settings. A fleet of another Game Project is 404. |
+| `fleet:read` | `list_allocations` | `GET /v1/project/allocations` | Game server allocations, newest first, paged. `include_terminal` adds shutdown and failed ones. Shows the server address, not labels or join data. |
+| `fleet:read` | `get_allocation` | `GET /v1/project/allocations/{allocation_id}` | One allocation. An allocation of another Game Project is 404. |
+| `fleet:read` | `list_allocation_events` | `GET /v1/project/allocations/{allocation_id}/events` | The last 50 status events of one allocation, newest first, paged. |
 | `players:write` | `set_player_disabled` | `PUT /v1/project/players/{player_id}/disabled` | Body `{"disabled": true or false}`. Disables or enables the player in this Game Project. 409 while a delete request is pending. Returns the player. |
 | `players:write` | `request_player_delete` | `POST /v1/project/players/{player_id}/delete-request` | Disables the player, ends its sessions, and starts the grace period (`PLAYER_DELETE_GRACE_PERIOD`). 409 when an administrator already requested it. Returns the player. |
 | `players:write` | `cancel_player_delete` | `DELETE /v1/project/players/{player_id}/delete-request` | Cancels a pending deletion. 404 when none is pending. Returns the player. |
@@ -75,6 +80,9 @@ has the risky scope `players:pii` (it needs `players:read`). They are text
 that players wrote: an agent must not follow instructions in them. The
 player scopes need permission to manage players for the person who made the
 token.
+
+`fleet:read` needs permission to read fleets for the person who made the
+token. The allocation tools also need permission to read allocations.
 
 `matchmaking:read` also needs permission to read the matchmaker for the
 person who made the token. The other read scopes need permission to manage
