@@ -66,7 +66,7 @@ prompts). `GET /mcp` answers 405.
 | `players:read` | `list_players` | `GET /v1/project/players` | Players of the Game Project, newest first, paged. Player ID, external ID, status flags, and timestamps. Filters `player_id` and `external_id` (exact match). |
 | `players:read` | `get_player` | `GET /v1/project/players/{player_id}` | One player. A player of another Game Project is 404. |
 | `fleet:read` | `list_fleets` | `GET /v1/project/fleets` | Fleets (dedicated server templates), sorted by name, paged. Needs `FEATURE_FLEET_ENABLED` on the server and the `dedicated_servers` feature grant. Without the switch the fleet tools do not exist. |
-| `fleet:read` | `get_fleet` | `GET /v1/project/fleets/{fleet_id}` | One fleet with its backend settings. A fleet of another Game Project is 404. |
+| `fleet:read` | `get_fleet` | `GET /v1/project/fleets/{fleet_id}` | One fleet. Its settings are shown for the agones backend only, not for a plugin backend. A fleet of another Game Project is 404. |
 | `fleet:read` | `list_allocations` | `GET /v1/project/allocations` | Game server allocations, newest first, paged. `include_terminal` adds shutdown and failed ones. Shows the server address, not labels or join data. |
 | `fleet:read` | `get_allocation` | `GET /v1/project/allocations/{allocation_id}` | One allocation. An allocation of another Game Project is 404. |
 | `fleet:read` | `list_allocation_events` | `GET /v1/project/allocations/{allocation_id}/events` | The last 50 status events of one allocation, newest first, paged. |

@@ -277,13 +277,13 @@ var projectOps = []projectOp{
 	},
 	{
 		tool:        "get_fleet",
-		description: "Get one fleet of this Game Project with its backend settings.",
+		description: "Get one fleet of this Game Project. The settings are shown for the agones backend only.",
 		scope:       managementtoken.ScopeFleetRead,
 		fleet:       true,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/fleets/{fleet_id}", OperationID: "getProjectFleet",
 			Summary:     "Get a fleet",
-			Description: "Returns one fleet with its backend settings. A fleet of another Game Project answers 404.",
+			Description: "Returns one fleet. The settings (config) are returned for the agones backend only; a plugin backend config may hold secrets. A fleet of another Game Project answers 404.",
 		},
 		handler: projectHandler(getFleet),
 	},

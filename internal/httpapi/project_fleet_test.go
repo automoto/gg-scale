@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/rbac"
 )
@@ -93,22 +94,34 @@ func TestProjectHandler_should_check_the_row_pair_of_a_row_with_a_scope(t *testi
 	assert.Equal(t, http.StatusForbidden, fleetProbe(t, true, "member", managementtoken.ScopeFleetRead))
 }
 
-func TestDecodeOffsetCursor(t *testing.T) {
+func TestDecodeIDCursor(t *testing.T) {
 	cases := map[string]struct {
 		in   string
-		want int
+		want int64
 		ok   bool
 	}{
 		"empty":    {"", 0, true},
 		"number":   {"25", 25, true},
+		"zero":     {"0", 0, false},
 		"negative": {"-1", 0, false},
 		"text":     {"x", 0, false},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got, ok := decodeOffsetCursor(c.in)
+			got, ok := decodeIDCursor(c.in)
 
 			assert.Equal(t, []any{c.want, c.ok}, []any{got, ok})
 		})
 	}
+}
+
+func TestFleetConfig_should_show_only_the_agones_config(t *testing.T) {
+	cfg := map[string]string{"k": "v"}
+
+	got := []map[string]string{
+		fleetConfig(&fleet.Fleet{Backend: "agones", Config: cfg}),
+		fleetConfig(&fleet.Fleet{Backend: "plugin", Config: cfg}),
+	}
+
+	assert.Equal(t, []map[string]string{cfg, nil}, got)
 }

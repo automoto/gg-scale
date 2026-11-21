@@ -374,6 +374,69 @@ func (q *Queries) ListAllocationsForProject(ctx context.Context, arg ListAllocat
 	return items, nil
 }
 
+const listAllocationsPageForProject = `-- name: ListAllocationsPageForProject :many
+SELECT id, fleet_id, backend, backend_ref, region, address, status::text AS status
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND ($2::boolean OR released_at IS NULL)
+  AND ($3::bigint = 0 OR id < $3::bigint)
+ORDER BY id DESC
+LIMIT $4
+`
+
+type ListAllocationsPageForProjectParams struct {
+	ProjectID       int64
+	IncludeTerminal bool
+	BeforeID        int64
+	RowLimit        int32
+}
+
+type ListAllocationsPageForProjectRow struct {
+	ID         int64
+	FleetID    *int64
+	Backend    string
+	BackendRef string
+	Region     string
+	Address    string
+	Status     string
+}
+
+// Management API list: keyset on id, newest first. before_id = 0 starts at
+// the newest row.
+func (q *Queries) ListAllocationsPageForProject(ctx context.Context, arg ListAllocationsPageForProjectParams) ([]ListAllocationsPageForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listAllocationsPageForProject,
+		arg.ProjectID,
+		arg.IncludeTerminal,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllocationsPageForProjectRow
+	for rows.Next() {
+		var i ListAllocationsPageForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FleetID,
+			&i.Backend,
+			&i.BackendRef,
+			&i.Region,
+			&i.Address,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAllocationFailed = `-- name: MarkAllocationFailed :exec
 UPDATE game_server_allocations
 SET status      = 'failed',

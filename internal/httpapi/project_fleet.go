@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/automoto/gg-scale/internal/db"
+	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/managementtoken"
 )
@@ -18,20 +19,30 @@ import (
 const allocationEventRing = 50
 
 // projectFleet is a fleet template as the dashboard shows it. config is
-// returned by get_fleet only: its keys depend on the backend.
+// returned by get_fleet for the agones backend only.
 type projectFleet struct {
 	ID        int64             `json:"id" example:"3"`
 	Name      string            `json:"name" example:"default"`
 	Backend   string            `json:"backend" example:"agones"`
-	Config    map[string]string `json:"config,omitempty" doc:"The backend settings of the fleet. Only in get_fleet."`
+	Config    map[string]string `json:"config,omitempty" doc:"The settings of an agones fleet. Only in get_fleet. Left out for other backends, whose settings may hold secrets."`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// fleetConfig returns the config that a token may see: only the agones
+// backend, whose keys are known and not secret. A plugin config is free-form
+// and may hold a secret.
+func fleetConfig(f *fleet.Fleet) map[string]string {
+	if f.Backend != "agones" {
+		return nil
+	}
+	return f.Config
 }
 
 func newProjectFleet(f *fleet.Fleet, withConfig bool) projectFleet {
 	out := projectFleet{ID: f.ID, Name: f.Name, Backend: f.Backend, CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt}
 	if withConfig {
-		out.Config = f.Config
+		out.Config = fleetConfig(f)
 	}
 	return out
 }
@@ -87,11 +98,14 @@ func getFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *proj
 		return projectFleet{}, err
 	}
 	f, err := m.Fleets().GetByID(db.WithTenant(ctx, p.TenantID), in.FleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) || err == nil && f.ProjectID != p.ProjectID {
+	if errors.Is(err, fleet.ErrFleetNotFound) {
 		return projectFleet{}, errProjectNotFound()
 	}
 	if err != nil {
 		return projectFleet{}, err
+	}
+	if f.ProjectID != p.ProjectID {
+		return projectFleet{}, errProjectNotFound()
 	}
 	return newProjectFleet(f, true), nil
 }
@@ -127,42 +141,50 @@ type projectListAllocationsInput struct {
 	IncludeTerminal bool `query:"include_terminal" doc:"Also list finished allocations (shutdown and failed). The default is live ones only."`
 }
 
-// decodeOffsetCursor reads a cursor that is a row position.
-func decodeOffsetCursor(s string) (int, bool) {
+// decodeIDCursor reads a cursor that is a row ID: empty, or a positive number.
+func decodeIDCursor(s string) (int64, bool) {
 	if s == "" {
 		return 0, true
 	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
 		return 0, false
 	}
 	return n, true
 }
 
-// listAllocations pages newest first. The cursor is the position of the next
-// row, as on the dashboard page, so a new allocation between two calls moves
-// the rows by one.
+// listAllocations pages newest first by allocation ID: the cursor is the ID
+// of the last allocation of the page.
 func listAllocations(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListAllocationsInput) (projectAllocationList, error) {
-	m, err := fleetManager(d)
-	if err != nil {
+	if _, err := fleetManager(d); err != nil {
 		return projectAllocationList{}, err
 	}
-	offset, ok := decodeOffsetCursor(in.Cursor)
+	before, ok := decodeIDCursor(in.Cursor)
 	if !ok {
 		return projectAllocationList{}, huma.Error422UnprocessableEntity("cursor is not valid")
 	}
 	limit := in.limit()
-	rows, _, err := m.List(db.WithTenant(ctx, p.TenantID), p.ProjectID, in.IncludeTerminal, int(limit)+1, offset)
+	var rows []sqlcgen.ListAllocationsPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListAllocationsPageForProject(ctx, sqlcgen.ListAllocationsPageForProjectParams{
+			ProjectID: p.ProjectID, IncludeTerminal: in.IncludeTerminal, BeforeID: before, RowLimit: limit + 1,
+		})
+		return err
+	})
 	if err != nil {
 		return projectAllocationList{}, err
 	}
 	rows, more := trimPage(rows, limit)
 	out := projectAllocationList{Allocations: make([]projectAllocation, 0, len(rows))}
-	for _, a := range rows {
-		out.Allocations = append(out.Allocations, newProjectAllocation(a))
+	for _, r := range rows {
+		out.Allocations = append(out.Allocations, projectAllocation{
+			ID: r.ID, FleetID: derefInt64(r.FleetID), Backend: r.Backend, BackendRef: r.BackendRef,
+			Region: r.Region, Address: r.Address, Status: r.Status,
+		})
 	}
 	if more {
-		out.NextCursor = strconv.Itoa(offset + len(rows))
+		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
 	}
 	return out, nil
 }
@@ -180,11 +202,14 @@ func ownAllocation(ctx context.Context, d Deps, p managementtoken.Principal, id 
 	}
 	ctx = db.WithTenant(ctx, p.TenantID)
 	a, err := m.Get(ctx, fleet.AllocationID(id))
-	if errors.Is(err, fleet.ErrNotFound) || err == nil && a.ProjectID != p.ProjectID {
+	if errors.Is(err, fleet.ErrNotFound) {
 		return nil, nil, nil, errProjectNotFound()
 	}
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if a.ProjectID != p.ProjectID {
+		return nil, nil, nil, errProjectNotFound()
 	}
 	return ctx, m, a, nil
 }
@@ -243,4 +268,11 @@ func listAllocationEvents(ctx context.Context, d Deps, p managementtoken.Princip
 		})
 	}
 	return out, nil
+}
+
+func derefInt64(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

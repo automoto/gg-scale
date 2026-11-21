@@ -674,6 +674,9 @@ type Querier interface {
 	// and paginate. include_terminal=false keeps the page focused on live
 	// allocations; the UI toggles it via a query param.
 	ListAllocationsForProject(ctx context.Context, arg ListAllocationsForProjectParams) ([]ListAllocationsForProjectRow, error)
+	// Management API list: keyset on id, newest first. before_id = 0 starts at
+	// the newest row.
+	ListAllocationsPageForProject(ctx context.Context, arg ListAllocationsPageForProjectParams) ([]ListAllocationsPageForProjectRow, error)
 	ListControlPanelInvitationsForTenant(ctx context.Context, tenantID *int64) ([]ListControlPanelInvitationsForTenantRow, error)
 	ListControlPanelMembersForTenant(ctx context.Context, tenantID int64) ([]ListControlPanelMembersForTenantRow, error)
 	ListControlPanelTenantsForPlatformAdmin(ctx context.Context) ([]ListControlPanelTenantsForPlatformAdminRow, error)

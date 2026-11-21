@@ -1961,7 +1961,7 @@ components:
         config:
           additionalProperties:
             type: string
-          description: The backend settings of the fleet. Only in get_fleet.
+          description: The settings of an agones fleet. Only in get_fleet. Left out for other backends, whose settings may hold secrets.
           type: object
         created_at:
           format: date-time
@@ -6231,7 +6231,7 @@ paths:
         - Project Management
   /v1/project/fleets/{fleet_id}:
     get:
-      description: Returns one fleet with its backend settings. A fleet of another Game Project answers 404.
+      description: Returns one fleet. The settings (config) are returned for the agones backend only; a plugin backend config may hold secrets. A fleet of another Game Project answers 404.
       operationId: getProjectFleet
       parameters:
         - description: The fleet ID.

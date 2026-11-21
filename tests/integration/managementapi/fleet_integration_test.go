@@ -198,3 +198,42 @@ func TestAllocations_should_return_422_for_a_bad_cursor(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnprocessableEntity, got.status)
 }
+
+func TestFleets_get_should_leave_out_the_config_of_a_plugin_fleet(t *testing.T) {
+	f := newFleetFixture(t)
+	plugin := f.scalar(`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		SELECT tenant_id, id, 'plug', 'plugin', '{"api_key":"SECRET"}' FROM projects WHERE id = $1 RETURNING id`, f.projectA)
+	tok := f.scopedToken(managementtoken.ScopeFleetRead)
+
+	got := f.do(tok, http.MethodGet, "/v1/project/fleets/"+id(plugin), "")
+
+	assert.Equal(t, []any{http.StatusOK, false}, []any{got.status, strings.Contains(got.raw, "SECRET") || strings.Contains(got.raw, "config")}, got.raw)
+}
+
+func TestAllocations_paging_should_not_repeat_rows_when_a_new_one_arrives(t *testing.T) {
+	f := newFleetFixture(t)
+	fl := f.fleet(f.projectA, "alpha")
+	first := f.allocation(f.projectA, fl, "eu", "ready")
+	second := f.allocation(f.projectA, fl, "us", "ready")
+	tok := f.scopedToken(managementtoken.ScopeFleetRead)
+	p1 := f.do(tok, http.MethodGet, "/v1/project/allocations?limit=1", "")
+	require.NotNil(t, p1.body["next_cursor"], p1.raw)
+
+	f.allocation(f.projectA, fl, "new", "ready")
+	p2 := f.do(tok, http.MethodGet, "/v1/project/allocations?limit=1&cursor="+p1.body["next_cursor"].(string), "")
+
+	idOf := func(r response) any { return r.body["allocations"].([]any)[0].(map[string]any)["id"] }
+	assert.Equal(t, []any{float64(second), float64(first)}, []any{idOf(p1), idOf(p2)}, p1.raw+p2.raw)
+}
+
+func TestAllocations_should_return_422_for_a_non_positive_cursor(t *testing.T) {
+	f := newFleetFixture(t)
+	tok := f.scopedToken(managementtoken.ScopeFleetRead)
+
+	got := []int{
+		f.do(tok, http.MethodGet, "/v1/project/allocations?cursor=0", "").status,
+		f.do(tok, http.MethodGet, "/v1/project/allocations?cursor=-5", "").status,
+	}
+
+	assert.Equal(t, []int{http.StatusUnprocessableEntity, http.StatusUnprocessableEntity}, got)
+}

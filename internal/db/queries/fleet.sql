@@ -112,3 +112,15 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND allocation_id = sqlc.arg(allocation_id)
 ORDER BY id DESC
 LIMIT sqlc.arg(lim);
+
+-- name: ListAllocationsPageForProject :many
+-- Management API list: keyset on id, newest first. before_id = 0 starts at
+-- the newest row.
+SELECT id, fleet_id, backend, backend_ref, region, address, status::text AS status
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND (sqlc.arg(include_terminal)::boolean OR released_at IS NULL)
+  AND (sqlc.arg(before_id)::bigint = 0 OR id < sqlc.arg(before_id)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(row_limit);
