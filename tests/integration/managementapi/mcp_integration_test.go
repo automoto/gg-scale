@@ -129,7 +129,9 @@ func TestMCP_initialize_should_report_the_build_version(t *testing.T) {
 
 func TestMCP_tool_call_should_work_with_the_token_cache_on(t *testing.T) {
 	// Arrange
-	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL = 2 * time.Second })
+	f := newFixtureWith(t, func(d *httpapi.Deps) {
+		d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = 2*time.Second, 100
+	})
 
 	// Act
 	res := f.call(f.ownerToken(), "get_remote_config", map[string]any{})

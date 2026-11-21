@@ -181,7 +181,6 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 		if aerr := a.checkLive(tctx, row); aerr != nil {
 			return Principal{}, aerr
 		}
-		a.d.Cache.put(sum, row, now)
 	}
 	// The creator limit: the creator must still manage the tenant's projects.
 	ok, err := a.d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, rbac.ObjectProject, rbac.ActionManage)
@@ -200,6 +199,11 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 	if !decision.Allowed {
 		return Principal{}, &authError{http.StatusTooManyRequests,
 			fmt.Sprintf("rate limit exceeded; retry in %d seconds", int(math.Ceil(decision.RetryAfter.Seconds())))}
+	}
+
+	// Only a request that passed every check is cached.
+	if !cached {
+		a.d.Cache.put(sum, row, now)
 	}
 
 	// Only a request that is let through counts as a use, at most one write

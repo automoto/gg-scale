@@ -428,6 +428,7 @@ func TestLoad_should_read_management_limits(t *testing.T) {
 		{"MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", func(c *config.Config) int { return c.ManagementTokenMaxExpiryDays }},
 		{"MANAGEMENT_TOKEN_RATE_PER_SECOND", func(c *config.Config) int { return c.ManagementTokenRatePerSecond }},
 		{"MANAGEMENT_TOKEN_RATE_BURST", func(c *config.Config) int { return c.ManagementTokenRateBurst }},
+		{"MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES", func(c *config.Config) int { return c.ManagementTokenCacheMaxEntries }},
 		{"MANAGEMENT_AUTH_FAILURES_PER_MINUTE", func(c *config.Config) int { return c.ManagementAuthFailuresPerMinute }},
 		{"MANAGEMENT_AUTH_FAILURE_BURST", func(c *config.Config) int { return c.ManagementAuthFailureBurst }},
 		{"MANAGEMENT_MAX_PROJECT_TOKENS", func(c *config.Config) int { return c.ManagementMaxProjectTokens }},
@@ -507,6 +508,32 @@ func TestLoad_should_refuse_a_negative_management_token_cache_ttl(t *testing.T) 
 
 	// Assert
 	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_CACHE_TTL")
+}
+
+func TestLoad_should_default_the_management_token_cache_max_entries_to_10000(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	// Act
+	cfg, err := config.Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, 10000, cfg.ManagementTokenCacheMaxEntries)
+}
+
+func TestLoad_should_refuse_a_zero_management_token_cache_max_entries(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES", "0")
+
+	// Act
+	_, err := config.Load()
+
+	// Assert
+	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES")
 }
 
 func TestLoad_should_not_put_the_limit_value_in_the_error(t *testing.T) {

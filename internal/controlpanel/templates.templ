@@ -3152,6 +3152,8 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementTokenRateBurst)) }</dd>
 					<dt>Token cache time</dt>
 					<dd>{ vm.Snapshot.ManagementTokenCacheTTL.String() }</dd>
+					<dt>Token cache entries</dt>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementTokenCacheMaxEntries)) }</dd>
 					<dt>Active tokens per Game Project</dt>
 					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementMaxProjectTokens)) }</dd>
 					<dt>API keys per Game Project (create_api_key)</dt>

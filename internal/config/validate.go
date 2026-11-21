@@ -394,6 +394,7 @@ func (c *Config) checkFields() error {
 		{"MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", int64(c.ManagementTokenMaxExpiryDays)},
 		{"MANAGEMENT_TOKEN_RATE_PER_SECOND", int64(c.ManagementTokenRatePerSecond)},
 		{"MANAGEMENT_TOKEN_RATE_BURST", int64(c.ManagementTokenRateBurst)},
+		{"MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES", int64(c.ManagementTokenCacheMaxEntries)},
 		{"MANAGEMENT_MAX_PROJECT_TOKENS", int64(c.ManagementMaxProjectTokens)},
 		{"MANAGEMENT_MAX_PROJECT_API_KEYS", int64(c.ManagementMaxProjectAPIKeys)},
 		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},

@@ -738,10 +738,11 @@ func TestServerSettingsPage_should_show_leaderboard_limit_with_management_api_of
 
 func TestServerSettingsPage_should_show_the_management_token_cache_ttl(t *testing.T) {
 	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
-		Snapshot: ServerSettingsSnapshot{FeatureManagementAPIEnabled: true, ManagementTokenCacheTTL: 2 * time.Second},
+		Snapshot: ServerSettingsSnapshot{FeatureManagementAPIEnabled: true, ManagementTokenCacheTTL: 2 * time.Second, ManagementTokenCacheMaxEntries: 10000},
 	}))
 
 	assert.Contains(t, html, "<dt>Token cache time</dt><dd>2s</dd>")
+	assert.Contains(t, html, "<dt>Token cache entries</dt><dd>10000</dd>")
 }
 
 func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) {

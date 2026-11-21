@@ -290,7 +290,7 @@ func TestProjectAPI_attempt_cap_should_answer_422_above_the_int32_range(t *testi
 
 func TestProjectAPI_cached_token_should_work_after_revoke_until_the_cache_time_ends(t *testing.T) {
 	// Arrange
-	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL = time.Hour })
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
 	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
 	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
@@ -304,7 +304,7 @@ func TestProjectAPI_cached_token_should_work_after_revoke_until_the_cache_time_e
 
 func TestProjectAPI_cached_token_should_stop_when_the_creator_loses_manage(t *testing.T) {
 	// Arrange
-	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL = time.Hour })
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
@@ -318,12 +318,46 @@ func TestProjectAPI_cached_token_should_stop_when_the_creator_loses_manage(t *te
 	assert.Equal(t, http.StatusForbidden, got.status, got.raw)
 }
 
+func TestProjectAPI_should_not_cache_a_token_when_the_creator_check_fails(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
+	creator := f.user("member@example.com", f.tenantA, "member")
+	tok, id := f.token(f.tenantA, f.projectA, creator, nil, time.Hour)
+	require.Equal(t, http.StatusForbidden, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
+	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
+	require.NoError(t, f.authz.RemoveControlPanelRoles(creator, f.tenantA))
+	require.NoError(t, f.authz.SetControlPanelMembershipRole(creator, f.tenantA, "admin"))
+
+	// Act
+	got := f.do(tok, http.MethodGet, "/v1/project/health", "")
+
+	// Assert
+	assert.Equal(t, http.StatusUnauthorized, got.status, got.raw)
+}
+
+func TestProjectAPI_should_not_cache_a_token_when_the_rate_limit_refuses(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) {
+		d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100
+		d.ManagementTokenRatePerSecond, d.ManagementTokenBurst = 0.001, 0
+	})
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	require.Equal(t, http.StatusTooManyRequests, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
+	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
+
+	// Act
+	got := f.do(tok, http.MethodGet, "/v1/project/health", "")
+
+	// Assert
+	assert.Equal(t, http.StatusUnauthorized, got.status, got.raw)
+}
+
 func TestProjectAPI_cached_token_should_stop_when_it_expires(t *testing.T) {
 	// Arrange
 	var clock atomic.Int64
 	clock.Store(time.Now().UnixNano())
 	f := newFixtureWith(t, func(d *httpapi.Deps) {
-		d.ManagementTokenCacheTTL = 24 * time.Hour
+		d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = 24*time.Hour, 100
 		d.Now = func() time.Time { return time.Unix(0, clock.Load()) }
 	})
 	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)

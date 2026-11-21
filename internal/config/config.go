@@ -66,6 +66,10 @@ type Config struct {
 	// creator, takes effect within this time. 0 turns the cache off.
 	// Default 2s.
 	ManagementTokenCacheTTL time.Duration `env:"MANAGEMENT_TOKEN_CACHE_TTL" envDefault:"2s"`
+	// ManagementTokenCacheMaxEntries is the most token checks each app
+	// instance keeps. When the cache is full, the entry that ends first is
+	// removed. Default 10000.
+	ManagementTokenCacheMaxEntries int `env:"MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES" envDefault:"10000"`
 	// ManagementAuthFailuresPerMinute / ManagementAuthFailureBurst set the
 	// per-IP bucket that only failed token authentications use; valid tokens
 	// never use it. Defaults 10 / 10.
