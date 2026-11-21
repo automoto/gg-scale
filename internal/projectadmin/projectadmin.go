@@ -87,6 +87,12 @@ func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, 
 	return auditlog.WritePlatformService(ctx, tx, "management_token:"+strconv.FormatInt(a.TokenID, 10), action, target, payload)
 }
 
+// Audit writes the audit row of a change made outside this package, inside
+// the caller's tenant-scoped transaction tx.
+func (a Actor) Audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
+	return a.audit(ctx, tx, tenantID, projectID, action, target, payload)
+}
+
 // Revision is one kept settings revision.
 type Revision struct {
 	Revision    int64

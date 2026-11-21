@@ -5,11 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -38,6 +38,15 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "fleets list failed", "err", err)
 			http.Error(w, "fleets list failed", http.StatusInternalServerError)
 			return
+		}
+		deleted, err := h.fleet.Fleets().ListDeletedForProject(tenantCtx, projectID)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "deleted fleets list failed", "err", err)
+			http.Error(w, "fleets list failed", http.StatusInternalServerError)
+			return
+		}
+		for _, f := range deleted {
+			view.DeletedFleets = append(view.DeletedFleets, DeletedFleetRowView{ID: f.ID, Name: f.Name, Backend: f.Backend})
 		}
 		for _, f := range fleets {
 			view.Fleets = append(view.Fleets, FleetRowView{
@@ -140,26 +149,19 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	f, err := h.fleet.Fleets().Create(tenantCtx, fleet.FleetCreate{
+	f, err := fleet.CreateFleet(r.Context(), h.pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      name,
 		Backend:   backend,
 		Config:    cfg,
-	})
+	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
+		var status int
+		view.Error, status = fleetFormError("Create failed", err)
 		slog.ErrorContext(r.Context(), "create fleet failed", "err", err)
-		view.Error = "Create failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		webutil.Render(r, w, NewFleetPage(view))
 		return
-	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.create", strconv.FormatInt(f.ID, 10), map[string]any{
-		"project_id": projectID,
-		"fleet_name": f.Name,
-		"backend":    f.Backend,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.create", "err", auditErr)
 	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+f.Name+"\" created.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -191,7 +193,7 @@ func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
 		return
 	}
-	if f.ProjectID != projectID {
+	if f.ProjectID != projectID || f.DeletedAt != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -267,23 +269,17 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
-	if err := h.fleet.Fleets().Update(tenantCtx, fleet.FleetUpdate{
-		ID:      fleetID,
-		Name:    name,
-		Backend: existing.Backend,
-		Config:  cfg,
-	}); err != nil {
+	if _, err := fleet.UpdateFleet(r.Context(), h.pool, tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+		if errors.Is(err, fleet.ErrFleetNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		var status int
+		view.Error, status = fleetFormError("Update failed", err)
 		slog.ErrorContext(r.Context(), "update fleet failed", "err", err)
-		view.Error = "Update failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		webutil.Render(r, w, EditFleetPage(view))
 		return
-	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.update", strconv.FormatInt(fleetID, 10), map[string]any{
-		"project_id": projectID,
-		"fleet_name": name,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.update", "err", auditErr)
 	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+name+"\" updated.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
@@ -322,19 +318,80 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
-	if err := h.fleet.Fleets().SoftDelete(tenantCtx, fleetID); err != nil {
+	session, _ := sessionFromContext(r.Context())
+	if err := fleet.DeleteFleet(r.Context(), h.pool, tenantID, projectID, fleetID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+		if errors.Is(err, fleet.ErrFleetNotFound) {
+			http.NotFound(w, r)
+			return
+		}
 		slog.ErrorContext(r.Context(), "delete fleet failed", "err", err)
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.delete", strconv.FormatInt(fleetID, 10), map[string]any{
-		"project_id": projectID,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.delete", "err", auditErr)
-	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet deleted.")
 	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+// fleetsRestoreHandler brings back a deleted template. A live template with
+// the same name blocks the restore.
+func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	if !ok {
+		return
+	}
+	fleetID, ok := parsePathID(w, r, "fleetID")
+	if !ok {
+		return
+	}
+	if h.fleet == nil {
+		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
+		return
+	}
+	tenantCtx := db.WithTenant(r.Context(), tenantID)
+	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
+		return
+	}
+	if existing.ProjectID != projectID {
+		http.NotFound(w, r)
+		return
+	}
+	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
+		return
+	}
+	session, _ := sessionFromContext(r.Context())
+	f, err := fleet.RestoreFleet(r.Context(), h.pool, tenantID, projectID, fleetID, projectadmin.Actor{UserID: session.User.ID})
+	base := fleetsBasePath(tenantID, projectID) + queryFlash
+	switch {
+	case errors.Is(err, fleet.ErrFleetNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, fleet.ErrFleetNameTaken):
+		http.Redirect(w, r, base+url.QueryEscape("Cannot restore: a fleet with that name exists. Rename or delete it first."), http.StatusSeeOther)
+	case err != nil:
+		slog.ErrorContext(r.Context(), "restore fleet failed", "err", err)
+		http.Error(w, "restore failed", http.StatusInternalServerError)
+	default:
+		http.Redirect(w, r, base+url.QueryEscape("Fleet \""+f.Name+"\" restored."), http.StatusSeeOther)
+	}
+}
+
+// fleetFormError returns the text and HTTP status for a failed fleet write.
+// An invalid input or a taken name shows its own text; other errors show a
+// fixed text, so no database text reaches the page.
+func fleetFormError(prefix string, err error) (string, int) {
+	var invalid fleet.InvalidError
+	switch {
+	case errors.As(err, &invalid):
+		return prefix + ": " + invalid.Error(), http.StatusUnprocessableEntity
+	case errors.Is(err, fleet.ErrFleetNameTaken):
+		return prefix + ": a fleet with that name already exists.", http.StatusConflict
+	}
+	return prefix + ".", http.StatusInternalServerError
 }
 
 // parseFleetConfigForm extracts the per-backend fields from the submitted
@@ -363,8 +420,8 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 	for k, v := range pairs {
 		cfg["selector."+k] = v
 	}
-	if cfg["fleet_name"] == "" {
-		errs["fleet_name"] = "Fleet name is required."
+	if err := fleet.ValidateConfig("agones", cfg); err != nil {
+		errs["fleet_name"] = err.Error()
 	}
 	return cfg, errs
 }
@@ -406,10 +463,10 @@ func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overC
 // arrays. Bounded only by the overall form-body limit before this; a single
 // request used to be able to stuff thousands of entries into a fleet config,
 // JSON-serialise them, store them, and re-render them on the next page load.
-const fleetFormKeyValuePairsCap = 64
+const fleetFormKeyValuePairsCap = fleet.MaxConfigKeys
 
 // fleetFormKeyOrValueLenCap bounds a single key or value within those forms.
-const fleetFormKeyOrValueLenCap = 256
+const fleetFormKeyOrValueLenCap = fleet.MaxConfigKeyOrVal
 
 // summarizeFleetConfig returns a one-line preview for the list page, so
 // operators can scan templates without opening each one.

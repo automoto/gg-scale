@@ -68,6 +68,7 @@ type FleetStore interface {
 	GetByID(ctx context.Context, id int64) (*Fleet, error)
 	GetByName(ctx context.Context, projectID int64, name string) (*Fleet, error)
 	ListForProject(ctx context.Context, projectID int64) ([]*Fleet, error)
+	ListDeletedForProject(ctx context.Context, projectID int64) ([]*Fleet, error)
 	Update(ctx context.Context, in FleetUpdate) error
 	SoftDelete(ctx context.Context, id int64) error
 }
@@ -169,6 +170,27 @@ func (s *PostgresFleetStore) ListForProject(ctx context.Context, projectID int64
 	var out []*Fleet
 	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
 		rows, qerr := sqlcgen.New(tx).ListFleetsForProject(ctx, projectID)
+		if qerr != nil {
+			return qerr
+		}
+		for _, row := range rows {
+			f, ferr := fleetRowToModel(row)
+			if ferr != nil {
+				return ferr
+			}
+			out = append(out, f)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ListDeletedForProject returns the deleted fleet templates of a project,
+// newest deletion first.
+func (s *PostgresFleetStore) ListDeletedForProject(ctx context.Context, projectID int64) ([]*Fleet, error) {
+	var out []*Fleet
+	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+		rows, qerr := sqlcgen.New(tx).ListDeletedFleetsForProject(ctx, projectID)
 		if qerr != nil {
 			return qerr
 		}

@@ -196,3 +196,13 @@ func TestNewFleetAllocationPage_renders_fleet_dropdown_with_mismatch_marker(t *t
 	assert.Contains(t, html, "stale")
 	assert.Contains(t, html, "backend mismatch")
 }
+
+func TestFleetsListPage_lists_deleted_fleets_with_a_restore_form(t *testing.T) {
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "agones", Enabled: true, CSRFToken: "tok",
+		DeletedFleets: []DeletedFleetRowView{{ID: 7, Name: "old-one", Backend: "agones"}},
+	}))
+	assert.Contains(t, html, "old-one")
+	assert.Contains(t, html, `action="/v1/control-panel/tenants/1/projects/2/fleets/7/restore"`)
+	assert.Contains(t, html, `name="_csrf" value="tok"`)
+}

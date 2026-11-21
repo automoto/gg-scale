@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/managementtoken"
@@ -102,6 +103,7 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 		// per-IP buckets for unknown keys and failed token logins never
 		// change an answer.
 		ProxyTrust:           ratelimit.NewProxyTrust(clientIPHeader, []string{"127.0.0.0/8", "::1/128"}),
+		ControlPanel:         controlpanel.Config{FleetEnabled: true},
 		ManagementAPIEnabled: true, ManagementTokenRatePerSecond: 1000, ManagementTokenBurst: 1000,
 	}))
 	t.Cleanup(srv.Close)

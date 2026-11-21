@@ -1834,6 +1834,27 @@ components:
       required:
         - label
       type: object
+    ProjectCreateFleetBody:
+      additionalProperties: false
+      properties:
+        backend:
+          description: agones or plugin:<name>.
+          examples:
+            - agones
+          type: string
+        config:
+          additionalProperties:
+            type: string
+          description: "agones: fleet_name (required), namespace, and selector.<label> keys. A plugin backend takes its own keys."
+          type: object
+        name:
+          examples:
+            - ranked
+          type: string
+      required:
+        - name
+        - backend
+      type: object
     ProjectCreateLeaderboardBody:
       additionalProperties: false
       properties:
@@ -2801,6 +2822,18 @@ components:
           type: string
       required:
         - label
+      type: object
+    ProjectUpdateFleetBody:
+      additionalProperties: false
+      properties:
+        config:
+          additionalProperties:
+            type: string
+          description: The full new config; it replaces the old one. Left out keeps the config. The backend cannot change.
+          type: object
+        name:
+          description: The new name. Left out keeps the name.
+          type: string
       type: object
     ProjectUpdateLeaderboardBody:
       additionalProperties: false
@@ -6229,7 +6262,65 @@ paths:
       summary: List fleets
       tags:
         - Project Management
+    post:
+      description: Creates a fleet and returns it. The config is returned for the agones backend only; a plugin backend config may hold secrets and is never returned or logged. Answers 409 when a live fleet has the name, 422 for a bad config.
+      operationId: createProjectFleet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateFleetBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFleet"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Create a fleet
+      tags:
+        - Project Management
   /v1/project/fleets/{fleet_id}:
+    delete:
+      description: Soft-deletes one fleet. It does not stop live allocations. Use restore_fleet to undo. Answers 404 for a deleted fleet or a fleet of another Game Project.
+      operationId: deleteProjectFleet
+      parameters:
+        - description: The fleet ID.
+          in: path
+          name: fleet_id
+          required: true
+          schema:
+            description: The fleet ID.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDeletedResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Delete a fleet
+      tags:
+        - Project Management
     get:
       description: Returns one fleet. The settings (config) are returned for the agones backend only; a plugin backend config may hold secrets. A fleet of another Game Project answers 404.
       operationId: getProjectFleet
@@ -6259,6 +6350,75 @@ paths:
       security:
         - ManagementToken: []
       summary: Get a fleet
+      tags:
+        - Project Management
+    put:
+      description: Changes the name or config of one fleet and returns it. A field that is left out stays as it is. The config is returned for the agones backend only. Answers 404 for a deleted fleet or a fleet of another Game Project.
+      operationId: updateProjectFleet
+      parameters:
+        - description: The fleet ID.
+          in: path
+          name: fleet_id
+          required: true
+          schema:
+            description: The fleet ID.
+            format: int64
+            minimum: 1
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateFleetBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFleet"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Update a fleet
+      tags:
+        - Project Management
+  /v1/project/fleets/{fleet_id}/restore:
+    post:
+      description: Brings back a deleted fleet and returns it. Answers 409 when a live fleet has the name, and 404 for a fleet that is not deleted or belongs to another Game Project.
+      operationId: restoreProjectFleet
+      parameters:
+        - description: The fleet ID.
+          in: path
+          name: fleet_id
+          required: true
+          schema:
+            description: The fleet ID.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectFleet"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Restore a deleted fleet
       tags:
         - Project Management
   /v1/project/health:

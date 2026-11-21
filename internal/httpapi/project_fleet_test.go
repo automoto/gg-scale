@@ -14,7 +14,9 @@ import (
 	"github.com/automoto/gg-scale/internal/rbac"
 )
 
-var fleetTools = []string{"get_allocation", "get_fleet", "list_allocation_events", "list_allocations", "list_fleets"}
+var fleetTools = []string{"create_fleet", "delete_fleet", "get_allocation", "get_fleet", "list_allocation_events", "list_allocations", "list_fleets", "restore_fleet", "update_fleet"}
+
+var fleetWriteTools = []string{"create_fleet", "delete_fleet", "restore_fleet", "update_fleet"}
 
 // registeredTools returns the sorted tool names of the /v1/project operations
 // that registerProjectManagementRoutes adds for d, other than the open ones.
@@ -23,7 +25,7 @@ func registeredTools(d Deps) []string {
 	registerProjectManagementRoutes(groupAPI(chi.NewRouter(), cfg), d)
 	var out []string
 	for _, tool := range managementToolArguments(cfg.OpenAPI) {
-		if tool.op.Metadata[managementScopeMetadata] == managementtoken.ScopeFleetRead {
+		if scope := tool.op.Metadata[managementScopeMetadata]; scope == managementtoken.ScopeFleetRead || scope == managementtoken.ScopeFleetWrite {
 			out = append(out, tool.op.Metadata[managementToolMetadata].(string))
 		}
 	}
@@ -42,7 +44,7 @@ func TestProjectFleetOps_should_be_registered_when_the_fleet_switch_is_on(t *tes
 	assert.Equal(t, fleetTools, registeredTools(d))
 }
 
-func TestProjectFleetOps_should_need_the_fleet_read_scope(t *testing.T) {
+func TestProjectFleetOps_should_need_the_fleet_read_or_write_scope(t *testing.T) {
 	got := map[string]string{}
 	for _, row := range projectOps {
 		if row.fleet {
@@ -53,6 +55,9 @@ func TestProjectFleetOps_should_need_the_fleet_read_scope(t *testing.T) {
 	want := map[string]string{}
 	for _, tool := range fleetTools {
 		want[tool] = managementtoken.ScopeFleetRead
+		if slices.Contains(fleetWriteTools, tool) {
+			want[tool] = managementtoken.ScopeFleetWrite
+		}
 	}
 	assert.Equal(t, want, got)
 }

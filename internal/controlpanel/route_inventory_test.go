@@ -88,6 +88,7 @@ var postRouteGuards = map[string]guardTier{
 	"/tenants/{tenantID}/projects/{projectID}/fleets":                                tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}":                      tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}/delete":               tierTenantAdmin,
+	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}/restore":              tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards":                          tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards/{leaderboardID}":          tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards/{leaderboardID}/delete":   tierTenantAdmin,

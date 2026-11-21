@@ -204,7 +204,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write", "fleets": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write", "fleets": "write"}, selections(rows))
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
@@ -301,7 +301,7 @@ func TestAccessOptions_should_give_each_reason_on_the_fleets_row(t *testing.T) {
 		{name: "should_say_turned_off_when_the_switch_is_off", gate: reasonSwitch, want: reasonSwitch},
 		{name: "should_say_not_enabled_when_the_grant_is_missing", gate: reasonGrant, want: reasonGrant},
 		{name: "should_say_role_when_the_creator_fails_the_pair", want: reasonRole},
-		{name: "should_give_no_reason_when_the_creator_passes_the_pair", grantable: []string{managementtoken.ScopeFleetRead}, want: ""},
+		{name: "should_give_no_reason_when_the_creator_passes_the_pair", grantable: []string{managementtoken.ScopeFleetRead, managementtoken.ScopeFleetWrite}, want: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

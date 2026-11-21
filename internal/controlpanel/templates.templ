@@ -2373,6 +2373,34 @@ templ FleetsListPage(vm FleetsListView) {
 				</table>
 			}
 		</section>
+		if len(vm.DeletedFleets) > 0 {
+			<section class="card">
+				<h2>Deleted fleets</h2>
+				<table>
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Backend</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, f := range vm.DeletedFleets {
+							<tr>
+								<td><code>{ f.Name }</code></td>
+								<td><code>{ f.Backend }</code></td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(f.ID) + "/restore") }>
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="secondary outline btn-inline">Restore</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</section>
+		}
 	}
 }
 

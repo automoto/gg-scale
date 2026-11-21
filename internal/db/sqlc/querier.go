@@ -516,6 +516,8 @@ type Querier interface {
 	// Feeds the PATCH /v1/profile email guard: is the address changing, is it
 	// already verified, and when did the last code go out (resend cooldown).
 	GetProfileEmailState(ctx context.Context, id int64) (GetProfileEmailStateRow, error)
+	// A live or deleted fleet of one project. A row of another project is not found.
+	GetProjectFleet(ctx context.Context, arg GetProjectFleetParams) (Fleet, error)
 	GetProjectName(ctx context.Context, projectID int64) (string, error)
 	// Runtime read for the Steam sign-in endpoint, tenant-scoped via RLS GUC.
 	GetProjectSteamAuthConfig(ctx context.Context, projectID int64) (GetProjectSteamAuthConfigRow, error)
@@ -685,6 +687,8 @@ type Querier interface {
 	// Powers the /v1/control-panel/admin/users page. tenant_count is a
 	// correlated subquery so users with zero memberships still appear.
 	ListControlPanelUsersForPlatformAdmin(ctx context.Context, arg ListControlPanelUsersForPlatformAdminParams) ([]ListControlPanelUsersForPlatformAdminRow, error)
+	// Deleted fleets of a project, newest deletion first, for the restore list.
+	ListDeletedFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error)
 	ListDeletedLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListDeletedLeaderboardsForProjectRow, error)
 	// Boards whose scheduled reset boundary has passed, locked for the reset
 	// transaction so two job runs can never double-archive a period. as_of is the
@@ -993,6 +997,9 @@ type Querier interface {
 	// Undo a code reservation only when it is still the code whose delivery
 	// failed. A concurrent request that installed a newer code must win.
 	RestorePlayerAccountVerificationCode(ctx context.Context, arg RestorePlayerAccountVerificationCodeParams) error
+	// Clears deleted_at. It fails with a unique violation when a live fleet of the
+	// project has the same name.
+	RestoreProjectFleet(ctx context.Context, arg RestoreProjectFleetParams) (Fleet, error)
 	// Retiring is idempotent and keeps the row. A retired node is never probed
 	// or advertised again.
 	RetireRelayNode(ctx context.Context, id int64) (RelayNode, error)
@@ -1103,6 +1110,7 @@ type Querier interface {
 	SetTenantTierIfUpgrade(ctx context.Context, tier int16) (int64, error)
 	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error)
+	SoftDeleteProjectFleet(ctx context.Context, arg SoftDeleteProjectFleetParams) (Fleet, error)
 	// Soft-deletes and returns the freed byte count (octet_length(value::text)) so
 	// the caller can decrement the tenant storage counter in the same tx. Returns
 	// no rows when the object is already absent (delete is idempotent).
@@ -1169,6 +1177,7 @@ type Querier interface {
 	// Self-set secondary identifier. NULL clears it. The unique partial index
 	// on (project_id, xuid) rejects collisions with a constraint violation.
 	UpdateProfileXuid(ctx context.Context, arg UpdateProfileXuidParams) error
+	UpdateProjectFleet(ctx context.Context, arg UpdateProjectFleetParams) (Fleet, error)
 	// A NULL key keeps the stored one, so the settings form can update the app id
 	// without re-entering the secret (replace-on-write).
 	UpdateProjectSteamAuthConfig(ctx context.Context, arg UpdateProjectSteamAuthConfigParams) (int64, error)

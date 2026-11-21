@@ -524,3 +524,35 @@ func postFormWithCookie(t *testing.T, urlStr string, form url.Values, cookie *ht
 	require.NoError(t, err)
 	return resp
 }
+
+func TestControlPanelFleet_delete_then_restore_lists_the_fleet_again_and_audits_the_user(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-restore")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	srv, _ := newControlPanelFleetServer(t, c, newStubBackend("stub"), nil)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	name := seedFleetTemplate(t, c, tenantID, projectID, "stub")
+	var fleetID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT id FROM fleets WHERE tenant_id = $1 AND name = $2`, tenantID, name).Scan(&fleetID))
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
+	one := base + "/" + strconv.FormatInt(fleetID, 10)
+
+	del := postFormWithCookie(t, one+"/delete", url.Values{"_csrf": {csrf}}, cookie)
+	del.Body.Close()
+	deletedList := getWithCookie(t, base, cookie)
+	restore := postFormWithCookie(t, one+"/restore", url.Values{"_csrf": {csrf}}, cookie)
+	restore.Body.Close()
+	restoredList := getWithCookie(t, base, cookie)
+
+	var audited int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM platform_audit_log
+		 WHERE action IN ('fleet.template.delete', 'fleet.template.restore') AND target = $1 AND actor_user_id = $2`,
+		strconv.FormatInt(fleetID, 10), ownerID).Scan(&audited))
+	assert.Equal(t, []any{http.StatusSeeOther, true, http.StatusSeeOther, false, 2},
+		[]any{del.StatusCode, strings.Contains(deletedList, "/restore"), restore.StatusCode, strings.Contains(restoredList, "/restore"), audited})
+}

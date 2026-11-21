@@ -12,6 +12,7 @@ import (
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/managementtoken"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 // allocationEventRing is the number of events that the database keeps for
@@ -104,8 +105,132 @@ func getFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *proj
 	if err != nil {
 		return projectFleet{}, err
 	}
-	if f.ProjectID != p.ProjectID {
+	if f.ProjectID != p.ProjectID || f.DeletedAt != nil {
 		return projectFleet{}, errProjectNotFound()
+	}
+	return newProjectFleet(f, true), nil
+}
+
+// fleetWriteError maps the errors of the fleet writes to safe client errors.
+// The texts never carry a config value. Other errors are returned unchanged
+// and become a 500.
+func fleetWriteError(err error) error {
+	var invalid fleet.InvalidError
+	switch {
+	case errors.Is(err, fleet.ErrFleetNotFound):
+		return errProjectNotFound()
+	case errors.Is(err, fleet.ErrFleetNameTaken):
+		return huma.Error409Conflict("a fleet with that name already exists in this Game Project")
+	case errors.As(err, &invalid):
+		return huma.Error422UnprocessableEntity(invalid.Error())
+	}
+	return err
+}
+
+// requireBackendFeature refuses the request when the tenant has no feature
+// grant for the fleet backend, as the dashboard does for each fleet write.
+func requireBackendFeature(ctx context.Context, d Deps, p managementtoken.Principal, backend string) error {
+	feature, ok := rbac.BackendFeature(backend)
+	if !ok {
+		return huma.Error422UnprocessableEntity("backend must be agones or plugin:<name>")
+	}
+	on, err := d.RBAC.FeatureEnabled(ctx, p.TenantID, p.ProjectID, feature)
+	if err != nil {
+		return serverError(ctx, "project management: feature check", err)
+	}
+	if !on {
+		return huma.Error403Forbidden("This fleet backend is not enabled for this Account Tenant.")
+	}
+	return nil
+}
+
+// ownFleet returns the fleet (live or deleted) of this project and checks
+// the grant of its backend, or answers 404.
+func ownFleet(ctx context.Context, d Deps, p managementtoken.Principal, id int64) (*fleet.Fleet, error) {
+	m, err := fleetManager(d)
+	if err != nil {
+		return nil, err
+	}
+	f, err := m.Fleets().GetByID(db.WithTenant(ctx, p.TenantID), id)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		return nil, errProjectNotFound()
+	}
+	if err != nil {
+		return nil, err
+	}
+	if f.ProjectID != p.ProjectID {
+		return nil, errProjectNotFound()
+	}
+	if err := requireBackendFeature(ctx, d, p, f.Backend); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+type projectCreateFleetBody struct {
+	Name    string            `json:"name" example:"ranked"`
+	Backend string            `json:"backend" example:"agones" doc:"agones or plugin:<name>."`
+	Config  map[string]string `json:"config,omitempty" doc:"agones: fleet_name (required), namespace, and selector.<label> keys. A plugin backend takes its own keys."`
+}
+
+type projectCreateFleetInput struct {
+	Body projectCreateFleetBody
+}
+
+func createFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateFleetInput) (projectFleet, error) {
+	if _, err := fleetManager(d); err != nil {
+		return projectFleet{}, err
+	}
+	if err := requireBackendFeature(ctx, d, p, in.Body.Backend); err != nil {
+		return projectFleet{}, err
+	}
+	f, err := fleet.CreateFleet(ctx, d.Pool, p.TenantID, fleet.FleetCreate{
+		ProjectID: p.ProjectID, Name: in.Body.Name, Backend: in.Body.Backend, Config: in.Body.Config,
+	}, projectActor(p))
+	if err != nil {
+		return projectFleet{}, fleetWriteError(err)
+	}
+	return newProjectFleet(f, true), nil
+}
+
+type projectUpdateFleetBody struct {
+	Name   *string           `json:"name,omitempty" doc:"The new name. Left out keeps the name."`
+	Config map[string]string `json:"config,omitempty" doc:"The full new config; it replaces the old one. Left out keeps the config. The backend cannot change."`
+}
+
+type projectUpdateFleetInput struct {
+	FleetID int64 `path:"fleet_id" minimum:"1" doc:"The fleet ID."`
+	Body    projectUpdateFleetBody
+}
+
+func updateFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateFleetInput) (projectFleet, error) {
+	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
+		return projectFleet{}, err
+	}
+	f, err := fleet.UpdateFleet(ctx, d.Pool, p.TenantID, p.ProjectID, in.FleetID, in.Body.Name, in.Body.Config, projectActor(p))
+	if err != nil {
+		return projectFleet{}, fleetWriteError(err)
+	}
+	return newProjectFleet(f, true), nil
+}
+
+func deleteFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectFleetInput) (projectDeletedResult, error) {
+	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
+		return projectDeletedResult{}, err
+	}
+	if err := fleet.DeleteFleet(ctx, d.Pool, p.TenantID, p.ProjectID, in.FleetID, projectActor(p)); err != nil {
+		return projectDeletedResult{}, fleetWriteError(err)
+	}
+	return projectDeletedResult{Deleted: true, Note: "Allocations are kept. Use restore_fleet to undo."}, nil
+}
+
+func restoreFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectFleetInput) (projectFleet, error) {
+	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
+		return projectFleet{}, err
+	}
+	f, err := fleet.RestoreFleet(ctx, d.Pool, p.TenantID, p.ProjectID, in.FleetID, projectActor(p))
+	if err != nil {
+		return projectFleet{}, fleetWriteError(err)
 	}
 	return newProjectFleet(f, true), nil
 }

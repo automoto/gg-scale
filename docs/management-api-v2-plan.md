@@ -321,11 +321,11 @@ Do the stages in order. Write failing tests first. After each stage:
 ### Stage 3: fleets (class 1)
 
 - [x] `list_fleets`, `get_fleet`, `list_allocations`, `get_allocation`, `list_allocation_events` (`fleet:read`), paged.
-- [ ] `create_fleet`, `update_fleet`, `delete_fleet` (`fleet:write`).
-- [ ] Fleet restore: query, `restore_fleet` operation, and a restore button on the dashboard fleet list.
-- [ ] Fleet writes take an actor and write the audit row in the transaction, for the dashboard and for tokens.
+- [x] `create_fleet`, `update_fleet`, `delete_fleet` (`fleet:write`).
+- [x] Fleet restore: query, `restore_fleet` operation, and a restore button on the dashboard fleet list.
+- [x] Fleet writes take an actor and write the audit row in the transaction, for the dashboard and for tokens.
 - [x] The operations are registered only when `FEATURE_FLEET_ENABLED` is on, and each one checks the `dedicated_servers` feature grant.
-- [ ] Tests: off switch hides the tools; no grant gives 403; delete then restore.
+- [x] Tests: off switch hides the tools; no grant gives 403; delete then restore.
 
 ### Stage 4: risky operations (class 2)
 

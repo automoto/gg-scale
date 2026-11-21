@@ -31,6 +31,7 @@ const (
 	ScopeLimitsRead        = "limits:read"
 	ScopeLimitsWrite       = "limits:write"
 	ScopeFleetRead         = "fleet:read"
+	ScopeFleetWrite        = "fleet:write"
 )
 
 // Scope classes.
@@ -90,6 +91,7 @@ var Scopes = []ScopePair{
 	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeFleetRead, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionRead, Resource: "fleets"},
+	{Scope: ScopeFleetWrite, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionManage, Resource: "fleets"},
 }
 
 // Resource is one row of the access table on the token page.

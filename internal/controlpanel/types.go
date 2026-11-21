@@ -885,7 +885,16 @@ type FleetsListView struct {
 	BackendConfigured string
 	Enabled           bool
 	Fleets            []FleetRowView
+	DeletedFleets     []DeletedFleetRowView
 	Message           string
+}
+
+// DeletedFleetRowView is one deleted fleet on the fleets list, with its
+// restore button.
+type DeletedFleetRowView struct {
+	ID      int64
+	Name    string
+	Backend string
 }
 
 // FleetRowView is one row on the fleets list.

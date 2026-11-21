@@ -288,6 +288,63 @@ var projectOps = []projectOp{
 		handler: projectHandler(getFleet),
 	},
 	{
+		tool: "create_fleet",
+		description: "Create a fleet (dedicated server template) in this Game Project. backend is agones or plugin:<name>. " +
+			"An agones config needs fleet_name and may have namespace and selector.<label> keys. " +
+			"The result shows the config for the agones backend only. Answers 409 when the name is in use.",
+		scope: managementtoken.ScopeFleetWrite,
+		fleet: true,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/fleets", OperationID: "createProjectFleet",
+			Summary: "Create a fleet",
+			Description: "Creates a fleet and returns it. The config is returned for the agones backend only; a plugin backend config " +
+				"may hold secrets and is never returned or logged. Answers 409 when a live fleet has the name, 422 for a bad config.",
+		},
+		handler: projectHandler(createFleet),
+	},
+	{
+		tool: "update_fleet",
+		description: "Change the name or the config of one fleet of this Game Project. The config replaces the old one. " +
+			"The backend cannot change. A deleted fleet answers 404.",
+		scope: managementtoken.ScopeFleetWrite,
+		fleet: true,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/fleets/{fleet_id}", OperationID: "updateProjectFleet",
+			Summary: "Update a fleet",
+			Description: "Changes the name or config of one fleet and returns it. A field that is left out stays as it is. " +
+				"The config is returned for the agones backend only. Answers 404 for a deleted fleet or a fleet of another Game Project.",
+		},
+		handler: projectHandler(updateFleet),
+	},
+	{
+		tool: "delete_fleet",
+		description: "Delete one fleet of this Game Project. New allocations cannot use it. Allocations and their history are kept. " +
+			"Use restore_fleet to undo.",
+		scope: managementtoken.ScopeFleetWrite,
+		fleet: true,
+		op: huma.Operation{
+			Method: http.MethodDelete, Path: "/v1/project/fleets/{fleet_id}", OperationID: "deleteProjectFleet",
+			Summary: "Delete a fleet",
+			Description: "Soft-deletes one fleet. It does not stop live allocations. Use restore_fleet to undo. " +
+				"Answers 404 for a deleted fleet or a fleet of another Game Project.",
+		},
+		handler: projectHandler(deleteFleet),
+	},
+	{
+		tool: "restore_fleet",
+		description: "Undo delete_fleet: bring back a deleted fleet of this Game Project with the same ID, name, backend, and config. " +
+			"Answers 409 when a live fleet now has the name, and 404 when the fleet is not deleted.",
+		scope: managementtoken.ScopeFleetWrite,
+		fleet: true,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/fleets/{fleet_id}/restore", OperationID: "restoreProjectFleet",
+			Summary: "Restore a deleted fleet",
+			Description: "Brings back a deleted fleet and returns it. Answers 409 when a live fleet has the name, and 404 for a fleet that is " +
+				"not deleted or belongs to another Game Project.",
+		},
+		handler: projectHandler(restoreFleet),
+	},
+	{
 		tool: "list_allocations",
 		description: "List the game server allocations of this Game Project, newest first: ID, fleet, region, address, and status. " +
 			"Set include_terminal to also list shutdown and failed ones. Paged.",

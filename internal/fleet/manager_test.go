@@ -276,6 +276,10 @@ func (s *fakeFleetStore) ListForProject(_ context.Context, projectID int64) ([]*
 	return out, nil
 }
 
+func (s *fakeFleetStore) ListDeletedForProject(_ context.Context, _ int64) ([]*fleet.Fleet, error) {
+	return nil, nil
+}
+
 func (s *fakeFleetStore) Update(_ context.Context, _ fleet.FleetUpdate) error { return nil }
 func (s *fakeFleetStore) SoftDelete(_ context.Context, _ int64) error         { return nil }
 

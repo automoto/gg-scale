@@ -298,6 +298,7 @@ func New(d Deps) http.Handler {
 				r.Post("/projects/{projectID}/fleets", h.fleetsCreateHandler)
 				r.Post("/projects/{projectID}/fleets/{fleetID}", h.fleetsUpdateHandler)
 				r.Post("/projects/{projectID}/fleets/{fleetID}/delete", h.fleetsDeleteHandler)
+				r.Post("/projects/{projectID}/fleets/{fleetID}/restore", h.fleetsRestoreHandler)
 				r.Get("/fleet/backends", h.fleetBackendsPage)
 			})
 		})

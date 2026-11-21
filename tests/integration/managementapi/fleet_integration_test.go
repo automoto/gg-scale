@@ -28,7 +28,8 @@ func newFleetFixture(t *testing.T) *fixture {
 		pool = d.Pool
 		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), nil, fleet.ManagerOptions{})
 	})
-	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES ($1, 'dedicated_servers', true)`, f.tenantA)
+	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES
+		($1, 'dedicated_servers', true), ($1, 'fleet_agones_backend', true), ($1, 'fleet_plugin_backend', true)`, f.tenantA)
 	return f
 }
 
