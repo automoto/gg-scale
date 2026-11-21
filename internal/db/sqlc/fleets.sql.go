@@ -262,20 +262,6 @@ func (q *Queries) RestoreProjectFleet(ctx context.Context, arg RestoreProjectFle
 	return i, err
 }
 
-const softDeleteFleet = `-- name: SoftDeleteFleet :exec
-UPDATE fleets
-SET deleted_at = now(),
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
-  AND deleted_at IS NULL
-`
-
-func (q *Queries) SoftDeleteFleet(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, softDeleteFleet, id)
-	return err
-}
-
 const softDeleteProjectFleet = `-- name: SoftDeleteProjectFleet :one
 UPDATE fleets
 SET deleted_at = now(),
@@ -307,34 +293,6 @@ func (q *Queries) SoftDeleteProjectFleet(ctx context.Context, arg SoftDeleteProj
 		&i.DeletedAt,
 	)
 	return i, err
-}
-
-const updateFleet = `-- name: UpdateFleet :exec
-UPDATE fleets
-SET name       = $1,
-    backend    = $2,
-    config     = $3,
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $4
-  AND deleted_at IS NULL
-`
-
-type UpdateFleetParams struct {
-	Name    string
-	Backend string
-	Config  []byte
-	ID      int64
-}
-
-func (q *Queries) UpdateFleet(ctx context.Context, arg UpdateFleetParams) error {
-	_, err := q.db.Exec(ctx, updateFleet,
-		arg.Name,
-		arg.Backend,
-		arg.Config,
-		arg.ID,
-	)
-	return err
 }
 
 const updateProjectFleet = `-- name: UpdateProjectFleet :one

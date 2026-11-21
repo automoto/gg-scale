@@ -2,6 +2,7 @@ package fleet_test
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -41,4 +42,22 @@ func TestValidateConfig_should_refuse_too_many_keys(t *testing.T) {
 	}
 
 	assert.Error(t, fleet.ValidateConfig("plugin:demo", cfg))
+}
+
+func TestValidateConfig_should_accept_what_the_dashboard_form_allows(t *testing.T) {
+	cfg := map[string]string{"fleet_name": "gs", "namespace": "ns"}
+	for i := 0; i < fleet.MaxConfigKeys; i++ {
+		cfg["selector."+strings.Repeat("k", fleet.MaxConfigKeyOrVal-len(strconv.Itoa(i)))+strconv.Itoa(i)] = "v"
+	}
+
+	assert.NoError(t, fleet.ValidateConfig("agones", cfg))
+}
+
+func TestValidateConfig_should_refuse_too_many_selector_keys(t *testing.T) {
+	cfg := map[string]string{"fleet_name": "gs"}
+	for i := 0; i <= fleet.MaxConfigKeys; i++ {
+		cfg["selector."+strconv.Itoa(i)] = "v"
+	}
+
+	assert.Error(t, fleet.ValidateConfig("agones", cfg))
 }

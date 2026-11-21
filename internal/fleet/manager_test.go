@@ -242,10 +242,6 @@ func (s *fakeFleetStore) seed(projectID int64, name, backend string, cfg map[str
 	return f
 }
 
-func (s *fakeFleetStore) Create(_ context.Context, in fleet.FleetCreate) (*fleet.Fleet, error) {
-	return s.seed(in.ProjectID, in.Name, in.Backend, in.Config), nil
-}
-
 func (s *fakeFleetStore) GetByID(_ context.Context, id int64) (*fleet.Fleet, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,9 +275,6 @@ func (s *fakeFleetStore) ListForProject(_ context.Context, projectID int64) ([]*
 func (s *fakeFleetStore) ListDeletedForProject(_ context.Context, _ int64) ([]*fleet.Fleet, error) {
 	return nil, nil
 }
-
-func (s *fakeFleetStore) Update(_ context.Context, _ fleet.FleetUpdate) error { return nil }
-func (s *fakeFleetStore) SoftDelete(_ context.Context, _ int64) error         { return nil }
 
 // newFakeFleetStoreSeed returns a fleet store seeded with one row whose
 // Backend matches backendName, so sampleReq() (which uses FleetID=1)
@@ -630,4 +623,16 @@ func TestManagerResolutionCleanupHandlesMissingFleetAndAuditsShutdown(t *testing
 			assert.Equal(t, fleet.StatusShutdown, store.events[len(store.events)-1].Status)
 		})
 	}
+}
+
+func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
+	backend := &fakeBackend{name: "fake"}
+	fleets := newFakeFleetStoreSeed(backend.name)
+	deletedAt := time.Now()
+	fleets.byID[1].DeletedAt = &deletedAt
+	mgr := fleet.NewManager(newFakeStore(), fleets, backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
+
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+
+	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
 }

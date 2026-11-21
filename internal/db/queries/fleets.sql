@@ -43,24 +43,6 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND deleted_at IS NULL
 ORDER BY name;
 
--- name: UpdateFleet :exec
-UPDATE fleets
-SET name       = sqlc.arg(name),
-    backend    = sqlc.arg(backend),
-    config     = sqlc.arg(config),
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = sqlc.arg(id)
-  AND deleted_at IS NULL;
-
--- name: SoftDeleteFleet :exec
-UPDATE fleets
-SET deleted_at = now(),
-    updated_at = now()
-WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = sqlc.arg(id)
-  AND deleted_at IS NULL;
-
 -- name: ListDeletedFleetsForProject :many
 -- Deleted fleets of a project, newest deletion first, for the restore list.
 SELECT id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at

@@ -45,29 +45,41 @@ func (e InvalidError) Error() string { return string(e) }
 
 // ValidateConfig checks a fleet config. Its messages never carry a value.
 // An agones config needs fleet_name and may have namespace and selector.*
-// keys. A plugin config is free-form.
+// keys: at most MaxConfigKeys selector keys, not counting the two fixed keys.
+// A plugin config is free-form, with at most MaxConfigKeys keys. A key
+// (without the selector prefix) or value is at most MaxConfigKeyOrVal bytes.
 func ValidateConfig(backend string, cfg map[string]string) error {
-	if len(cfg) > MaxConfigKeys {
-		return InvalidError("Too many config keys.")
-	}
+	agones := backend == "agones"
+	keys := 0
 	for k, v := range cfg {
-		if k == "" || len(k) > MaxConfigKeyOrVal || len(v) > MaxConfigKeyOrVal {
+		name, fixed := k, false
+		if agones {
+			switch {
+			case k == "fleet_name" || k == "namespace":
+				fixed = true
+			case strings.HasPrefix(k, selectorPrefix):
+				name = strings.TrimPrefix(k, selectorPrefix)
+				keys++
+			default:
+				return InvalidError("Unknown agones config key.")
+			}
+		} else {
+			keys++
+		}
+		if len(v) > MaxConfigKeyOrVal || len(name) > MaxConfigKeyOrVal || (!fixed && name == "") {
 			return InvalidError("A config key or value is empty or too long.")
 		}
 	}
-	if backend != "agones" {
-		return nil
+	if keys > MaxConfigKeys {
+		return InvalidError("Too many config keys.")
 	}
-	if strings.TrimSpace(cfg["fleet_name"]) == "" {
+	if agones && strings.TrimSpace(cfg["fleet_name"]) == "" {
 		return InvalidError("Fleet name is required.")
-	}
-	for k := range cfg {
-		if k != "fleet_name" && k != "namespace" && !strings.HasPrefix(k, "selector.") {
-			return InvalidError("Unknown agones config key.")
-		}
 	}
 	return nil
 }
+
+const selectorPrefix = "selector."
 
 func validateName(name string) error {
 	if strings.TrimSpace(name) == "" {

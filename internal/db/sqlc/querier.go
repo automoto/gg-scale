@@ -1108,7 +1108,6 @@ type Querier interface {
 	// Auto-applied on tier-upgrade approval. The direction check and write are one
 	// atomic operation so a stale request can never lower the current tier.
 	SetTenantTierIfUpgrade(ctx context.Context, tier int16) (int64, error)
-	SoftDeleteFleet(ctx context.Context, id int64) error
 	SoftDeleteLeaderboard(ctx context.Context, arg SoftDeleteLeaderboardParams) (int64, error)
 	SoftDeleteProjectFleet(ctx context.Context, arg SoftDeleteProjectFleetParams) (Fleet, error)
 	// Soft-deletes and returns the freed byte count (octet_length(value::text)) so
@@ -1164,7 +1163,6 @@ type Querier interface {
 	UnlinkPlayerFromAccount(ctx context.Context, arg UnlinkPlayerFromAccountParams) (int64, error)
 	UpdateAPIKeyLabel(ctx context.Context, arg UpdateAPIKeyLabelParams) error
 	UpdateControlPanelPassword(ctx context.Context, arg UpdateControlPanelPasswordParams) error
-	UpdateFleet(ctx context.Context, arg UpdateFleetParams) error
 	UpdateGameSessionState(ctx context.Context, arg UpdateGameSessionStateParams) error
 	// score_operator and current_period are deliberately absent: the operator is
 	// fixed at creation and the period only moves via AdvanceLeaderboardPeriod.

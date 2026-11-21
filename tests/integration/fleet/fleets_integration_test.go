@@ -17,6 +17,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/migrate"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 func startMigratedDB(t *testing.T) (*db.Pool, int64, int64) {
@@ -60,12 +61,15 @@ func startMigratedDB(t *testing.T) (*db.Pool, int64, int64) {
 	return pool, tenantID, projectID
 }
 
+// actor is a token actor: it needs no dashboard user row.
+var actor = projectadmin.Actor{TokenID: 1, TokenCreatorID: 1}
+
 func TestPostgresFleetStore_Create_then_GetByID_and_GetByName(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	store := fleet.NewPostgresFleetStore(pool)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	created, err := store.Create(ctx, fleet.FleetCreate{
+	created, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "primary",
 		Backend:   "docker",
@@ -73,7 +77,7 @@ func TestPostgresFleetStore_Create_then_GetByID_and_GetByName(t *testing.T) {
 			"image": "traefik/whoami:latest",
 			"port":  "80",
 		},
-	})
+	}, actor)
 	require.NoError(t, err)
 	require.NotZero(t, created.ID)
 	assert.Equal(t, tenantID, created.TenantID)
@@ -106,18 +110,18 @@ func TestPostgresFleetStore_ListForProject_skips_deleted(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	a, err := store.Create(ctx, fleet.FleetCreate{
+	a, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "a", Backend: "docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
-	_, err = store.Create(ctx, fleet.FleetCreate{
+	_, err = fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "b", Backend: "docker",
 		Config: map[string]string{"image": "y:1", "port": "81"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
-	require.NoError(t, store.SoftDelete(ctx, a.ID))
+	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, a.ID, actor))
 
 	out, err := store.ListForProject(ctx, projectID)
 	require.NoError(t, err)
@@ -125,23 +129,19 @@ func TestPostgresFleetStore_ListForProject_skips_deleted(t *testing.T) {
 	assert.Equal(t, "b", out[0].Name)
 }
 
-func TestPostgresFleetStore_Update_changes_config_but_not_backend(t *testing.T) {
+func TestUpdateFleet_changes_config_but_not_backend(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	store := fleet.NewPostgresFleetStore(pool)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	f, err := store.Create(ctx, fleet.FleetCreate{
+	f, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
-	err = store.Update(ctx, fleet.FleetUpdate{
-		ID:      f.ID,
-		Name:    "primary",
-		Backend: "docker",
-		Config:  map[string]string{"image": "x:2", "port": "8080"},
-	})
+	name := "primary"
+	_, err = fleet.UpdateFleet(ctx, pool, tenantID, projectID, f.ID, &name, map[string]string{"image": "x:2", "port": "8080"}, actor)
 	require.NoError(t, err)
 
 	got, err := store.GetByID(ctx, f.ID)
@@ -155,19 +155,19 @@ func TestPostgresFleetStore_SoftDelete_lets_same_name_recreate(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	first, err := store.Create(ctx, fleet.FleetCreate{
+	first, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
-	require.NoError(t, store.SoftDelete(ctx, first.ID))
+	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, first.ID, actor))
 
 	// Same name should be re-usable because the unique index is partial
 	// on deleted_at IS NULL.
-	second, err := store.Create(ctx, fleet.FleetCreate{
+	second, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x:2", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
 	assert.NotEqual(t, first.ID, second.ID)
 
@@ -177,21 +177,20 @@ func TestPostgresFleetStore_SoftDelete_lets_same_name_recreate(t *testing.T) {
 	assert.Equal(t, second.ID, got.ID)
 }
 
-func TestPostgresFleetStore_Create_rejects_duplicate_active_name(t *testing.T) {
+func TestCreateFleet_rejects_duplicate_active_name(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
-	store := fleet.NewPostgresFleetStore(pool)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	_, err := store.Create(ctx, fleet.FleetCreate{
+	_, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
-	_, err = store.Create(ctx, fleet.FleetCreate{
+	_, err = fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
-	})
+	}, actor)
 	require.Error(t, err, "active duplicate-name insert must violate the unique index")
 }
 
@@ -200,10 +199,10 @@ func TestPostgresFleetStore_isolated_per_tenant(t *testing.T) {
 
 	store := fleet.NewPostgresFleetStore(pool)
 	ctxA := db.WithTenant(context.Background(), tenantA)
-	_, err := store.Create(ctxA, fleet.FleetCreate{
+	_, err := fleet.CreateFleet(ctxA, pool, tenantA, fleet.FleetCreate{
 		ProjectID: projectA, Name: "primary", Backend: "docker",
 		Config: map[string]string{"image": "x", "port": "80"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
 	// RLS check using a tenant-scoped context that points at a different

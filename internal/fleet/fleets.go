@@ -48,29 +48,16 @@ type FleetCreate struct {
 	Config    map[string]string
 }
 
-// FleetUpdate is the input shape for FleetStore.Update.
-//
-//nolint:revive // intentional Fleet-prefix to disambiguate from fleet.Store.
-type FleetUpdate struct {
-	ID      int64
-	Name    string
-	Backend string
-	Config  map[string]string
-}
-
 // FleetStore persists fleet templates. Implementations live below
 // (Postgres-backed) and in tests (in-memory). Distinct from fleet.Store,
 // which serves allocations.
 //
 //nolint:revive // intentional Fleet-prefix to disambiguate from fleet.Store.
 type FleetStore interface {
-	Create(ctx context.Context, in FleetCreate) (*Fleet, error)
 	GetByID(ctx context.Context, id int64) (*Fleet, error)
 	GetByName(ctx context.Context, projectID int64, name string) (*Fleet, error)
 	ListForProject(ctx context.Context, projectID int64) ([]*Fleet, error)
 	ListDeletedForProject(ctx context.Context, projectID int64) ([]*Fleet, error)
-	Update(ctx context.Context, in FleetUpdate) error
-	SoftDelete(ctx context.Context, id int64) error
 }
 
 // ErrFleetNotFound is returned when a fleet id or name does not resolve to
@@ -85,36 +72,6 @@ type PostgresFleetStore struct {
 // NewPostgresFleetStore returns a FleetStore bound to the given pool.
 func NewPostgresFleetStore(pool *db.Pool) *PostgresFleetStore {
 	return &PostgresFleetStore{pool: pool}
-}
-
-// Create inserts a fleet template. The tenant id is read from the context.
-func (s *PostgresFleetStore) Create(ctx context.Context, in FleetCreate) (*Fleet, error) {
-	cfg, err := encodeFleetConfig(in.Config)
-	if err != nil {
-		return nil, err
-	}
-	var out *Fleet
-	err = s.pool.Q(ctx, func(tx pgx.Tx) error {
-		row, qerr := sqlcgen.New(tx).CreateFleet(ctx, sqlcgen.CreateFleetParams{
-			ProjectID: in.ProjectID,
-			Name:      in.Name,
-			Backend:   in.Backend,
-			Config:    cfg,
-		})
-		if qerr != nil {
-			return qerr
-		}
-		f, ferr := fleetRowToModel(row)
-		if ferr != nil {
-			return ferr
-		}
-		out = f
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("fleet: create fleet: %w", err)
-	}
-	return out, nil
 }
 
 // GetByID looks up a fleet by primary key. Returns ErrFleetNotFound when the
@@ -204,32 +161,6 @@ func (s *PostgresFleetStore) ListDeletedForProject(ctx context.Context, projectI
 		return nil
 	})
 	return out, err
-}
-
-// Update overwrites the editable fields. Soft-deleted rows are not visible
-// to Update (the underlying query filters deleted_at IS NULL).
-func (s *PostgresFleetStore) Update(ctx context.Context, in FleetUpdate) error {
-	cfg, err := encodeFleetConfig(in.Config)
-	if err != nil {
-		return err
-	}
-	return s.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).UpdateFleet(ctx, sqlcgen.UpdateFleetParams{
-			ID:      in.ID,
-			Name:    in.Name,
-			Backend: in.Backend,
-			Config:  cfg,
-		})
-	})
-}
-
-// SoftDelete marks the row deleted_at = now(). The unique-on-name index is
-// partial on deleted_at IS NULL so the operator can recreate a fleet under
-// the same name.
-func (s *PostgresFleetStore) SoftDelete(ctx context.Context, id int64) error {
-	return s.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).SoftDeleteFleet(ctx, id)
-	})
 }
 
 func fleetRowToModel(row sqlcgen.Fleet) (*Fleet, error) {
