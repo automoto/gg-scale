@@ -27,6 +27,7 @@ const (
 	ScopeMatchmakingRead   = "matchmaking:read"
 	ScopePlayersRead       = "players:read"
 	ScopePlayersPII        = "players:pii"
+	ScopePlayersWrite      = "players:write"
 )
 
 // Scope classes.
@@ -80,6 +81,7 @@ var Scopes = []ScopePair{
 		Scope: ScopePlayersPII, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
 		Label: "See player email and display name. They go into agent logs.", Needs: ScopePlayersRead,
 	},
+	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 }
 
 // Resource is one row of the access table on the token page.

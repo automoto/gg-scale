@@ -3,11 +3,13 @@
 package managementapi_test
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,4 +197,112 @@ func TestPlayers_tools_should_follow_the_scopes(t *testing.T) {
 	_, out := f.post(f.scopedToken(managementtoken.ScopePlayersRead), toolsList)
 
 	assert.ElementsMatch(t, []string{"project_health_check", "get_token", "list_players", "get_player"}, toolNames(out))
+}
+
+func playerWritePath(id int64, suffix string) string { return playerPath(id) + suffix }
+
+func (f *fixture) audit(action string, target int64) (service string, count int) {
+	f.t.Helper()
+	rows, err := f.owner.Query(context.Background(),
+		`SELECT actor_service FROM platform_audit_log WHERE action = $1 AND target = $2`, action, strconv.FormatInt(target, 10))
+	require.NoError(f.t, err)
+	defer rows.Close()
+	for rows.Next() {
+		require.NoError(f.t, rows.Scan(&service))
+		count++
+	}
+	return service, count
+}
+
+func TestPlayerWrite_should_return_403_without_the_players_write_scope(t *testing.T) {
+	f := newFixture(t)
+	id := f.player(f.projectA)
+	tok := f.scopedToken(managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII)
+
+	disable := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+	request := f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "")
+	cancel := f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "")
+
+	assert.Equal(t, []int{403, 403, 403}, []int{disable.status, request.status, cancel.status})
+}
+
+func TestPlayerWrite_should_return_403_when_the_creator_lacks_the_players_pair(t *testing.T) {
+	f := newFixture(t)
+	id := f.player(f.projectA)
+	admin := f.user("admin@example.com", f.tenantA, "admin")
+	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{managementtoken.ScopePlayersWrite}, time.Hour)
+	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:players' AND v3 = 'manage'`)
+	require.NoError(t, f.authz.ReloadPolicy())
+
+	got := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+
+	assert.Equal(t, []any{http.StatusForbidden, 0}, []any{got.status, f.count(`SELECT count(*) FROM project_players WHERE disabled_at IS NOT NULL`)}, got.raw)
+}
+
+func TestPlayerWrite_should_return_404_for_a_player_of_another_project_or_tenant(t *testing.T) {
+	f := newFixture(t)
+	tok := f.scopedToken(managementtoken.ScopePlayersWrite)
+	var statuses []int
+	for _, id := range []int64{f.player(f.projectB), f.player(f.projectC), 999999} {
+		statuses = append(statuses,
+			f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`).status,
+			f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "").status,
+			f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "").status)
+	}
+
+	assert.Equal(t, []int{404, 404, 404, 404, 404, 404, 404, 404, 404}, statuses)
+	assert.Equal(t, 0, f.count(`SELECT count(*) FROM project_players WHERE disabled_at IS NOT NULL OR delete_requested_at IS NOT NULL`))
+}
+
+func TestPlayerWrite_disable_and_enable_should_change_the_player_and_audit_the_token(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	id := f.namedPlayer(f.projectA)
+	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{managementtoken.ScopePlayersWrite}, time.Hour)
+
+	// Act
+	off := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+	service, disables := f.audit("control_panel.player.disable", id)
+	on := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":false}`)
+	_, enables := f.audit("control_panel.player.enable", id)
+
+	// Assert
+	_, hasEmail := off.body["email"]
+	assert.Equal(t, []any{200, true, false, false, 200, false, "management_token:" + strconv.FormatInt(tokenID, 10), 1, 1},
+		[]any{off.status, off.body["disabled"], hasEmail, strings.Contains(off.raw, "example.com"), on.status, on.body["disabled"], service, disables, enables}, off.raw+on.raw)
+}
+
+func TestPlayerWrite_disable_should_return_the_pii_fields_only_with_the_pii_scope(t *testing.T) {
+	f := newFixture(t)
+	id := f.namedPlayer(f.projectA)
+	tok := f.scopedToken(managementtoken.ScopePlayersWrite, managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII)
+
+	got := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+
+	assert.Equal(t, []any{200, playerEmail}, []any{got.status, got.body["email"]}, got.raw)
+}
+
+func TestPlayerWrite_delete_request_then_cancel_should_follow_the_dashboard_rules(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	id := f.player(f.projectA)
+	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{managementtoken.ScopePlayersWrite}, time.Hour)
+	service := "management_token:" + strconv.FormatInt(tokenID, 10)
+	req := func() response { return f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "") }
+	cancel := func() response { return f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "") }
+
+	// Act
+	none := cancel()
+	first := req()
+	again := req()
+	disable := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":false}`)
+	reqService, requests := f.audit("control_panel.player.delete_request", id)
+	done := cancel()
+	cancelService, cancels := f.audit("control_panel.player.delete_cancel", id)
+
+	// Assert
+	assert.Equal(t, []any{404, 200, true, true, 409, 409, 200, false, false, service, 1, service, 1},
+		[]any{none.status, first.status, first.body["delete_requested"], first.body["disabled"], again.status, disable.status,
+			done.status, done.body["delete_requested"], done.body["disabled"], reqService, requests, cancelService, cancels},
+		first.raw+again.raw+done.raw)
 }

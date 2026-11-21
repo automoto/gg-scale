@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -341,4 +342,36 @@ func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Princip
 		_ = d.Cache.Delete(ctx, ratelimit.APIKeyBucketKey(in.APIKeyID))
 	}
 	return projectAPIKeyUpdated{Updated: true}, nil
+}
+
+type projectSetPlayerDisabledInput struct {
+	ProjectPlayerPath
+	Body struct {
+		Disabled bool `json:"disabled" doc:"true disables the player in this Game Project; false enables it again."`
+	}
+}
+
+// playerWriteResult reads the player again after a write. A write error is
+// mapped first, so a player of another project is 404 before any change.
+func playerWriteResult(ctx context.Context, d Deps, p managementtoken.Principal, playerID int64, err error) (projectPlayer, error) {
+	if err != nil {
+		return projectPlayer{}, projectWriteError(err)
+	}
+	return readPlayer(ctx, d, p, playerID)
+}
+
+func setPlayerDisabled(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetPlayerDisabledInput) (projectPlayer, error) {
+	err := projectadmin.SetPlayerDisabled(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, in.Body.Disabled, time.Now(), projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
+}
+
+func requestProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	_, err := projectadmin.RequestPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID,
+		projectadmin.DeleteGrace(d.ControlPanel.DeleteGracePeriod), projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
+}
+
+func cancelProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	err := projectadmin.CancelPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
 }

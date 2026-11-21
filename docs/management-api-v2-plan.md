@@ -306,7 +306,7 @@ Do the stages in order. Write failing tests first. After each stage:
 - [x] `update_api_key_label`, `update_api_key_features` (`keys:write`). Move `updateAPIKeyLabel` and `updateAPIKeyManagedScopes` from `controlpanel/key_management.go` to `projectadmin/apikeys.go`.
 - [x] `list_players`, `get_player` (`players:read`), search by player ID and external ID, paged. Add `email` and `display_name` only with `players:pii`.
 - [x] `players:pii` in the class 2 group of the token page.
-- [ ] `set_player_disabled`, `request_player_delete`, `cancel_player_delete` (`players:write`) in `projectadmin/players.go`, with audit rows. The dashboard player disable gets an audit row too.
+- [x] `set_player_disabled`, `request_player_delete`, `cancel_player_delete` (`players:write`) in `projectadmin/players.go`, with audit rows. The dashboard player disable gets an audit row too.
 - [ ] `get_project_limits`, `set_project_invite_limit`, `set_project_storage_limit` (`limits:read`, `limits:write`) in `projectadmin/limits.go`. Same bounds as the dashboard. Make the storage limit write and its audit row one transaction.
 - [ ] `get_matchmaking_queue` (`matchmaking:read`), the bucket view of the dashboard queue page. `matchmaking_ticket_trace` already uses `matchmaking:read`.
 - [ ] `get_steam_auth` (`config:read`): App ID and whether a key is set. Never the key.

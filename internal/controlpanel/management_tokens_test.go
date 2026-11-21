@@ -106,12 +106,12 @@ func TestAccessOptions_should_build_the_pii_box_from_the_scope_table(t *testing.
 	}, got)
 }
 
-func TestAccessOptions_should_show_the_players_row_with_read_only(t *testing.T) {
+func TestAccessOptions_should_show_the_players_row_with_read_and_write(t *testing.T) {
 	rows, _ := accessOptions(allScopes(), nil)
 
 	got := accessRow(t, rows, "players")
 
-	assert.Equal(t, []any{"Players (IDs and status)", true, false, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
+	assert.Equal(t, []any{"Players (IDs and status)", true, true, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
 }
 
 func TestAccessOptions_should_disable_the_pii_box_when_the_creator_lacks_the_pair(t *testing.T) {
@@ -234,7 +234,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "read"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write"}, selections(rows))
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {

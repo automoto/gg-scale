@@ -2265,6 +2265,15 @@ components:
       required:
         - origins
       type: object
+    ProjectSetPlayerDisabledInputBody:
+      additionalProperties: false
+      properties:
+        disabled:
+          description: true disables the player in this Game Project; false enables it again.
+          type: boolean
+      required:
+        - disabled
+      type: object
     ProjectSetRemoteConfigBody:
       additionalProperties: false
       properties:
@@ -6127,6 +6136,110 @@ paths:
       security:
         - ManagementToken: []
       summary: Get a player
+      tags:
+        - Project Management
+  /v1/project/players/{player_id}/delete-request:
+    delete:
+      description: Ends the pending deletion of one player of the Game Project and returns the player. Answers 404 for a player of another Game Project and when no deletion is pending.
+      operationId: cancelProjectPlayerDelete
+      parameters:
+        - description: Player ID.
+          in: path
+          name: player_id
+          required: true
+          schema:
+            description: Player ID.
+            examples:
+              - 42
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPlayer"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Cancel the deletion of a player
+      tags:
+        - Project Management
+    post:
+      description: Starts the grace period for one player of the Game Project and returns the player. The data is purged after the grace period unless the request is cancelled. Answers 404 for a player of another Game Project, and 409 when the deletion is already requested.
+      operationId: requestProjectPlayerDelete
+      parameters:
+        - description: Player ID.
+          in: path
+          name: player_id
+          required: true
+          schema:
+            description: Player ID.
+            examples:
+              - 42
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPlayer"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Request deletion of a player
+      tags:
+        - Project Management
+  /v1/project/players/{player_id}/disabled:
+    put:
+      description: Sets disabled for one player of the Game Project and returns the player. Answers 404 for a player of another Game Project, and 409 when a delete request is pending.
+      operationId: setProjectPlayerDisabled
+      parameters:
+        - description: Player ID.
+          in: path
+          name: player_id
+          required: true
+          schema:
+            description: Player ID.
+            examples:
+              - 42
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetPlayerDisabledInputBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPlayer"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Disable or enable a player
       tags:
         - Project Management
   /v1/project/remote-config:

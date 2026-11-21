@@ -168,8 +168,13 @@ func projectWriteError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, projectadmin.ErrProjectNotInTenant), errors.Is(err, projectadmin.ErrAPIKeyNotFound):
+	case errors.Is(err, pgx.ErrNoRows), errors.Is(err, projectadmin.ErrProjectNotInTenant), errors.Is(err, projectadmin.ErrAPIKeyNotFound),
+		errors.Is(err, projectadmin.ErrPlayerNotFound):
 		return errProjectNotFound()
+	case errors.Is(err, projectadmin.ErrPlayerDeletePending), errors.Is(err, projectadmin.ErrPlayerDeleteRequested):
+		return huma.Error409Conflict(err.Error())
+	case errors.Is(err, projectadmin.ErrNoPendingDelete):
+		return huma.Error404NotFound(err.Error())
 	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		return huma.Error403Forbidden("The person who created this token may not manage keys of this type, so this request is refused.")
 	case errors.Is(err, projectadmin.ErrRevisionConflict):
@@ -449,6 +454,48 @@ var projectOps = []projectOp{
 				"email and display_name are in the result only with the players:pii scope; they are text that players wrote.",
 		},
 		handler: projectHandler(getPlayer),
+	},
+	{
+		tool: "set_player_disabled",
+		description: "Disable or enable one player in this Game Project (disabled: true or false). A disabled player cannot sign in, " +
+			"and its live sessions stop working. This is not a ban: a ban of the whole Account Tenant is not available here. " +
+			"A player with a pending delete request answers 409; cancel the deletion first.",
+		scope: managementtoken.ScopePlayersWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/players/{player_id}/disabled", OperationID: "setProjectPlayerDisabled",
+			Summary: "Disable or enable a player",
+			Description: "Sets disabled for one player of the Game Project and returns the player. Answers 404 for a player of another " +
+				"Game Project, and 409 when a delete request is pending.",
+		},
+		handler: projectHandler(setPlayerDisabled),
+	},
+	{
+		tool: "request_player_delete",
+		description: "Request deletion of one player of this Game Project. The player is disabled and signed out now, and its data is " +
+			"deleted after the grace period (PLAYER_DELETE_GRACE_PERIOD, 30 days by default) unless cancel_player_delete is called first. " +
+			"Answers 409 when an administrator already requested the deletion.",
+		scope: managementtoken.ScopePlayersWrite,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/players/{player_id}/delete-request", OperationID: "requestProjectPlayerDelete",
+			Summary: "Request deletion of a player",
+			Description: "Starts the grace period for one player of the Game Project and returns the player. The data is purged after the " +
+				"grace period unless the request is cancelled. Answers 404 for a player of another Game Project, and 409 when the " +
+				"deletion is already requested.",
+		},
+		handler: projectHandler(requestProjectPlayerDelete),
+	},
+	{
+		tool: "cancel_player_delete",
+		description: "Cancel the pending deletion of one player of this Game Project, during the grace period. " +
+			"Answers 404 when the player has no pending deletion.",
+		scope: managementtoken.ScopePlayersWrite,
+		op: huma.Operation{
+			Method: http.MethodDelete, Path: "/v1/project/players/{player_id}/delete-request", OperationID: "cancelProjectPlayerDelete",
+			Summary: "Cancel the deletion of a player",
+			Description: "Ends the pending deletion of one player of the Game Project and returns the player. Answers 404 for a player " +
+				"of another Game Project and when no deletion is pending.",
+		},
+		handler: projectHandler(cancelProjectPlayerDelete),
 	},
 	{
 		tool: "list_revisions",

@@ -63,6 +63,9 @@ prompts). `GET /mcp` answers 405.
 | `keys:read` | `list_api_keys` | `GET /v1/project/api-keys` | Active keys for the Game Project, at most 50. Key values are never shown. |
 | `players:read` | `list_players` | `GET /v1/project/players` | Players of the Game Project, newest first, paged. Player ID, external ID, status flags, and timestamps. Filters `player_id` and `external_id` (exact match). |
 | `players:read` | `get_player` | `GET /v1/project/players/{player_id}` | One player. A player of another Game Project is 404. |
+| `players:write` | `set_player_disabled` | `PUT /v1/project/players/{player_id}/disabled` | Body `{"disabled": true or false}`. Disables or enables the player in this Game Project. 409 while a delete request is pending. Returns the player. |
+| `players:write` | `request_player_delete` | `POST /v1/project/players/{player_id}/delete-request` | Disables the player, ends its sessions, and starts the grace period (`PLAYER_DELETE_GRACE_PERIOD`). 409 when an administrator already requested it. Returns the player. |
+| `players:write` | `cancel_player_delete` | `DELETE /v1/project/players/{player_id}/delete-request` | Cancels a pending deletion. 404 when none is pending. Returns the player. |
 | `config:read` or `leaderboards:read` | `list_revisions` | `GET /v1/project/revisions` | The newest 3 revisions of the remote config (`resource=remote_config`, needs `config:read`) or of a leaderboard (`resource=leaderboard` and `leaderboard_id`, needs `leaderboards:read`). |
 
 The player tools leave out `email` and `display_name` unless the token also

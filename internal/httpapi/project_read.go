@@ -350,15 +350,21 @@ func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	return out, nil
 }
 
-type projectPlayerPath struct {
+// ProjectPlayerPath is exported because huma reads an embedded struct only when its type is exported.
+type ProjectPlayerPath struct {
 	PlayerID int64 `path:"player_id" doc:"Player ID." example:"42"`
 }
 
-func getPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectPlayerPath) (projectPlayer, error) {
+func getPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	return readPlayer(ctx, d, p, in.PlayerID)
+}
+
+// readPlayer returns one live player of the token's project.
+func readPlayer(ctx context.Context, d Deps, p managementtoken.Principal, playerID int64) (projectPlayer, error) {
 	var r sqlcgen.GetPlayerPageRowForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
-		r, err = q.GetPlayerPageRowForProject(ctx, sqlcgen.GetPlayerPageRowForProjectParams{ProjectID: p.ProjectID, ID: in.PlayerID})
+		r, err = q.GetPlayerPageRowForProject(ctx, sqlcgen.GetPlayerPageRowForProjectParams{ProjectID: p.ProjectID, ID: playerID})
 		return err
 	})
 	if errors.Is(err, pgx.ErrNoRows) {

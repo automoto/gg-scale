@@ -251,3 +251,40 @@ func TestControlPanelPlayerDelete_admin_request_should_show_only_while_player_ow
 	assert.Contains(t, playerOwned, "/request-delete")
 	assert.NotContains(t, adminOwned, "/request-delete")
 }
+
+func TestControlPanelPlayerDisable_should_write_an_audit_row_for_disable_and_enable(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	ctx := context.Background()
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "cp-dis")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	var playerID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1, $2, 'p') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	base := srv.URL + "/v1/control-panel" + playerDeleteBase(tenantID, projectID, playerID)
+
+	// Act
+	for _, enable := range []string{"false", "true"} {
+		resp := postForm(t, noRedirectClient(), base+"/disable", url.Values{"_csrf": {csrf}, "enable": {enable}}, cookie)
+		resp.Body.Close()
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	// Assert
+	var actions []string
+	rows, err := c.bootstrapPool.Query(ctx,
+		`SELECT action FROM platform_audit_log WHERE action LIKE 'control_panel.player.%able' AND actor_user_id = $1 AND target = $2 ORDER BY id`,
+		adminID, fmt.Sprint(playerID))
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var a string
+		require.NoError(t, rows.Scan(&a))
+		actions = append(actions, a)
+	}
+	assert.Equal(t, []string{"control_panel.player.disable", "control_panel.player.enable"}, actions)
+}
