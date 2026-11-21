@@ -98,11 +98,22 @@ func APIKeyObject(keyType string) (string, bool) {
 	}
 }
 
-// AuthorizeAPIKey checks that the key is in the tenant (and in projectID,
-// unless it is 0), and that the actor may manage keys of its type. A key of
+// KeyScope limits which keys a change may touch. The zero value is the
+// dashboard: any key of the tenant, revoked keys included. A management
+// token sets both fields, so a request never reaches a key of another
+// Game Project or a revoked key.
+type KeyScope struct {
+	// ProjectID, when set, limits the key to that project. A key with no
+	// project does not match it.
+	ProjectID *int64
+	// LiveOnly refuses a revoked key.
+	LiveOnly bool
+}
+
+// AuthorizeAPIKey checks that the key is in the tenant and in scope, and that the actor may manage keys of its type. A key of
 // another project answers ErrAPIKeyNotFound before any permission check, so
 // a caller learns nothing about it. It returns the key's scopes and project.
-func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Authorizer, tenantID, projectID, apiKeyID int64, actor Actor) (sqlcgen.GetAPIKeyScopesRow, error) {
+func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) (sqlcgen.GetAPIKeyScopesRow, error) {
 	row, err := q.GetAPIKeyScopes(ctx, apiKeyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, ErrAPIKeyNotFound
@@ -110,7 +121,10 @@ func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Author
 	if err != nil {
 		return row, fmt.Errorf("get api key scopes: %w", err)
 	}
-	if projectID != 0 && (row.ProjectID == nil || *row.ProjectID != projectID) {
+	if scope.ProjectID != nil && (row.ProjectID == nil || *row.ProjectID != *scope.ProjectID) {
+		return row, ErrAPIKeyNotFound
+	}
+	if scope.LiveOnly && row.RevokedAt.Valid {
 		return row, ErrAPIKeyNotFound
 	}
 	keyType, err := q.GetAPIKeyType(ctx, apiKeyID)
@@ -137,13 +151,13 @@ func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Author
 	return row, nil
 }
 
-// UpdateAPIKeyLabel renames a key. projectID limits the key to one project;
-// 0 means any project of the tenant. Authorization is as in AuthorizeAPIKey.
-func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, tenantID, projectID, apiKeyID int64, label string, actor Actor) error {
+// UpdateAPIKeyLabel renames a key. scope limits the keys it may touch.
+// Authorization is as in AuthorizeAPIKey.
+func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, label string, actor Actor) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	return pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, projectID, apiKeyID, actor)
+		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
 		if err != nil {
 			return err
 		}
@@ -160,16 +174,16 @@ func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorize
 }
 
 // UpdateAPIKeyFeatures sets the managed feature scopes of a key to desired.
-// A scope that is new on the key must be grantable. projectID limits the key
-// to one project; 0 means any project of the tenant.
-func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, sw KeySwitches, tenantID, projectID, apiKeyID int64, desired []string, actor Actor) error {
+// A scope that is new on the key must be grantable. scope limits the keys it
+// may touch.
+func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, sw KeySwitches, tenantID int64, scope KeyScope, apiKeyID int64, desired []string, actor Actor) error {
 	if slices.ContainsFunc(desired, func(s string) bool { return !IsManagedKeyScope(s) }) {
 		return ErrInvalidKeyScope
 	}
 	ctx = db.WithTenant(ctx, tenantID)
 	return pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, projectID, apiKeyID, actor)
+		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
 		if err != nil {
 			return err
 		}

@@ -122,7 +122,7 @@ func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenant
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, 0, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, projectadmin.KeyScope{}, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
 		return err
 	}
 	if h.cache != nil {
@@ -253,7 +253,7 @@ func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiK
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	return projectadmin.UpdateAPIKeyLabel(ctx, h.pool, h.rbac, tenantID, 0, apiKeyID, label, projectadmin.Actor{UserID: actorID})
+	return projectadmin.UpdateAPIKeyLabel(ctx, h.pool, h.rbac, tenantID, projectadmin.KeyScope{}, apiKeyID, label, projectadmin.Actor{UserID: actorID})
 }
 
 func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID int64) error {
@@ -263,7 +263,7 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 	ctx = db.WithTenant(ctx, tenantID)
 	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		if _, err := projectadmin.AuthorizeAPIKey(ctx, q, h.rbac, tenantID, 0, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
+		if _, err := projectadmin.AuthorizeAPIKey(ctx, q, h.rbac, tenantID, projectadmin.KeyScope{}, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
 			return err
 		}
 		if err := q.RevokeAPIKey(ctx, apiKeyID); err != nil {

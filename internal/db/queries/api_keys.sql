@@ -89,7 +89,7 @@ SET label = nullif(trim(sqlc.arg(label)::text), '')
 WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
 -- name: GetAPIKeyScopes :one
-SELECT scopes, project_id
+SELECT scopes, project_id, revoked_at
 FROM api_keys
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 

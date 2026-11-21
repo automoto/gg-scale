@@ -170,7 +170,7 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 }
 
 const getAPIKeyScopes = `-- name: GetAPIKeyScopes :one
-SELECT scopes, project_id
+SELECT scopes, project_id, revoked_at
 FROM api_keys
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
 `
@@ -178,12 +178,13 @@ WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
 type GetAPIKeyScopesRow struct {
 	Scopes    []string
 	ProjectID *int64
+	RevokedAt pgtype.Timestamptz
 }
 
 func (q *Queries) GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error) {
 	row := q.db.QueryRow(ctx, getAPIKeyScopes, id)
 	var i GetAPIKeyScopesRow
-	err := row.Scan(&i.Scopes, &i.ProjectID)
+	err := row.Scan(&i.Scopes, &i.ProjectID, &i.RevokedAt)
 	return i, err
 }
 

@@ -294,6 +294,11 @@ func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal,
 	}, nil
 }
 
+// projectKeyScope limits a key change to live keys of the token's project.
+func projectKeyScope(p managementtoken.Principal) projectadmin.KeyScope {
+	return projectadmin.KeyScope{ProjectID: &p.ProjectID, LiveOnly: true}
+}
+
 // ProjectAPIKeyPath is exported because huma reads an embedded struct only when its type is exported.
 type ProjectAPIKeyPath struct {
 	APIKeyID int64 `path:"api_key_id" doc:"API key ID." example:"12"`
@@ -314,7 +319,7 @@ func updateAPIKeyLabel(ctx context.Context, d Deps, p managementtoken.Principal,
 	if err := checkProjectAPIKeyLabel(in.Body.Label); err != nil {
 		return projectAPIKeyUpdated{}, err
 	}
-	if err := projectadmin.UpdateAPIKeyLabel(ctx, d.Pool, d.RBAC, p.TenantID, p.ProjectID, in.APIKeyID, in.Body.Label, projectActor(p)); err != nil {
+	if err := projectadmin.UpdateAPIKeyLabel(ctx, d.Pool, d.RBAC, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Label, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)
 	}
 	return projectAPIKeyUpdated{Updated: true}, nil
@@ -329,7 +334,7 @@ type projectUpdateAPIKeyFeaturesInput struct {
 
 func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyFeaturesInput) (projectAPIKeyUpdated, error) {
 	sw := projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled}
-	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, sw, p.TenantID, p.ProjectID, in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)
 	}
 	if d.Cache != nil {

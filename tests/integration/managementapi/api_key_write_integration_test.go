@@ -139,3 +139,16 @@ func TestAPIKeyWrite_features_should_return_422_for_a_scope_the_project_lacks(t 
 
 	assert.Equal(t, []int{http.StatusUnprocessableEntity, http.StatusUnprocessableEntity}, []int{got.status, unknown.status}, got.raw+unknown.raw)
 }
+
+func TestAPIKeyWrite_should_return_404_for_a_revoked_key(t *testing.T) {
+	f := newFixture(t)
+	id := f.key(f.tenantA, f.projectA, "publishable", "old", "matchmaker", "fleet")
+	f.exec(`UPDATE api_keys SET revoked_at = now() WHERE id = $1`, id)
+	tok := f.scopedToken("keys:write")
+
+	label := f.do(tok, http.MethodPut, keyPath(id, "/label"), `{"label":"new"}`)
+	features := f.do(tok, http.MethodPut, keyPath(id, "/features"), `{"scopes":["matchmaker"]}`)
+
+	assert.Equal(t, []int{http.StatusNotFound, http.StatusNotFound, 0},
+		[]int{label.status, features.status, f.count(`SELECT count(*) FROM api_keys WHERE label = 'new' OR scopes = '{matchmaker}'`)})
+}
