@@ -84,7 +84,7 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, authorizer.SetControlPanelMembershipRole(ownerID, tenantID, "owner"))
 	scopes := []string{}
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		scopes = append(scopes, s.Scope)
 	}
 	managementHash := sha256.Sum256([]byte(keyTypeManagementToken))

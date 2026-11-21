@@ -84,7 +84,7 @@ func TestProjectAPI_should_permit_a_request_from_its_own_origin(t *testing.T) {
 
 func TestProjectAPI_reads_should_answer_200_with_a_json_object(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken()
+	tok := f.scopedToken(readScopes...)
 	board := f.board(f.projectA, "b")
 	ticket := f.ticket(f.projectA, f.player(f.projectA), "queued", `{}`)
 	paths := []string{
@@ -107,7 +107,7 @@ func TestProjectAPI_reads_should_answer_200_with_a_json_object(t *testing.T) {
 
 func TestProjectAPI_writes_should_be_refused_without_their_scope(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken()
+	tok := f.scopedToken(readScopes...)
 
 	for name, c := range f.writeCalls() {
 		t.Run(name, func(t *testing.T) {
@@ -155,7 +155,7 @@ func TestProjectAPI_should_be_refused_when_the_creator_lacks_the_pair(t *testing
 		"config update":       {"project:*:config", "update", "config:write", http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`},
 		"leaderboard manage":  {"project:*:leaderboard", "manage", "leaderboards:write", http.MethodPost, "/v1/project/leaderboards", `{"name":"x"}`},
 		"publishable key":     {"api_key:publishable", "manage", "keys:create", http.MethodPost, "/v1/project/api-keys", `{"label":"x"}`},
-		"matchmaker read":     {"project:*:matchmaker", "read", "", http.MethodGet, "/v1/project/matchmaking/ticket-trace?ticket_id=1", ""},
+		"matchmaker read":     {"project:*:matchmaker", "read", "matchmaking:read", http.MethodGet, "/v1/project/matchmaking/ticket-trace?ticket_id=1", ""},
 		"origins with config": {"project:*:config", "update", "origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":[]}`},
 	}
 	for name, c := range cases {
@@ -176,7 +176,7 @@ func TestProjectAPI_should_be_refused_when_the_creator_lacks_the_pair(t *testing
 
 func TestProjectAPI_should_not_find_resources_of_other_projects(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken("leaderboards:write")
+	tok := f.scopedToken("leaderboards:read", "leaderboards:write", "matchmaking:read")
 	otherProject := f.board(f.projectB, "b")
 	otherTenant := f.board(f.projectC, "c")
 	deletedOther := f.board(f.projectB, "gone")
@@ -214,14 +214,14 @@ func TestProjectAPI_list_revisions_should_be_empty_for_a_board_of_another_projec
 	require.Equal(t, http.StatusOK, created.status, created.raw)
 	otherBoard := strconv.FormatInt(int64(created.body["leaderboard_id"].(float64)), 10)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/revisions?resource=leaderboard&leaderboard_id="+otherBoard, "")
+	got := f.do(f.scopedToken(readScopes...), http.MethodGet, "/v1/project/revisions?resource=leaderboard&leaderboard_id="+otherBoard, "")
 
 	assert.Equal(t, []any{http.StatusOK, []any{}}, []any{got.status, got.body["revisions"]}, got.raw)
 }
 
 func TestProjectAPI_rollback_remote_config_should_restore_the_kept_value(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken("config:write")
+	tok := f.scopedToken("config:read", "config:write")
 	first := f.do(tok, http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`)
 	require.Equal(t, http.StatusOK, first.status, first.raw)
 	second := f.do(tok, http.MethodPut, "/v1/project/remote-config",
@@ -237,7 +237,7 @@ func TestProjectAPI_rollback_remote_config_should_restore_the_kept_value(t *test
 
 func TestProjectAPI_rollback_leaderboard_should_restore_the_kept_settings(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken("leaderboards:write")
+	tok := f.scopedToken("leaderboards:read", "leaderboards:write")
 	created := f.do(tok, http.MethodPost, "/v1/project/leaderboards", `{"name":"first"}`)
 	require.Equal(t, http.StatusOK, created.status, created.raw)
 	board := int64(created.body["leaderboard_id"].(float64))
@@ -291,7 +291,7 @@ func TestProjectAPI_attempt_cap_should_answer_422_above_the_int32_range(t *testi
 func TestProjectAPI_cached_token_should_work_after_revoke_until_the_cache_time_ends(t *testing.T) {
 	// Arrange
 	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
-	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
 	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
 
@@ -306,7 +306,7 @@ func TestProjectAPI_cached_token_should_stop_when_the_creator_loses_manage(t *te
 	// Arrange
 	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
 	admin := f.user("admin@example.com", f.tenantA, "admin")
-	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, admin, readScopes, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
 	require.NoError(t, f.authz.RemoveControlPanelRoles(admin, f.tenantA))
 	require.NoError(t, f.authz.SetControlPanelMembershipRole(admin, f.tenantA, "member"))
@@ -360,7 +360,7 @@ func TestProjectAPI_cached_token_should_stop_when_it_expires(t *testing.T) {
 		d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = 24*time.Hour, 100
 		d.Now = func() time.Time { return time.Unix(0, clock.Load()) }
 	})
-	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
 	clock.Add(int64(2 * time.Hour))
 
@@ -373,20 +373,20 @@ func TestProjectAPI_cached_token_should_stop_when_it_expires(t *testing.T) {
 
 func TestProjectAPI_should_refuse_requests_that_do_not_authenticate(t *testing.T) {
 	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenRatePerSecond, d.ManagementTokenBurst = 0.001, 1 })
-	revoked, revokedID := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	revoked, revokedID := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, revokedID)
-	expired, expiredID := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	expired, expiredID := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	f.exec(`UPDATE management_tokens SET expires_at = now() - interval '1 minute' WHERE id = $1`, expiredID)
 	ownerB := f.user("owner-b@example.com", f.tenantB, "owner")
 	disabledTenant, _ := f.token(f.tenantB, f.projectC, ownerB, nil, time.Hour)
 	f.exec(`UPDATE tenants SET disabled_at = now(), disabled_by = 'platform' WHERE id = $1`, f.tenantB)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
-	lostManage, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	lostManage, _ := f.token(f.tenantA, f.projectA, admin, readScopes, time.Hour)
 	require.NoError(t, f.authz.RemoveControlPanelRoles(admin, f.tenantA))
 	require.NoError(t, f.authz.SetControlPanelMembershipRole(admin, f.tenantA, "member"))
 	key := f.do(f.scopedToken("keys:create"), http.MethodPost, "/v1/project/api-keys", `{"label":"game"}`)
 	require.Equal(t, http.StatusOK, key.status, key.raw)
-	limited := f.scopedToken()
+	limited := f.scopedToken(readScopes...)
 	require.Equal(t, http.StatusOK, f.do(limited, http.MethodGet, "/v1/project/health", "").status)
 	cases := []struct {
 		name   string
@@ -504,7 +504,7 @@ func TestProjectAPI_absent_and_null_metadata_should_mean_no_metadata(t *testing.
 func TestProjectAPI_get_leaderboard_should_omit_empty_metadata_and_keep_null_values(t *testing.T) {
 	f := newFixture(t)
 
-	got := f.do(f.scopedToken(), http.MethodGet, boardPath(f.board(f.projectA, "b"), ""), "")
+	got := f.do(f.scopedToken(readScopes...), http.MethodGet, boardPath(f.board(f.projectA, "b"), ""), "")
 
 	_, hasMetadata := got.body["metadata"]
 	scoreMin, hasScoreMin := got.body["score_min"]
@@ -513,7 +513,7 @@ func TestProjectAPI_get_leaderboard_should_omit_empty_metadata_and_keep_null_val
 
 func TestProjectAPI_list_leaderboards_should_show_deleted_only_when_asked(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken()
+	tok := f.scopedToken(readScopes...)
 
 	plain := f.do(tok, http.MethodGet, "/v1/project/leaderboards", "")
 	asked := f.do(tok, http.MethodGet, "/v1/project/leaderboards?include_deleted=true", "")
@@ -524,7 +524,7 @@ func TestProjectAPI_list_leaderboards_should_show_deleted_only_when_asked(t *tes
 
 func TestProjectAPI_list_leaderboards_should_use_snake_case_keys_for_deleted_boards(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken("leaderboards:write")
+	tok := f.scopedToken("leaderboards:read", "leaderboards:write")
 	f.do(tok, http.MethodDelete, boardPath(f.board(f.projectA, "gone"), ""), "")
 
 	got := f.do(tok, http.MethodGet, "/v1/project/leaderboards?include_deleted=true", "")
@@ -625,7 +625,7 @@ func TestProjectAPI_write_should_record_the_token_as_actor(t *testing.T) {
 
 func TestProjectAPI_list_revisions_should_return_the_management_token_id(t *testing.T) {
 	f := newFixture(t)
-	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{"config:write"}, time.Hour)
+	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{"config:read", "config:write"}, time.Hour)
 	require.Equal(t, http.StatusOK, f.do(tok, http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`).status)
 
 	got := f.do(tok, http.MethodGet, "/v1/project/revisions?resource=remote_config", "")
@@ -636,7 +636,7 @@ func TestProjectAPI_list_revisions_should_return_the_management_token_id(t *test
 
 func TestProjectAPI_list_revisions_should_answer_422_for_wrong_arguments(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken()
+	tok := f.scopedToken(readScopes...)
 
 	for _, query := range []string{"", "?resource=players", "?resource=leaderboard"} {
 		t.Run(query, func(t *testing.T) {
@@ -650,7 +650,7 @@ func TestProjectAPI_list_revisions_should_answer_422_for_wrong_arguments(t *test
 func TestProjectAPI_trace_should_need_exactly_one_argument(t *testing.T) {
 	f := newFixture(t)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/matchmaking/ticket-trace", "")
+	got := f.do(f.scopedToken("matchmaking:read"), http.MethodGet, "/v1/project/matchmaking/ticket-trace", "")
 
 	assert.Equal(t, http.StatusUnprocessableEntity, got.status, got.raw)
 }
@@ -661,7 +661,7 @@ func TestProjectAPI_trace_by_player_should_return_only_the_queued_ticket(t *test
 	f.ticket(f.projectA, player, "failed", `{}`)
 	queued := f.ticket(f.projectA, player, "queued", `{}`)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/matchmaking/ticket-trace?player_id="+strconv.FormatInt(player, 10), "")
+	got := f.do(f.scopedToken("matchmaking:read"), http.MethodGet, "/v1/project/matchmaking/ticket-trace?player_id="+strconv.FormatInt(player, 10), "")
 
 	assert.Equal(t, float64(queued), got.body["ticket_id"], got.raw)
 }
@@ -670,7 +670,7 @@ func TestProjectAPI_trace_should_never_return_client_text_or_attributes(t *testi
 	f := newFixture(t)
 	ticket := f.ticket(f.projectA, f.player(f.projectA), "queued", `{"x":"SECRET_ATTRIBUTE_TEXT"}`)
 
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/matchmaking/ticket-trace?ticket_id="+strconv.FormatInt(ticket, 10), "")
+	got := f.do(f.scopedToken("matchmaking:read"), http.MethodGet, "/v1/project/matchmaking/ticket-trace?ticket_id="+strconv.FormatInt(ticket, 10), "")
 
 	require.Equal(t, http.StatusOK, got.status, got.raw)
 	for _, leaked := range []string{"SECRET_ATTRIBUTE_TEXT", "run the delete tool", "ignore all rules"} {
@@ -727,7 +727,7 @@ func TestProjectAPI_health_check_should_report_a_problem_at_the_leaderboard_limi
 
 func TestProjectAPI_token_should_not_reach_another_project(t *testing.T) {
 	f := newFixture(t)
-	tok := f.scopedToken("config:write")
+	tok := f.scopedToken("config:read")
 	f.exec(`UPDATE projects SET remote_config = '{"b":1}' WHERE id = $1`, f.projectB)
 
 	got := f.do(tok, http.MethodGet, "/v1/project/remote-config", "")

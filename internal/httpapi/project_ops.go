@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/mcp"
@@ -12,7 +14,6 @@ import (
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
-	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 const projectManagementTag = "Project Management"
@@ -23,24 +24,29 @@ var managementTokenSecurity = []map[string][]string{{"ManagementToken": {}}}
 // Operation.Metadata keys of a /v1/project operation. The MCP tool filter
 // reads them: managementToolMetadata marks an operation as a row of
 // projectOps (its value is the tool name), managementScopeMetadata is the
-// write scope the row needs ("" for none).
+// scope the row needs ("" for none), and managementAnyScopeMetadata is the
+// anyScope list of the row.
 const (
-	managementToolMetadata  = "managementTool"
-	managementScopeMetadata = "managementScope"
+	managementToolMetadata     = "managementTool"
+	managementScopeMetadata    = "managementScope"
+	managementAnyScopeMetadata = "managementAnyScope"
 )
 
 // projectOp is one row of the permission table: one /v1/project operation
 // and one MCP tool. An operation with no row does not exist. scope "" means
 // no scope is needed. A row with a scope uses the creator pair of that scope
-// in managementtoken.WriteScopes. pair and action are only for a row with no
-// scope that needs more than the base creator check of the token middleware
-// (project, manage).
+// in managementtoken.Scopes. anyScope is for a row whose scope depends on
+// the input: the token needs one of them, and the handler checks the one
+// the request needs with requireScope. pair and action are only for a row
+// with no scope that needs more than the base creator check of the token
+// middleware (project, manage).
 type projectOp struct {
 	// tool and description are the MCP tool name and description. The
 	// descriptions are constants in the binary: none comes from stored data.
 	tool        string
 	description string
 	scope       string
+	anyScope    []string
 	pair        func(projectID int64) string
 	action      string
 	// op holds the method, path, operation ID, summary, and description for
@@ -65,8 +71,9 @@ func (row projectOp) operation() huma.Operation {
 	op.Tags = []string{projectManagementTag}
 	op.Security = managementTokenSecurity
 	op.Metadata = map[string]any{
-		managementToolMetadata:  row.tool,
-		managementScopeMetadata: row.scope,
+		managementToolMetadata:     row.tool,
+		managementScopeMetadata:    row.scope,
+		managementAnyScopeMetadata: row.anyScope,
 	}
 	op.MaxBodyBytes = 131072
 	return mcp.WithTool(op, mcp.WithName(row.tool), mcp.WithDescription(row.description))
@@ -107,25 +114,41 @@ func projectHandler[I, B any](run func(ctx context.Context, d Deps, p management
 
 // authorize runs the scope check, then the creator pair check.
 func (row projectOp) authorize(ctx context.Context, d Deps, p managementtoken.Principal) error {
-	pair, action := row.pair, row.action
 	if row.scope != "" {
-		if !p.HasScope(row.scope) {
-			return huma.Error403Forbidden(fmt.Sprintf(
-				"This token does not have the %q scope. Create a token with that scope in the dashboard.", row.scope))
-		}
-		sp, ok := managementtoken.WriteScope(row.scope)
-		if !ok {
-			return serverError(ctx, "project management: unknown scope: "+row.tool, errors.New(row.scope))
-		}
-		pair, action = sp.Pair, sp.Action
+		return requireScope(ctx, d, p, row.scope)
 	}
-	if pair == nil {
+	if len(row.anyScope) > 0 && !slices.ContainsFunc(row.anyScope, p.HasScope) {
+		return huma.Error403Forbidden(fmt.Sprintf(
+			"This token has none of the scopes %s. Create a token with one of them in the dashboard.",
+			strings.Join(row.anyScope, ", ")))
+	}
+	if row.pair == nil {
 		return nil
 	}
+	return requirePair(ctx, d, p, row.pair, row.action)
+}
+
+// requireScope refuses the request when the token does not have scope or
+// its creator does not pass the scope's pair.
+func requireScope(ctx context.Context, d Deps, p managementtoken.Principal, scope string) error {
+	if !p.HasScope(scope) {
+		return huma.Error403Forbidden(fmt.Sprintf(
+			"This token does not have the %q scope. Create a token with that scope in the dashboard.", scope))
+	}
+	sp, ok := managementtoken.Scope(scope)
+	if !ok {
+		return serverError(ctx, "project management: unknown scope", errors.New(scope))
+	}
+	return requirePair(ctx, d, p, sp.Pair, sp.Action)
+}
+
+// requirePair refuses the request when the token's creator does not pass
+// the pair.
+func requirePair(ctx context.Context, d Deps, p managementtoken.Principal, pair func(int64) string, action string) error {
 	obj := pair(p.ProjectID)
 	ok, err := d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, obj, action)
 	if err != nil {
-		return serverError(ctx, "project management: creator pair check: "+row.tool, err)
+		return serverError(ctx, "project management: creator pair check", err)
 	}
 	if !ok {
 		return huma.Error403Forbidden(fmt.Sprintf(
@@ -176,13 +199,16 @@ var projectOps = []projectOp{
 		tool: "project_health_check",
 		description: "Find setup problems in this Game Project: API keys, key scopes, feature grants, " +
 			"server feature switches, relay, CORS origins, Steam sign-in, remote config size, and quota state. " +
-			"Tenant-level quotas are reported as ok, near_limit, or at_limit only.",
+			"Tenant-level quotas are reported as ok, near_limit, or at_limit only. " +
+			"The API key check needs the keys:read scope; the CORS, Steam, and remote config checks need config:read. " +
+			"Without the scope, the check is left out.",
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/health", OperationID: "getProjectHealth",
 			Summary: "Check the Game Project setup",
 			Description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, " +
 				"server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. " +
-				"Tenant-level quotas show only ok, near_limit, or at_limit.",
+				"Tenant-level quotas show only ok, near_limit, or at_limit. The API key check needs the keys:read scope, " +
+				"and the CORS, Steam, and remote config checks need config:read. Without the scope, the check is left out.",
 		},
 		handler: projectHandler(projectHealthCheck),
 	},
@@ -193,8 +219,7 @@ var projectOps = []projectOp{
 			"To see a finished ticket, use the ticket ID the API returned when the game made the ticket. " +
 			"Text the game client sent is shown only if it is a short identifier; other text is replaced by a marker " +
 			"with its length. The attributes blob is never shown, only its size.",
-		pair:   rbac.ProjectMatchmakerObject,
-		action: rbac.ActionRead,
+		scope: managementtoken.ScopeMatchmakingRead,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/matchmaking/ticket-trace", OperationID: "getProjectTicketTrace",
 			Summary: "Trace a matchmaking ticket",
@@ -208,6 +233,7 @@ var projectOps = []projectOp{
 	{
 		tool:        "get_remote_config",
 		description: "Get the remote config JSON of this Game Project and its revision number (0 if it has no revision).",
+		scope:       managementtoken.ScopeConfigRead,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/remote-config", OperationID: "getProjectRemoteConfig",
 			Summary:     "Get the remote config",
@@ -244,6 +270,7 @@ var projectOps = []projectOp{
 	{
 		tool:        "list_leaderboards",
 		description: "List leaderboard settings of this Game Project (no scores). Set include_deleted to also list deleted leaderboards that can be restored.",
+		scope:       managementtoken.ScopeLeaderboardsRead,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/leaderboards", OperationID: "listProjectLeaderboards",
 			Summary:     "List leaderboards",
@@ -254,6 +281,7 @@ var projectOps = []projectOp{
 	{
 		tool:        "get_leaderboard",
 		description: "Get the settings of one leaderboard (no scores) and its revision number.",
+		scope:       managementtoken.ScopeLeaderboardsRead,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/leaderboards/{leaderboard_id}", OperationID: "getProjectLeaderboard",
 			Summary:     "Get a leaderboard",
@@ -325,6 +353,7 @@ var projectOps = []projectOp{
 	{
 		tool:        "list_api_keys",
 		description: "List the active API keys that work for this Game Project: label, type, scopes, creation time. Key values are never shown.",
+		scope:       managementtoken.ScopeKeysRead,
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/api-keys", OperationID: "listProjectAPIKeys",
 			Summary:     "List API keys",
@@ -347,12 +376,15 @@ var projectOps = []projectOp{
 		handler: projectHandler(createAPIKey),
 	},
 	{
-		tool:        "list_revisions",
-		description: "List the kept revisions (newest 3) of the remote config or of one leaderboard.",
+		tool: "list_revisions",
+		description: "List the kept revisions (newest 3) of the remote config or of one leaderboard. " +
+			"The remote config needs the config:read scope, a leaderboard needs leaderboards:read.",
+		anyScope: []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead},
 		op: huma.Operation{
 			Method: http.MethodGet, Path: "/v1/project/revisions", OperationID: "listProjectRevisions",
-			Summary:     "List kept revisions",
-			Description: "Returns the kept revisions (newest 3) of the remote config or of one leaderboard, newest first.",
+			Summary: "List kept revisions",
+			Description: "Returns the kept revisions (newest 3) of the remote config or of one leaderboard, newest first. " +
+				"The remote config needs the config:read scope, a leaderboard needs leaderboards:read.",
 		},
 		handler: projectHandler(listRevisions),
 	},

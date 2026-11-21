@@ -37,8 +37,9 @@ func attachManagementMCP(api huma.API, version string) {
 }
 
 // managementToolFilter offers a tool only when it is a row of projectOps and
-// the token has the row's scope. It is not the authorization boundary: the
-// wrapper of each operation checks the scope and the creator pair again.
+// the token has the row's scope, or one of its anyScope list. It is not the
+// authorization boundary: the wrapper of each operation checks the scope and
+// the creator pair again.
 func managementToolFilter(ctx context.Context, op *huma.Operation) bool {
 	if _, ok := op.Metadata[managementToolMetadata].(string); !ok {
 		return false
@@ -47,8 +48,11 @@ func managementToolFilter(ctx context.Context, op *huma.Operation) bool {
 	if !ok {
 		return false
 	}
-	scope, _ := op.Metadata[managementScopeMetadata].(string)
-	return scope == "" || p.HasScope(scope)
+	if scope, _ := op.Metadata[managementScopeMetadata].(string); scope != "" {
+		return p.HasScope(scope)
+	}
+	anyScope, _ := op.Metadata[managementAnyScopeMetadata].([]string)
+	return len(anyScope) == 0 || slices.ContainsFunc(anyScope, p.HasScope)
 }
 
 // managementTool is a registered row operation, the argument names its tool

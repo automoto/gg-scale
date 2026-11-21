@@ -29,7 +29,7 @@ Made with the user on 2026-11-21.
 |---|---|
 | Same operations for all clients | Every operation is an HTTP operation and an MCP tool. No operation is for one client only. Control is by scope, not by client. A per-client limit is not a security boundary: an agent with a shell can run the CLI. |
 | Read access | Read scopes for each resource. Before this plan, every token could use every read. |
-| Old tokens | A migration adds all read scopes to each existing token, so no existing token loses access. |
+| Old tokens | No migration. A token made before read scopes has no read access. Make a new token. |
 | Risky operations | An operation that cannot be undone, returns a secret, or sends email gets its own opt-in scope. Opt-in scopes are never in a preset. The token page shows them in a separate group with a warning. The operation runs at once (no approval step). |
 | Secrets | No operation returns a stored secret. One exception: `create_secret_api_key` returns the new key value one time, behind the opt-in scope `keys:secret`. A secret that a token writes (the Steam Web API key) is never returned. |
 | Player data | Without `players:pii`: player ID, external ID, status flags, and timestamps. With the opt-in scope `players:pii`: email and display name too, unchanged, in their own fields. The tool description says that these fields are text that players wrote. The client text filter is not used for them, because it hides almost every real email and name. |
@@ -46,7 +46,7 @@ Made with the user on 2026-11-21.
 
 | Old rule (`archive/mcp-plan.md`) | New rule | Why |
 |---|---|---|
-| Every token can use every read. | Read scopes for each resource. Old tokens get all of them. | A token for one task does not need to see keys, players, or fleets. |
+| Every token can use every read. | Read scopes for each resource. Old tokens lose their reads; make a new token. | A token for one task does not need to see keys, players, or fleets. |
 | No operation that cannot be undone. | Allowed behind an opt-in scope that is never in a preset. | A CLI user must be able to revoke a key or deallocate a server. The scope makes the risk a clear choice. |
 | No operation returns a secret. | One exception: a new secret API key, behind `keys:secret`. | CI and deploy scripts need secret keys. A stored secret is still never returned. |
 | No player data except IDs and flags. | Email and display name behind `players:pii`. | Support work on the CLI needs them. The opt-in scope and the warning keep agents safe by default. |
@@ -77,10 +77,10 @@ creator passes, and each request checks the pair again.
 
 | Scope | Class | Operations | Creator pair |
 |---|---|---|---|
-| `config:read` | 1 | `get_remote_config`, `list_revisions` (remote config), `get_steam_auth` | `(project:<id>:config, read)` |
+| `config:read` | 1 | `get_remote_config`, `list_revisions` (remote config), `get_steam_auth` | `(project, manage)` |
 | `config:write` | 1 | `set_remote_config`, `rollback_remote_config` | `(project:<id>:config, update)` |
 | `origins:write` | 1 | `set_allowed_origins` | `(project:<id>:config, update)` |
-| `leaderboards:read` | 1 | `list_leaderboards`, `get_leaderboard`, `list_revisions` (leaderboard) | `(project:<id>:leaderboard, read)` |
+| `leaderboards:read` | 1 | `list_leaderboards`, `get_leaderboard`, `list_revisions` (leaderboard) | `(project, manage)` |
 | `leaderboards:write` | 1 | create, update, rollback, delete, restore leaderboard | `(project:<id>:leaderboard, manage)` |
 | `keys:read` | 1 | `list_api_keys` | `(project, manage)` |
 | `keys:create` | 1 | `create_api_key` (publishable) | `(api_key:publishable, manage)` |
@@ -101,7 +101,12 @@ creator passes, and each request checks the pair again.
 
 Notes:
 
-- Check each "read" pair in `internal/rbac` before stage 1. If a read pair does
+- The read pairs were checked in `internal/rbac`. Casbin matches the action
+  exactly, and no role has `(project:<id>:config, read)` or
+  `(project:<id>:leaderboard, read)`, so `config:read` and
+  `leaderboards:read` use `(project, manage)`, the check of the dashboard
+  pages today.
+- Check the pair of each later read scope in `internal/rbac`. If a read pair does
   not exist, use the pair that the dashboard page checks today (for most
   project pages that is the route gate `(project, manage)`). The pair must
   never be weaker than the dashboard.
@@ -250,8 +255,8 @@ stage 5 review, before code:
 
 - A token with only `leaderboards:read` sees only the leaderboard read tools
   in `tools/list`, and gets 403 on `GET /v1/project/api-keys`.
-- A token that existed before the migration can still use every read
-  operation.
+- A token made before read scopes has no read access. The release notes tell
+  people to make a new token.
 - A class 2 scope is in no preset, and the token page shows it in a separate
   group with a warning.
 - Each new write operation writes one audit row with `management_token:<id>`,
@@ -274,18 +279,19 @@ Do the stages in order. Write failing tests first. After each stage:
 
 ### Stage 1: read scopes, introspection, paging
 
-- [ ] Check the read pairs in `internal/rbac` and fix the scope table above.
-- [ ] Scope table: rename `WriteScopes` to `Scopes`, add the read scopes and the class of each scope.
-- [ ] `projectOps`: each read row gets its read scope.
-- [ ] Migration: add all read scopes to every existing `management_tokens` row. Down: remove them. Test in `tests/integration/migrate`.
+- [x] Check the read pairs in `internal/rbac` and fix the scope table above.
+- [x] Scope table: rename `WriteScopes` to `Scopes`, add the read scopes and the class of each scope.
+- [x] `projectOps`: each read row gets its read scope. `list_revisions` needs `config:read` or `leaderboards:read`, by resource.
+- Dropped: ~~Migration: add all read scopes to every existing `management_tokens` row.~~ Old tokens lose their reads; make a new token. Until the token page changes, the old create form adds all four read scopes to each new token.
 - [ ] Token page: the access table, Quick fill links, the risky group (empty in this stage), disabled options with the reason, server-side mapping from form fields to scopes. See "Token page".
 - [ ] Token list: access in words, the inactive count, "New token like this".
 - [ ] Tests: a disabled option is refused on POST; Quick fill never sets a risky scope; "New token like this" fills the same access; the default form makes a read-only token.
-- [ ] `project_health_check`: leave out each section that the token cannot read.
+- [x] `project_health_check`: leave out each section that the token cannot read.
 - [ ] `get_token` operation.
 - [ ] Paging for `list_leaderboards` and `list_api_keys`.
 - [ ] `mcpInstructions`: mention `get_token`.
-- [ ] Tests: a narrow token's tool list; 403 for a missing read scope; an old token keeps its reads; paging.
+- [x] Tests: a narrow token's tool list; 403 for a missing read scope.
+- [ ] Tests: paging.
 
 ### Stage 2: keys, players, limits, matchmaking (class 1)
 
@@ -294,7 +300,7 @@ Do the stages in order. Write failing tests first. After each stage:
 - [ ] `players:pii` in the class 2 group of the token page.
 - [ ] `set_player_disabled`, `request_player_delete`, `cancel_player_delete` (`players:write`) in `projectadmin/players.go`, with audit rows. The dashboard player disable gets an audit row too.
 - [ ] `get_project_limits`, `set_project_invite_limit`, `set_project_storage_limit` (`limits:read`, `limits:write`) in `projectadmin/limits.go`. Same bounds as the dashboard. Make the storage limit write and its audit row one transaction.
-- [ ] `get_matchmaking_queue` (`matchmaking:read`), the bucket view of the dashboard queue page. `matchmaking_ticket_trace` moves to `matchmaking:read`.
+- [ ] `get_matchmaking_queue` (`matchmaking:read`), the bucket view of the dashboard queue page. `matchmaking_ticket_trace` already uses `matchmaking:read`.
 - [ ] `get_steam_auth` (`config:read`): App ID and whether a key is set. Never the key.
 - [ ] Tests for each operation: scope refusal, creator pair refusal, another project's resource is 404, audit row.
 
@@ -326,7 +332,7 @@ Do the stages in order. Write failing tests first. After each stage:
 ### Stage 6: documents
 
 - [ ] `docs/management-api.md`: scope table, classes, presets, and each new operation.
-- [ ] Release notes: read scopes (old tokens keep all reads), the new operations, and the changed rules.
+- [ ] Release notes: read scopes (old tokens lose reads; make a new token), the new operations, and the changed rules.
 - [ ] `openapi.yaml` (`make openapi`).
 
 ## Risks
@@ -344,9 +350,10 @@ Do the stages in order. Write failing tests first. After each stage:
 - **Inline dashboard code.** Many dashboard writes are inline in
   `internal/controlpanel`. Moving them to shared functions changes dashboard
   code too, so each stage must run the `controlpanel` suite.
-- **Migration.** The read scope migration changes `management_tokens.scopes`.
-  The previous release ignores unknown scopes on requests, so it stays
-  working. Check this in a test before release.
+- **Old tokens.** There is no read scope migration. A token made before read
+  scopes loses its reads and must be made again. The previous release checks
+  a scope only by membership, so a new token with read scopes still works
+  there.
 
 ## Files to change
 

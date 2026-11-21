@@ -38,6 +38,13 @@ const (
 
 var errManagementTokenLimit = errors.New("control panel: management token limit reached")
 
+// managementReadScopes are added to each new token that its creator can
+// grant, whatever the preset. The form offers only the other scopes.
+var managementReadScopes = []string{
+	managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead,
+	managementtoken.ScopeKeysRead, managementtoken.ScopeMatchmakingRead,
+}
+
 // ManagementTokensView renders a project's management token page.
 type ManagementTokensView struct {
 	UserEmail       string
@@ -103,11 +110,11 @@ func (h *Handler) managementMaxTokens() int64 {
 	return 20
 }
 
-// grantableManagementScopes returns the write scopes whose Casbin pair the
-// user passes now. A token can never get a scope its creator could not use.
+// grantableManagementScopes returns the scopes whose Casbin pair the user
+// passes now. A token can never get a scope its creator could not use.
 func (h *Handler) grantableManagementScopes(userID, tenantID, projectID int64) ([]string, error) {
 	var out []string
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		ok, err := h.rbac.CanControlPanel(userID, tenantID, s.Pair(projectID), s.Action)
 		if err != nil {
 			return nil, err
@@ -144,9 +151,14 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 		DefaultDays: managementTokenDefaultDays,
 		Days:        strconv.Itoa(managementTokenDefaultDays),
 	}
-	var err error
-	if view.GrantableScopes, err = h.grantableManagementScopes(session.User.ID, tenantID, projectID); err != nil {
+	grantable, err := h.grantableManagementScopes(session.User.ID, tenantID, projectID)
+	if err != nil {
 		return view, err
+	}
+	for _, s := range grantable {
+		if !slices.Contains(managementReadScopes, s) {
+			view.GrantableScopes = append(view.GrantableScopes, s)
+		}
 	}
 	var rows []sqlcgen.ListManagementTokensForProjectRow
 	tctx := db.WithTenant(ctx, tenantID)
@@ -225,10 +237,15 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 	// "read_only" included, gives a token with no write scopes.
 	switch r.Form.Get("preset") {
 	case presetReadWrite:
-		scopes = grantable
+		scopes = slices.Clone(grantable)
 	case presetCustom:
 	default:
 		scopes = []string{}
+	}
+	for _, s := range grantable {
+		if slices.Contains(managementReadScopes, s) && !slices.Contains(scopes, s) {
+			scopes = append(scopes, s)
+		}
 	}
 
 	label := strings.TrimSpace(r.Form.Get("label"))

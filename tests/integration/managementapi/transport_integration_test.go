@@ -72,7 +72,7 @@ func TestTransport_tool_call_should_take_one_unit_from_each_token_bucket(t *test
 	// Arrange
 	limiter := &countingLimiter{Limiter: ratelimit.NewCacheLimiter(memory.New()), keys: map[string]int{}}
 	f := newFixtureWith(t, func(d *httpapi.Deps) { d.Limiter = limiter })
-	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 
 	// Act
 	res := f.call(tok, "project_health_check", nil)
@@ -121,7 +121,7 @@ func TestTransport_token_at_its_mcp_limit_should_still_get_a_direct_call(t *test
 func TestTransport_tools_list_should_have_exactly_the_table_tools_for_all_scopes(t *testing.T) {
 	f := newFixture(t)
 	scopes := []string{}
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		scopes = append(scopes, s.Scope)
 	}
 
@@ -139,7 +139,7 @@ func TestTransport_tools_list_should_hide_tools_whose_scope_the_token_lacks(t *t
 
 	_, out := f.post(f.scopedToken(managementtoken.ScopeConfigWrite), toolsList)
 
-	assert.ElementsMatch(t, append([]string{"set_remote_config", "rollback_remote_config"}, readTools...), toolNames(out))
+	assert.ElementsMatch(t, []string{"set_remote_config", "rollback_remote_config", "project_health_check"}, toolNames(out))
 }
 
 func TestTransport_should_refuse_a_tool_with_no_row(t *testing.T) {

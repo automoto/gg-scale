@@ -37,7 +37,7 @@ func TestProjectAPI_list_leaderboards_should_report_truncated_over_50(t *testing
 		SELECT $1, $2, 'b-' || g FROM generate_series(1, 60) g`, f.tenantA, f.projectA)
 
 	// Act
-	got := f.do(f.scopedToken(), http.MethodGet, "/v1/project/leaderboards", "")
+	got := f.do(f.scopedToken(readScopes...), http.MethodGet, "/v1/project/leaderboards", "")
 
 	// Assert
 	assert.Equal(t, []any{http.StatusOK, true, 50},

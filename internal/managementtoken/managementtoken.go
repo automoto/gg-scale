@@ -13,37 +13,60 @@ import (
 // TokenPrefix starts each management token value.
 const TokenPrefix = "ggm_"
 
-// Write scopes. A token can always use the read operations.
+// Scopes. A scope is <resource>:<action>.
 const (
+	ScopeConfigRead        = "config:read"
 	ScopeConfigWrite       = "config:write"
-	ScopeLeaderboardsWrite = "leaderboards:write"
-	ScopeKeysCreate        = "keys:create"
 	ScopeOriginsWrite      = "origins:write"
+	ScopeLeaderboardsRead  = "leaderboards:read"
+	ScopeLeaderboardsWrite = "leaderboards:write"
+	ScopeKeysRead          = "keys:read"
+	ScopeKeysCreate        = "keys:create"
+	ScopeMatchmakingRead   = "matchmaking:read"
 )
 
-// ScopePair is a write scope and the Casbin pair that guards it.
+// Scope classes.
+const (
+	// ClassNormal is a scope for reversible, project-level operations that
+	// return no secret. It can be in a preset.
+	ClassNormal = 1
+	// ClassRisky is an opt-in scope: its operations cannot be undone, return
+	// or write a secret, or send email. It is never in a preset.
+	ClassRisky = 2
+)
+
+// ScopePair is a scope, its class, and the Casbin pair that guards it.
 type ScopePair struct {
 	Scope  string
+	Class  int
 	Pair   func(projectID int64) string
 	Action string
 }
 
-// WriteScopes lists each write scope with the Casbin pair the creator must
-// pass to grant it. The dashboard offers only the scopes the person passes.
-var WriteScopes = []ScopePair{
-	{Scope: ScopeConfigWrite, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
-	{Scope: ScopeLeaderboardsWrite, Pair: rbac.ProjectLeaderboardObject, Action: rbac.ActionManage},
-	{Scope: ScopeKeysCreate, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage},
-	{Scope: ScopeOriginsWrite, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
+func projectObject(int64) string { return rbac.ObjectProject }
+
+// Scopes lists each scope with the Casbin pair the creator must pass to
+// grant it. The dashboard offers only the scopes the person passes. No role
+// has a read pair on the project config or leaderboard objects, so their
+// read scopes use (project, manage), the check of the dashboard pages.
+var Scopes = []ScopePair{
+	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
+	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
+	{Scope: ScopeOriginsWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
+	{Scope: ScopeLeaderboardsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
+	{Scope: ScopeLeaderboardsWrite, Class: ClassNormal, Pair: rbac.ProjectLeaderboardObject, Action: rbac.ActionManage},
+	{Scope: ScopeKeysRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
+	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage},
+	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead},
 }
 
-// WriteScope returns the entry of WriteScopes for scope.
-func WriteScope(scope string) (ScopePair, bool) {
-	i := slices.IndexFunc(WriteScopes, func(s ScopePair) bool { return s.Scope == scope })
+// Scope returns the entry of Scopes for scope.
+func Scope(scope string) (ScopePair, bool) {
+	i := slices.IndexFunc(Scopes, func(s ScopePair) bool { return s.Scope == scope })
 	if i < 0 {
 		return ScopePair{}, false
 	}
-	return WriteScopes[i], true
+	return Scopes[i], true
 }
 
 // Principal is the authenticated token. It holds no dashboard session.

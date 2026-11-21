@@ -147,22 +147,36 @@ func (p tokenPanel) onlyTokenScopes(t *testing.T) []string {
 	return scopes
 }
 
+// tokenReadScopes are the read scopes that the create form adds to each new
+// token.
+var tokenReadScopes = []string{"config:read", "leaderboards:read", "keys:read", "matchmaking:read"}
+
 func TestManagementTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	p.create(t, c, csrf, url.Values{"preset": {"read_only"}, "scopes": {"config:write"}})
 
-	assert.Empty(t, p.onlyTokenScopes(t))
+	assert.ElementsMatch(t, tokenReadScopes, p.onlyTokenScopes(t))
 }
 
 func TestManagementTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
-	p.create(t, c, csrf, url.Values{"preset": {"custom"}, "scopes": {"config:write"}})
+	p.create(t, c, csrf, url.Values{"preset": {"custom"}, "scopes": {"config:write", "keys:read"}})
 
-	assert.Equal(t, []string{"config:write"}, p.onlyTokenScopes(t))
+	assert.ElementsMatch(t, append([]string{"config:write"}, tokenReadScopes...), p.onlyTokenScopes(t))
+}
+
+func TestManagementTokens_page_should_offer_only_write_scopes_as_boxes(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Equal(t, []bool{true, false}, []bool{
+		strings.Contains(body, `value="config:write"`), strings.Contains(body, `value="config:read"`)})
 }
 
 func TestManagementTokens_should_refuse_unknown_scope(t *testing.T) {
@@ -252,7 +266,7 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	require.NoError(t, p.raw.QueryRow(context.Background(),
 		`SELECT project_id, scopes FROM management_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
 	assert.Equal(t, p.project, projectID)
-	assert.ElementsMatch(t, []string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, scopes)
+	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, tokenReadScopes...), scopes)
 }
 
 func TestManagementTokens_revoke_sets_revoked_at(t *testing.T) {

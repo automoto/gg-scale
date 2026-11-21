@@ -23,6 +23,8 @@ func TestManagementToolFilter(t *testing.T) {
 	tool := func(scope string) *huma.Operation {
 		return &huma.Operation{Metadata: map[string]any{managementToolMetadata: "x", managementScopeMetadata: scope}}
 	}
+	anyTool := &huma.Operation{Metadata: map[string]any{managementToolMetadata: "x", managementScopeMetadata: "",
+		managementAnyScopeMetadata: []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}}}
 	withScopes := func(scopes ...string) context.Context {
 		return managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: scopes})
 	}
@@ -37,6 +39,8 @@ func TestManagementToolFilter(t *testing.T) {
 		{"should_show_a_tool_with_no_scope", withScopes(), tool(""), true},
 		{"should_hide_a_tool_whose_scope_the_token_lacks", withScopes(managementtoken.ScopeKeysCreate), tool(managementtoken.ScopeConfigWrite), false},
 		{"should_show_a_tool_whose_scope_the_token_has", withScopes(managementtoken.ScopeConfigWrite), tool(managementtoken.ScopeConfigWrite), true},
+		{"should_show_a_tool_when_the_token_has_one_of_its_scopes", withScopes(managementtoken.ScopeLeaderboardsRead), anyTool, true},
+		{"should_hide_a_tool_when_the_token_has_none_of_its_scopes", withScopes(managementtoken.ScopeKeysRead), anyTool, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -54,7 +58,7 @@ func strictCall(t *testing.T, body string) (bool, string) {
 	reached := false
 	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
 	h := strictToolArguments(OpenAPIDoc("1.0.0"))(next)
-	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: []string{managementtoken.ScopeLeaderboardsWrite}})
+	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: []string{managementtoken.ScopeLeaderboardsRead, managementtoken.ScopeLeaderboardsWrite}})
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body)).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -86,11 +90,11 @@ func TestStrictToolArguments_should_refuse_unknown_argument_in_a_body_with_verti
 	assert.False(t, reached)
 }
 
-// allWriteScopes returns every write scope, so the tool filter shows every
+// allScopes returns every scope, so the tool filter shows every
 // tool.
-func allWriteScopes() []string {
+func allScopes() []string {
 	scopes := []string{}
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		scopes = append(scopes, s.Scope)
 	}
 	return scopes
@@ -103,7 +107,7 @@ func listedToolArguments(t *testing.T, cfg huma.Config) map[string][]string {
 	r := chi.NewRouter()
 	registerProjectManagementRoutes(groupAPI(r, cfg), Deps{})
 	attachManagementMCP(groupAPI(r, cfg), "test")
-	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allWriteScopes()})
+	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allScopes()})
 	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { r.ServeHTTP(w, req.WithContext(ctx)) })
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
@@ -170,7 +174,7 @@ func TestStrictToolArguments_should_restore_the_body_for_the_next_handler(t *tes
 	var got []byte
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got, _ = io.ReadAll(r.Body) })
 	h := strictToolArguments(OpenAPIDoc("1.0.0"))(next)
-	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allWriteScopes()})
+	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allScopes()})
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body)).WithContext(ctx)
 
 	// Act

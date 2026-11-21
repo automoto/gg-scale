@@ -39,23 +39,67 @@ func TestProjectOps_should_use_only_project_level_casbin_objects(t *testing.T) {
 
 func TestProjectOps_should_use_only_known_scopes(t *testing.T) {
 	known := map[string]bool{"": true}
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		known[s.Scope] = true
 	}
 	for _, row := range projectOps {
-		assert.True(t, known[row.scope], "tool %s has unknown scope %q", row.tool, row.scope)
+		for _, scope := range append([]string{row.scope}, row.anyScope...) {
+			assert.True(t, known[scope], "tool %s has unknown scope %q", row.tool, scope)
+		}
 	}
 }
 
-func TestProjectOps_ticket_trace_should_need_matchmaker_read(t *testing.T) {
-	var got [2]string
+func TestProjectOps_read_rows_should_need_their_read_scope(t *testing.T) {
+	want := map[string]string{
+		"project_health_check":     "",
+		"matchmaking_ticket_trace": managementtoken.ScopeMatchmakingRead,
+		"get_remote_config":        managementtoken.ScopeConfigRead,
+		"list_leaderboards":        managementtoken.ScopeLeaderboardsRead,
+		"get_leaderboard":          managementtoken.ScopeLeaderboardsRead,
+		"list_api_keys":            managementtoken.ScopeKeysRead,
+	}
+	got := map[string]string{}
 	for _, row := range projectOps {
-		if row.tool == "matchmaking_ticket_trace" {
-			got = [2]string{row.pair(testProjectID), row.action}
+		if _, ok := want[row.tool]; ok {
+			got[row.tool] = row.scope
 		}
 	}
 
-	assert.Equal(t, [2]string{"project:42:matchmaker", "read"}, got)
+	assert.Equal(t, want, got)
+}
+
+func TestProjectOps_list_revisions_should_be_shown_for_either_read_scope(t *testing.T) {
+	var got []string
+	for _, row := range projectOps {
+		if row.tool == "list_revisions" {
+			got = append([]string{row.scope}, row.anyScope...)
+		}
+	}
+
+	assert.Equal(t, []string{"", managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}, got)
+}
+
+func TestListRevisions_should_return_403_when_the_read_scope_of_the_resource_is_missing(t *testing.T) {
+	cases := map[string]struct {
+		in    projectListRevisionsInput
+		scope string
+	}{
+		"remote config": {projectListRevisionsInput{Resource: projectadmin.KindRemoteConfig}, managementtoken.ScopeLeaderboardsRead},
+		"leaderboard":   {projectListRevisionsInput{Resource: projectadmin.KindLeaderboard, LeaderboardID: 1}, managementtoken.ScopeConfigRead},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			a, err := rbac.NewMemoryAuthorizer()
+			require.NoError(t, err)
+			require.NoError(t, a.SetControlPanelMembershipRole(7, 1, "owner"))
+
+			_, err = listRevisions(context.Background(), Deps{RBAC: a}, *creatorToken(c.scope), &c.in)
+
+			var se huma.StatusError
+			require.ErrorAs(t, err, &se)
+			assert.Equal(t, http.StatusForbidden, se.GetStatus())
+		})
+	}
 }
 
 // projectOperations returns each documented operation under /v1/project,
@@ -246,6 +290,24 @@ func TestProjectHandler_should_answer_401_without_a_principal(t *testing.T) {
 	rec := serveProbe(t, probeRow("", nil, "", nil), "owner", nil)
 
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+}
+
+func TestProjectHandler_should_return_403_when_the_token_has_none_of_the_scopes(t *testing.T) {
+	row := probeRow("", nil, "", nil)
+	row.anyScope = []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}
+
+	rec := serveProbe(t, row, "owner", creatorToken(managementtoken.ScopeKeysRead))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestProjectHandler_should_permit_a_token_with_one_of_the_scopes(t *testing.T) {
+	row := probeRow("", nil, "", nil)
+	row.anyScope = []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}
+
+	rec := serveProbe(t, row, "owner", creatorToken(managementtoken.ScopeLeaderboardsRead))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestProjectHandler_should_name_the_missing_scope(t *testing.T) {

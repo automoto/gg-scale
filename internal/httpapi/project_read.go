@@ -250,12 +250,15 @@ type projectRevisionList struct {
 
 func listRevisions(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListRevisionsInput) (projectRevisionList, error) {
 	// The enum of Resource refuses other values before the handler runs.
-	kind, resourceID := projectadmin.KindRemoteConfig, p.ProjectID
+	kind, resourceID, scope := projectadmin.KindRemoteConfig, p.ProjectID, managementtoken.ScopeConfigRead
 	if in.Resource == projectadmin.KindLeaderboard {
 		if in.LeaderboardID == 0 {
 			return projectRevisionList{}, huma.Error422UnprocessableEntity("leaderboard_id is required when resource is leaderboard")
 		}
-		kind, resourceID = projectadmin.KindLeaderboard, in.LeaderboardID
+		kind, resourceID, scope = projectadmin.KindLeaderboard, in.LeaderboardID, managementtoken.ScopeLeaderboardsRead
+	}
+	if err := requireScope(ctx, d, p, scope); err != nil {
+		return projectRevisionList{}, err
 	}
 	revs, err := projectadmin.ListRevisions(ctx, d.Pool, p.TenantID, p.ProjectID, kind, resourceID)
 	if err != nil {
@@ -410,13 +413,16 @@ type projectHealth struct {
 	Checks   projectHealthChecks `json:"checks"`
 }
 
+// projectHealthChecks leaves out each section that needs a read scope the
+// token does not have. The pointers make the key absent, so a client can
+// tell a left-out section from an empty one.
 type projectHealthChecks struct {
-	APIKeys            []projectAPIKey       `json:"api_keys"`
+	APIKeys            *[]projectAPIKey      `json:"api_keys,omitempty" doc:"Absent without the keys:read scope."`
 	FeatureGrants      map[string]bool       `json:"feature_grants"`
 	ServerSwitches     projectServerSwitches `json:"server_switches"`
-	CORSAllowedOrigins projectHealthOrigins  `json:"cors_allowed_origins"`
-	SteamSignIn        bool                  `json:"steam_sign_in"`
-	RemoteConfigBytes  int                   `json:"remote_config_bytes"`
+	CORSAllowedOrigins *projectHealthOrigins `json:"cors_allowed_origins,omitempty" doc:"Absent without the config:read scope."`
+	SteamSignIn        *bool                 `json:"steam_sign_in,omitempty" doc:"Absent without the config:read scope."`
+	RemoteConfigBytes  *int                  `json:"remote_config_bytes,omitempty" doc:"Absent without the config:read scope."`
 	Quotas             projectHealthQuotas   `json:"quotas"`
 }
 
@@ -450,25 +456,34 @@ type projectQuotaCount struct {
 	Limit   int64 `json:"limit"`
 }
 
+// projectHealthCheck is open to every token. The pairs of keys:read and
+// config:read are (project, manage), which the token middleware checks, so
+// the scope test alone decides each section.
 func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectHealth, error) {
 	fleetEnabled, relayEnabled, relayConfigured := d.ControlPanel.FleetEnabled, d.ControlPanel.RelayEnabled, d.RelayIssuer != nil
+	showKeys, showConfig := p.HasScope(managementtoken.ScopeKeysRead), p.HasScope(managementtoken.ScopeConfigRead)
 	problems := []string{}
-	keys, err := projectActiveKeys(ctx, d, p)
-	if err != nil {
-		return projectHealth{}, err
-	}
-	var hasPublishable bool
+	var checks projectHealthChecks
 	keyScopes := map[string]bool{}
-	for _, k := range keys {
-		if k.Type == string(tenant.KeyTypePublishable) {
-			hasPublishable = true
+	if showKeys {
+		keys, err := projectActiveKeys(ctx, d, p)
+		if err != nil {
+			return projectHealth{}, err
 		}
-		for _, s := range k.Scopes {
-			keyScopes[s] = true
+		var hasPublishable bool
+		for _, k := range keys {
+			if k.Type == string(tenant.KeyTypePublishable) {
+				hasPublishable = true
+			}
+			for _, s := range k.Scopes {
+				keyScopes[s] = true
+			}
 		}
-	}
-	if !hasPublishable {
-		problems = append(problems, "No active publishable API key works for this Game Project. Game clients cannot call the API.")
+		if !hasPublishable {
+			problems = append(problems, "No active publishable API key works for this Game Project. Game clients cannot call the API.")
+		}
+		keys = keys[:min(len(keys), projectMaxListRows)]
+		checks.APIKeys = &keys
 	}
 
 	grants := map[string]bool{}
@@ -479,14 +494,14 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		}
 		grants[string(f)] = on
 	}
-	if grants[string(rbac.FeatureMatchmaker)] && !keyScopes[tenant.ScopeMatchmaker] {
+	if showKeys && grants[string(rbac.FeatureMatchmaker)] && !keyScopes[tenant.ScopeMatchmaker] {
 		problems = append(problems, "Matchmaking is granted, but no active API key has the matchmaker scope. /v1/matchmaker calls get 403.")
 	}
 	if grants[string(rbac.FeatureP2PRelay)] {
 		switch {
 		case !relayEnabled || !relayConfigured:
 			problems = append(problems, "The relay is granted, but the server relay is off or not configured. /v1/relay is not available.")
-		case !keyScopes[tenant.ScopeP2PRelay]:
+		case showKeys && !keyScopes[tenant.ScopeP2PRelay]:
 			problems = append(problems, "The relay is granted, but no active API key has the p2p_relay scope.")
 		}
 	}
@@ -502,7 +517,7 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		configBytes  int
 		steam        sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
 	)
-	err = projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
 		if qc, err = q.GetTenantQuotaContext(ctx); err != nil {
 			return err
@@ -515,6 +530,9 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		}
 		if boards, err = q.CountLiveLeaderboardsForProject(ctx, p.ProjectID); err != nil {
 			return err
+		}
+		if !showConfig {
+			return nil
 		}
 		cfg, err := q.GetRemoteConfig(ctx, p.ProjectID)
 		if err != nil {
@@ -551,34 +569,31 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		}
 	}
 
-	steamConfigured := steam.SteamAppID != "" && steam.SteamKeyConfigured != nil && *steam.SteamKeyConfigured
-	if steam.SteamAppID != "" && !steamConfigured {
-		problems = append(problems, "Steam sign-in has an App ID but no Web API key, so it is off.")
-	}
-	serverOrigins := d.CORSAllowedOrigins
-	if len(serverOrigins) == 0 {
-		serverOrigins = []string{"*"}
-	}
-	projectOrigins, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
-	if err != nil {
-		return projectHealth{}, err
+	if showConfig {
+		steamConfigured := steam.SteamAppID != "" && steam.SteamKeyConfigured != nil && *steam.SteamKeyConfigured
+		if steam.SteamAppID != "" && !steamConfigured {
+			problems = append(problems, "Steam sign-in has an App ID but no Web API key, so it is off.")
+		}
+		serverOrigins := d.CORSAllowedOrigins
+		if len(serverOrigins) == 0 {
+			serverOrigins = []string{"*"}
+		}
+		projectOrigins, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
+		if err != nil {
+			return projectHealth{}, err
+		}
+		checks.CORSAllowedOrigins = &projectHealthOrigins{
+			Server:  serverOrigins,
+			Project: projectOrigins,
+			Note: "A browser origin is accepted if the server list or the list of any Game Project has it. " +
+				"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
+		}
+		checks.SteamSignIn = &steamConfigured
+		checks.RemoteConfigBytes = &configBytes
 	}
 	sort.Strings(problems)
-	return projectHealth{
-		Problems: problems,
-		Checks: projectHealthChecks{
-			APIKeys:        keys[:min(len(keys), projectMaxListRows)],
-			FeatureGrants:  grants,
-			ServerSwitches: projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured},
-			CORSAllowedOrigins: projectHealthOrigins{
-				Server:  serverOrigins,
-				Project: projectOrigins,
-				Note: "A browser origin is accepted if the server list or the list of any Game Project has it. " +
-					"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
-			},
-			SteamSignIn:       steamConfigured,
-			RemoteConfigBytes: configBytes,
-			Quotas:            quotas,
-		},
-	}, nil
+	checks.FeatureGrants = grants
+	checks.ServerSwitches = projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured}
+	checks.Quotas = quotas
+	return projectHealth{Problems: problems, Checks: checks}, nil
 }

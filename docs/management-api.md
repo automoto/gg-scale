@@ -10,8 +10,9 @@ client can use it:
 Both use a management token (`ggm_...`). An agent can use it to set up a Game
 Project and to find why online play fails.
 
-A token can always use the read operations. Each group of write operations
-needs a scope that you choose when you make the token.
+Each group of operations needs a scope: a read scope for the reads of a
+resource, and a write scope for its writes. A token made before read scopes
+existed has no read access. Make a new token.
 
 ## For game developers
 
@@ -23,7 +24,8 @@ needs a scope that you choose when you make the token.
 3. Enter a label and the number of days until the token expires (default 30).
 4. Select **Read only**, **Read and write** (all scopes that you can give), or
    **Custom** with the write scopes that the agent needs (see "Write scopes"
-   below). Then select **Create token**.
+   below). Then select **Create token**. Each new token gets all read scopes
+   that you can give.
 5. Copy the token (`ggm_...`). It is shown one time only.
 
 The **Management tokens** card shows only when the operator has turned the
@@ -48,20 +50,21 @@ The server supports the MCP protocol revisions `2026-07-28` (stateless),
 `2025-11-25`, and `2025-06-18`. It has tools only (no resources and no
 prompts). `GET /mcp` answers 405.
 
-### Read operations
+### Read scopes
 
-| Tool | HTTP | What it does |
-|---|---|---|
-| `project_health_check` | `GET /v1/project/health` | Lists setup problems: API keys and their scopes, feature grants, server feature switches, relay, CORS origins, Steam sign-in, remote config size, quota state, and the number of live leaderboards against `LEADERBOARD_MAX_PER_PROJECT`. |
-| `matchmaking_ticket_trace` | `GET /v1/project/matchmaking/ticket-trace` | Shows one matchmaking ticket by `ticket_id`, or the queued ticket of a player by `player_id`. Finished tickets are kept for 24 hours. |
-| `get_remote_config` | `GET /v1/project/remote-config` | The remote config and its revision number. |
-| `list_leaderboards` | `GET /v1/project/leaderboards` | Leaderboard settings (no scores), at most 50. With `include_deleted`, also the deleted boards that you can restore. |
-| `get_leaderboard` | `GET /v1/project/leaderboards/{leaderboard_id}` | The settings and the revision number of one leaderboard. |
-| `list_api_keys` | `GET /v1/project/api-keys` | Active keys for the Game Project, at most 50. Key values are never shown. |
-| `list_revisions` | `GET /v1/project/revisions` | The newest 3 revisions of the remote config (`resource=remote_config`) or of a leaderboard (`resource=leaderboard` and `leaderboard_id`). |
+| Scope | Tool | HTTP | What it does |
+|---|---|---|---|
+| none | `project_health_check` | `GET /v1/project/health` | Lists setup problems: API keys and their scopes, feature grants, server feature switches, relay, CORS origins, Steam sign-in, remote config size, quota state, and the number of live leaderboards against `LEADERBOARD_MAX_PER_PROJECT`. The API key check needs `keys:read`; the CORS, Steam, and remote config checks need `config:read`. Without the scope, the check is left out. |
+| `matchmaking:read` | `matchmaking_ticket_trace` | `GET /v1/project/matchmaking/ticket-trace` | Shows one matchmaking ticket by `ticket_id`, or the queued ticket of a player by `player_id`. Finished tickets are kept for 24 hours. |
+| `config:read` | `get_remote_config` | `GET /v1/project/remote-config` | The remote config and its revision number. |
+| `leaderboards:read` | `list_leaderboards` | `GET /v1/project/leaderboards` | Leaderboard settings (no scores), at most 50. With `include_deleted`, also the deleted boards that you can restore. |
+| `leaderboards:read` | `get_leaderboard` | `GET /v1/project/leaderboards/{leaderboard_id}` | The settings and the revision number of one leaderboard. |
+| `keys:read` | `list_api_keys` | `GET /v1/project/api-keys` | Active keys for the Game Project, at most 50. Key values are never shown. |
+| `config:read` or `leaderboards:read` | `list_revisions` | `GET /v1/project/revisions` | The newest 3 revisions of the remote config (`resource=remote_config`, needs `config:read`) or of a leaderboard (`resource=leaderboard` and `leaderboard_id`, needs `leaderboards:read`). |
 
-`matchmaking_ticket_trace` also needs permission to read the matchmaker for
-the person who made the token.
+`matchmaking:read` also needs permission to read the matchmaker for the
+person who made the token. The other read scopes need permission to manage
+the Game Project, as the dashboard pages do.
 
 ### Write scopes
 

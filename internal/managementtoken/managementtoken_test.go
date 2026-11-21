@@ -14,21 +14,44 @@ import (
 	"github.com/automoto/gg-scale/internal/rbac"
 )
 
-func TestWriteScopes_should_use_only_project_level_casbin_objects(t *testing.T) {
-	for _, s := range WriteScopes {
+func TestScopes_should_use_only_project_level_casbin_objects(t *testing.T) {
+	for _, s := range Scopes {
 		obj := s.Pair(42)
-		assert.True(t, strings.HasPrefix(obj, "project:42:") || obj == rbac.ObjectAPIKeyPublic, "scope %s uses %s", s.Scope, obj)
+		assert.True(t, strings.HasPrefix(obj, "project:42:") || obj == rbac.ObjectProject || obj == rbac.ObjectAPIKeyPublic,
+			"scope %s uses %s", s.Scope, obj)
 	}
 }
 
-func TestWriteScope_should_return_the_pair_of_the_scope(t *testing.T) {
-	got, ok := WriteScope(ScopeLeaderboardsWrite)
+func TestScopes_read_scopes_should_use_the_pair_of_the_dashboard_page(t *testing.T) {
+	cases := map[string][2]string{
+		ScopeConfigRead:       {rbac.ObjectProject, rbac.ActionManage},
+		ScopeLeaderboardsRead: {rbac.ObjectProject, rbac.ActionManage},
+		ScopeKeysRead:         {rbac.ObjectProject, rbac.ActionManage},
+		ScopeMatchmakingRead:  {"project:42:matchmaker", rbac.ActionRead},
+	}
+	for scope, want := range cases {
+		t.Run(scope, func(t *testing.T) {
+			got, _ := Scope(scope)
+
+			assert.Equal(t, want, [2]string{got.Pair(42), got.Action})
+		})
+	}
+}
+
+func TestScopes_should_all_be_normal_class(t *testing.T) {
+	for _, s := range Scopes {
+		assert.Equal(t, ClassNormal, s.Class, s.Scope)
+	}
+}
+
+func TestScope_should_return_the_pair_of_the_scope(t *testing.T) {
+	got, ok := Scope(ScopeLeaderboardsWrite)
 
 	assert.Equal(t, []any{true, "project:42:leaderboard", rbac.ActionManage}, []any{ok, got.Pair(42), got.Action})
 }
 
-func TestWriteScope_should_report_an_unknown_scope(t *testing.T) {
-	_, ok := WriteScope("players:delete")
+func TestScope_should_report_an_unknown_scope(t *testing.T) {
+	_, ok := Scope("players:delete")
 
 	assert.False(t, ok)
 }

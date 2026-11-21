@@ -1867,13 +1867,13 @@ components:
       additionalProperties: false
       properties:
         api_keys:
+          description: Absent without the keys:read scope.
           items:
             $ref: "#/components/schemas/ProjectAPIKey"
-          type:
-            - array
-            - "null"
+          type: array
         cors_allowed_origins:
           $ref: "#/components/schemas/ProjectHealthOrigins"
+          description: Absent without the config:read scope.
         feature_grants:
           additionalProperties:
             type: boolean
@@ -1881,19 +1881,17 @@ components:
         quotas:
           $ref: "#/components/schemas/ProjectHealthQuotas"
         remote_config_bytes:
+          description: Absent without the config:read scope.
           format: int64
           type: integer
         server_switches:
           $ref: "#/components/schemas/ProjectServerSwitches"
         steam_sign_in:
+          description: Absent without the config:read scope.
           type: boolean
       required:
-        - api_keys
         - feature_grants
         - server_switches
-        - cors_allowed_origins
-        - steam_sign_in
-        - remote_config_bytes
         - quotas
       type: object
     ProjectHealthOrigins:
@@ -5490,7 +5488,7 @@ paths:
         - Project Management
   /v1/project/health:
     get:
-      description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. Tenant-level quotas show only ok, near_limit, or at_limit."
+      description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. Tenant-level quotas show only ok, near_limit, or at_limit. The API key check needs the keys:read scope, and the CORS, Steam, and remote config checks need config:read. Without the scope, the check is left out."
       operationId: getProjectHealth
       responses:
         "200":
@@ -5860,7 +5858,7 @@ paths:
         - Project Management
   /v1/project/revisions:
     get:
-      description: Returns the kept revisions (newest 3) of the remote config or of one leaderboard, newest first.
+      description: Returns the kept revisions (newest 3) of the remote config or of one leaderboard, newest first. The remote config needs the config:read scope, a leaderboard needs leaderboards:read.
       operationId: listProjectRevisions
       parameters:
         - description: remote_config or leaderboard.
