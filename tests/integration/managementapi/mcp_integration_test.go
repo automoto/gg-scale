@@ -127,6 +127,19 @@ func TestMCP_initialize_should_report_the_build_version(t *testing.T) {
 	assert.Equal(t, "v9.9.9", info["version"], out)
 }
 
+func TestMCP_tool_call_should_work_with_the_token_cache_on(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) {
+		d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = 2*time.Second, 100
+	})
+
+	// Act
+	res := f.call(f.ownerToken(), "get_remote_config", map[string]any{})
+
+	// Assert
+	assert.NotEqual(t, true, res["isError"], resultText(res))
+}
+
 func TestMCP_should_not_limit_correct_requests_by_ip(t *testing.T) {
 	f := newFixture(t)
 	tok := f.ownerToken()

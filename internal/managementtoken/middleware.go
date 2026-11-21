@@ -36,7 +36,11 @@ type Deps struct {
 	// only failed authentications use. Defaults 10 / 10.
 	AuthFailuresPerMinute float64
 	AuthFailureBurst      float64
-	Now                   func() time.Time
+	// Cache keeps successful token checks for a short time. Nil caches
+	// nothing. Share one Cache between the /mcp and /v1/project middleware,
+	// so the inner request of a tool call finds the outer check.
+	Cache *Cache
+	Now   func() time.Time
 }
 
 type principalKey struct{}
@@ -141,7 +145,8 @@ func (a authenticator) chargeFailure(r *http.Request, aerr *authError) *authErro
 
 // authenticate runs the request checks in order and stops at the first
 // failure. The per-token limiter runs last, so a client that only goes over
-// its own rate does not use up the per-IP failure bucket.
+// its own rate does not use up the per-IP failure bucket. A row from the
+// cache skips the token lookup and the tenant, creator, and project checks.
 func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 	ctx := r.Context()
 	token, ok := bearerToken(r.Header.Get("Authorization"))
@@ -149,19 +154,15 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 		return Principal{}, &authError{http.StatusUnauthorized, "unauthorized"}
 	}
 	sum := sha256.Sum256([]byte(token))
-	var row sqlcgen.GetManagementTokenByHashRow
-	err := a.d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		var qerr error
-		row, qerr = sqlcgen.New(tx).GetManagementTokenByHash(ctx, sum[:])
-		return qerr
-	})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows), err == nil && row.RevokedAt.Valid:
-		return Principal{}, &authError{http.StatusUnauthorized, "unauthorized"}
-	case err != nil:
-		slog.ErrorContext(ctx, "management token: token lookup", "err", err)
-		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
-	case !row.ExpiresAt.Time.After(a.d.Now()):
+	now := a.d.Now()
+	row, cached := a.d.Cache.get(sum, now)
+	if !cached {
+		var aerr *authError
+		if row, aerr = a.lookup(ctx, sum); aerr != nil {
+			return Principal{}, aerr
+		}
+	}
+	if !row.ExpiresAt.Time.After(now) {
 		// A distinct message, so the client can tell the developer to make a
 		// new token.
 		return Principal{}, &authError{http.StatusUnauthorized, "token expired"}
@@ -175,25 +176,14 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 		Label:           row.Label,
 		Scopes:          row.Scopes,
 	}
-	if row.TenantDisabled || row.CreatorDisabled {
-		return Principal{}, &authError{http.StatusForbidden, "forbidden"}
-	}
-	var live bool
 	tctx := db.WithTenant(ctx, p.TenantID)
-	err = a.d.Pool.Q(tctx, func(tx pgx.Tx) error {
-		var err error
-		live, err = sqlcgen.New(tx).ProjectIsLive(tctx, p.ProjectID)
-		return err
-	})
-	if err != nil {
-		slog.ErrorContext(ctx, "management token: project check", "err", err)
-		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
-	}
-	if !live {
-		return Principal{}, &authError{http.StatusForbidden, "forbidden"}
+	if !cached {
+		if aerr := a.checkLive(tctx, row); aerr != nil {
+			return Principal{}, aerr
+		}
 	}
 	// The creator limit: the creator must still manage the tenant's projects.
-	ok, err = a.d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, rbac.ObjectProject, rbac.ActionManage)
+	ok, err := a.d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, rbac.ObjectProject, rbac.ActionManage)
 	if err != nil {
 		return Principal{}, &authError{http.StatusInternalServerError, "internal error"}
 	}
@@ -211,16 +201,63 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 			fmt.Sprintf("rate limit exceeded; retry in %d seconds", int(math.Ceil(decision.RetryAfter.Seconds())))}
 	}
 
+	// Only a request that passed every check is cached.
+	if !cached {
+		a.d.Cache.put(sum, row, now)
+	}
+
 	// Only a request that is let through counts as a use, at most one write
 	// per minute for each token. A failed write does not refuse the request.
-	if !row.LastUsedAt.Valid || a.d.Now().Sub(row.LastUsedAt.Time) >= lastUsedPrecision {
+	if !row.LastUsedAt.Valid || now.Sub(row.LastUsedAt.Time) >= lastUsedPrecision {
 		if err := a.d.Pool.Q(tctx, func(tx pgx.Tx) error {
 			return sqlcgen.New(tx).TouchManagementTokenLastUsed(tctx, p.TokenID)
 		}); err != nil {
 			slog.WarnContext(ctx, "management token: touch last_used_at", "err", err)
+		} else {
+			a.d.Cache.touched(sum, now)
 		}
 	}
 	return p, nil
+}
+
+// lookup finds the token by its hash. An unknown or revoked token is 401.
+func (a authenticator) lookup(ctx context.Context, sum [32]byte) (sqlcgen.GetManagementTokenByHashRow, *authError) {
+	var row sqlcgen.GetManagementTokenByHashRow
+	err := a.d.Pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var qerr error
+		row, qerr = sqlcgen.New(tx).GetManagementTokenByHash(ctx, sum[:])
+		return qerr
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows), err == nil && row.RevokedAt.Valid:
+		return row, &authError{http.StatusUnauthorized, "unauthorized"}
+	case err != nil:
+		slog.ErrorContext(ctx, "management token: token lookup", "err", err)
+		return row, &authError{http.StatusInternalServerError, "internal error"}
+	}
+	return row, nil
+}
+
+// checkLive refuses a token whose tenant or creator is disabled, or whose
+// project is not live. tctx must carry the token's tenant.
+func (a authenticator) checkLive(tctx context.Context, row sqlcgen.GetManagementTokenByHashRow) *authError {
+	if row.TenantDisabled || row.CreatorDisabled {
+		return &authError{http.StatusForbidden, "forbidden"}
+	}
+	var live bool
+	err := a.d.Pool.Q(tctx, func(tx pgx.Tx) error {
+		var err error
+		live, err = sqlcgen.New(tx).ProjectIsLive(tctx, row.ProjectID)
+		return err
+	})
+	if err != nil {
+		slog.ErrorContext(tctx, "management token: project check", "err", err)
+		return &authError{http.StatusInternalServerError, "internal error"}
+	}
+	if !live {
+		return &authError{http.StatusForbidden, "forbidden"}
+	}
+	return nil
 }
 
 func bearerToken(header string) (string, bool) {

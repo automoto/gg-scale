@@ -90,11 +90,13 @@ type ServerSettingsSnapshot struct {
 	FeatureP2PRelayEnabled      bool
 	FeatureManagementAPIEnabled bool
 
-	ManagementTokenMaxExpiryDays int
-	ManagementTokenRatePerSecond int
-	ManagementTokenRateBurst     int
-	ManagementMaxProjectTokens   int
-	ManagementMaxProjectAPIKeys  int
+	ManagementTokenMaxExpiryDays   int
+	ManagementTokenRatePerSecond   int
+	ManagementTokenRateBurst       int
+	ManagementTokenCacheTTL        time.Duration
+	ManagementTokenCacheMaxEntries int
+	ManagementMaxProjectTokens     int
+	ManagementMaxProjectAPIKeys    int
 
 	CORSAllowedOrigins    []string
 	CORSMaxProjectOrigins int
