@@ -201,6 +201,9 @@ type Deps struct {
 	ManagementAPIEnabled         bool
 	ManagementTokenRatePerSecond float64
 	ManagementTokenBurst         float64
+	// ManagementTokenCacheTTL is how long a successful token check is kept.
+	// Zero caches nothing.
+	ManagementTokenCacheTTL time.Duration
 	// ManagementAuthFailuresPerMinute / ManagementAuthFailureBurst set the
 	// per-IP bucket for failed token authentications. Zero uses the
 	// managementtoken package default.
@@ -328,6 +331,7 @@ func NewRouter(d Deps) http.Handler {
 		TokenBurst:            d.ManagementTokenBurst,
 		AuthFailuresPerMinute: d.ManagementAuthFailuresPerMinute,
 		AuthFailureBurst:      d.ManagementAuthFailureBurst,
+		Cache:                 managementtoken.NewCache(d.ManagementTokenCacheTTL),
 		Now:                   d.Now,
 	}
 

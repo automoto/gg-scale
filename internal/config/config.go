@@ -61,6 +61,11 @@ type Config struct {
 	// effective limit can be N times the value. Defaults 5 / 20.
 	ManagementTokenRatePerSecond int `env:"MANAGEMENT_TOKEN_RATE_PER_SECOND" envDefault:"5"`
 	ManagementTokenRateBurst     int `env:"MANAGEMENT_TOKEN_RATE_BURST" envDefault:"20"`
+	// ManagementTokenCacheTTL is how long each app instance keeps a
+	// successful token check. A revoked token, or a disabled tenant or
+	// creator, takes effect within this time. 0 turns the cache off.
+	// Default 2s.
+	ManagementTokenCacheTTL time.Duration `env:"MANAGEMENT_TOKEN_CACHE_TTL" envDefault:"2s"`
 	// ManagementAuthFailuresPerMinute / ManagementAuthFailureBurst set the
 	// per-IP bucket that only failed token authentications use; valid tokens
 	// never use it. Defaults 10 / 10.

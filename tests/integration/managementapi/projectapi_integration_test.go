@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,6 +286,55 @@ func TestProjectAPI_attempt_cap_should_answer_422_above_the_int32_range(t *testi
 				[]any{got.status, strings.Contains(got.raw, "int32")}, got.raw)
 		})
 	}
+}
+
+func TestProjectAPI_cached_token_should_work_after_revoke_until_the_cache_time_ends(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL = time.Hour })
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
+	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
+
+	// Act
+	got := f.do(tok, http.MethodGet, "/v1/project/health", "")
+
+	// Assert
+	assert.Equal(t, http.StatusOK, got.status, got.raw)
+}
+
+func TestProjectAPI_cached_token_should_stop_when_the_creator_loses_manage(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL = time.Hour })
+	admin := f.user("admin@example.com", f.tenantA, "admin")
+	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
+	require.NoError(t, f.authz.RemoveControlPanelRoles(admin, f.tenantA))
+	require.NoError(t, f.authz.SetControlPanelMembershipRole(admin, f.tenantA, "member"))
+
+	// Act
+	got := f.do(tok, http.MethodGet, "/v1/project/health", "")
+
+	// Assert
+	assert.Equal(t, http.StatusForbidden, got.status, got.raw)
+}
+
+func TestProjectAPI_cached_token_should_stop_when_it_expires(t *testing.T) {
+	// Arrange
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	f := newFixtureWith(t, func(d *httpapi.Deps) {
+		d.ManagementTokenCacheTTL = 24 * time.Hour
+		d.Now = func() time.Time { return time.Unix(0, clock.Load()) }
+	})
+	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	require.Equal(t, http.StatusOK, f.do(tok, http.MethodGet, "/v1/project/health", "").status)
+	clock.Add(int64(2 * time.Hour))
+
+	// Act
+	got := f.do(tok, http.MethodGet, "/v1/project/health", "")
+
+	// Assert
+	assert.Equal(t, []any{http.StatusUnauthorized, true}, []any{got.status, strings.Contains(got.raw, "token expired")}, got.raw)
 }
 
 func TestProjectAPI_should_refuse_requests_that_do_not_authenticate(t *testing.T) {

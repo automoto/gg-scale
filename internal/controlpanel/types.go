@@ -93,6 +93,7 @@ type ServerSettingsSnapshot struct {
 	ManagementTokenMaxExpiryDays int
 	ManagementTokenRatePerSecond int
 	ManagementTokenRateBurst     int
+	ManagementTokenCacheTTL      time.Duration
 	ManagementMaxProjectTokens   int
 	ManagementMaxProjectAPIKeys  int
 

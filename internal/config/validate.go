@@ -376,6 +376,7 @@ func (c *Config) checkFields() error {
 		{"MATCHMAKER_RELAX_AFTER", c.MatchmakerRelaxAfter},
 		{"MATCHMAKER_REGION_RELAX_AFTER", c.MatchmakerRegionRelaxAfter},
 		{"MATCHMAKER_TICKET_TTL", c.MatchmakerTicketTTL},
+		{"MANAGEMENT_TOKEN_CACHE_TTL", c.ManagementTokenCacheTTL},
 	} {
 		if d.val < 0 {
 			return fmt.Errorf("%s %q: must be a non-negative duration", d.name, d.val)

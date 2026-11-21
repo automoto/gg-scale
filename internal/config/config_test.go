@@ -469,6 +469,46 @@ func TestLoad_should_name_new_variable_when_limit_is_not_positive(t *testing.T) 
 	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS")
 }
 
+func TestLoad_should_default_the_management_token_cache_ttl_to_2s(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	// Act
+	cfg, err := config.Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Second, cfg.ManagementTokenCacheTTL)
+}
+
+func TestLoad_should_accept_a_zero_management_token_cache_ttl(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_TOKEN_CACHE_TTL", "0s")
+
+	// Act
+	cfg, err := config.Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(0), cfg.ManagementTokenCacheTTL)
+}
+
+func TestLoad_should_refuse_a_negative_management_token_cache_ttl(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_TOKEN_CACHE_TTL", "-1s")
+
+	// Act
+	_, err := config.Load()
+
+	// Assert
+	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_CACHE_TTL")
+}
+
 func TestLoad_should_not_put_the_limit_value_in_the_error(t *testing.T) {
 	// Arrange
 	clearEnv(t)
