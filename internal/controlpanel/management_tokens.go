@@ -154,17 +154,7 @@ func (h *Handler) managementMaxTokens() int64 {
 // grantableManagementScopes returns the scopes whose Casbin pair the user
 // passes now. A token can never get a scope its creator could not use.
 func (h *Handler) grantableManagementScopes(userID, tenantID, projectID int64) ([]string, error) {
-	var out []string
-	for _, s := range managementtoken.Scopes {
-		ok, err := h.rbac.CanControlPanel(userID, tenantID, s.Pair(projectID), s.Action)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, s.Scope)
-		}
-	}
-	return out, nil
+	return managementtoken.AllowedScopes(h.rbac, userID, tenantID, projectID, managementtoken.ScopeNames())
 }
 
 // featureGate returns why a row that needs feature is disabled, or "".
@@ -410,21 +400,17 @@ func lostScopesText(n int) string {
 // lostScopes counts the scopes whose pair the creator fails now, with the
 // same check as each request. A scope that is not in the table is skipped.
 func (h *Handler) lostScopes(creatorID, tenantID, projectID int64, scopes []string) (int, error) {
-	n := 0
+	allowed, err := managementtoken.AllowedScopes(h.rbac, creatorID, tenantID, projectID, scopes)
+	if err != nil {
+		return 0, err
+	}
+	known := 0
 	for _, name := range scopes {
-		sp, ok := managementtoken.Scope(name)
-		if !ok {
-			continue
-		}
-		allowed, err := h.rbac.CanControlPanel(creatorID, tenantID, sp.Pair(projectID), sp.Action)
-		if err != nil {
-			return 0, err
-		}
-		if !allowed {
-			n++
+		if _, ok := managementtoken.Scope(name); ok {
+			known++
 		}
 	}
-	return n, nil
+	return known - len(allowed), nil
 }
 
 func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {

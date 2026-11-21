@@ -138,6 +138,36 @@ func Scope(scope string) (ScopePair, bool) {
 	return Scopes[i], true
 }
 
+// ScopeNames returns the name of each scope in Scopes.
+func ScopeNames() []string {
+	out := make([]string, 0, len(Scopes))
+	for _, s := range Scopes {
+		out = append(out, s.Scope)
+	}
+	return out
+}
+
+// AllowedScopes returns the scopes whose pair the creator passes now. It
+// skips a scope that is not in Scopes. Every caller that asks what a creator
+// may still use goes through it, so they use the same check.
+func AllowedScopes(authz *rbac.Authorizer, creatorID, tenantID, projectID int64, scopes []string) ([]string, error) {
+	out := []string{}
+	for _, name := range scopes {
+		sp, ok := Scope(name)
+		if !ok {
+			continue
+		}
+		allowed, err := authz.CanControlPanel(creatorID, tenantID, sp.Pair(projectID), sp.Action)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
 // Principal is the authenticated token. It holds no dashboard session.
 type Principal struct {
 	TokenID         int64

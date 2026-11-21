@@ -757,19 +757,9 @@ type projectToken struct {
 // activeScopes returns the scopes of the token whose creator pair the creator
 // passes now, with the same check as the per-request creator check.
 func activeScopes(ctx context.Context, d Deps, p managementtoken.Principal) ([]string, error) {
-	out := []string{}
-	for _, name := range p.Scopes {
-		sp, ok := managementtoken.Scope(name)
-		if !ok {
-			continue
-		}
-		allowed, err := d.RBAC.CanControlPanel(p.CreatedByUserID, p.TenantID, sp.Pair(p.ProjectID), sp.Action)
-		if err != nil {
-			return nil, serverError(ctx, "project management: active scopes", err)
-		}
-		if allowed {
-			out = append(out, name)
-		}
+	out, err := managementtoken.AllowedScopes(d.RBAC, p.CreatedByUserID, p.TenantID, p.ProjectID, p.Scopes)
+	if err != nil {
+		return nil, serverError(ctx, "project management: active scopes", err)
 	}
 	return out, nil
 }
