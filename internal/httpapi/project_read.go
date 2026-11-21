@@ -284,7 +284,7 @@ func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *P
 // are text that players wrote.
 type projectPlayer struct {
 	ID                int64      `json:"id" example:"42"`
-	ExternalID        string     `json:"external_id" example:"7a1c0b52-5d3e-4a35-9a54-6f1f63f2f0a1"`
+	ExternalID        string     `json:"external_id" doc:"Set by the sign-in of the game. It may hold text that the game chose." example:"7a1c0b52-5d3e-4a35-9a54-6f1f63f2f0a1"`
 	EmailVerified     bool       `json:"email_verified"`
 	Disabled          bool       `json:"disabled"`
 	DeleteRequested   bool       `json:"delete_requested" doc:"A delete request is pending and the player is in the grace period."`

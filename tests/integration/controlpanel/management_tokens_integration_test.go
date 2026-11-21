@@ -488,18 +488,21 @@ func TestManagementTokens_should_refuse_a_risky_scope_the_creator_cannot_give(t 
 	c, csrf, _ := p.member(t, "admin@example.com", "admin")
 	p.dropAdminPair(t, "project:*:players")
 
-	resp, _ := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopePlayersPII}})
+	resp, body := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopePlayersPII}})
 
-	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+	assert.Equal(t, []any{http.StatusForbidden, true, 0},
+		[]any{resp.StatusCode, strings.Contains(body, `"players:pii"`), p.tokenCount(t)})
 }
 
 func TestManagementTokens_should_refuse_pii_without_players_read(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
-	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"none"}, "risky": {managementtoken.ScopePlayersPII}})
+	resp, body := p.create(t, c, csrf, url.Values{"label": {"keep-me"}, "access_players": {"none"}, "risky": {managementtoken.ScopePlayersPII}})
 
-	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, true, false, 0}, []any{resp.StatusCode,
+		strings.Contains(body, "Needs read access to Players. Give that access or uncheck the box."),
+		strings.Contains(body, `value="keep-me"`), strings.Contains(body, "A link checked risky access"), p.tokenCount(t)})
 }
 
 func TestManagementTokens_should_give_pii_with_players_read(t *testing.T) {

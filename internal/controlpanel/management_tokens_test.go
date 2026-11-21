@@ -122,12 +122,14 @@ func TestAccessOptions_should_disable_the_pii_box_when_the_creator_lacks_the_pai
 	assert.Equal(t, reasonRole, got.Reason)
 }
 
-func TestScopesFromAccessForm_should_refuse_pii_without_players_read(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+func TestMissingDependency_should_name_the_needed_access_for_pii_without_players_read(t *testing.T) {
+	got := missingDependency([]string{managementtoken.ScopePlayersPII})
 
-	_, err := scopesFromAccessForm(url.Values{"risky": {managementtoken.ScopePlayersPII}}, rows, risky)
+	assert.Contains(t, got, "Needs read access to Players")
+}
 
-	assert.ErrorContains(t, err, "Needs read access to Players")
+func TestMissingDependency_should_be_empty_with_players_read(t *testing.T) {
+	assert.Empty(t, missingDependency([]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}))
 }
 
 func TestScopesFromAccessForm_should_give_pii_with_players_read(t *testing.T) {

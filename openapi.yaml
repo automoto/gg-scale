@@ -2089,6 +2089,7 @@ components:
         email_verified:
           type: boolean
         external_id:
+          description: Set by the sign-in of the game. It may hold text that the game chose.
           examples:
             - 7a1c0b52-5d3e-4a35-9a54-6f1f63f2f0a1
           type: string

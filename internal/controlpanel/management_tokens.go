@@ -229,9 +229,6 @@ func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView
 			continue
 		}
 		box := RiskyBoxView{Scope: s.Scope, Label: s.Label, Needs: needsText(s.Needs), Reason: gates[s.Resource]}
-		if box.Label == "" {
-			box.Label = s.Scope
-		}
 		if box.Reason == "" && !slices.Contains(grantable, s.Scope) {
 			box.Reason = reasonRole
 		}
@@ -246,11 +243,7 @@ func needsText(scope string) string {
 	if scope == "" {
 		return ""
 	}
-	i := slices.IndexFunc(managementtoken.Resources, func(r managementtoken.Resource) bool { return r.Read == scope })
-	if i < 0 {
-		return "Needs the " + scope + " scope"
-	}
-	res := managementtoken.Resources[i]
+	res := managementtoken.Resources[slices.IndexFunc(managementtoken.Resources, func(r managementtoken.Resource) bool { return r.Read == scope })]
 	if res.Noun != "" {
 		return "Needs read access to " + res.Noun
 	}
@@ -266,6 +259,19 @@ func riskyNotice(risky []RiskyBoxView) string {
 		}
 	}
 	return strings.Join(labels, " ")
+}
+
+// missingDependency returns a message for the first risky scope in scopes
+// whose needed scope is not in scopes, or "". This is a normal form mistake,
+// so the page shows it as a form error.
+func missingDependency(scopes []string) string {
+	for _, v := range scopes {
+		sp, _ := managementtoken.Scope(v)
+		if sp.Needs != "" && !slices.Contains(scopes, sp.Needs) {
+			return sp.Label + " " + needsText(sp.Needs) + ". Give that access or uncheck the box."
+		}
+	}
+	return ""
 }
 
 // scopesFromAccessForm turns the access_<resource> and risky form fields
@@ -292,12 +298,6 @@ func scopesFromAccessForm(form url.Values, rows []AccessRowView, risky []RiskyBo
 		}
 		if !slices.Contains(scopes, v) {
 			scopes = append(scopes, v)
-		}
-	}
-	for _, v := range form["risky"] {
-		sp, _ := managementtoken.Scope(v)
-		if sp.Needs != "" && !slices.Contains(scopes, sp.Needs) {
-			return nil, fmt.Errorf("the scope %s is refused: %s", strconv.Quote(v), needsText(sp.Needs))
 		}
 	}
 	return scopes, nil
@@ -438,6 +438,7 @@ func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view.Message = r.URL.Query().Get("flash")
+	view.RiskyNotice = riskyNotice(view.Risky)
 	webutil.Render(r, w, ManagementTokensPage(view))
 }
 
@@ -461,7 +462,6 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 		return view, err
 	}
 	fillAccess(fill, view.Access, view.Risky)
-	view.RiskyNotice = riskyNotice(view.Risky)
 	var rows []sqlcgen.ListManagementTokensForProjectRow
 	tctx := db.WithTenant(ctx, tenantID)
 	err = h.pool.Q(tctx, func(tx pgx.Tx) error {
@@ -554,6 +554,10 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(fieldErrs) > 0 {
 		h.renderManagementTokensError(w, r, tenantID, projectID, http.StatusUnprocessableEntity, "", fieldErrs, label, daysRaw)
+		return
+	}
+	if msg := missingDependency(scopes); msg != "" {
+		h.renderManagementTokensError(w, r, tenantID, projectID, http.StatusUnprocessableEntity, msg, nil, label, daysRaw)
 		return
 	}
 
