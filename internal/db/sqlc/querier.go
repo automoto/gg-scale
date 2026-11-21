@@ -355,7 +355,6 @@ type Querier interface {
 	// a bootstrap policy on tenants, the JOIN keeps working.
 	GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKeyByHashRow, error)
 	GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error)
-	GetAPIKeyType(ctx context.Context, id int64) (string, error)
 	// Tenant-level HTTP API override (project_id NULL, kind 'api'). Read by the
 	// rate-limit middleware; falls back to compiled tier defaults when absent.
 	GetAPIRateLimitOverride(ctx context.Context, tenantID int64) (GetAPIRateLimitOverrideRow, error)

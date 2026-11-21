@@ -13,6 +13,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 type changePasswordInput struct {
@@ -42,15 +43,10 @@ type deleteCancelInput struct {
 	}
 }
 
-// defaultDeleteGracePeriod backs Deps.DeleteGracePeriod when unset, keeping
-// test fixtures and sparse deployments on the documented 30-day window.
-const defaultDeleteGracePeriod = 720 * time.Hour
-
+// deleteGrace is Deps.DeleteGracePeriod, or the documented 30-day window when
+// unset.
 func deleteGrace(d Deps) time.Duration {
-	if d.DeleteGracePeriod > 0 {
-		return d.DeleteGracePeriod
-	}
-	return defaultDeleteGracePeriod
+	return projectadmin.DeleteGrace(d.DeleteGracePeriod)
 }
 
 // registerAuthAccountRoutes carries the session-authenticated account

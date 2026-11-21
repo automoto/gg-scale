@@ -127,16 +127,9 @@ func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Author
 	if scope.LiveOnly && row.RevokedAt.Valid {
 		return row, ErrAPIKeyNotFound
 	}
-	keyType, err := q.GetAPIKeyType(ctx, apiKeyID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return row, ErrAPIKeyNotFound
-	}
-	if err != nil {
-		return row, fmt.Errorf("get api key type: %w", err)
-	}
-	object, ok := APIKeyObject(keyType)
+	object, ok := APIKeyObject(row.KeyType)
 	if !ok {
-		return row, fmt.Errorf("unknown api key type %q", keyType)
+		return row, fmt.Errorf("unknown api key type %q", row.KeyType)
 	}
 	if authz == nil {
 		return row, rbac.ErrAuthorizerUnavailable
@@ -149,6 +142,14 @@ func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Author
 		return row, ErrAPIKeyManageDenied
 	}
 	return row, nil
+}
+
+// keyProjectID is the key's project, or 0 for a tenant-wide key.
+func keyProjectID(row sqlcgen.GetAPIKeyScopesRow) int64 {
+	if row.ProjectID == nil {
+		return 0
+	}
+	return *row.ProjectID
 }
 
 // UpdateAPIKeyLabel renames a key. scope limits the keys it may touch.
@@ -165,10 +166,7 @@ func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorize
 		if err := q.UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{ID: apiKeyID, Label: label}); err != nil {
 			return err
 		}
-		var keyProject int64
-		if row.ProjectID != nil {
-			keyProject = *row.ProjectID
-		}
+		keyProject := keyProjectID(row)
 		return actor.audit(ctx, tx, tenantID, keyProject, "control_panel.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label})
 	})
 }
@@ -199,10 +197,7 @@ func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Author
 		if err := q.SetAPIKeyScopes(ctx, sqlcgen.SetAPIKeyScopesParams{ID: apiKeyID, Scopes: applyManagedScopes(row.Scopes, desired)}); err != nil {
 			return fmt.Errorf("set api key scopes: %w", err)
 		}
-		var keyProject int64
-		if row.ProjectID != nil {
-			keyProject = *row.ProjectID
-		}
+		keyProject := keyProjectID(row)
 		for _, change := range changes {
 			action := "control_panel.api_key.scope_revoke"
 			if change.Grant {

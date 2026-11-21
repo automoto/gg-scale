@@ -367,7 +367,7 @@ func setPlayerDisabled(ctx context.Context, d Deps, p managementtoken.Principal,
 
 func requestProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
 	_, err := projectadmin.RequestPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID,
-		projectadmin.DeleteGrace(d.ControlPanel.DeleteGracePeriod), projectActor(p))
+		deleteGrace(d), projectActor(p))
 	return playerWriteResult(ctx, d, p, in.PlayerID, err)
 }
 

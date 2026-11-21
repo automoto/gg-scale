@@ -78,18 +78,13 @@ WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY k.id DESC
 LIMIT sqlc.arg(row_limit);
 
--- name: GetAPIKeyType :one
-SELECT key_type
-FROM api_keys
-WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
-
 -- name: UpdateAPIKeyLabel :exec
 UPDATE api_keys
 SET label = nullif(trim(sqlc.arg(label)::text), '')
 WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
 -- name: GetAPIKeyScopes :one
-SELECT scopes, project_id, revoked_at
+SELECT scopes, project_id, revoked_at, key_type
 FROM api_keys
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 

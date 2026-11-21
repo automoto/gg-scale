@@ -170,7 +170,7 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash []byte) (GetAPIKe
 }
 
 const getAPIKeyScopes = `-- name: GetAPIKeyScopes :one
-SELECT scopes, project_id, revoked_at
+SELECT scopes, project_id, revoked_at, key_type
 FROM api_keys
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
 `
@@ -179,26 +179,19 @@ type GetAPIKeyScopesRow struct {
 	Scopes    []string
 	ProjectID *int64
 	RevokedAt pgtype.Timestamptz
+	KeyType   string
 }
 
 func (q *Queries) GetAPIKeyScopes(ctx context.Context, id int64) (GetAPIKeyScopesRow, error) {
 	row := q.db.QueryRow(ctx, getAPIKeyScopes, id)
 	var i GetAPIKeyScopesRow
-	err := row.Scan(&i.Scopes, &i.ProjectID, &i.RevokedAt)
+	err := row.Scan(
+		&i.Scopes,
+		&i.ProjectID,
+		&i.RevokedAt,
+		&i.KeyType,
+	)
 	return i, err
-}
-
-const getAPIKeyType = `-- name: GetAPIKeyType :one
-SELECT key_type
-FROM api_keys
-WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint
-`
-
-func (q *Queries) GetAPIKeyType(ctx context.Context, id int64) (string, error) {
-	row := q.db.QueryRow(ctx, getAPIKeyType, id)
-	var key_type string
-	err := row.Scan(&key_type)
-	return key_type, err
 }
 
 const listAPIKeys = `-- name: ListAPIKeys :many

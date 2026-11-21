@@ -26,15 +26,15 @@ var (
 	ErrNoPendingDelete = errors.New("no pending deletion")
 )
 
-// DefaultDeleteGracePeriod is the grace period when none is configured.
-const DefaultDeleteGracePeriod = 720 * time.Hour
+// defaultDeleteGracePeriod is the grace period when none is configured.
+const defaultDeleteGracePeriod = 720 * time.Hour
 
 // DeleteGrace returns configured, or the default when it is not set.
 func DeleteGrace(configured time.Duration) time.Duration {
 	if configured > 0 {
 		return configured
 	}
-	return DefaultDeleteGracePeriod
+	return defaultDeleteGracePeriod
 }
 
 // playerGone returns the error for a guarded write that matched no row: the

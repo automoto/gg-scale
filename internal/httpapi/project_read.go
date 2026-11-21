@@ -218,6 +218,14 @@ type projectAPIKey struct {
 	CreatedAt   *time.Time `json:"created_at"`
 }
 
+func newProjectAPIKey(id int64, label *string, keyType string, scopes []string, projectID *int64, createdAt pgtype.Timestamptz) projectAPIKey {
+	k := projectAPIKey{ID: id, Type: keyType, Scopes: scopes, AllProjects: projectID == nil, CreatedAt: timestamptzPtr(createdAt)}
+	if label != nil {
+		k.Label = *label
+	}
+	return k
+}
+
 // projectActiveKeys returns the unrevoked keys that work for the token's
 // project: keys bound to it and tenant-wide keys (project_id NULL).
 func projectActiveKeys(ctx context.Context, d Deps, p managementtoken.Principal) ([]projectAPIKey, error) {
@@ -235,11 +243,7 @@ func projectActiveKeys(ctx context.Context, d Deps, p managementtoken.Principal)
 		if r.RevokedAt.Valid || (r.ProjectID != nil && *r.ProjectID != p.ProjectID) {
 			continue
 		}
-		v := projectAPIKey{ID: r.ID, Type: r.KeyType, Scopes: r.Scopes, AllProjects: r.ProjectID == nil, CreatedAt: timestamptzPtr(r.CreatedAt)}
-		if r.Label != nil {
-			v.Label = *r.Label
-		}
-		out = append(out, v)
+		out = append(out, newProjectAPIKey(r.ID, r.Label, r.KeyType, r.Scopes, r.ProjectID, r.CreatedAt))
 	}
 	return out, nil
 }
@@ -270,11 +274,7 @@ func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *P
 		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
 	}
 	for _, r := range rows {
-		k := projectAPIKey{ID: r.ID, Type: r.KeyType, Scopes: r.Scopes, AllProjects: r.ProjectID == nil, CreatedAt: timestamptzPtr(r.CreatedAt)}
-		if r.Label != nil {
-			k.Label = *r.Label
-		}
-		out.APIKeys = append(out.APIKeys, k)
+		out.APIKeys = append(out.APIKeys, newProjectAPIKey(r.ID, r.Label, r.KeyType, r.Scopes, r.ProjectID, r.CreatedAt))
 	}
 	return out, nil
 }
@@ -297,14 +297,14 @@ type projectPlayer struct {
 
 // playerView builds the result for one row. It leaves email and display name
 // out unless pii is true.
-func playerView(pii bool, id int64, externalID, email, displayName string, verifiedAt, disabledAt, deleteAt, createdAt pgtype.Timestamptz) projectPlayer {
+func playerView(pii bool, r sqlcgen.ListPlayersPageForProjectRow) projectPlayer {
 	v := projectPlayer{
-		ID: id, ExternalID: externalID,
-		EmailVerified: verifiedAt.Valid, Disabled: disabledAt.Valid, DeleteRequested: deleteAt.Valid,
-		CreatedAt: timestamptzPtr(createdAt), DisabledAt: timestamptzPtr(disabledAt), DeleteRequestedAt: timestamptzPtr(deleteAt),
+		ID: r.ID, ExternalID: r.ExternalID,
+		EmailVerified: r.EmailVerifiedAt.Valid, Disabled: r.DisabledAt.Valid, DeleteRequested: r.DeleteRequestedAt.Valid,
+		CreatedAt: timestamptzPtr(r.CreatedAt), DisabledAt: timestamptzPtr(r.DisabledAt), DeleteRequestedAt: timestamptzPtr(r.DeleteRequestedAt),
 	}
 	if pii {
-		v.Email, v.DisplayName = &email, &displayName
+		v.Email, v.DisplayName = &r.Email, &r.DisplayName
 	}
 	return v
 }
@@ -344,8 +344,7 @@ func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	}
 	pii := p.HasScope(managementtoken.ScopePlayersPII)
 	for _, r := range rows {
-		out.Players = append(out.Players, playerView(pii, r.ID, r.ExternalID, r.Email, r.DisplayName,
-			r.EmailVerifiedAt, r.DisabledAt, r.DeleteRequestedAt, r.CreatedAt))
+		out.Players = append(out.Players, playerView(pii, r))
 	}
 	return out, nil
 }
@@ -373,8 +372,7 @@ func readPlayer(ctx context.Context, d Deps, p managementtoken.Principal, player
 	if err != nil {
 		return projectPlayer{}, err
 	}
-	return playerView(p.HasScope(managementtoken.ScopePlayersPII), r.ID, r.ExternalID, r.Email, r.DisplayName,
-		r.EmailVerifiedAt, r.DisabledAt, r.DeleteRequestedAt, r.CreatedAt), nil
+	return playerView(p.HasScope(managementtoken.ScopePlayersPII), sqlcgen.ListPlayersPageForProjectRow(r)), nil
 }
 
 type projectListRevisionsInput struct {
