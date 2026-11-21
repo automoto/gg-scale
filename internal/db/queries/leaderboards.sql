@@ -174,7 +174,9 @@ ORDER BY
   le.player_id ASC
 LIMIT sqlc.arg(row_limit);
 
--- name: ListLeaderboardsForProject :many
+-- name: ListAllLeaderboardsForProject :many
+-- Every live board, for the dashboard. The live count is
+-- capped at create and restore (quota.AxisLeaderboards).
 SELECT id, name, sort_order, score_operator, metadata, client_submissions,
        score_min, score_max, reset_schedule, attempt_cap, current_period,
        period_started_at, next_reset_at, created_at
@@ -183,6 +185,28 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = sqlc.arg(project_id)
   AND deleted_at IS NULL
 ORDER BY name;
+
+-- name: ListLeaderboardsPageForProject :many
+-- One page of live boards, keyset-paginated on name (live names are unique
+-- per project). Player discovery and the management API list read it; the
+-- caller reads one row more than the page to see if more rows exist.
+SELECT id, name, sort_order, score_operator, metadata, client_submissions,
+       score_min, score_max, reset_schedule, attempt_cap, current_period,
+       period_started_at, next_reset_at, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL
+  AND name > sqlc.arg(after_name)::text
+ORDER BY name
+LIMIT sqlc.arg(row_limit);
+
+-- name: CountLiveLeaderboardsForProject :one
+SELECT count(*)::bigint
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND deleted_at IS NULL;
 
 -- name: GetLeaderboardForControlPanel :one
 SELECT id, project_id, name, sort_order, score_operator, metadata,

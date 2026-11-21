@@ -728,6 +728,14 @@ func TestServerSettingsPage_should_hide_mail_network_and_control_panel_rows(t *t
 	assert.Contains(t, html, "<dt>P2P relay</dt>")
 }
 
+func TestServerSettingsPage_should_show_leaderboard_limit_with_management_api_off(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{LeaderboardMaxPerProject: 25},
+	}))
+
+	assert.Contains(t, html, "<dt>Leaderboards per Game Project</dt><dd>25</dd>")
+}
+
 func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
 		TenantID:        1,

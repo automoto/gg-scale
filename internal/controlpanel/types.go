@@ -58,13 +58,15 @@ type Config struct {
 	// tenant provisioning sets enforce_quotas=true on the new tenant so the
 	// class ladder is enforced from creation.
 	EnforceNewTenantQuotas bool
-	// MCPEnabled mirrors FEATURE_MCP_ENABLED. When false the MCP token page is
-	// hidden and its routes 404.
-	MCPEnabled bool
-	// MCPMaxExpiryDays mirrors MCP_TOKEN_MAX_EXPIRY_DAYS; 0 uses 365.
-	MCPMaxExpiryDays int
-	// MCPMaxProjectTokens mirrors MCP_MAX_PROJECT_TOKENS; 0 uses 20.
-	MCPMaxProjectTokens int
+	// ManagementAPIEnabled mirrors FEATURE_MANAGEMENT_API_ENABLED. When false
+	// the management token page is hidden and its routes 404.
+	ManagementAPIEnabled bool
+	// ManagementMaxExpiryDays mirrors MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS; 0 uses
+	// 365.
+	ManagementMaxExpiryDays int
+	// ManagementMaxProjectTokens mirrors MANAGEMENT_MAX_PROJECT_TOKENS; 0 uses
+	// 20.
+	ManagementMaxProjectTokens int
 	// CORSMaxProjectOrigins mirrors CORS_MAX_PROJECT_ORIGINS; 0 uses 20.
 	CORSMaxProjectOrigins int
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
@@ -83,19 +85,21 @@ type ServerSettingsSnapshot struct {
 	LogLevel string
 	HTTPAddr string
 
-	PlayersEnabled         bool
-	FeatureFleetEnabled    bool
-	FeatureP2PRelayEnabled bool
-	FeatureMCPEnabled      bool
+	PlayersEnabled              bool
+	FeatureFleetEnabled         bool
+	FeatureP2PRelayEnabled      bool
+	FeatureManagementAPIEnabled bool
 
-	MCPTokenMaxExpiryDays int
-	MCPTokenRatePerSecond int
-	MCPTokenRateBurst     int
-	MCPMaxProjectTokens   int
-	MCPMaxProjectAPIKeys  int
+	ManagementTokenMaxExpiryDays int
+	ManagementTokenRatePerSecond int
+	ManagementTokenRateBurst     int
+	ManagementMaxProjectTokens   int
+	ManagementMaxProjectAPIKeys  int
 
 	CORSAllowedOrigins    []string
 	CORSMaxProjectOrigins int
+
+	LeaderboardMaxPerProject int
 
 	FleetBackend string
 	FleetRegion  string
@@ -394,12 +398,15 @@ type RateLimitsView struct {
 }
 
 // QuotaOverrideRowView is one quota axis on the rate-limits page: the class
-// ladder default and the active override, if any.
+// ladder default and the active override, if any. Note tells when the limit
+// applies and Min is the lowest value the override input accepts.
 type QuotaOverrideRowView struct {
 	Axis         string
 	Label        string
 	DefaultLabel string
 	Override     *int64
+	Note         string
+	Min          string
 }
 
 // ProjectInviteLimitView is one project's invite-quota override (0 = default)
@@ -564,8 +571,8 @@ type ProjectSettingsView struct {
 	// carries only whether one is stored, never its value.
 	SteamAppID         string
 	SteamKeyConfigured bool
-	// MCPEnabled shows the link to the MCP token page.
-	MCPEnabled bool
+	// ManagementAPIEnabled shows the link to the management token page.
+	ManagementAPIEnabled bool
 	// AllowedOrigins is the project's browser origin list, one per line.
 	AllowedOrigins    string
 	MaxAllowedOrigins int

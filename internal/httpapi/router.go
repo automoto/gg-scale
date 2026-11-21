@@ -5,6 +5,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -27,8 +29,8 @@ import (
 	"github.com/automoto/gg-scale/internal/jobs"
 	"github.com/automoto/gg-scale/internal/lifecycle"
 	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/matchmaker"
-	"github.com/automoto/gg-scale/internal/mcp"
 	"github.com/automoto/gg-scale/internal/middleware"
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/party"
@@ -64,6 +66,9 @@ type Deps struct {
 	PartyCodeLimits party.CodeLimits
 	Version         string
 	Commit          string
+	// Release is the build version, such as v0.9.76. The MCP server reports
+	// it in serverInfo.
+	Release string
 
 	// RequestTimeout bounds non-streaming requests; 0 disables the deadline
 	// middleware (used by unit-test fixtures). WebSocket paths are exempt.
@@ -189,19 +194,23 @@ type Deps struct {
 	// Empty leaves /metrics open (dev / explicitly-unauthenticated deployments).
 	MetricsAuthToken string
 
-	// MCPEnabled mounts POST /mcp for coding agents (FEATURE_MCP_ENABLED).
-	// MCPTokenRatePerSecond / MCPTokenBurst set the per-token bucket.
-	MCPEnabled            bool
-	MCPTokenRatePerSecond float64
-	MCPTokenBurst         float64
-	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
-	// for failed /mcp authentications. Zero uses the mcp package default.
-	MCPAuthFailuresPerMinute float64
-	MCPAuthFailureBurst      float64
-	// MCPMaxProjectAPIKeys limits the create_api_key tool.
-	MCPMaxProjectAPIKeys int64
-	// CORSMaxProjectOrigins limits the set_allowed_origins tool.
-	CORSMaxProjectOrigins int
+	// ManagementAPIEnabled mounts POST /mcp for coding agents and the
+	// /v1/project operations (FEATURE_MANAGEMENT_API_ENABLED).
+	// ManagementTokenRatePerSecond /
+	// ManagementTokenBurst set the per-token bucket.
+	ManagementAPIEnabled         bool
+	ManagementTokenRatePerSecond float64
+	ManagementTokenBurst         float64
+	// ManagementAuthFailuresPerMinute / ManagementAuthFailureBurst set the
+	// per-IP bucket for failed token authentications. Zero uses the
+	// managementtoken package default.
+	ManagementAuthFailuresPerMinute float64
+	ManagementAuthFailureBurst      float64
+	// ManagementMaxProjectAPIKeys limits the create_api_key operation, and
+	// CORSMaxProjectOrigins the set_allowed_origins operation. Config
+	// validation refuses 0 or less for both.
+	ManagementMaxProjectAPIKeys int64
+	CORSMaxProjectOrigins       int
 
 	// EntitlementAPIToken, when non-empty, mounts the internal declarative
 	// entitlement API at /internal/entitlements behind this bearer token —
@@ -308,32 +317,18 @@ func NewRouter(d Deps) http.Handler {
 	// One observability middleware for /v1 and /mcp: it registers its
 	// collectors on reg, so it can be built only once.
 	observe := middleware.NewObservability(reg)
-	if d.MCPEnabled && d.Pool != nil && d.Limiter != nil && d.RBAC != nil {
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.NewRequestID())
-			r.Use(observe)
-			if d.RequestTimeout > 0 {
-				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
-			}
-			r.Handle("/mcp", mcp.New(mcp.Deps{
-				Pool:                  d.Pool,
-				RBAC:                  d.RBAC,
-				Limiter:               d.Limiter,
-				ProxyTrust:            d.ProxyTrust,
-				Version:               d.Version,
-				TokenRatePerSecond:    d.MCPTokenRatePerSecond,
-				TokenBurst:            d.MCPTokenBurst,
-				AuthFailuresPerMinute: d.MCPAuthFailuresPerMinute,
-				AuthFailureBurst:      d.MCPAuthFailureBurst,
-				FleetEnabled:          d.ControlPanel.FleetEnabled,
-				RelayEnabled:          d.ControlPanel.RelayEnabled,
-				RelayConfigured:       d.RelayIssuer != nil,
-				CORSAllowedOrigins:    d.CORSAllowedOrigins,
-				MaxProjectAPIKeys:     d.MCPMaxProjectAPIKeys,
-				MaxProjectOrigins:     d.CORSMaxProjectOrigins,
-				Now:                   d.Now,
-			}))
-		})
+	// One switch and one token Deps for /mcp and /v1/project.
+	managementAPI := d.ManagementAPIEnabled && d.Pool != nil && d.Limiter != nil && d.RBAC != nil
+	tokenDeps := managementtoken.Deps{
+		Pool:                  d.Pool,
+		RBAC:                  d.RBAC,
+		Limiter:               d.Limiter,
+		ProxyTrust:            d.ProxyTrust,
+		TokenRatePerSecond:    d.ManagementTokenRatePerSecond,
+		TokenBurst:            d.ManagementTokenBurst,
+		AuthFailuresPerMinute: d.ManagementAuthFailuresPerMinute,
+		AuthFailureBurst:      d.ManagementAuthFailureBurst,
+		Now:                   d.Now,
 	}
 
 	r.Route("/v1", func(r chi.Router) {
@@ -349,6 +344,15 @@ func NewRouter(d Deps) http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(func(next http.Handler) http.Handler { return lifecycle.RequireBearer(d.PlatformAdminToken, next) })
 				registerAdminRelayNodes(groupAPI(r, humaCfg), d)
+			})
+		}
+		// Project management API: a management token, not an API key. The
+		// same switch as /mcp.
+		if managementAPI {
+			r.Group(func(r chi.Router) {
+				r.Use(managementtoken.SameOrigin)
+				r.Use(managementtoken.Middleware(tokenDeps, "api"))
+				registerProjectManagementRoutes(groupAPI(r, humaCfg), d)
 			})
 		}
 		// Shared front-end assets (Pico, stylesheet, fonts) for both the
@@ -539,6 +543,26 @@ func NewRouter(d Deps) http.Handler {
 			})
 		}
 	})
+
+	// MCP transport for coding agents: the /v1/project operations as tools.
+	// A root-level group, not inside /v1, because a tool call sends the full
+	// /v1/project path back through this group's router. The inner request
+	// runs the /v1 middleware and the token middleware again.
+	if managementAPI {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.NewRequestID())
+			r.Use(observe)
+			if d.RequestTimeout > 0 {
+				r.Use(middleware.NewRequestDeadline(d.RequestTimeout))
+			}
+			r.Use(managementtoken.SameOrigin)
+			r.Use(chimw.RequestSize(mcpMaxBodyBytes))
+			r.Use(managementtoken.Middleware(tokenDeps, "mcp"))
+			// After the /v1 routes, so the table operations are registered.
+			r.Use(strictToolArguments(humaCfg.OpenAPI))
+			attachManagementMCP(groupAPI(r, humaCfg), cmp.Or(d.Release, "dev"))
+		})
+	}
 
 	return r
 }

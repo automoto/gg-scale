@@ -73,6 +73,7 @@ var quotaOverrideAxes = []struct{ Value, Label string }{
 // cannot request them, and the change-request feature CHECK refuses them too.
 var adminOnlyQuotaAxes = []struct{ Value, Label string }{
 	{quota.AxisRelayAllocations, "Relay allocations per relay node"},
+	{quota.AxisLeaderboards, "Leaderboards per Game Project"},
 }
 
 // errNotRequestableAxis refuses a change request for an axis tenants may not
@@ -120,8 +121,15 @@ func parseRequestedLimit(s string) (int64, error) {
 var errOverrideAboveHardCap = fmt.Errorf(
 	"open_sessions override exceeds the absolute per-project cap (%d)", gamesession.SessionsHardCap)
 
+// errLeaderboardsUnlimited rejects an unlimited leaderboards override: the
+// limit keeps player discovery bounded, so it always needs a number.
+var errLeaderboardsUnlimited = errors.New("leaderboards override must be a number, not unlimited")
+
 // validateOverrideLimit applies per-axis bounds on top of parseRequestedLimit.
 func validateOverrideLimit(axis string, limit int64) error {
+	if axis == quota.AxisLeaderboards && limit == quota.Unlimited {
+		return errLeaderboardsUnlimited
+	}
 	if axis != quota.AxisOpenSessions {
 		return nil
 	}

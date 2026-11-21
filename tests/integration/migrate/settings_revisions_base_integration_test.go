@@ -23,6 +23,7 @@ func TestSettingsRevisionsBase_backfill_marks_only_base_rows(t *testing.T) {
 	t.Cleanup(func() { _ = r.Close() })
 	require.NoError(t, r.Up())
 	db := openDB(t, dsn)
+	execMigrationFile(t, db, "0058_management_tokens_rename.down.sql")
 	execMigrationFile(t, db, "0053_settings_revisions_base_source.down.sql")
 
 	var tenantID, projectID int64

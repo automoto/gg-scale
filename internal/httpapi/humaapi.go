@@ -99,6 +99,13 @@ func newHumaConfig(version string) huma.Config {
 			Description: "The server's PLATFORM_ADMIN_TOKEN, held by the platform operator. Game Project keys are refused. " +
 				"The /v1/admin routes are not mounted when the token is unset.",
 		},
+		"ManagementToken": {
+			Type:   "http",
+			Scheme: "bearer",
+			Description: "Management token (ggm_...) for the /v1/project operations. Make it in the dashboard. " +
+				"It works for one Game Project only, with the scopes chosen when it was made. " +
+				"It is for developer tools and coding agents: never ship it in a game.",
+		},
 	}
 	// Tags group the operations into feature sections in the rendered docs.
 	// The order here is the order a reader sees them.
@@ -118,6 +125,7 @@ func newHumaConfig(version string) huma.Config {
 		{Name: "Session Verification", Description: "Server-tier check of a player session token."},
 		{Name: "Health", Description: "Liveness probe."},
 		{Name: "Platform Admin", Description: "Operator API for the platform itself, such as relay node registration. Not for game clients or servers."},
+		{Name: "Project Management", Description: "Settings of one Game Project for developer tools and coding agents, with a management token. Not for game clients or servers."},
 	}
 	return cfg
 }
@@ -168,10 +176,11 @@ func groupAPI(r chi.Router, cfg huma.Config) huma.API {
 // serverError logs err (so an operator can locate the fault) and returns a
 // generic problem+json 500 that leaks no internals — the huma equivalent of
 // webutil.InternalError. Postgres rejects a NUL byte in a text value with
-// SQLSTATE 22021; that is always client input, so it is a 400 instead.
+// SQLSTATE 22021, and a \u0000 in a jsonb value with 22P05; that is always
+// client input, so it is a 400 instead.
 func serverError(ctx context.Context, msg string, err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "22021" {
+	if errors.As(err, &pgErr) && (pgErr.Code == "22021" || pgErr.Code == "22P05") {
 		return huma.Error400BadRequest("request contains invalid characters")
 	}
 	slog.ErrorContext(ctx, msg, "error", err)

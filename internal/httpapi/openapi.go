@@ -52,6 +52,7 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerPartyRoutes(api, d)
 	registerRealtimeTicket(api, d)
 	registerAdminRelayNodes(api, d)
+	registerProjectManagementRoutes(api, d)
 
 	doc := cfg.OpenAPI
 	enrichVerifyOp(doc)

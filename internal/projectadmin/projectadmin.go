@@ -1,5 +1,5 @@
 // Package projectadmin holds the project settings writes that the dashboard
-// and MCP tokens share. A function does no authorization: the caller checks
+// and management tokens share. A function does no authorization: the caller checks
 // permissions first. Each write does the change, its revision row, and its
 // audit row in one tenant-scoped transaction.
 package projectadmin
@@ -28,7 +28,7 @@ const (
 
 const (
 	sourceDashboard = "dashboard"
-	sourceMCP       = "mcp"
+	sourceToken     = "token"
 	sourceRollback  = "rollback"
 	// sourceBase marks the value from before revision history.
 	sourceBase = "base"
@@ -47,7 +47,7 @@ var (
 )
 
 // Actor is who made a change. Set UserID for a dashboard user, or TokenID
-// and TokenCreatorID for an MCP token.
+// and TokenCreatorID for a management token.
 type Actor struct {
 	UserID         int64
 	TokenID        int64
@@ -56,7 +56,7 @@ type Actor struct {
 
 func (a Actor) source() string {
 	if a.TokenID != 0 {
-		return sourceMCP
+		return sourceToken
 	}
 	return sourceDashboard
 }
@@ -75,7 +75,7 @@ func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, 
 		return auditlog.WritePlatform(ctx, tx, a.UserID, action, target, payload)
 	}
 	payload["created_by_user_id"] = a.TokenCreatorID
-	return auditlog.WritePlatformService(ctx, tx, "mcp_token:"+strconv.FormatInt(a.TokenID, 10), action, target, payload)
+	return auditlog.WritePlatformService(ctx, tx, "management_token:"+strconv.FormatInt(a.TokenID, 10), action, target, payload)
 }
 
 // Revision is one kept settings revision.
@@ -104,7 +104,7 @@ func ListRevisions(ctx context.Context, pool *db.Pool, tenantID, projectID int64
 				Revision:    r.Revision,
 				Snapshot:    r.Snapshot,
 				ActorUserID: r.ActorUserID,
-				TokenID:     r.McpTokenID,
+				TokenID:     r.ManagementTokenID,
 				Source:      r.Source,
 				CreatedAt:   r.CreatedAt.Time,
 			})
@@ -154,7 +154,7 @@ func recordRevision(ctx context.Context, q *sqlcgen.Queries, latest int64, w rev
 			p.ActorUserID = &actor.UserID
 		}
 		if actor.TokenID != 0 {
-			p.McpTokenID = &actor.TokenID
+			p.ManagementTokenID = &actor.TokenID
 		}
 		return q.InsertSettingsRevision(ctx, p)
 	}

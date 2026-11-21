@@ -414,7 +414,7 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 		return ProjectSettingsView{}, err
 	}
 	view.RemoteConfigRevisions = revisionViews(revs)
-	view.MCPEnabled = h.cfg.MCPEnabled
+	view.ManagementAPIEnabled = h.cfg.ManagementAPIEnabled
 	view.MaxAllowedOrigins = h.maxProjectOrigins()
 	view.OriginDelay = projectadmin.OriginCacheTTL.String()
 	origins, err := projectadmin.AllowedOrigins(ctx, h.pool, tenantID, projectID)

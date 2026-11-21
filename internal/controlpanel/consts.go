@@ -20,4 +20,5 @@ const (
 	msgProjectListFailed      = "Game Project list failed"
 	msgControlPanelPoolNeeded = "control panel: database pool is required"
 	msgSetupUnavailable       = "control panel setup is no longer available"
+	msgLeaderboardLimit       = "This Game Project has the maximum number of leaderboards. Delete one first, or ask a platform admin to raise the limit."
 )

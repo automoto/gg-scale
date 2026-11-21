@@ -1,9 +1,10 @@
 //go:build integration
 
-package mcp_test
+package managementapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,16 +24,9 @@ func structured(res map[string]any) map[string]any {
 	return m
 }
 
-// scopedToken is a token of the tenant owner with exactly these scopes.
-func (f *fixture) scopedToken(scopes ...string) string {
-	f.t.Helper()
-	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, scopes, time.Hour)
-	return tok
-}
-
-// writeCalls returns one valid call for each write tool. Each call is built
-// fresh, so a test can run every call once.
-func (f *fixture) writeCalls() map[string]struct {
+// writeToolCalls returns one valid call for each write tool. Each call is
+// built fresh, so a test can run every call once.
+func (f *fixture) writeToolCalls() map[string]struct {
 	scope string
 	args  map[string]any
 } {
@@ -43,7 +37,7 @@ func (f *fixture) writeCalls() map[string]struct {
 		scope string
 		args  map[string]any
 	}{
-		"set_remote_config":      {"config:write", map[string]any{"config_json": `{"a":1}`, "expected_revision": 0}},
+		"set_remote_config":      {"config:write", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0}},
 		"rollback_remote_config": {"config:write", map[string]any{"revision": 1, "expected_revision": 0}},
 		"create_leaderboard":     {"leaderboards:write", map[string]any{"name": "new-" + strconv.FormatInt(board, 10)}},
 		"update_leaderboard":     {"leaderboards:write", map[string]any{"leaderboard_id": board, "expected_revision": 0, "name": "renamed"}},
@@ -55,15 +49,17 @@ func (f *fixture) writeCalls() map[string]struct {
 	}
 }
 
+// A write tool outside the token's scopes is hidden, so a call to it
+// answers as an unknown tool.
 func TestWriteTools_should_be_refused_without_their_scope(t *testing.T) {
 	f := newFixture(t)
 	tok := f.scopedToken()
 
-	for name, c := range f.writeCalls() {
+	for name, c := range f.writeToolCalls() {
 		t.Run(name, func(t *testing.T) {
-			res := f.call(tok, name, c.args)
+			msg := f.rpcError(tok, name, c.args)
 
-			assert.Contains(t, resultText(res), c.scope)
+			assert.Equal(t, "unknown tool: "+name, msg)
 		})
 	}
 }
@@ -74,7 +70,7 @@ func TestWriteTools_should_be_refused_without_their_scope(t *testing.T) {
 func TestWriteTools_should_be_permitted_with_only_their_scope(t *testing.T) {
 	f := newFixture(t)
 
-	for name, c := range f.writeCalls() {
+	for name, c := range f.writeToolCalls() {
 		t.Run(name, func(t *testing.T) {
 			res := f.call(f.scopedToken(c.scope), name, c.args)
 
@@ -87,7 +83,7 @@ func TestWriteTools_should_be_permitted_with_only_their_scope(t *testing.T) {
 
 func TestWriteTools_should_succeed_with_their_scope(t *testing.T) {
 	f := newFixture(t)
-	calls := f.writeCalls()
+	calls := f.writeToolCalls()
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
 		"delete_leaderboard", "restore_leaderboard", "create_api_key", "set_allowed_origins"} {
@@ -108,7 +104,7 @@ func TestWriteTools_should_be_refused_when_creator_lacks_the_pair(t *testing.T) 
 	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:config'`)
 	require.NoError(t, f.authz.ReloadPolicy())
 
-	res := f.call(tok, "set_remote_config", map[string]any{"config_json": `{"a":1}`, "expected_revision": 0})
+	res := f.call(tok, "set_remote_config", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0})
 
 	assert.Contains(t, resultText(res), "does not have the update permission")
 }
@@ -116,13 +112,13 @@ func TestWriteTools_should_be_refused_when_creator_lacks_the_pair(t *testing.T) 
 func TestWriteTools_should_refuse_stale_expected_revision(t *testing.T) {
 	f := newFixture(t)
 	tok := f.scopedToken("config:write", "leaderboards:write")
-	require.False(t, isError(f.call(tok, "set_remote_config", map[string]any{"config_json": `{"a":1}`, "expected_revision": 0})))
+	require.False(t, isError(f.call(tok, "set_remote_config", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0})))
 	created := structured(f.call(tok, "create_leaderboard", map[string]any{"name": "scores"}))
 	board := created["leaderboard_id"]
 	require.False(t, isError(f.call(tok, "update_leaderboard", map[string]any{"leaderboard_id": board, "expected_revision": 1, "name": "renamed"})))
 
 	cases := map[string]map[string]any{
-		"set_remote_config":      {"config_json": `{"a":2}`, "expected_revision": 1},
+		"set_remote_config":      {"config": map[string]any{"a": 2}, "expected_revision": 1},
 		"rollback_remote_config": {"revision": 1, "expected_revision": 1},
 		"update_leaderboard":     {"leaderboard_id": board, "expected_revision": 1, "name": "again"},
 		"rollback_leaderboard":   {"leaderboard_id": board, "revision": 1, "expected_revision": 1},
@@ -140,23 +136,24 @@ func TestWriteTools_should_record_token_as_actor(t *testing.T) {
 	f := newFixture(t)
 	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{"config:write"}, time.Hour)
 
-	res := f.call(tok, "set_remote_config", map[string]any{"config_json": `{"a":1}`, "expected_revision": 0})
+	res := f.call(tok, "set_remote_config", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0})
 	require.False(t, isError(res), resultText(res))
 
 	var service string
 	var revisionToken int64
+	var source string
 	require.NoError(t, f.owner.QueryRow(context.Background(),
 		`SELECT actor_service FROM platform_audit_log WHERE action = 'control_panel.remote_config.update'`).Scan(&service))
 	require.NoError(t, f.owner.QueryRow(context.Background(),
-		`SELECT mcp_token_id FROM settings_revisions WHERE revision = 2 AND project_id = $1`, f.projectA).Scan(&revisionToken))
-	assert.Equal(t, []any{"mcp_token:" + strconv.FormatInt(tokenID, 10), tokenID}, []any{service, revisionToken})
+		`SELECT management_token_id, source FROM settings_revisions WHERE revision = 2 AND project_id = $1`, f.projectA).Scan(&revisionToken, &source))
+	assert.Equal(t, []any{"management_token:" + strconv.FormatInt(tokenID, 10), tokenID, "token"}, []any{service, revisionToken, source})
 }
 
 func TestWriteTools_set_remote_config_keeps_large_integers_exact(t *testing.T) {
 	f := newFixture(t)
 
 	f.call(f.scopedToken("config:write"), "set_remote_config",
-		map[string]any{"config_json": `{"id":12345678901234567890}`, "expected_revision": 0})
+		map[string]any{"config": json.RawMessage(`{"id":12345678901234567890}`), "expected_revision": 0})
 
 	var config string
 	require.NoError(t, f.owner.QueryRow(context.Background(),
@@ -164,20 +161,45 @@ func TestWriteTools_set_remote_config_keeps_large_integers_exact(t *testing.T) {
 	assert.Contains(t, config, "12345678901234567890")
 }
 
-func TestCreateAPIKey_should_refuse_a_secret_key_request(t *testing.T) {
+// An argument that is not in the tool schema is refused, as a direct HTTP
+// request with key_type is (see tests/integration/projectapi).
+func TestCreateAPIKey_should_not_make_a_secret_key(t *testing.T) {
 	f := newFixture(t)
 
-	res := f.call(f.scopedToken("keys:create"), "create_api_key", map[string]any{"label": "x", "key_type": "secret"})
+	msg := f.rpcError(f.scopedToken("keys:create"), "create_api_key", map[string]any{"label": "x", "key_type": "secret"})
 
-	assert.True(t, isError(res))
-	assert.Equal(t, 0, f.count(`SELECT count(*) FROM api_keys`))
+	assert.Equal(t, []any{true, 0}, []any{strings.Contains(msg, "key_type"), f.count(`SELECT count(*) FROM api_keys`)}, msg)
 }
 
-func (f *fixture) count(sql string, args ...any) int {
-	f.t.Helper()
-	var n int
-	require.NoError(f.t, f.owner.QueryRow(context.Background(), sql, args...).Scan(&n))
-	return n
+func TestUpdateLeaderboard_should_refuse_an_unknown_argument_and_keep_the_board(t *testing.T) {
+	f := newFixture(t)
+	board := f.board(f.projectA, "keep")
+
+	msg := f.rpcError(f.scopedToken("leaderboards:write"), "update_leaderboard",
+		map[string]any{"leaderboard_id": board, "expected_revision": 0, "name": "renamed", "metadata_json": "{}"})
+
+	assert.Equal(t, []any{true, 1}, []any{strings.Contains(msg, "metadata_json"),
+		f.count(`SELECT count(*) FROM leaderboards WHERE id = $1 AND name = 'keep'`, board)}, msg)
+}
+
+func TestUpdateLeaderboard_should_accept_only_known_arguments(t *testing.T) {
+	f := newFixture(t)
+	board := f.board(f.projectA, "keep")
+
+	res := f.call(f.scopedToken("leaderboards:write"), "update_leaderboard",
+		map[string]any{"leaderboard_id": board, "expected_revision": 0, "name": "renamed", "metadata": map[string]any{"a": 1}})
+
+	assert.False(t, isError(res), resultText(res))
+}
+
+// A hidden tool answers as unknown, also with an unknown argument, so a
+// caller cannot probe for tools it was not offered.
+func TestWriteTools_hidden_tool_with_an_unknown_argument_should_answer_unknown_tool(t *testing.T) {
+	f := newFixture(t)
+
+	msg := f.rpcError(f.scopedToken(), "create_api_key", map[string]any{"label": "x", "key_type": "secret"})
+
+	assert.Equal(t, "unknown tool: create_api_key", msg)
 }
 
 func TestCreateAPIKey_should_make_a_publishable_key_for_the_token_project(t *testing.T) {
@@ -190,7 +212,7 @@ func TestCreateAPIKey_should_make_a_publishable_key_for_the_token_project(t *tes
 	var keyType, label string
 	require.NoError(t, f.owner.QueryRow(context.Background(),
 		`SELECT project_id, key_type, label FROM api_keys`).Scan(&projectID, &keyType, &label))
-	assert.Equal(t, []any{f.projectA, "publishable", "web build (MCP token: test)"}, []any{projectID, keyType, label})
+	assert.Equal(t, []any{f.projectA, "publishable", "web build (management token: test)"}, []any{projectID, keyType, label})
 	assert.True(t, strings.HasPrefix(structured(res)["api_key"].(string), "ggp_"))
 }
 
@@ -265,7 +287,7 @@ func TestWriteTools_should_not_find_leaderboards_of_other_projects(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			res := f.call(tok, tools[name], args)
 
-			assert.Equal(t, "not found in this Game Project", resultText(res))
+			assert.Equal(t, "not found in this Game Project", resultDetail(res))
 		})
 	}
 	assert.Equal(t, 0, f.count(`SELECT count(*) FROM leaderboards WHERE id IN ($1, $2) AND (deleted_at IS NOT NULL OR name = 'x')`, otherProject, otherTenant))

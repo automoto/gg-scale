@@ -29,6 +29,11 @@ func timestamptzPtr(ts pgtype.Timestamptz) *time.Time {
 // scored friends than this sees the best-ranked slice.
 const leaderboardFriendsMaxEntries = 100
 
+// leaderboardListPageSize is the default and the largest page of the board
+// list. A board can have 16 KiB of metadata, so one page is at most about
+// 1.6 MB.
+const leaderboardListPageSize = 100
+
 type leaderboardInfo struct {
 	ID                int64           `json:"id" example:"1"`
 	Name              string          `json:"name" example:"weekly-high-score"`
@@ -45,8 +50,16 @@ type leaderboardInfo struct {
 	Metadata          json.RawMessage `json:"metadata,omitempty" example:"{\"icon\":\"gold\"}"`
 }
 
+type leaderboardListInput struct {
+	Limit  string `query:"limit" example:"100"`
+	Cursor string `query:"cursor" example:"weekly-high-score"`
+}
+
 type leaderboardListResult struct {
 	Leaderboards []leaderboardInfo `json:"leaderboards"`
+	// NextCursor is the name of the last board of the page. It is set only
+	// when there is a next page.
+	NextCursor string `json:"next_cursor,omitempty" example:"weekly-high-score"`
 }
 
 type leaderboardListOutput struct {
@@ -68,7 +81,8 @@ func registerLeaderboardDiscoveryRoutes(api huma.API, d Deps) {
 		Summary:     "List the project's leaderboards",
 		Description: "Runtime discovery: board ids, sort order, score operator, period " +
 			"state, submission policy, and the developer-defined metadata blob — no " +
-			"hardcoded ids needed in the client.",
+			"hardcoded ids needed in the client. Sorted by name and paged: limit is " +
+			"at most 100 (the default); send next_cursor as cursor for the next page.",
 		Tags:     []string{"Leaderboards"},
 		Security: playerSecurity,
 	}, leaderboardList(d))
@@ -88,20 +102,31 @@ func registerLeaderboardDiscoveryRoutes(api huma.API, d Deps) {
 	}, leaderboardFriends(d))
 }
 
-func leaderboardList(d Deps) func(context.Context, *struct{}) (*leaderboardListOutput, error) {
-	return func(ctx context.Context, _ *struct{}) (*leaderboardListOutput, error) {
+func leaderboardList(d Deps) func(context.Context, *leaderboardListInput) (*leaderboardListOutput, error) {
+	return func(ctx context.Context, in *leaderboardListInput) (*leaderboardListOutput, error) {
 		projectID, ok := playerauth.ProjectIDFromContext(ctx)
 		if !ok {
 			return nil, huma.Error401Unauthorized("no player project")
 		}
-		out := make([]leaderboardInfo, 0)
+		limit := parseLimit(in.Limit, leaderboardListPageSize, leaderboardListPageSize)
+		result := leaderboardListResult{Leaderboards: make([]leaderboardInfo, 0)}
 		err := d.ReadPool.Q(ctx, func(tx pgx.Tx) error {
-			rows, qerr := sqlcgen.New(tx).ListLeaderboardsForProject(ctx, projectID)
+			// Get one row more than the page, so next_cursor is set only when
+			// a next page exists.
+			rows, qerr := sqlcgen.New(tx).ListLeaderboardsPageForProject(ctx, sqlcgen.ListLeaderboardsPageForProjectParams{
+				ProjectID: projectID,
+				AfterName: in.Cursor,
+				RowLimit:  limit + 1,
+			})
 			if qerr != nil {
 				return qerr
 			}
+			if len(rows) > int(limit) {
+				rows = rows[:limit]
+				result.NextCursor = rows[len(rows)-1].Name
+			}
 			for _, row := range rows {
-				out = append(out, leaderboardInfo{
+				result.Leaderboards = append(result.Leaderboards, leaderboardInfo{
 					ID:                row.ID,
 					Name:              row.Name,
 					SortOrder:         row.SortOrder,
@@ -122,7 +147,7 @@ func leaderboardList(d Deps) func(context.Context, *struct{}) (*leaderboardListO
 		if err != nil {
 			return nil, serverError(ctx, "leaderboard list", err)
 		}
-		return &leaderboardListOutput{Body: leaderboardListResult{Leaderboards: out}}, nil
+		return &leaderboardListOutput{Body: result}, nil
 	}
 }
 

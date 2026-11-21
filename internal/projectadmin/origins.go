@@ -25,6 +25,11 @@ const OriginCacheTTL = 30 * time.Second
 // message is safe to show the person or the agent.
 var ErrInvalidOrigins = errors.New("invalid allowed origins")
 
+// ErrOriginLimit means the list has more origins than the limit. It wraps
+// ErrInvalidOrigins and has the same text, so callers that check only
+// ErrInvalidOrigins do not change.
+var ErrOriginLimit = fmt.Errorf("%w", ErrInvalidOrigins)
+
 func invalidOrigin(raw, why string) error {
 	return fmt.Errorf("%w: %q %s", ErrInvalidOrigins, raw, why)
 }
@@ -52,6 +57,10 @@ func NormalizeOrigin(raw string) (string, error) {
 	if host == "" {
 		return "", invalidOrigin(raw, "must have a host")
 	}
+	// 253 is the longest DNS name.
+	if len(host) > 253 {
+		return "", invalidOrigin(raw, "has a host longer than 253 characters")
+	}
 	port := u.Port()
 	if port != "" {
 		n, err := strconv.Atoi(port)
@@ -72,7 +81,8 @@ func NormalizeOrigin(raw string) (string, error) {
 }
 
 // NormalizeOrigins checks a list, drops blank lines and duplicates, and
-// refuses more than limit origins.
+// refuses more than limit origins. It stops as soon as the list passes the
+// limit, so the duplicate check never scans more than limit origins.
 func NormalizeOrigins(raw []string, limit int) ([]string, error) {
 	out := []string{}
 	for _, r := range raw {
@@ -83,12 +93,13 @@ func NormalizeOrigins(raw []string, limit int) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !slices.Contains(out, o) {
-			out = append(out, o)
+		if slices.Contains(out, o) {
+			continue
 		}
-	}
-	if len(out) > limit {
-		return nil, fmt.Errorf("%w: a Game Project can have at most %d origins", ErrInvalidOrigins, limit)
+		out = append(out, o)
+		if len(out) > limit {
+			return nil, fmt.Errorf("%w: a Game Project can have at most %d origins", ErrOriginLimit, limit)
+		}
 	}
 	return out, nil
 }

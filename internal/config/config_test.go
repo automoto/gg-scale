@@ -398,6 +398,77 @@ func TestEnvExample_has_no_drift(t *testing.T) {
 	}
 }
 
+func TestLoad_should_turn_on_management_api_with_new_variable(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("FEATURE_MANAGEMENT_API_ENABLED", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.FeatureManagementAPIEnabled)
+}
+
+func TestLoad_should_ignore_old_mcp_feature_variable(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("FEATURE_MCP_ENABLED", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.FeatureManagementAPIEnabled)
+}
+
+func TestLoad_should_read_management_limits(t *testing.T) {
+	cases := []struct {
+		envVar string
+		got    func(*config.Config) int
+	}{
+		{"MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", func(c *config.Config) int { return c.ManagementTokenMaxExpiryDays }},
+		{"MANAGEMENT_TOKEN_RATE_PER_SECOND", func(c *config.Config) int { return c.ManagementTokenRatePerSecond }},
+		{"MANAGEMENT_TOKEN_RATE_BURST", func(c *config.Config) int { return c.ManagementTokenRateBurst }},
+		{"MANAGEMENT_AUTH_FAILURES_PER_MINUTE", func(c *config.Config) int { return c.ManagementAuthFailuresPerMinute }},
+		{"MANAGEMENT_AUTH_FAILURE_BURST", func(c *config.Config) int { return c.ManagementAuthFailureBurst }},
+		{"MANAGEMENT_MAX_PROJECT_TOKENS", func(c *config.Config) int { return c.ManagementMaxProjectTokens }},
+		{"MANAGEMENT_MAX_PROJECT_API_KEYS", func(c *config.Config) int { return c.ManagementMaxProjectAPIKeys }},
+		{"LEADERBOARD_MAX_PER_PROJECT", func(c *config.Config) int { return c.LeaderboardMaxPerProject }},
+	}
+	for _, c := range cases {
+		t.Run(c.envVar, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv(c.envVar, "7")
+
+			cfg, err := config.Load()
+			require.NoError(t, err)
+
+			assert.Equal(t, 7, c.got(cfg))
+		})
+	}
+}
+
+func TestLoad_should_keep_default_limit_when_only_old_name_is_set(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MCP_MAX_PROJECT_TOKENS", "3")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 20, cfg.ManagementMaxProjectTokens)
+}
+
+func TestLoad_should_name_new_variable_when_limit_is_not_positive(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", "0")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS")
+}
+
 func parseEnvFileKeys(content string) []string {
 	var keys []string
 	for _, line := range strings.Split(content, "\n") {
@@ -425,7 +496,29 @@ func clearEnv(t *testing.T) {
 		"TWO_FACTOR_ENC_KEY", "TWO_FACTOR_ENC_KEY_FILE",
 		"CONTROL_PANEL_DISABLED", "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", "CONTROL_PANEL_COOKIE_SECURE",
 		"RELAY_URLS", "RELAY_PROBE_TOKEN", "RELAY_PROBE_TOKEN_FILE", "PLATFORM_ADMIN_TOKEN", "PLATFORM_ADMIN_TOKEN_FILE",
+		"FEATURE_MANAGEMENT_API_ENABLED", "MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", "MANAGEMENT_MAX_PROJECT_TOKENS",
+		"LEADERBOARD_MAX_PER_PROJECT",
 	} {
 		t.Setenv(k, "")
 	}
+}
+
+func TestLoad_should_default_leaderboard_max_per_project_to_1000(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 1000, cfg.LeaderboardMaxPerProject)
+}
+
+func TestLoad_should_refuse_leaderboard_max_per_project_of_zero(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("LEADERBOARD_MAX_PER_PROJECT", "0")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "LEADERBOARD_MAX_PER_PROJECT")
 }

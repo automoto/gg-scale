@@ -48,6 +48,7 @@ import (
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/party"
 	"github.com/automoto/gg-scale/internal/players"
+	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/realtime"
@@ -377,6 +378,7 @@ func run() error {
 
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
+	quota.SetLeaderboardsPerProject(int64(cfg.LeaderboardMaxPerProject))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -687,6 +689,7 @@ func run() error {
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
 		Commit:                buildCommit(),
+		Release:               release,
 		RequestTimeout:        cfg.HTTPRequestTimeout,
 		Pool:                  appPool,
 		ReadPool:              readPool,
@@ -727,45 +730,46 @@ func run() error {
 		RelayNodes:   relaySelector,
 		RelayMeter:   relaymeter.New(appPool, m, cfg.MailFrom),
 		ControlPanel: controlpanel.Config{
-			Mount:                  cfg.ControlPanelEnabled,
-			CookieSecure:           cfg.ControlPanelCookieSecure,
-			BaseURL:                cfg.ControlPanelBaseURL,
-			MailFrom:               cfg.MailFrom,
-			TrustedProxyHeader:     cfg.TrustedProxyHeader,
-			TrustedProxyCIDRs:      cfg.TrustedProxyCIDRs,
-			FleetEnabled:           cfg.FeatureFleetEnabled,
-			RelayEnabled:           cfg.FeatureP2PRelayEnabled,
-			StorageMaxValueBytes:   cfg.StorageMaxValueBytes,
-			DeleteGracePeriod:      cfg.PlayerDeleteGracePeriod,
-			BillingPortalURL:       cfg.BillingPortalURL,
-			BillingUpgradeURL:      cfg.BillingUpgradeURL,
-			EnforceNewTenantQuotas: cfg.QuotasEnforceNewTenants,
-			MCPEnabled:             cfg.FeatureMCPEnabled,
-			MCPMaxExpiryDays:       cfg.MCPTokenMaxExpiryDays,
-			MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
-			CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
+			Mount:                      cfg.ControlPanelEnabled,
+			CookieSecure:               cfg.ControlPanelCookieSecure,
+			BaseURL:                    cfg.ControlPanelBaseURL,
+			MailFrom:                   cfg.MailFrom,
+			TrustedProxyHeader:         cfg.TrustedProxyHeader,
+			TrustedProxyCIDRs:          cfg.TrustedProxyCIDRs,
+			FleetEnabled:               cfg.FeatureFleetEnabled,
+			RelayEnabled:               cfg.FeatureP2PRelayEnabled,
+			StorageMaxValueBytes:       cfg.StorageMaxValueBytes,
+			DeleteGracePeriod:          cfg.PlayerDeleteGracePeriod,
+			BillingPortalURL:           cfg.BillingPortalURL,
+			BillingUpgradeURL:          cfg.BillingUpgradeURL,
+			EnforceNewTenantQuotas:     cfg.QuotasEnforceNewTenants,
+			ManagementAPIEnabled:       cfg.FeatureManagementAPIEnabled,
+			ManagementMaxExpiryDays:    cfg.ManagementTokenMaxExpiryDays,
+			ManagementMaxProjectTokens: cfg.ManagementMaxProjectTokens,
+			CORSMaxProjectOrigins:      cfg.CORSMaxProjectOrigins,
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/control-panel/sso",
 				cfg.ControlPanelSSOGoogleClientID, cfg.ControlPanelSSOGoogleClientSecret),
 			// Redacted read-only snapshot for the server settings page.
 			// Secrets are reduced to booleans here so raw values never
 			// cross into the control panel package.
 			ServerSettings: controlpanel.ServerSettingsSnapshot{
-				Env:                    cfg.Env,
-				LogLevel:               cfg.LogLevel,
-				HTTPAddr:               cfg.HTTPAddr,
-				PlayersEnabled:         cfg.PlayersEnabled,
-				FeatureFleetEnabled:    cfg.FeatureFleetEnabled,
-				FeatureP2PRelayEnabled: cfg.FeatureP2PRelayEnabled,
-				FeatureMCPEnabled:      cfg.FeatureMCPEnabled,
-				MCPTokenMaxExpiryDays:  cfg.MCPTokenMaxExpiryDays,
-				MCPTokenRatePerSecond:  cfg.MCPTokenRatePerSecond,
-				MCPTokenRateBurst:      cfg.MCPTokenRateBurst,
-				MCPMaxProjectTokens:    cfg.MCPMaxProjectTokens,
-				MCPMaxProjectAPIKeys:   cfg.MCPMaxProjectAPIKeys,
-				CORSAllowedOrigins:     cfg.CORSAllowedOrigins,
-				CORSMaxProjectOrigins:  cfg.CORSMaxProjectOrigins,
-				FleetBackend:           cfg.FleetBackend,
-				FleetRegion:            cfg.FleetRegion,
+				Env:                          cfg.Env,
+				LogLevel:                     cfg.LogLevel,
+				HTTPAddr:                     cfg.HTTPAddr,
+				PlayersEnabled:               cfg.PlayersEnabled,
+				FeatureFleetEnabled:          cfg.FeatureFleetEnabled,
+				FeatureP2PRelayEnabled:       cfg.FeatureP2PRelayEnabled,
+				FeatureManagementAPIEnabled:  cfg.FeatureManagementAPIEnabled,
+				ManagementTokenMaxExpiryDays: cfg.ManagementTokenMaxExpiryDays,
+				ManagementTokenRatePerSecond: cfg.ManagementTokenRatePerSecond,
+				ManagementTokenRateBurst:     cfg.ManagementTokenRateBurst,
+				ManagementMaxProjectTokens:   cfg.ManagementMaxProjectTokens,
+				ManagementMaxProjectAPIKeys:  cfg.ManagementMaxProjectAPIKeys,
+				CORSAllowedOrigins:           cfg.CORSAllowedOrigins,
+				CORSMaxProjectOrigins:        cfg.CORSMaxProjectOrigins,
+				LeaderboardMaxPerProject:     cfg.LeaderboardMaxPerProject,
+				FleetBackend:                 cfg.FleetBackend,
+				FleetRegion:                  cfg.FleetRegion,
 			},
 		},
 		Players: players.Config{
@@ -776,23 +780,23 @@ func run() error {
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/players/account/sso",
 				cfg.PlayerSSOGoogleClientID, cfg.PlayerSSOGoogleClientSecret),
 		},
-		ControlPanelBootstrap:    controlPanelBootstrap,
-		ControlPanelPluginInfo:   pluginInfo,
-		CORSAllowedOrigins:       cfg.CORSAllowedOrigins,
-		MetricsAuthToken:         cfg.MetricsAuthToken,
-		EntitlementAPIToken:      entitlementToken,
-		PlatformAdminToken:       cfg.PlatformAdminToken,
-		RelayNodeAdmin:           relayNodes,
-		MCPEnabled:               cfg.FeatureMCPEnabled,
-		MCPTokenRatePerSecond:    float64(cfg.MCPTokenRatePerSecond),
-		MCPTokenBurst:            float64(cfg.MCPTokenRateBurst),
-		MCPAuthFailuresPerMinute: float64(cfg.MCPAuthFailuresPerMinute),
-		MCPAuthFailureBurst:      float64(cfg.MCPAuthFailureBurst),
-		MCPMaxProjectAPIKeys:     int64(cfg.MCPMaxProjectAPIKeys),
-		CORSMaxProjectOrigins:    cfg.CORSMaxProjectOrigins,
-		BillingHandoffKey:        billingHandoffKey,
-		Lifecycle:                lc,
-		RealtimeDrain:            realtimeDrain,
+		ControlPanelBootstrap:           controlPanelBootstrap,
+		ControlPanelPluginInfo:          pluginInfo,
+		CORSAllowedOrigins:              cfg.CORSAllowedOrigins,
+		MetricsAuthToken:                cfg.MetricsAuthToken,
+		EntitlementAPIToken:             entitlementToken,
+		PlatformAdminToken:              cfg.PlatformAdminToken,
+		RelayNodeAdmin:                  relayNodes,
+		ManagementAPIEnabled:            cfg.FeatureManagementAPIEnabled,
+		ManagementTokenRatePerSecond:    float64(cfg.ManagementTokenRatePerSecond),
+		ManagementTokenBurst:            float64(cfg.ManagementTokenRateBurst),
+		ManagementAuthFailuresPerMinute: float64(cfg.ManagementAuthFailuresPerMinute),
+		ManagementAuthFailureBurst:      float64(cfg.ManagementAuthFailureBurst),
+		ManagementMaxProjectAPIKeys:     int64(cfg.ManagementMaxProjectAPIKeys),
+		CORSMaxProjectOrigins:           cfg.CORSMaxProjectOrigins,
+		BillingHandoffKey:               billingHandoffKey,
+		Lifecycle:                       lc,
+		RealtimeDrain:                   realtimeDrain,
 	})
 
 	srv := &http.Server{

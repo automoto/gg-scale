@@ -24,7 +24,7 @@ import (
 	"github.com/automoto/gg-scale/internal/secretseal"
 )
 
-type mcpPanel struct {
+type tokenPanel struct {
 	srv      *httptest.Server
 	raw      *pgxpool.Pool
 	authz    *rbac.Authorizer
@@ -32,14 +32,14 @@ type mcpPanel struct {
 	project  int64
 }
 
-// newMCPPanel mounts the control panel with the MCP feature on and a limit of
-// two active tokens for each project.
-func newMCPPanel(t *testing.T, enabled bool) mcpPanel {
+// newTokenPanel mounts the control panel with the management API feature set
+// to enabled and a limit of two active tokens for each project.
+func newTokenPanel(t *testing.T, enabled bool) tokenPanel {
 	t.Helper()
 	pool, raw := startTwoFactorDB(t)
 	ctx := context.Background()
-	p := mcpPanel{raw: raw}
-	require.NoError(t, raw.QueryRow(ctx, `INSERT INTO tenants (name) VALUES ('mcp') RETURNING id`).Scan(&p.tenantID))
+	p := tokenPanel{raw: raw}
+	require.NoError(t, raw.QueryRow(ctx, `INSERT INTO tenants (name) VALUES ('management') RETURNING id`).Scan(&p.tenantID))
 	p.project = createLeaderboardProject(t, raw, p.tenantID, "game")
 
 	var err error
@@ -56,7 +56,7 @@ func newMCPPanel(t *testing.T, enabled bool) mcpPanel {
 		Pool: pool, Mailer: noopMailer, RBAC: p.authz, CredentialCipher: credCipher,
 		VerifySigningKey: []byte(testEmailVerifySigningKey),
 		Config: controlpanel.Config{
-			Mount: true, MCPEnabled: enabled, MCPMaxExpiryDays: 90, MCPMaxProjectTokens: 2,
+			Mount: true, ManagementAPIEnabled: enabled, ManagementMaxExpiryDays: 90, ManagementMaxProjectTokens: 2,
 		},
 	}))
 	p.srv = httptest.NewServer(root)
@@ -65,7 +65,7 @@ func newMCPPanel(t *testing.T, enabled bool) mcpPanel {
 }
 
 // member creates a user with a membership role in the tenant and signs in.
-func (p mcpPanel) member(t *testing.T, email, role string) (*http.Client, string, int64) {
+func (p tokenPanel) member(t *testing.T, email, role string) (*http.Client, string, int64) {
 	t.Helper()
 	id := createVerifiedUser(t, p.raw, email)
 	require.NoError(t, p.authz.SetControlPanelMembershipRole(id, p.tenantID, role))
@@ -73,12 +73,12 @@ func (p mcpPanel) member(t *testing.T, email, role string) (*http.Client, string
 	return c, csrf, id
 }
 
-func (p mcpPanel) tokensURL() string {
+func (p tokenPanel) tokensURL() string {
 	return p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) +
-		"/projects/" + strconv.FormatInt(p.project, 10) + "/mcp-tokens"
+		"/projects/" + strconv.FormatInt(p.project, 10) + "/management-tokens"
 }
 
-func (p mcpPanel) create(t *testing.T, c *http.Client, csrf string, extra url.Values) (*http.Response, string) {
+func (p tokenPanel) create(t *testing.T, c *http.Client, csrf string, extra url.Values) (*http.Response, string) {
 	t.Helper()
 	form := url.Values{"_csrf": {csrf}, "label": {"agent"}, "days": {"30"}}
 	for k, v := range extra {
@@ -87,16 +87,16 @@ func (p mcpPanel) create(t *testing.T, c *http.Client, csrf string, extra url.Va
 	return tfPostForm(t, c, p.tokensURL(), form)
 }
 
-func (p mcpPanel) tokenCount(t *testing.T) int {
+func (p tokenPanel) tokenCount(t *testing.T) int {
 	t.Helper()
 	var n int
 	require.NoError(t, p.raw.QueryRow(context.Background(),
-		`SELECT count(*) FROM mcp_tokens WHERE project_id = $1`, p.project).Scan(&n))
+		`SELECT count(*) FROM management_tokens WHERE project_id = $1`, p.project).Scan(&n))
 	return n
 }
 
-func TestMCPTokens_owner_creates_token_and_sees_it_once(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_owner_creates_token_and_sees_it_once(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	resp, body := p.create(t, c, csrf, nil)
@@ -105,8 +105,8 @@ func TestMCPTokens_owner_creates_token_and_sees_it_once(t *testing.T) {
 	assert.Contains(t, body, "ggm_")
 }
 
-func TestMCPTokens_should_refuse_days_above_maximum(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_should_refuse_days_above_maximum(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	resp, _ := p.create(t, c, csrf, url.Values{"days": {"91"}})
@@ -114,8 +114,8 @@ func TestMCPTokens_should_refuse_days_above_maximum(t *testing.T) {
 	assert.Equal(t, []int{http.StatusUnprocessableEntity, 0}, []int{resp.StatusCode, p.tokenCount(t)})
 }
 
-func TestMCPTokens_should_refuse_create_at_token_limit(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_should_refuse_create_at_token_limit(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 	p.create(t, c, csrf, nil)
 	p.create(t, c, csrf, nil)
@@ -125,8 +125,8 @@ func TestMCPTokens_should_refuse_create_at_token_limit(t *testing.T) {
 	assert.Equal(t, []int{http.StatusConflict, 2}, []int{resp.StatusCode, p.tokenCount(t)})
 }
 
-func TestMCPTokens_should_refuse_scope_the_creator_cannot_use(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_should_refuse_scope_the_creator_cannot_use(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "admin@example.com", "admin")
 	// Take the publishable key pair away from tenant admins.
 	_, err := p.raw.Exec(context.Background(),
@@ -139,16 +139,16 @@ func TestMCPTokens_should_refuse_scope_the_creator_cannot_use(t *testing.T) {
 	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
 }
 
-func (p mcpPanel) onlyTokenScopes(t *testing.T) []string {
+func (p tokenPanel) onlyTokenScopes(t *testing.T) []string {
 	t.Helper()
 	var scopes []string
 	require.NoError(t, p.raw.QueryRow(context.Background(),
-		`SELECT scopes FROM mcp_tokens WHERE project_id = $1`, p.project).Scan(&scopes))
+		`SELECT scopes FROM management_tokens WHERE project_id = $1`, p.project).Scan(&scopes))
 	return scopes
 }
 
-func TestMCPTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	p.create(t, c, csrf, url.Values{"preset": {"read_only"}, "scopes": {"config:write"}})
@@ -156,8 +156,8 @@ func TestMCPTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
 	assert.Empty(t, p.onlyTokenScopes(t))
 }
 
-func TestMCPTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	p.create(t, c, csrf, url.Values{"preset": {"custom"}, "scopes": {"config:write"}})
@@ -165,8 +165,8 @@ func TestMCPTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
 	assert.Equal(t, []string{"config:write"}, p.onlyTokenScopes(t))
 }
 
-func TestMCPTokens_should_refuse_unknown_scope(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_should_refuse_unknown_scope(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
 	resp, _ := p.create(t, c, csrf, url.Values{"scopes": {"tenant:admin"}})
@@ -174,8 +174,8 @@ func TestMCPTokens_should_refuse_unknown_scope(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
 }
 
-func TestMCPTokens_member_gets_403_on_page_and_create(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_member_gets_403_on_page_and_create(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "member@example.com", "member")
 
 	getResp, _ := tfGet(t, c, p.tokensURL())
@@ -184,8 +184,8 @@ func TestMCPTokens_member_gets_403_on_page_and_create(t *testing.T) {
 	assert.Equal(t, []int{http.StatusForbidden, http.StatusForbidden}, []int{getResp.StatusCode, postResp.StatusCode})
 }
 
-func TestMCPTokens_page_is_hidden_when_feature_is_off(t *testing.T) {
-	p := newMCPPanel(t, false)
+func TestManagementTokens_page_is_hidden_when_feature_is_off(t *testing.T) {
+	p := newTokenPanel(t, false)
 	c, _, _ := p.member(t, "owner@example.com", "owner")
 
 	resp, _ := tfGet(t, c, p.tokensURL())
@@ -193,8 +193,53 @@ func TestMCPTokens_page_is_hidden_when_feature_is_off(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
-func TestMCPTokens_platform_admin_token_has_one_project_and_listed_scopes(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_page_has_management_tokens_title(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "<h1>Management tokens</h1>")
+}
+
+func TestManagementTokens_old_mcp_tokens_url_returns_404(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+	oldURL := strings.TrimSuffix(p.tokensURL(), "/management-tokens") + "/mcp-tokens"
+
+	resp, _ := tfGet(t, c, oldURL)
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestManagementTokens_create_writes_management_token_audit_action(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, ownerID := p.member(t, "owner@example.com", "owner")
+
+	p.create(t, c, csrf, nil)
+
+	var n int
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM platform_audit_log WHERE action = 'management_token.create' AND actor_user_id = $1`, ownerID).Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
+func TestManagementTokens_revoke_writes_management_token_audit_action(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, ownerID := p.member(t, "owner@example.com", "owner")
+	p.create(t, c, csrf, nil)
+	id := p.onlyTokenID(t)
+
+	tfPostForm(t, c, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {csrf}})
+
+	var n int
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM platform_audit_log WHERE action = 'management_token.revoke' AND actor_user_id = $1`, ownerID).Scan(&n))
+	assert.Equal(t, 1, n)
+}
+
+func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes(t *testing.T) {
+	p := newTokenPanel(t, true)
 	id := createPlatformAdminUser(t, p.raw, "pa@example.com")
 	require.NoError(t, p.authz.ReloadPolicy())
 	c, csrf := loginAsAdmin(t, p.srv, p.raw, id, "pa@example.com")
@@ -205,24 +250,24 @@ func TestMCPTokens_platform_admin_token_has_one_project_and_listed_scopes(t *tes
 	var projectID int64
 	var scopes []string
 	require.NoError(t, p.raw.QueryRow(context.Background(),
-		`SELECT project_id, scopes FROM mcp_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
+		`SELECT project_id, scopes FROM management_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
 	assert.Equal(t, p.project, projectID)
 	assert.ElementsMatch(t, []string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, scopes)
 }
 
-func TestMCPTokens_revoke_sets_revoked_at(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_revoke_sets_revoked_at(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 	p.create(t, c, csrf, nil)
 	var id int64
-	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT id FROM mcp_tokens`).Scan(&id))
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT id FROM management_tokens`).Scan(&id))
 
 	resp, _ := tfPostForm(t, c, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {csrf}})
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 
 	var revoked bool
 	require.NoError(t, p.raw.QueryRow(context.Background(),
-		`SELECT revoked_at IS NOT NULL FROM mcp_tokens WHERE id = $1`, id).Scan(&revoked))
+		`SELECT revoked_at IS NOT NULL FROM management_tokens WHERE id = $1`, id).Scan(&revoked))
 	assert.True(t, revoked)
 }
 
@@ -264,7 +309,7 @@ func TestMatchmakerQueue_admin_can_open_queue_but_not_fleets(t *testing.T) {
 
 // dropAdminSecretKeyPair takes (api_key:secret, manage) away from tenant
 // admins, the pair a non-creator needs to revoke a token.
-func (p mcpPanel) dropAdminSecretKeyPair(t *testing.T) {
+func (p tokenPanel) dropAdminSecretKeyPair(t *testing.T) {
 	t.Helper()
 	_, err := p.raw.Exec(context.Background(),
 		`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret'`)
@@ -272,23 +317,23 @@ func (p mcpPanel) dropAdminSecretKeyPair(t *testing.T) {
 	require.NoError(t, p.authz.ReloadPolicy())
 }
 
-func (p mcpPanel) onlyTokenID(t *testing.T) int64 {
+func (p tokenPanel) onlyTokenID(t *testing.T) int64 {
 	t.Helper()
 	var id int64
-	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT id FROM mcp_tokens`).Scan(&id))
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT id FROM management_tokens`).Scan(&id))
 	return id
 }
 
-func (p mcpPanel) revoked(t *testing.T, id int64) bool {
+func (p tokenPanel) revoked(t *testing.T, id int64) bool {
 	t.Helper()
 	var revoked bool
 	require.NoError(t, p.raw.QueryRow(context.Background(),
-		`SELECT revoked_at IS NOT NULL FROM mcp_tokens WHERE id = $1`, id).Scan(&revoked))
+		`SELECT revoked_at IS NOT NULL FROM management_tokens WHERE id = $1`, id).Scan(&revoked))
 	return revoked
 }
 
-func TestMCPTokens_non_creator_without_secret_key_pair_cannot_revoke(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_non_creator_without_secret_key_pair_cannot_revoke(t *testing.T) {
+	p := newTokenPanel(t, true)
 	owner, ownerCSRF, _ := p.member(t, "owner@example.com", "owner")
 	p.create(t, owner, ownerCSRF, nil)
 	id := p.onlyTokenID(t)
@@ -300,8 +345,8 @@ func TestMCPTokens_non_creator_without_secret_key_pair_cannot_revoke(t *testing.
 	assert.Equal(t, []any{http.StatusForbidden, false}, []any{resp.StatusCode, p.revoked(t, id)})
 }
 
-func TestMCPTokens_creator_can_revoke_own_token_without_secret_key_pair(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_creator_can_revoke_own_token_without_secret_key_pair(t *testing.T) {
+	p := newTokenPanel(t, true)
 	admin, csrf, _ := p.member(t, "admin@example.com", "admin")
 	p.create(t, admin, csrf, nil)
 	id := p.onlyTokenID(t)
@@ -312,11 +357,11 @@ func TestMCPTokens_creator_can_revoke_own_token_without_secret_key_pair(t *testi
 	assert.Equal(t, []any{http.StatusSeeOther, true}, []any{resp.StatusCode, p.revoked(t, id)})
 }
 
-func TestMCPTokens_list_hides_tokens_expired_over_30_days(t *testing.T) {
-	p := newMCPPanel(t, true)
+func TestManagementTokens_list_hides_tokens_expired_over_30_days(t *testing.T) {
+	p := newTokenPanel(t, true)
 	c, _, ownerID := p.member(t, "owner@example.com", "owner")
 	_, err := p.raw.Exec(context.Background(), `
-		INSERT INTO mcp_tokens (tenant_id, project_id, created_by_user_id, label, token_hash, token_hint, expires_at) VALUES
+		INSERT INTO management_tokens (tenant_id, project_id, created_by_user_id, label, token_hash, token_hint, expires_at) VALUES
 		  ($1, $2, $3, 'recently-expired', '\x01'::bytea, 'aaaa', now() - interval '1 day'),
 		  ($1, $2, $3, 'long-expired',     '\x02'::bytea, 'bbbb', now() - interval '31 days')`,
 		p.tenantID, p.project, ownerID)

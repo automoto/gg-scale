@@ -33,7 +33,7 @@ func revisionViews(revs []projectadmin.Revision) []RevisionView {
 		}
 		switch {
 		case r.TokenID != nil:
-			actor = "MCP token #" + strconv.FormatInt(*r.TokenID, 10)
+			actor = "Management token #" + strconv.FormatInt(*r.TokenID, 10)
 		case r.ActorUserID != nil:
 			actor = "User #" + strconv.FormatInt(*r.ActorUserID, 10)
 		}
@@ -77,6 +77,8 @@ func writeRollbackError(w http.ResponseWriter, r *http.Request, op string, err e
 		http.Error(w, "A leaderboard with that name already exists in this Game Project. Rename it first.", http.StatusConflict)
 	case errors.Is(err, projectadmin.ErrSortOrderLocked):
 		http.Error(w, "Sort order is fixed once scores exist, so this revision cannot be applied.", http.StatusConflict)
+	case errors.Is(err, projectadmin.ErrLeaderboardLimit):
+		http.Error(w, msgLeaderboardLimit, http.StatusConflict)
 	default:
 		slog.ErrorContext(r.Context(), op+" failed", "err", err)
 		http.Error(w, op+" failed", http.StatusInternalServerError)

@@ -448,6 +448,21 @@ type LeaderboardPeriod struct {
 	EndedAt       pgtype.Timestamptz
 }
 
+type ManagementToken struct {
+	ID              int64
+	TenantID        int64
+	ProjectID       int64
+	CreatedByUserID int64
+	Label           string
+	TokenHash       []byte
+	TokenHint       string
+	Scopes          []string
+	ExpiresAt       pgtype.Timestamptz
+	LastUsedAt      pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	RevokedAt       pgtype.Timestamptz
+}
+
 type MatchmakerMatch struct {
 	ID           string
 	TenantID     int64
@@ -516,21 +531,6 @@ type MatchmakingTicket struct {
 	FailureReason      *string
 	EntryID            int64
 	PartyID            *int64
-}
-
-type McpToken struct {
-	ID              int64
-	TenantID        int64
-	ProjectID       int64
-	CreatedByUserID int64
-	Label           string
-	TokenHash       []byte
-	TokenHint       string
-	Scopes          []string
-	ExpiresAt       pgtype.Timestamptz
-	LastUsedAt      pgtype.Timestamptz
-	CreatedAt       pgtype.Timestamptz
-	RevokedAt       pgtype.Timestamptz
 }
 
 type Party struct {
@@ -905,17 +905,17 @@ type Session struct {
 }
 
 type SettingsRevision struct {
-	ID           int64
-	TenantID     int64
-	ProjectID    int64
-	ResourceKind string
-	ResourceID   int64
-	Revision     int64
-	Snapshot     []byte
-	ActorUserID  *int64
-	McpTokenID   *int64
-	Source       string
-	CreatedAt    pgtype.Timestamptz
+	ID                int64
+	TenantID          int64
+	ProjectID         int64
+	ResourceKind      string
+	ResourceID        int64
+	Revision          int64
+	Snapshot          []byte
+	ActorUserID       *int64
+	ManagementTokenID *int64
+	Source            string
+	CreatedAt         pgtype.Timestamptz
 }
 
 type StorageLimit struct {
