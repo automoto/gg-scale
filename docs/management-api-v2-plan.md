@@ -283,9 +283,9 @@ Do the stages in order. Write failing tests first. After each stage:
 - [x] Scope table: rename `WriteScopes` to `Scopes`, add the read scopes and the class of each scope.
 - [x] `projectOps`: each read row gets its read scope. `list_revisions` needs `config:read` or `leaderboards:read`, by resource.
 - Dropped: ~~Migration: add all read scopes to every existing `management_tokens` row.~~ Old tokens lose their reads; make a new token. Until the token page changes, the old create form adds all four read scopes to each new token.
-- [ ] Token page: the access table, Quick fill links, the risky group (empty in this stage), disabled options with the reason, server-side mapping from form fields to scopes. See "Token page".
-- [ ] Token list: access in words, the inactive count, "New token like this".
-- [ ] Tests: a disabled option is refused on POST; Quick fill never sets a risky scope; "New token like this" fills the same access; the default form makes a read-only token.
+- [x] Token page: the access table, Quick fill links, the risky group (empty in this stage), disabled options with the reason, server-side mapping from form fields to scopes. See "Token page".
+- [x] Token list: access in words, the inactive count, "New token like this".
+- [x] Tests: a disabled option is refused on POST; Quick fill never sets a risky scope; "New token like this" fills the same access; the default form makes a read-only token.
 - [x] `project_health_check`: leave out each section that the token cannot read.
 - [x] `get_token` operation.
 - [x] Paging for `list_leaderboards` and `list_api_keys`.

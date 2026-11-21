@@ -478,6 +478,7 @@ details.row-menu > summary:hover {
 .badge-active  { border-color: #4ade80; color: #4ade80; }
 .badge-revoked { opacity: 0.35; }
 .badge-role    { border-color: var(--pico-primary); color: var(--pico-primary); }
+.badge-warning { border-color: #f87171; color: #f87171; }
 
 /* === Alerts =============================================== */
 [role="alert"] {

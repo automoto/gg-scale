@@ -6,9 +6,11 @@ package controlpanel_test
 
 import (
 	"context"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/secretseal"
 )
@@ -125,18 +128,34 @@ func TestManagementTokens_should_refuse_create_at_token_limit(t *testing.T) {
 	assert.Equal(t, []int{http.StatusConflict, 2}, []int{resp.StatusCode, p.tokenCount(t)})
 }
 
-func TestManagementTokens_should_refuse_scope_the_creator_cannot_use(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "admin@example.com", "admin")
-	// Take the publishable key pair away from tenant admins.
+// dropAdminPair takes the Casbin pair (obj, any action) away from tenant
+// admins.
+func (p tokenPanel) dropAdminPair(t *testing.T, obj string) {
+	t.Helper()
 	_, err := p.raw.Exec(context.Background(),
-		`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:publishable'`)
+		`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = $1`, obj)
 	require.NoError(t, err)
 	require.NoError(t, p.authz.ReloadPolicy())
+}
 
-	resp, _ := p.create(t, c, csrf, url.Values{"scopes": {"keys:create"}})
+func TestManagementTokens_should_refuse_a_disabled_option_on_post(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "admin@example.com", "admin")
+	p.dropAdminPair(t, "api_key:publishable")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_keys": {"write"}})
 
 	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+}
+
+func TestManagementTokens_page_should_show_the_role_reason_for_a_disabled_option(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "admin@example.com", "admin")
+	p.dropAdminPair(t, "api_key:publishable")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "Your role does not allow this.")
 }
 
 func (p tokenPanel) onlyTokenScopes(t *testing.T) []string {
@@ -147,45 +166,109 @@ func (p tokenPanel) onlyTokenScopes(t *testing.T) []string {
 	return scopes
 }
 
-// tokenReadScopes are the read scopes that the create form adds to each new
-// token.
-var tokenReadScopes = []string{"config:read", "leaderboards:read", "keys:read", "matchmaking:read"}
+var checkedRadio = regexp.MustCompile(`name="(access_[a-z]+)" value="([a-z]+)"[^>]*checked`)
 
-func TestManagementTokens_read_only_preset_should_ignore_posted_scopes(t *testing.T) {
+// checkedAccess returns the access_<resource> values that the form in body
+// sends as it is.
+func checkedAccess(body string) url.Values {
+	out := url.Values{}
+	for _, m := range checkedRadio.FindAllStringSubmatch(body, -1) {
+		out.Set(m[1], m[2])
+	}
+	return out
+}
+
+func TestManagementTokens_default_form_should_make_a_read_only_token(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	_, page := tfGet(t, c, p.tokensURL())
+
+	p.create(t, c, csrf, checkedAccess(page))
+
+	assert.ElementsMatch(t, managementtoken.ReadScopes(), p.onlyTokenScopes(t))
+}
+
+func TestManagementTokens_write_row_should_give_its_read_and_write_scopes(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
-	p.create(t, c, csrf, url.Values{"preset": {"read_only"}, "scopes": {"config:write"}})
+	p.create(t, c, csrf, url.Values{"access_config": {"write"}, "access_keys": {"read"}})
 
-	assert.ElementsMatch(t, tokenReadScopes, p.onlyTokenScopes(t))
+	assert.ElementsMatch(t, []string{"config:read", "config:write", "origins:write", "keys:read"}, p.onlyTokenScopes(t))
 }
 
-func TestManagementTokens_custom_preset_should_keep_posted_scopes(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	p.create(t, c, csrf, url.Values{"preset": {"custom"}, "scopes": {"config:write", "keys:read"}})
-
-	assert.ElementsMatch(t, append([]string{"config:write"}, tokenReadScopes...), p.onlyTokenScopes(t))
-}
-
-func TestManagementTokens_page_should_offer_only_write_scopes_as_boxes(t *testing.T) {
+func TestManagementTokens_quick_fill_read_write_should_select_write_rows(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, _, _ := p.member(t, "owner@example.com", "owner")
 
-	_, body := tfGet(t, c, p.tokensURL())
+	_, body := tfGet(t, c, p.tokensURL()+"?fill=read_write")
 
-	assert.Equal(t, []bool{true, false}, []bool{
-		strings.Contains(body, `value="config:write"`), strings.Contains(body, `value="config:read"`)})
+	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}},
+		checkedAccess(body))
 }
 
-func TestManagementTokens_should_refuse_unknown_scope(t *testing.T) {
+var likeLink = regexp.MustCompile(`href="([^"]*)"[^>]*>New token like this<`)
+
+func TestManagementTokens_new_token_like_this_should_fill_the_same_access(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	access := url.Values{"access_config": {"write"}, "access_leaderboards": {"none"}, "access_keys": {"read"}, "access_matchmaking": {"none"}}
+	p.create(t, c, csrf, access)
+	_, list := tfGet(t, c, p.tokensURL())
+	m := likeLink.FindStringSubmatch(list)
+	require.NotNil(t, m, list)
+
+	_, body := tfGet(t, c, p.srv.URL+html.UnescapeString(m[1]))
+
+	assert.Equal(t, access, checkedAccess(body))
+}
+
+func TestManagementTokens_list_should_show_access_in_words(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	p.create(t, c, csrf, url.Values{"access_config": {"write"}, "access_leaderboards": {"read"}})
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "Remote config and origins: read and write · Leaderboards: read")
+}
+
+func TestManagementTokens_list_should_count_scopes_the_creator_lost(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "admin@example.com", "admin")
+	p.create(t, c, csrf, url.Values{"access_config": {"write"}, "access_keys": {"write"}})
+	p.dropAdminPair(t, "project:*:config")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "2 permissions inactive: creator lost access")
+}
+
+func TestManagementTokens_should_refuse_an_unknown_access_value(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
 
-	resp, _ := p.create(t, c, csrf, url.Values{"scopes": {"tenant:admin"}})
+	resp, _ := p.create(t, c, csrf, url.Values{"access_config": {"admin"}})
 
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func TestManagementTokens_should_refuse_a_normal_scope_as_risky(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"risky": {"config:write"}})
+
+	assert.Equal(t, []int{http.StatusForbidden, 0}, []int{resp.StatusCode, p.tokenCount(t)})
+}
+
+func TestManagementTokens_created_page_should_show_the_access_in_words(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := p.create(t, c, csrf, url.Values{"access_leaderboards": {"write"}})
+
+	assert.Contains(t, body, "Access: Leaderboards: read and write")
 }
 
 func TestManagementTokens_member_gets_403_on_page_and_create(t *testing.T) {
@@ -258,7 +341,8 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	require.NoError(t, p.authz.ReloadPolicy())
 	c, csrf := loginAsAdmin(t, p.srv, p.raw, id, "pa@example.com")
 
-	resp, _ := p.create(t, c, csrf, url.Values{"preset": {"read_write"}})
+	resp, _ := p.create(t, c, csrf, url.Values{
+		"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}})
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var projectID int64
@@ -266,7 +350,7 @@ func TestManagementTokens_platform_admin_token_has_one_project_and_listed_scopes
 	require.NoError(t, p.raw.QueryRow(context.Background(),
 		`SELECT project_id, scopes FROM management_tokens WHERE created_by_user_id = $1`, id).Scan(&projectID, &scopes))
 	assert.Equal(t, p.project, projectID)
-	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, tokenReadScopes...), scopes)
+	assert.ElementsMatch(t, append([]string{"config:write", "leaderboards:write", "keys:create", "origins:write"}, managementtoken.ReadScopes()...), scopes)
 }
 
 func TestManagementTokens_revoke_sets_revoked_at(t *testing.T) {
@@ -321,16 +405,6 @@ func TestMatchmakerQueue_admin_can_open_queue_but_not_fleets(t *testing.T) {
 	assert.Equal(t, []int{http.StatusOK, http.StatusForbidden, http.StatusForbidden}, codes)
 }
 
-// dropAdminSecretKeyPair takes (api_key:secret, manage) away from tenant
-// admins, the pair a non-creator needs to revoke a token.
-func (p tokenPanel) dropAdminSecretKeyPair(t *testing.T) {
-	t.Helper()
-	_, err := p.raw.Exec(context.Background(),
-		`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret'`)
-	require.NoError(t, err)
-	require.NoError(t, p.authz.ReloadPolicy())
-}
-
 func (p tokenPanel) onlyTokenID(t *testing.T) int64 {
 	t.Helper()
 	var id int64
@@ -352,7 +426,7 @@ func TestManagementTokens_non_creator_without_secret_key_pair_cannot_revoke(t *t
 	p.create(t, owner, ownerCSRF, nil)
 	id := p.onlyTokenID(t)
 	admin, adminCSRF, _ := p.member(t, "admin@example.com", "admin")
-	p.dropAdminSecretKeyPair(t)
+	p.dropAdminPair(t, "api_key:secret")
 
 	resp, _ := tfPostForm(t, admin, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {adminCSRF}})
 
@@ -364,7 +438,7 @@ func TestManagementTokens_creator_can_revoke_own_token_without_secret_key_pair(t
 	admin, csrf, _ := p.member(t, "admin@example.com", "admin")
 	p.create(t, admin, csrf, nil)
 	id := p.onlyTokenID(t)
-	p.dropAdminSecretKeyPair(t)
+	p.dropAdminPair(t, "api_key:secret")
 
 	resp, _ := tfPostForm(t, admin, p.tokensURL()+"/"+strconv.FormatInt(id, 10)+"/revoke", url.Values{"_csrf": {csrf}})
 

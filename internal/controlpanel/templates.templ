@@ -3254,6 +3254,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<dt>Token</dt>
 					<dd><code>{ vm.NewToken }</code></dd>
 				</dl>
+				<p>Access: { vm.NewTokenAccess }</p>
 				<p>Example for Claude Code:</p>
 				<pre>claude mcp add --transport http ggscale https://&lt;your-host&gt;/mcp --header "Authorization: Bearer { vm.NewToken }"</pre>
 			</section>
@@ -3261,7 +3262,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 		<section class="card">
 			<h2>New token</h2>
 			@errorAlert(vm.Error)
-			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) } class="settings-form">
+			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Label
@@ -3274,21 +3275,63 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<small id="days-help">From 1 to { stringFromInt(int64(vm.MaxDays)) }.</small>
 					@fieldError(vm.FieldErrors, "days")
 				</label>
-				<fieldset>
-					<legend>Access</legend>
-					<label><input type="radio" name="preset" value="read_only" checked/> Read only</label>
-					if len(vm.GrantableScopes) > 0 {
-						<label><input type="radio" name="preset" value="read_write"/> Read and write (all scopes below)</label>
-						<label><input type="radio" name="preset" value="custom"/> Custom (only the scopes checked below)</label>
-					}
-				</fieldset>
-				if len(vm.GrantableScopes) > 0 {
-					<fieldset>
-						<legend>Write scopes</legend>
-						for _, s := range vm.GrantableScopes {
-							<label><input type="checkbox" name="scopes" value={ s }/> <code>{ s }</code></label>
+				<table>
+					<thead>
+						<tr>
+							<th scope="col">Access</th>
+							<th scope="col">No access</th>
+							<th scope="col">Read</th>
+							<th scope="col">Read and write</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range vm.Access {
+							<tr>
+								<th scope="row">
+									{ row.Label }
+									if row.Reason != "" {
+										<br/>
+										<small id={ "access-" + row.Name + "-reason" }>{ row.Reason }</small>
+									}
+								</th>
+								<td><input type="radio" name={ "access_" + row.Name } value="none" checked?={ row.Selected == accessNone } aria-label={ row.Label + ": No access" }/></td>
+								<td><input type="radio" name={ "access_" + row.Name } value="read" checked?={ row.Selected == accessRead } disabled?={ !row.CanRead } aria-label={ row.Label + ": Read" }
+									if !row.CanRead {
+										aria-describedby={ "access-" + row.Name + "-reason" }
+									}
+								/></td>
+								<td>
+									if row.HasWrite {
+										<input type="radio" name={ "access_" + row.Name } value="write" checked?={ row.Selected == accessWrite } disabled?={ !row.CanWrite } aria-label={ row.Label + ": Read and write" }
+											if !row.CanWrite {
+												aria-describedby={ "access-" + row.Name + "-reason" }
+											}
+										/>
+									} else {
+										—
+									}
+								</td>
+							</tr>
 						}
-						<small>Only scopes that you have permission for are shown. Each write can be undone with a rollback or a restore.</small>
+					</tbody>
+				</table>
+				<p>
+					Quick fill:
+					<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "?fill=read_only") } role="button" class="secondary outline btn-inline">Read only</a>
+					<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "?fill=read_write") } role="button" class="secondary outline btn-inline">Read and write</a>
+				</p>
+				if len(vm.Risky) > 0 {
+					<fieldset>
+						<legend>Risky access (never included by Quick fill)</legend>
+						for _, b := range vm.Risky {
+							<label>
+								<input type="checkbox" name="risky" value={ b.Scope } checked?={ b.Checked } disabled?={ b.Reason != "" }/>
+								{ b.Label }
+								if b.Reason != "" {
+									<small>{ b.Reason }</small>
+								}
+							</label>
+						}
 					</fieldset>
 				}
 				<button type="submit" class="btn-inline">Create token</button>
@@ -3305,7 +3348,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 						<tr>
 							<th>Label</th>
 							<th>Token</th>
-							<th>Scopes</th>
+							<th>Access</th>
 							<th>Created by</th>
 							<th>Expires</th>
 							<th>Last used</th>
@@ -3323,12 +3366,13 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 								</td>
 								<td><code>…{ t.Hint }</code></td>
 								<td>
-									if len(t.Scopes) == 0 {
-										read only
-									} else {
-										for _, s := range t.Scopes {
-											<code>{ s }</code>
-										}
+									{ t.Access }
+									if t.Risky {
+										<span class="badge badge-warning">risky</span>
+									}
+									if t.LostScopes > 0 {
+										<br/>
+										<small>{ lostScopesText(t.LostScopes) }</small>
 									}
 								</td>
 								<td>{ t.CreatorEmail }</td>
@@ -3348,6 +3392,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 									}
 								</td>
 								<td class="actions-cell">
+									<a href={ templ.URL(t.LikeURL) } role="button" class="secondary outline btn-inline">New token like this</a>
 									<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
 										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 										<button type="submit" class="btn-inline contrast outline">Revoke</button>

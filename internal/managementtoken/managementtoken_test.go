@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -130,4 +131,43 @@ func TestMiddleware_should_send_bearer_challenge_when_header_is_missing(t *testi
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	assert.Equal(t, []any{http.StatusUnauthorized, "Bearer"}, []any{rec.Code, rec.Header().Get("WWW-Authenticate")})
+}
+
+func TestScopes_should_each_belong_to_a_resource_row(t *testing.T) {
+	for _, s := range Scopes {
+		ok := slices.ContainsFunc(Resources, func(r Resource) bool { return r.Name == s.Resource })
+
+		assert.True(t, ok, "scope %s has unknown resource %q", s.Scope, s.Resource)
+	}
+}
+
+func TestResources_read_scope_should_be_a_normal_scope_of_the_row(t *testing.T) {
+	for _, r := range Resources {
+		s, ok := Scope(r.Read)
+
+		assert.Equal(t, []any{true, r.Name, ClassNormal}, []any{ok, s.Resource, s.Class}, r.Name)
+	}
+}
+
+func TestResource_write_scopes_should_be_the_other_normal_scopes_of_the_row(t *testing.T) {
+	r := resourceNamed("config")
+
+	assert.Equal(t, []string{ScopeConfigWrite, ScopeOriginsWrite}, r.WriteScopes())
+}
+
+func TestResource_should_have_no_write_scopes_for_matchmaking(t *testing.T) {
+	r := resourceNamed("matchmaking")
+
+	assert.Empty(t, r.WriteScopes())
+}
+
+func TestReadScopes_should_list_the_read_scope_of_each_row(t *testing.T) {
+	got := ReadScopes()
+
+	assert.Equal(t, []string{ScopeConfigRead, ScopeLeaderboardsRead, ScopeKeysRead, ScopeMatchmakingRead}, got)
+}
+
+func resourceNamed(name string) Resource {
+	i := slices.IndexFunc(Resources, func(r Resource) bool { return r.Name == name })
+	return Resources[i]
 }

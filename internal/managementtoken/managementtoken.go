@@ -36,12 +36,14 @@ const (
 	ClassRisky = 2
 )
 
-// ScopePair is a scope, its class, and the Casbin pair that guards it.
+// ScopePair is a scope, its class, the Casbin pair that guards it, and the
+// token page row it belongs to.
 type ScopePair struct {
-	Scope  string
-	Class  int
-	Pair   func(projectID int64) string
-	Action string
+	Scope    string
+	Class    int
+	Pair     func(projectID int64) string
+	Action   string
+	Resource string
 }
 
 func projectObject(int64) string { return rbac.ObjectProject }
@@ -51,14 +53,55 @@ func projectObject(int64) string { return rbac.ObjectProject }
 // has a read pair on the project config or leaderboard objects, so their
 // read scopes use (project, manage), the check of the dashboard pages.
 var Scopes = []ScopePair{
-	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
-	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
-	{Scope: ScopeOriginsWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate},
-	{Scope: ScopeLeaderboardsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
-	{Scope: ScopeLeaderboardsWrite, Class: ClassNormal, Pair: rbac.ProjectLeaderboardObject, Action: rbac.ActionManage},
-	{Scope: ScopeKeysRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage},
-	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage},
-	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead},
+	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "config"},
+	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config"},
+	{Scope: ScopeOriginsWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config"},
+	{Scope: ScopeLeaderboardsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "leaderboards"},
+	{Scope: ScopeLeaderboardsWrite, Class: ClassNormal, Pair: rbac.ProjectLeaderboardObject, Action: rbac.ActionManage, Resource: "leaderboards"},
+	{Scope: ScopeKeysRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "keys"},
+	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
+	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead, Resource: "matchmaking"},
+}
+
+// Resource is one row of the access table on the token page.
+type Resource struct {
+	// Name is the row key: the form field is access_<Name>.
+	Name  string
+	Label string
+	// Read is the scope that "Read" gives.
+	Read string
+	// Feature, when set, is the feature grant the row needs. Its server
+	// switch is needed too.
+	Feature rbac.Feature
+}
+
+// Resources lists the token page rows in page order.
+var Resources = []Resource{
+	{Name: "config", Label: "Remote config and origins", Read: ScopeConfigRead},
+	{Name: "leaderboards", Label: "Leaderboards", Read: ScopeLeaderboardsRead},
+	{Name: "keys", Label: "API keys", Read: ScopeKeysRead},
+	{Name: "matchmaking", Label: "Matchmaking", Read: ScopeMatchmakingRead},
+}
+
+// WriteScopes returns the normal-class scopes of the row other than its read
+// scope: the scopes that "Read and write" adds.
+func (r Resource) WriteScopes() []string {
+	var out []string
+	for _, s := range Scopes {
+		if s.Resource == r.Name && s.Class == ClassNormal && s.Scope != r.Read {
+			out = append(out, s.Scope)
+		}
+	}
+	return out
+}
+
+// ReadScopes returns the read scope of each row.
+func ReadScopes() []string {
+	out := make([]string, 0, len(Resources))
+	for _, r := range Resources {
+		out = append(out, r.Read)
+	}
+	return out
 }
 
 // Scope returns the entry of Scopes for scope.

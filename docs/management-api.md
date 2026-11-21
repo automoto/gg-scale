@@ -22,10 +22,11 @@ existed has no read access. Make a new token.
 2. In the **Management tokens** card, select **Manage tokens**. The page is
    `/v1/control-panel/tenants/{tenantID}/projects/{projectID}/management-tokens`.
 3. Enter a label and the number of days until the token expires (default 30).
-4. Select **Read only**, **Read and write** (all scopes that you can give), or
-   **Custom** with the write scopes that the agent needs (see "Write scopes"
-   below). Then select **Create token**. Each new token gets all read scopes
-   that you can give.
+4. In the access table, select **No access**, **Read**, or **Read and write**
+   for each resource. The default is **Read** in each row, so a new token is
+   read-only. **Quick fill** sets all rows to **Read only** or to **Read and
+   write**. An option that you cannot give is disabled, with the reason. Then
+   select **Create token**.
 5. Copy the token (`ggm_...`). It is shown one time only.
 
 The **Management tokens** card shows only when the operator has turned the

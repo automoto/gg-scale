@@ -12,10 +12,7 @@ import (
 )
 
 // readScopes are all read scopes, so a token with them can use every read.
-var readScopes = []string{
-	managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead,
-	managementtoken.ScopeKeysRead, managementtoken.ScopeMatchmakingRead,
-}
+var readScopes = managementtoken.ReadScopes()
 
 func TestReadScopes_leaderboards_read_token_should_list_only_leaderboard_read_tools(t *testing.T) {
 	f := newFixture(t)
