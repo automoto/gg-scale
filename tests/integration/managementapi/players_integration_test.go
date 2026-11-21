@@ -199,7 +199,6 @@ func TestPlayers_tools_should_follow_the_scopes(t *testing.T) {
 	assert.ElementsMatch(t, []string{"project_health_check", "get_token", "list_players", "get_player"}, toolNames(out))
 }
 
-func playerWritePath(id int64, suffix string) string { return playerPath(id) + suffix }
 
 func (f *fixture) audit(action string, target int64) (service string, count int) {
 	f.t.Helper()
@@ -219,9 +218,9 @@ func TestPlayerWrite_should_return_403_without_the_players_write_scope(t *testin
 	id := f.player(f.projectA)
 	tok := f.scopedToken(managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII)
 
-	disable := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
-	request := f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "")
-	cancel := f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "")
+	disable := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`)
+	request := f.do(tok, http.MethodPost, playerPath(id)+"/delete-request", "")
+	cancel := f.do(tok, http.MethodDelete, playerPath(id)+"/delete-request", "")
 
 	assert.Equal(t, []int{403, 403, 403}, []int{disable.status, request.status, cancel.status})
 }
@@ -234,7 +233,7 @@ func TestPlayerWrite_should_return_403_when_the_creator_lacks_the_players_pair(t
 	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:players' AND v3 = 'manage'`)
 	require.NoError(t, f.authz.ReloadPolicy())
 
-	got := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+	got := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`)
 
 	assert.Equal(t, []any{http.StatusForbidden, 0}, []any{got.status, f.count(`SELECT count(*) FROM project_players WHERE disabled_at IS NOT NULL`)}, got.raw)
 }
@@ -245,9 +244,9 @@ func TestPlayerWrite_should_return_404_for_a_player_of_another_project_or_tenant
 	var statuses []int
 	for _, id := range []int64{f.player(f.projectB), f.player(f.projectC), 999999} {
 		statuses = append(statuses,
-			f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`).status,
-			f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "").status,
-			f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "").status)
+			f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`).status,
+			f.do(tok, http.MethodPost, playerPath(id)+"/delete-request", "").status,
+			f.do(tok, http.MethodDelete, playerPath(id)+"/delete-request", "").status)
 	}
 
 	assert.Equal(t, []int{404, 404, 404, 404, 404, 404, 404, 404, 404}, statuses)
@@ -261,9 +260,9 @@ func TestPlayerWrite_disable_and_enable_should_change_the_player_and_audit_the_t
 	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{managementtoken.ScopePlayersWrite}, time.Hour)
 
 	// Act
-	off := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+	off := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`)
 	service, disables := f.audit("control_panel.player.disable", id)
-	on := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":false}`)
+	on := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":false}`)
 	_, enables := f.audit("control_panel.player.enable", id)
 
 	// Assert
@@ -277,7 +276,7 @@ func TestPlayerWrite_disable_should_return_the_pii_fields_only_with_the_pii_scop
 	id := f.namedPlayer(f.projectA)
 	tok := f.scopedToken(managementtoken.ScopePlayersWrite, managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII)
 
-	got := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":true}`)
+	got := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`)
 
 	assert.Equal(t, []any{200, playerEmail}, []any{got.status, got.body["email"]}, got.raw)
 }
@@ -288,14 +287,14 @@ func TestPlayerWrite_delete_request_then_cancel_should_follow_the_dashboard_rule
 	id := f.player(f.projectA)
 	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{managementtoken.ScopePlayersWrite}, time.Hour)
 	service := "management_token:" + strconv.FormatInt(tokenID, 10)
-	req := func() response { return f.do(tok, http.MethodPost, playerWritePath(id, "/delete-request"), "") }
-	cancel := func() response { return f.do(tok, http.MethodDelete, playerWritePath(id, "/delete-request"), "") }
+	req := func() response { return f.do(tok, http.MethodPost, playerPath(id)+"/delete-request", "") }
+	cancel := func() response { return f.do(tok, http.MethodDelete, playerPath(id)+"/delete-request", "") }
 
 	// Act
 	none := cancel()
 	first := req()
 	again := req()
-	disable := f.do(tok, http.MethodPut, playerWritePath(id, "/disabled"), `{"disabled":false}`)
+	disable := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":false}`)
 	reqService, requests := f.audit("control_panel.player.delete_request", id)
 	done := cancel()
 	cancelService, cancels := f.audit("control_panel.player.delete_cancel", id)

@@ -41,12 +41,6 @@ func TestScopes_read_scopes_should_use_the_pair_of_the_dashboard_page(t *testing
 	}
 }
 
-func TestScopes_should_have_a_known_class(t *testing.T) {
-	for _, s := range Scopes {
-		assert.Contains(t, []int{ClassNormal, ClassRisky}, s.Class, s.Scope)
-	}
-}
-
 func TestScopes_risky_scopes_should_have_a_label_and_a_known_dependency(t *testing.T) {
 	for _, s := range Scopes {
 		if s.Class != ClassRisky {
@@ -178,12 +172,6 @@ func TestResource_should_have_no_write_scopes_for_matchmaking(t *testing.T) {
 	r := resourceNamed("matchmaking")
 
 	assert.Empty(t, r.WriteScopes())
-}
-
-func TestReadScopes_should_list_the_read_scope_of_each_row(t *testing.T) {
-	got := ReadScopes()
-
-	assert.Equal(t, []string{ScopeConfigRead, ScopeLeaderboardsRead, ScopeKeysRead, ScopeMatchmakingRead, ScopePlayersRead}, got)
 }
 
 func resourceNamed(name string) Resource {

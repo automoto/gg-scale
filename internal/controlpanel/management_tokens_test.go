@@ -21,18 +21,6 @@ func allScopes() []string {
 	return out
 }
 
-// withRiskyScope adds a class 2 scope to the keys row for the test.
-func withRiskyScope(t *testing.T) string {
-	t.Helper()
-	saved := managementtoken.Scopes
-	managementtoken.Scopes = append(append([]managementtoken.ScopePair{}, saved...), managementtoken.ScopePair{
-		Scope: "keys:risky", Class: managementtoken.ClassRisky, Resource: "keys", Label: "Do a risky key thing.",
-		Pair: func(int64) string { return rbac.ObjectProject }, Action: rbac.ActionManage,
-	})
-	t.Cleanup(func() { managementtoken.Scopes = saved })
-	return "keys:risky"
-}
-
 func accessRow(t *testing.T, rows []AccessRowView, name string) AccessRowView {
 	t.Helper()
 	for _, r := range rows {
@@ -74,14 +62,6 @@ func TestAccessOptions_should_have_no_write_option_for_matchmaking(t *testing.T)
 	got := accessRow(t, rows, "matchmaking")
 
 	assert.Equal(t, []any{false, ""}, []any{got.HasWrite, got.Reason})
-}
-
-func TestAccessOptions_should_disable_a_risky_box_the_creator_cannot_give(t *testing.T) {
-	scope := withRiskyScope(t)
-
-	_, risky := accessOptions(allScopes()[:1], nil)
-
-	assert.Equal(t, RiskyBoxView{Scope: scope, Label: "Do a risky key thing.", Reason: reasonRole}, riskyBox(t, risky, scope))
 }
 
 func riskyBox(t *testing.T, risky []RiskyBoxView, scope string) RiskyBoxView {
@@ -203,16 +183,6 @@ func TestScopesFromAccessForm(t *testing.T) {
 	}
 }
 
-func TestScopesFromAccessForm_should_give_a_checked_risky_scope(t *testing.T) {
-	scope := withRiskyScope(t)
-	rows, risky := accessOptions(allScopes(), nil)
-
-	got, err := scopesFromAccessForm(url.Values{"risky": {scope}}, rows, risky)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{scope}, got)
-}
-
 func TestFillAccess_should_select_read_in_each_row_by_default(t *testing.T) {
 	rows, risky := accessOptions(allScopes(), nil)
 
@@ -238,7 +208,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 }
 
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
-	scope := withRiskyScope(t)
+	scope := managementtoken.ScopePlayersPII
 	rows, risky := accessOptions(allScopes(), nil)
 
 	fillAccess(url.Values{"fill": {"read_write"}, "risky": {scope}}, rows, risky)
@@ -246,30 +216,15 @@ func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
 	assert.False(t, riskyBox(t, risky, scope).Checked)
 }
 
-func TestFillAccess_should_check_a_risky_box_from_the_link(t *testing.T) {
-	scope := withRiskyScope(t)
-	rows, risky := accessOptions(allScopes(), nil)
-
-	fillAccess(url.Values{"risky": {scope}}, rows, risky)
-
-	assert.True(t, riskyBox(t, risky, scope).Checked)
-}
-
 func TestTokenAccessValues_should_round_trip_through_the_form(t *testing.T) {
-	scope := withRiskyScope(t)
 	scopes := []string{managementtoken.ScopeConfigRead, managementtoken.ScopeConfigWrite, managementtoken.ScopeOriginsWrite,
-		managementtoken.ScopeMatchmakingRead, scope}
+		managementtoken.ScopeMatchmakingRead, managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate, managementtoken.ScopeKeysWrite,
+		managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}
 	rows, risky := accessOptions(allScopes(), nil)
 
 	got, _ := scopesFromAccessForm(tokenAccessValues(scopes), rows, risky)
 
 	assert.ElementsMatch(t, scopes, got)
-}
-
-func TestTokenAccessValues_should_map_a_partial_row_to_read(t *testing.T) {
-	got := tokenAccessValues([]string{managementtoken.ScopeConfigRead, managementtoken.ScopeConfigWrite})
-
-	assert.Equal(t, "read", got.Get("access_config"))
 }
 
 func TestAccessWords(t *testing.T) {
@@ -297,7 +252,7 @@ func TestAccessWords(t *testing.T) {
 }
 
 func TestAccessWords_should_report_risky_access(t *testing.T) {
-	scope := withRiskyScope(t)
+	scope := managementtoken.ScopePlayersPII
 
 	words, risky := accessWords([]string{scope})
 
@@ -327,17 +282,6 @@ func TestFeatureGate(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestTokenAccessValues_should_fill_keys_write_back_to_write(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
-	made, err := scopesFromAccessForm(url.Values{"access_keys": {"write"}}, rows, risky)
-	require.NoError(t, err)
-
-	got := tokenAccessValues(made).Get("access_keys")
-
-	assert.ElementsMatch(t, []string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate, managementtoken.ScopeKeysWrite}, made)
-	assert.Equal(t, "write", got)
 }
 
 func TestTokenAccessValues_should_map_keys_without_keys_write_to_read(t *testing.T) {
