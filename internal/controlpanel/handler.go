@@ -251,12 +251,13 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/config/rollback", h.remoteConfigRollbackHandler)
 			r.Post("/projects/{projectID}/allowed-origins", h.updateAllowedOriginsHandler)
 			r.Post("/projects/{projectID}/steam-auth", h.updateSteamAuthHandler)
-			// MCP tokens. FEATURE_MCP_ENABLED off hides these routes (404).
+			// Management tokens. FEATURE_MANAGEMENT_API_ENABLED off hides
+			// these routes (404).
 			r.Group(func(r chi.Router) {
-				r.Use(h.requireMCPFeature)
-				r.Get("/projects/{projectID}/mcp-tokens", h.mcpTokensPage)
-				r.Post("/projects/{projectID}/mcp-tokens", h.mcpTokenCreateHandler)
-				r.Post("/projects/{projectID}/mcp-tokens/{tokenID}/revoke", h.mcpTokenRevokeHandler)
+				r.Use(h.requireManagementFeature)
+				r.Get("/projects/{projectID}/management-tokens", h.managementTokensPage)
+				r.Post("/projects/{projectID}/management-tokens", h.managementTokenCreateHandler)
+				r.Post("/projects/{projectID}/management-tokens/{tokenID}/revoke", h.managementTokenRevokeHandler)
 			})
 			// Dedicated-server fleet surface (fleets, allocations, and the
 			// matchmaker queue that feeds them). The FEATURE_FLEET_ENABLED kill

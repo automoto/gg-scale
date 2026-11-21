@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -476,4 +477,111 @@ func TestAllowedOrigins_form_refuses_wildcard(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, resp.StatusCode)
 	assert.Contains(t, body, "must not contain a wildcard")
 	assert.Empty(t, storedOrigins(t, raw, projectA))
+}
+
+// setLeaderboardOverride sets the tenant's leaderboards quota override
+// directly, so a test can use a small limit.
+func setLeaderboardOverride(t *testing.T, raw *pgxpool.Pool, tenantID, limit int64) {
+	t.Helper()
+	_, err := raw.Exec(context.Background(),
+		`INSERT INTO tenant_quota_overrides (tenant_id, axis, "limit") VALUES ($1, 'leaderboards', $2)
+		 ON CONFLICT (tenant_id, axis) DO UPDATE SET "limit" = EXCLUDED."limit"`, tenantID, limit)
+	require.NoError(t, err)
+}
+
+func TestLeaderboards_create_at_limit_is_refused_with_message(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	setLeaderboardOverride(t, raw, tenantID, 1)
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "first", "desc")
+
+	// Act
+	resp, body := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "second", "desc")
+
+	// Assert
+	assert.Equal(t, []any{http.StatusConflict, true},
+		[]any{resp.StatusCode, strings.Contains(body, "maximum number of leaderboards")})
+}
+
+func TestLeaderboards_limit_applies_when_quotas_are_not_enforced(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	_, err := raw.Exec(context.Background(), `UPDATE tenants SET enforce_quotas = false WHERE id = $1`, tenantID)
+	require.NoError(t, err)
+	setLeaderboardOverride(t, raw, tenantID, 1)
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "first", "desc")
+
+	// Act
+	resp, _ := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "second", "desc")
+
+	// Assert
+	assert.Equal(t, http.StatusConflict, resp.StatusCode)
+}
+
+func TestLeaderboards_limit_counts_each_project_alone(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, projectB := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	setLeaderboardOverride(t, raw, tenantID, 1)
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "first", "desc")
+
+	// Act
+	resp, _ := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectB, "first", "desc")
+
+	// Assert
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+}
+
+func TestLeaderboards_platform_admin_override_raises_limit(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	setLeaderboardOverride(t, raw, tenantID, 1)
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "first", "desc")
+	quotaURL := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) + "/rate-limits/quotas"
+	set, _ := tfPostForm(t, admin, quotaURL, url.Values{"_csrf": {csrf}, "axis": {"leaderboards"}, "limit": {"2"}})
+	require.Equal(t, http.StatusSeeOther, set.StatusCode)
+
+	// Act
+	resp, _ := createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "second", "desc")
+
+	// Assert
+	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
+}
+
+func TestLeaderboards_platform_admin_cannot_set_unlimited_leaderboards(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, _, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	quotaURL := srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(tenantID, 10) + "/rate-limits/quotas"
+
+	// Act
+	tfPostForm(t, admin, quotaURL, url.Values{"_csrf": {csrf}, "axis": {"leaderboards"}, "limit": {"-1"}})
+
+	// Assert
+	var n int
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`SELECT count(*) FROM tenant_quota_overrides WHERE tenant_id = $1 AND axis = 'leaderboards'`, tenantID).Scan(&n))
+	assert.Equal(t, 0, n)
+}
+
+func TestLeaderboards_restore_at_limit_is_refused(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	setLeaderboardOverride(t, raw, tenantID, 1)
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "old", "desc")
+	id := boardID(t, raw, projectA, "old")
+	boardURL := srv.URL + leaderboardsPath(tenantID, projectA) + "/" + strconv.FormatInt(id, 10)
+	tfPostForm(t, admin, boardURL+"/delete", url.Values{"_csrf": {csrf}})
+	createBoardViaHTTP(t, admin, csrf, srv.URL, tenantID, projectA, "new", "desc")
+
+	// Act
+	resp, body := tfPostForm(t, admin, boardURL+"/restore", url.Values{"_csrf": {csrf}})
+
+	// Assert
+	assert.Equal(t, []any{http.StatusConflict, true},
+		[]any{resp.StatusCode, strings.Contains(body, "maximum number of leaderboards")})
 }

@@ -140,6 +140,8 @@ func (h *Handler) updateQuotaOverrideHandler(w http.ResponseWriter, r *http.Requ
 			h.redirectRateLimits(w, r, tenantID, fmt.Sprintf(
 				"Open game sessions per Game Project can't exceed %d (the platform-wide cap) and can't be unlimited.",
 				gamesession.SessionsHardCap))
+		case errors.Is(err, errLeaderboardsUnlimited):
+			h.redirectRateLimits(w, r, tenantID, "Leaderboards per Game Project can't be unlimited. Enter a number.")
 		default:
 			http.Error(w, "quota override update failed", http.StatusInternalServerError)
 		}

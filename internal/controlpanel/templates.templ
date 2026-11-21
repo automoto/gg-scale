@@ -865,8 +865,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 		<section class="card">
 			<h2>Account Tenant quotas</h2>
 			<p class="card-subtitle">
-				Per-axis limits for this Account Tenant's class, applied when quota enforcement is on.
-				Blank = tier default; -1 = unlimited.
+				Per-axis limits for this Account Tenant's class. Blank = tier default.
 			</p>
 			if vm.IsPlatformAdmin {
 				for _, qo := range vm.QuotaOverrides {
@@ -875,8 +874,9 @@ templ RateLimitsPage(vm RateLimitsView) {
 						<input type="hidden" name="axis" value={ qo.Axis }/>
 						<strong>{ qo.Label }</strong>
 						<label>Limit
-							<input name="limit" type="number" step="1" min="-1" value={ quotaOverrideValue(qo.Override) } placeholder={ qo.DefaultLabel }/>
+							<input name="limit" type="number" step="1" min={ qo.Min } value={ quotaOverrideValue(qo.Override) } placeholder={ qo.DefaultLabel }/>
 						</label>
+						<small class="muted">{ qo.Note }</small>
 						<button type="submit" class="btn-inline">Save</button>
 					</form>
 				}
@@ -886,7 +886,7 @@ templ RateLimitsPage(vm RateLimitsView) {
 					<tbody>
 						for _, qo := range vm.QuotaOverrides {
 							<tr>
-								<td>{ qo.Label }</td>
+								<td>{ qo.Label } <small class="muted">{ qo.Note }</small></td>
 								<td>
 									if qo.Override != nil {
 										{ quotaLimitLabel(*qo.Override) } <span class="muted">(override)</span>
@@ -3023,11 +3023,11 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 				<button type="submit" class="btn-inline">Save origins</button>
 			</form>
 		</section>
-		if vm.MCPEnabled {
+		if vm.ManagementAPIEnabled {
 			<section class="card">
-				<h2>MCP tokens</h2>
-				<p class="card-subtitle">Tokens that let a coding agent find setup problems in this Game Project and, with write scopes, change its settings.</p>
-				<a href={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Manage MCP tokens</a>
+				<h2>Management tokens</h2>
+				<p class="card-subtitle">Tokens that let a coding agent or a script find setup problems in this Game Project and, with write scopes, change its settings. A token works for the MCP endpoint and for the <code>/v1/project</code> API.</p>
+				<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) } role="button" class="secondary outline btn-inline">Manage tokens</a>
 			</section>
 		}
 		<section class="card">
@@ -3111,8 +3111,8 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>@boolBadge(vm.Snapshot.FeatureFleetEnabled)</dd>
 				<dt>P2P relay</dt>
 				<dd>@boolBadge(vm.Snapshot.FeatureP2PRelayEnabled)</dd>
-				<dt>MCP server</dt>
-				<dd>@boolBadge(vm.Snapshot.FeatureMCPEnabled)</dd>
+				<dt>Management API and MCP</dt>
+				<dd>@boolBadge(vm.Snapshot.FeatureManagementAPIEnabled)</dd>
 			</dl>
 		</section>
 		<section class="card">
@@ -3132,20 +3132,28 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ stringFromInt(int64(vm.Snapshot.CORSMaxProjectOrigins)) }</dd>
 			</dl>
 		</section>
-		if vm.Snapshot.FeatureMCPEnabled {
+		<section class="card">
+			<h2>Leaderboards</h2>
+			<dl class="kv">
+				<dt>Leaderboards per Game Project</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.LeaderboardMaxPerProject)) }</dd>
+			</dl>
+			<p class="card-subtitle">LEADERBOARD_MAX_PER_PROJECT. Always applies. A platform admin can change it for one Account Tenant on its rate-limits page.</p>
+		</section>
+		if vm.Snapshot.FeatureManagementAPIEnabled {
 			<section class="card">
-				<h2>MCP</h2>
+				<h2>Management tokens</h2>
 				<dl class="kv">
 					<dt>Token maximum expiry (days)</dt>
-					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenMaxExpiryDays)) }</dd>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementTokenMaxExpiryDays)) }</dd>
 					<dt>Token rate (requests/second)</dt>
-					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenRatePerSecond)) }</dd>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementTokenRatePerSecond)) }</dd>
 					<dt>Token burst</dt>
-					<dd>{ stringFromInt(int64(vm.Snapshot.MCPTokenRateBurst)) }</dd>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementTokenRateBurst)) }</dd>
 					<dt>Active tokens per Game Project</dt>
-					<dd>{ stringFromInt(int64(vm.Snapshot.MCPMaxProjectTokens)) }</dd>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementMaxProjectTokens)) }</dd>
 					<dt>API keys per Game Project (create_api_key)</dt>
-					<dd>{ stringFromInt(int64(vm.Snapshot.MCPMaxProjectAPIKeys)) }</dd>
+					<dd>{ stringFromInt(int64(vm.Snapshot.ManagementMaxProjectAPIKeys)) }</dd>
 				</dl>
 			</section>
 		}
@@ -3222,16 +3230,16 @@ templ revisionHistory(csrf, action string, revs []RevisionView, note string) {
 	}
 }
 
-templ MCPTokensPage(vm MCPTokensView) {
-	@appLayout("MCP tokens — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
+templ ManagementTokensPage(vm ManagementTokensView) {
+	@appLayout("Management tokens — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
 		<div class="breadcrumb">
-			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Game Project settings</a> / MCP tokens
+			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Game Project settings</a> / Management tokens
 		</div>
 		<div class="page-header">
 			<div>
 				<p class="eyebrow">Game Project #{ stringFromInt(vm.ProjectID) }</p>
-				<h1>MCP tokens</h1>
-				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) find setup problems in this Game Project and, with write scopes, change remote config, leaderboards, publishable API keys, and browser origins. A token works for this Game Project only, and never has more rights than the person who created it.</p>
+				<h1>Management tokens</h1>
+				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) or a script find setup problems in this Game Project and, with write scopes, change remote config, leaderboards, publishable API keys, and browser origins. A token works for the MCP endpoint (<code>/mcp</code>) and for the <code>/v1/project</code> API. It works for this Game Project only, and never has more rights than the person who created it.</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -3249,7 +3257,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 		<section class="card">
 			<h2>New token</h2>
 			@errorAlert(vm.Error)
-			<form method="post" action={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID)) } class="settings-form">
+			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Label
@@ -3336,7 +3344,7 @@ templ MCPTokensPage(vm MCPTokensView) {
 									}
 								</td>
 								<td class="actions-cell">
-									<form method="post" action={ templ.URL(mcpTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
+									<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
 										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 										<button type="submit" class="btn-inline contrast outline">Revoke</button>
 									</form>

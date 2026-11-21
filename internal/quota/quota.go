@@ -1,6 +1,7 @@
 // Package quota holds the per-class limit ladder for enforced tenants and the
-// growth checks that back it. Limits apply only when a tenant has
-// enforce_quotas=true; zero-config self-host stays uncapped. Numbered classes
+// growth checks that back it. Most limits apply only when a tenant has
+// enforce_quotas=true, so zero-config self-host stays uncapped. The
+// leaderboard cap is the exception: it is a safety cap that always applies. Numbered classes
 // carry no price judgment — the ladder is deliberately generous, and projects,
 // registered players, and object storage are the upgrade levers (CCU is not).
 package quota
@@ -27,7 +28,20 @@ const (
 	// AxisRelayAllocations overrides RelayAllocationsPerNode. Only a platform
 	// admin may set it; tenants cannot request it.
 	AxisRelayAllocations = "relay_allocations"
+	// AxisLeaderboards overrides LeaderboardsPerProject. Only a platform
+	// admin may set it; tenants cannot request it.
+	AxisLeaderboards = "leaderboards"
 )
+
+// leaderboardsPerProject is the LeaderboardsPerProject value of every class.
+// main sets it from LEADERBOARD_MAX_PER_PROJECT at startup.
+var leaderboardsPerProject = int64(1000)
+
+// SetLeaderboardsPerProject sets the leaderboard cap of every class. Call it
+// once at startup, before the server handles requests.
+func SetLeaderboardsPerProject(n int64) {
+	leaderboardsPerProject = n
+}
 
 const gb = int64(1073741824)
 
@@ -42,6 +56,9 @@ const gb = int64(1073741824)
 // node. It travels inside the relay credential, since relay nodes have no
 // database. Unlimited lifts the per-tenant cap (the node cap still applies);
 // 0 refuses every new allocation.
+// LeaderboardsPerProject caps live leaderboards per project. It is the same
+// for every class (LEADERBOARD_MAX_PER_PROJECT) and applies even when
+// enforce_quotas is off.
 type Limits struct {
 	Projects                int
 	Players                 int64
@@ -49,21 +66,25 @@ type Limits struct {
 	RelaySessionsPerMonth   int64
 	OpenSessionsPerProject  int64
 	RelayAllocationsPerNode int64
+	LeaderboardsPerProject  int64
 }
 
 // LimitsForClass returns the quota ladder for a tenant class.
 // Unknown/out-of-range classes fall back to tier_0 — fail-closed, matching the rate ladder.
 func LimitsForClass(t tenant.Tier) Limits {
+	var l Limits
 	switch t {
 	case tenant.Tier1:
-		return Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000, OpenSessionsPerProject: 2_000, RelayAllocationsPerNode: 2_000}
+		l = Limits{Projects: 10, Players: 500_000, StorageBytes: 25 * gb, RelaySessionsPerMonth: 10_000, OpenSessionsPerProject: 2_000, RelayAllocationsPerNode: 2_000}
 	case tenant.Tier2:
-		return Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000, OpenSessionsPerProject: 5_000, RelayAllocationsPerNode: 2_000}
+		l = Limits{Projects: 20, Players: 2_000_000, StorageBytes: 100 * gb, RelaySessionsPerMonth: 100_000, OpenSessionsPerProject: 5_000, RelayAllocationsPerNode: 2_000}
 	case tenant.Tier3:
-		return Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited, OpenSessionsPerProject: 10_000, RelayAllocationsPerNode: 2_000}
+		l = Limits{Projects: Unlimited, Players: Unlimited, StorageBytes: 500 * gb, RelaySessionsPerMonth: Unlimited, OpenSessionsPerProject: 10_000, RelayAllocationsPerNode: 2_000}
 	default:
-		return Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000, OpenSessionsPerProject: 500, RelayAllocationsPerNode: 200}
+		l = Limits{Projects: 3, Players: 100_000, StorageBytes: 5 * gb, RelaySessionsPerMonth: 1_000, OpenSessionsPerProject: 500, RelayAllocationsPerNode: 200}
 	}
+	l.LeaderboardsPerProject = leaderboardsPerProject
+	return l
 }
 
 // Resolve layers per-tenant axis overrides (tenant_quota_overrides rows,
@@ -85,6 +106,8 @@ func Resolve(t tenant.Tier, overrides map[string]int64) Limits {
 			l.OpenSessionsPerProject = v
 		case AxisRelayAllocations:
 			l.RelayAllocationsPerNode = v
+		case AxisLeaderboards:
+			l.LeaderboardsPerProject = v
 		}
 	}
 	return l
@@ -157,6 +180,13 @@ func (l Limits) CheckStorage(current, delta int64) error {
 // Existing sessions are never affected.
 func (l Limits) CheckOpenSessions(current int64) error {
 	return checkCount(AxisOpenSessions, l.OpenSessionsPerProject, current)
+}
+
+// CheckLeaderboards rejects creating or restoring another leaderboard when the
+// project's live board count already meets or exceeds the limit. Existing
+// boards are never affected.
+func (l Limits) CheckLeaderboards(current int64) error {
+	return checkCount(AxisLeaderboards, l.LeaderboardsPerProject, current)
 }
 
 // checkCount is the shared "block new growth at the cap" rule for count axes.

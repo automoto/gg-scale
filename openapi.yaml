@@ -872,6 +872,10 @@ components:
           type:
             - array
             - "null"
+        next_cursor:
+          examples:
+            - weekly-high-score
+          type: string
       required:
         - leaderboards
       type: object
@@ -1633,6 +1637,735 @@ components:
         - external_id
         - created_at
       type: object
+    ProjectAPIKey:
+      additionalProperties: false
+      properties:
+        all_projects:
+          description: True for a tenant-wide key that works for each Game Project.
+          type: boolean
+        created_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        id:
+          examples:
+            - 12
+          format: int64
+          type: integer
+        label:
+          examples:
+            - web build
+          type: string
+        scopes:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        type:
+          examples:
+            - publishable
+          type: string
+      required:
+        - id
+        - label
+        - type
+        - scopes
+        - all_projects
+        - created_at
+      type: object
+    ProjectAPIKeyList:
+      additionalProperties: false
+      properties:
+        api_keys:
+          items:
+            $ref: "#/components/schemas/ProjectAPIKey"
+          type:
+            - array
+            - "null"
+        truncated:
+          description: True when there are more than 50 keys.
+          type: boolean
+      required:
+        - api_keys
+        - truncated
+      type: object
+    ProjectAllowedOrigins:
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+        old_origins:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        origins:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - origins
+        - old_origins
+        - note
+      type: object
+    ProjectCreateAPIKeyBody:
+      additionalProperties: false
+      properties:
+        label:
+          description: 1 to 64 characters.
+          examples:
+            - web build
+          type: string
+        scopes:
+          description: "Extra feature scopes: fleet or p2p_relay. matchmaker is always added."
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - label
+      type: object
+    ProjectCreateLeaderboardBody:
+      additionalProperties: false
+      properties:
+        attempt_cap:
+          description: Maximum submissions per player per period.
+          format: int32
+          maximum: 2147483647
+          minimum: 1
+          type: integer
+        client_submissions:
+          description: Let game clients submit scores with a publishable key.
+          type: boolean
+        metadata:
+          description: Display metadata, a JSON object, up to 16 KiB.
+        name:
+          description: 1 to 120 characters.
+          examples:
+            - weekly-high-scores
+          type: string
+        reset_schedule:
+          description: none (default), daily, weekly, or monthly.
+          examples:
+            - weekly
+          type: string
+        score_max:
+          format: int64
+          type: integer
+        score_min:
+          format: int64
+          type: integer
+        score_operator:
+          description: best (default), set, or incr; fixed after creation.
+          examples:
+            - best
+          type: string
+        sort_order:
+          description: desc (high score first, default) or asc.
+          examples:
+            - desc
+          type: string
+      required:
+        - name
+      type: object
+    ProjectCreatedAPIKey:
+      additionalProperties: false
+      properties:
+        api_key:
+          description: The key value. It is returned only in this response.
+          examples:
+            - ggp_...
+          type: string
+        api_key_id:
+          examples:
+            - 12
+          format: int64
+          type: integer
+        key_type:
+          examples:
+            - publishable
+          type: string
+        label:
+          examples:
+            - "web build (management token: ci)"
+          type: string
+        note:
+          type: string
+      required:
+        - api_key_id
+        - api_key
+        - key_type
+        - label
+        - note
+      type: object
+    ProjectCreatedLeaderboard:
+      additionalProperties: false
+      properties:
+        leaderboard_id:
+          examples:
+            - 7
+          format: int64
+          type: integer
+        revision:
+          examples:
+            - 1
+          format: int64
+          type: integer
+      required:
+        - leaderboard_id
+        - revision
+      type: object
+    ProjectDeletedLeaderboard:
+      additionalProperties: false
+      properties:
+        deleted_at:
+          format: date-time
+          type: string
+        id:
+          format: int64
+          type: integer
+        name:
+          type: string
+      required:
+        - id
+        - name
+        - deleted_at
+      type: object
+    ProjectDeletedResult:
+      additionalProperties: false
+      properties:
+        deleted:
+          type: boolean
+        note:
+          type: string
+      required:
+        - deleted
+        - note
+      type: object
+    ProjectHealth:
+      additionalProperties: false
+      properties:
+        checks:
+          $ref: "#/components/schemas/ProjectHealthChecks"
+        problems:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - problems
+        - checks
+      type: object
+    ProjectHealthChecks:
+      additionalProperties: false
+      properties:
+        api_keys:
+          items:
+            $ref: "#/components/schemas/ProjectAPIKey"
+          type:
+            - array
+            - "null"
+        cors_allowed_origins:
+          $ref: "#/components/schemas/ProjectHealthOrigins"
+        feature_grants:
+          additionalProperties:
+            type: boolean
+          type: object
+        quotas:
+          $ref: "#/components/schemas/ProjectHealthQuotas"
+        remote_config_bytes:
+          format: int64
+          type: integer
+        server_switches:
+          $ref: "#/components/schemas/ProjectServerSwitches"
+        steam_sign_in:
+          type: boolean
+      required:
+        - api_keys
+        - feature_grants
+        - server_switches
+        - cors_allowed_origins
+        - steam_sign_in
+        - remote_config_bytes
+        - quotas
+      type: object
+    ProjectHealthOrigins:
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+        project:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+        server:
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - server
+        - project
+        - note
+      type: object
+    ProjectHealthQuotas:
+      additionalProperties: false
+      properties:
+        enforced:
+          type: boolean
+        leaderboards:
+          $ref: "#/components/schemas/ProjectQuotaCount"
+        open_sessions:
+          $ref: "#/components/schemas/ProjectQuotaCount"
+        players:
+          enum:
+            - ok
+            - near_limit
+            - at_limit
+          type: string
+        projects:
+          enum:
+            - ok
+            - near_limit
+            - at_limit
+          type: string
+      required:
+        - enforced
+        - open_sessions
+        - leaderboards
+      type: object
+    ProjectLeaderboard:
+      additionalProperties: false
+      properties:
+        attempt_cap:
+          format: int32
+          type:
+            - integer
+            - "null"
+        client_submissions:
+          type: boolean
+        created_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        current_period:
+          format: int32
+          type: integer
+        id:
+          examples:
+            - 7
+          format: int64
+          type: integer
+        metadata:
+          description: Display metadata, a JSON object. Absent when the leaderboard has none.
+        name:
+          examples:
+            - weekly-high-scores
+          type: string
+        next_reset_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        reset_schedule:
+          examples:
+            - weekly
+          type: string
+        revision:
+          description: Newest revision number. Only in the response of a single leaderboard.
+          format: int64
+          type: integer
+        score_max:
+          format: int64
+          type:
+            - integer
+            - "null"
+        score_min:
+          format: int64
+          type:
+            - integer
+            - "null"
+        score_operator:
+          examples:
+            - best
+          type: string
+        sort_order:
+          examples:
+            - desc
+          type: string
+      required:
+        - id
+        - name
+        - sort_order
+        - score_operator
+        - client_submissions
+        - score_min
+        - score_max
+        - reset_schedule
+        - attempt_cap
+        - current_period
+        - next_reset_at
+        - created_at
+      type: object
+    ProjectLeaderboardList:
+      additionalProperties: false
+      properties:
+        deleted_leaderboards:
+          description: Deleted leaderboards that can be restored. Only when include_deleted is set.
+          items:
+            $ref: "#/components/schemas/ProjectDeletedLeaderboard"
+          type: array
+        leaderboards:
+          items:
+            $ref: "#/components/schemas/ProjectLeaderboard"
+          type:
+            - array
+            - "null"
+        truncated:
+          description: True when there are more than 50 leaderboards.
+          type: boolean
+      required:
+        - leaderboards
+        - truncated
+      type: object
+    ProjectLeaderboardRollback:
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+        revision:
+          examples:
+            - 4
+          format: int64
+          type: integer
+      required:
+        - revision
+        - note
+      type: object
+    ProjectQuotaCount:
+      additionalProperties: false
+      properties:
+        current:
+          format: int64
+          type: integer
+        limit:
+          format: int64
+          type: integer
+      required:
+        - current
+        - limit
+      type: object
+    ProjectRemoteConfig:
+      additionalProperties: false
+      properties:
+        config:
+          description: The remote config, a JSON object.
+        revision:
+          description: Newest revision number, 0 if the config has no revision.
+          examples:
+            - 3
+          format: int64
+          type: integer
+      required:
+        - config
+        - revision
+      type: object
+    ProjectRestoredResult:
+      additionalProperties: false
+      properties:
+        restored:
+          type: boolean
+      required:
+        - restored
+      type: object
+    ProjectRevision:
+      additionalProperties: false
+      properties:
+        actor_user_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        created_at:
+          format: date-time
+          type: string
+        management_token_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        revision:
+          examples:
+            - 2
+          format: int64
+          type: integer
+        snapshot:
+          description: The resource value of this revision.
+        source:
+          description: dashboard, token, rollback, or base.
+          examples:
+            - token
+          type: string
+      required:
+        - revision
+        - source
+        - actor_user_id
+        - management_token_id
+        - created_at
+        - snapshot
+      type: object
+    ProjectRevisionList:
+      additionalProperties: false
+      properties:
+        revisions:
+          items:
+            $ref: "#/components/schemas/ProjectRevision"
+          type:
+            - array
+            - "null"
+      required:
+        - revisions
+      type: object
+    ProjectRevisionResult:
+      additionalProperties: false
+      properties:
+        revision:
+          description: The new revision number.
+          examples:
+            - 4
+          format: int64
+          type: integer
+      required:
+        - revision
+      type: object
+    ProjectRollbackBody:
+      additionalProperties: false
+      properties:
+        expected_revision:
+          description: The newest revision number.
+          examples:
+            - 3
+          format: int64
+          type: integer
+        revision:
+          description: The kept revision to apply.
+          examples:
+            - 2
+          format: int64
+          type: integer
+      required:
+        - revision
+        - expected_revision
+      type: object
+    ProjectServerSwitches:
+      additionalProperties: false
+      properties:
+        fleet:
+          type: boolean
+        p2p_relay:
+          type: boolean
+        relay_configured:
+          type: boolean
+      required:
+        - fleet
+        - p2p_relay
+        - relay_configured
+      type: object
+    ProjectSetAllowedOriginsBody:
+      additionalProperties: false
+      properties:
+        origins:
+          description: The full list of browser origins, for example https://html-classic.itch.zone or http://localhost:5173.
+          items:
+            type: string
+          type:
+            - array
+            - "null"
+      required:
+        - origins
+      type: object
+    ProjectSetRemoteConfigBody:
+      additionalProperties: false
+      properties:
+        config:
+          description: The full remote config, a JSON object, up to 64 KiB.
+        expected_revision:
+          description: The newest revision number from the remote config read (0 if it has no revision).
+          examples:
+            - 3
+          format: int64
+          type: integer
+      required:
+        - config
+        - expected_revision
+      type: object
+    ProjectTicketTrace:
+      additionalProperties: false
+      properties:
+        allow_cross_region:
+          type: boolean
+        attributes_bytes:
+          format: int32
+          type: integer
+        claimed:
+          type: boolean
+        count_multiple:
+          format: int32
+          type: integer
+        created_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        expires_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        failure_reason:
+          type:
+            - string
+            - "null"
+        fleet_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        game_mode:
+          type: string
+        matched_at:
+          format: date-time
+          type:
+            - string
+            - "null"
+        max_count:
+          format: int32
+          type: integer
+        min_count:
+          format: int32
+          type: integer
+        mode:
+          examples:
+            - match_only
+          type: string
+        note:
+          type: string
+        numeric_properties:
+          additionalProperties:
+            format: double
+            type: number
+          type: object
+        party_id:
+          format: int64
+          type:
+            - integer
+            - "null"
+        player_id:
+          examples:
+            - 42
+          format: int64
+          type: integer
+        query:
+          type: string
+        queued_in_same_bucket:
+          format: int64
+          type: integer
+        region:
+          type: string
+        status:
+          examples:
+            - queued
+          type: string
+        string_properties:
+          additionalProperties:
+            type: string
+          type: object
+        ticket_id:
+          examples:
+            - 91
+          format: int64
+          type: integer
+      required:
+        - ticket_id
+        - player_id
+        - party_id
+        - status
+        - failure_reason
+        - claimed
+        - mode
+        - fleet_id
+        - region
+        - game_mode
+        - min_count
+        - max_count
+        - count_multiple
+        - allow_cross_region
+        - query
+        - string_properties
+        - numeric_properties
+        - attributes_bytes
+        - created_at
+        - matched_at
+        - expires_at
+        - queued_in_same_bucket
+        - note
+      type: object
+    ProjectUpdateLeaderboardBody:
+      additionalProperties: false
+      properties:
+        attempt_cap:
+          description: Maximum submissions per player per period.
+          format: int32
+          maximum: 2147483647
+          minimum: 1
+          type: integer
+        client_submissions:
+          description: Let game clients submit scores with a publishable key.
+          type: boolean
+        expected_revision:
+          description: The revision number from the leaderboard read.
+          examples:
+            - 1
+          format: int64
+          type: integer
+        metadata:
+          description: Display metadata, a JSON object, up to 16 KiB.
+        name:
+          description: 1 to 120 characters.
+          examples:
+            - weekly-high-scores
+          type: string
+        reset_schedule:
+          description: none (default), daily, weekly, or monthly.
+          examples:
+            - weekly
+          type: string
+        score_max:
+          format: int64
+          type: integer
+        score_min:
+          format: int64
+          type: integer
+        sort_order:
+          description: desc (high score first, default) or asc.
+          examples:
+            - desc
+          type: string
+      required:
+        - expected_revision
+        - name
+      type: object
     PublicGameSessionEntry:
       additionalProperties: false
       properties:
@@ -2091,6 +2824,10 @@ components:
         - verified
       type: object
   securitySchemes:
+    ManagementToken:
+      description: "Management token (ggm_...) for the /v1/project operations. Make it in the dashboard. It works for one Game Project only, with the scopes chosen when it was made. It is for developer tools and coding agents: never ship it in a game."
+      scheme: bearer
+      type: http
     PlatformAdminToken:
       description: The server's PLATFORM_ADMIN_TOKEN, held by the platform operator. Game Project keys are refused. The /v1/admin routes are not mounted when the token is unset.
       scheme: bearer
@@ -3436,8 +4173,23 @@ paths:
         - Game Sessions & Invites
   /v1/leaderboards:
     get:
-      description: "Runtime discovery: board ids, sort order, score operator, period state, submission policy, and the developer-defined metadata blob — no hardcoded ids needed in the client."
+      description: "Runtime discovery: board ids, sort order, score operator, period state, submission policy, and the developer-defined metadata blob — no hardcoded ids needed in the client. Sorted by name and paged: limit is at most 100 (the default); send next_cursor as cursor for the next page."
       operationId: listLeaderboards
+      parameters:
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            examples:
+              - "100"
+            type: string
+        - explode: false
+          in: query
+          name: cursor
+          schema:
+            examples:
+              - weekly-high-score
+            type: string
       responses:
         "200":
           content:
@@ -4659,6 +5411,495 @@ paths:
       summary: Regenerate the caller's friend code
       tags:
         - Friends & Presence
+  /v1/project/allowed-origins:
+    put:
+      description: Replaces the browser origins (CORS for web builds) of the Game Project with the full list. The response has the old list. Answers 409 when the list has more origins than the limit.
+      operationId: setProjectAllowedOrigins
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetAllowedOriginsBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllowedOrigins"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Replace the allowed browser origins
+      tags:
+        - Project Management
+  /v1/project/api-keys:
+    get:
+      description: "Returns the active API keys that work for the Game Project, at most 50: label, type, scopes, and creation time. Key values are never returned."
+      operationId: listProjectAPIKeys
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAPIKeyList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List API keys
+      tags:
+        - Project Management
+    post:
+      description: Creates a publishable (ggp_) API key for the Game Project. Secret keys cannot be made here. The key value is returned only in this response. Scopes are limited to the features of the Game Project. Answers 409 when the Game Project has the maximum number of active keys.
+      operationId: createProjectAPIKey
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateAPIKeyBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectCreatedAPIKey"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Create a publishable API key
+      tags:
+        - Project Management
+  /v1/project/health:
+    get:
+      description: "Returns a list of setup problems and the facts they come from: API keys, feature grants, server feature switches, CORS origins, Steam sign-in, remote config size, and quota state. Tenant-level quotas show only ok, near_limit, or at_limit."
+      operationId: getProjectHealth
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectHealth"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Check the Game Project setup
+      tags:
+        - Project Management
+  /v1/project/leaderboards:
+    get:
+      description: Returns the settings of the leaderboards (no scores), at most 50. Set include_deleted to also list the deleted leaderboards that can be restored.
+      operationId: listProjectLeaderboards
+      parameters:
+        - description: Also list deleted leaderboards that can be restored.
+          explode: false
+          in: query
+          name: include_deleted
+          schema:
+            description: Also list deleted leaderboards that can be restored.
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLeaderboardList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List leaderboards
+      tags:
+        - Project Management
+    post:
+      description: Creates a leaderboard at revision 1. score_operator is fixed after creation.
+      operationId: createProjectLeaderboard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateLeaderboardBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectCreatedLeaderboard"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Create a leaderboard
+      tags:
+        - Project Management
+  /v1/project/leaderboards/{leaderboard_id}:
+    delete:
+      description: Deletes a leaderboard. The scores are kept, and the restore operation undoes the delete.
+      operationId: deleteProjectLeaderboard
+      parameters:
+        - description: Leaderboard ID.
+          in: path
+          name: leaderboard_id
+          required: true
+          schema:
+            description: Leaderboard ID.
+            examples:
+              - 7
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectDeletedResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Delete a leaderboard
+      tags:
+        - Project Management
+    get:
+      description: Returns the settings of one leaderboard (no scores) and its revision number.
+      operationId: getProjectLeaderboard
+      parameters:
+        - description: Leaderboard ID.
+          in: path
+          name: leaderboard_id
+          required: true
+          schema:
+            description: Leaderboard ID.
+            examples:
+              - 7
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLeaderboard"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Get a leaderboard
+      tags:
+        - Project Management
+    put:
+      description: "Replaces all settings of a leaderboard: an optional setting that is not sent is removed. expected_revision must be the newest revision number; a stale revision answers 409."
+      operationId: updateProjectLeaderboard
+      parameters:
+        - description: Leaderboard ID.
+          in: path
+          name: leaderboard_id
+          required: true
+          schema:
+            description: Leaderboard ID.
+            examples:
+              - 7
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdateLeaderboardBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRevisionResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Replace leaderboard settings
+      tags:
+        - Project Management
+  /v1/project/leaderboards/{leaderboard_id}/restore:
+    post:
+      description: Restores a deleted leaderboard with its scores. Answers 409 when a live leaderboard has the same name.
+      operationId: restoreProjectLeaderboard
+      parameters:
+        - description: Leaderboard ID.
+          in: path
+          name: leaderboard_id
+          required: true
+          schema:
+            description: Leaderboard ID.
+            examples:
+              - 7
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRestoredResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Restore a deleted leaderboard
+      tags:
+        - Project Management
+  /v1/project/leaderboards/{leaderboard_id}/rollback:
+    post:
+      description: Applies a kept revision of the leaderboard settings as a new revision. Scores do not change. expected_revision must be the newest revision number; a stale revision answers 409.
+      operationId: rollbackProjectLeaderboard
+      parameters:
+        - description: Leaderboard ID.
+          in: path
+          name: leaderboard_id
+          required: true
+          schema:
+            description: Leaderboard ID.
+            examples:
+              - 7
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectRollbackBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectLeaderboardRollback"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Roll back leaderboard settings
+      tags:
+        - Project Management
+  /v1/project/matchmaking/ticket-trace:
+    get:
+      description: Returns the state of one matchmaking ticket. Give exactly one of ticket_id (any state) or player_id (the ticket the player has in the queue now). Finished tickets are kept for 24 hours. Text that the game client sent is shown only when it is a short identifier; other text is replaced by a marker with its length. The attributes are never shown, only their size.
+      operationId: getProjectTicketTrace
+      parameters:
+        - description: Matchmaking ticket ID.
+          explode: false
+          in: query
+          name: ticket_id
+          schema:
+            description: Matchmaking ticket ID.
+            format: int64
+            type: integer
+        - description: Player ID; finds the player's queued ticket.
+          explode: false
+          in: query
+          name: player_id
+          schema:
+            description: Player ID; finds the player's queued ticket.
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectTicketTrace"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Trace a matchmaking ticket
+      tags:
+        - Project Management
+  /v1/project/remote-config:
+    get:
+      description: Returns the remote config of the Game Project and its revision number (0 if it has no revision).
+      operationId: getProjectRemoteConfig
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRemoteConfig"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Get the remote config
+      tags:
+        - Project Management
+    put:
+      description: Replaces the remote config with a JSON object of up to 64 KiB. expected_revision must be the newest revision number; a stale revision answers 409. Each change makes a new revision.
+      operationId: setProjectRemoteConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetRemoteConfigBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRevisionResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Replace the remote config
+      tags:
+        - Project Management
+  /v1/project/remote-config/rollback:
+    post:
+      description: Applies a kept revision of the remote config as a new revision. expected_revision must be the newest revision number; a stale revision answers 409.
+      operationId: rollbackProjectRemoteConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectRollbackBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRevisionResult"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Roll back the remote config
+      tags:
+        - Project Management
+  /v1/project/revisions:
+    get:
+      description: Returns the kept revisions (newest 3) of the remote config or of one leaderboard, newest first.
+      operationId: listProjectRevisions
+      parameters:
+        - description: remote_config or leaderboard.
+          explode: false
+          in: query
+          name: resource
+          required: true
+          schema:
+            description: remote_config or leaderboard.
+            enum:
+              - remote_config
+              - leaderboard
+            type: string
+        - description: Required when resource is leaderboard.
+          explode: false
+          in: query
+          name: leaderboard_id
+          schema:
+            description: Required when resource is leaderboard.
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRevisionList"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: List kept revisions
+      tags:
+        - Project Management
   /v1/relay/credentials:
     post:
       description: Returns credentials plus the TURN URLs of the relay nodes that are currently eligible, preferring the requested region. Responds 503 when no relay node is eligible.
@@ -5174,3 +6415,5 @@ tags:
     name: Health
   - description: Operator API for the platform itself, such as relay node registration. Not for game clients or servers.
     name: Platform Admin
+  - description: Settings of one Game Project for developer tools and coding agents, with a management token. Not for game clients or servers.
+    name: Project Management

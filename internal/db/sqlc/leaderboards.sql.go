@@ -61,6 +61,21 @@ func (q *Queries) ArchiveLeaderboardPeriod(ctx context.Context, arg ArchiveLeade
 	return err
 }
 
+const countLiveLeaderboardsForProject = `-- name: CountLiveLeaderboardsForProject :one
+SELECT count(*)::bigint
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND deleted_at IS NULL
+`
+
+func (q *Queries) CountLiveLeaderboardsForProject(ctx context.Context, projectID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countLiveLeaderboardsForProject, projectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createLeaderboard = `-- name: CreateLeaderboard :one
 INSERT INTO leaderboards (
     tenant_id, project_id, name, sort_order, score_operator, metadata,
@@ -530,6 +545,71 @@ func (q *Queries) LeaderboardUserRank(ctx context.Context, arg LeaderboardUserRa
 	return rank, err
 }
 
+const listAllLeaderboardsForProject = `-- name: ListAllLeaderboardsForProject :many
+SELECT id, name, sort_order, score_operator, metadata, client_submissions,
+       score_min, score_max, reset_schedule, attempt_cap, current_period,
+       period_started_at, next_reset_at, created_at
+FROM leaderboards
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND deleted_at IS NULL
+ORDER BY name
+`
+
+type ListAllLeaderboardsForProjectRow struct {
+	ID                int64
+	Name              string
+	SortOrder         string
+	ScoreOperator     string
+	Metadata          []byte
+	ClientSubmissions bool
+	ScoreMin          *int64
+	ScoreMax          *int64
+	ResetSchedule     string
+	AttemptCap        *int32
+	CurrentPeriod     int32
+	PeriodStartedAt   pgtype.Timestamptz
+	NextResetAt       pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+}
+
+// Every live board, for the dashboard. The live count is
+// capped at create and restore (quota.AxisLeaderboards).
+func (q *Queries) ListAllLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListAllLeaderboardsForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listAllLeaderboardsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAllLeaderboardsForProjectRow
+	for rows.Next() {
+		var i ListAllLeaderboardsForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.SortOrder,
+			&i.ScoreOperator,
+			&i.Metadata,
+			&i.ClientSubmissions,
+			&i.ScoreMin,
+			&i.ScoreMax,
+			&i.ResetSchedule,
+			&i.AttemptCap,
+			&i.CurrentPeriod,
+			&i.PeriodStartedAt,
+			&i.NextResetAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDeletedLeaderboardsForProject = `-- name: ListDeletedLeaderboardsForProject :many
 SELECT id, name, deleted_at
 FROM leaderboards
@@ -669,7 +749,7 @@ func (q *Queries) ListLeaderboardPeriods(ctx context.Context, arg ListLeaderboar
 	return items, nil
 }
 
-const listLeaderboardsForProject = `-- name: ListLeaderboardsForProject :many
+const listLeaderboardsPageForProject = `-- name: ListLeaderboardsPageForProject :many
 SELECT id, name, sort_order, score_operator, metadata, client_submissions,
        score_min, score_max, reset_schedule, attempt_cap, current_period,
        period_started_at, next_reset_at, created_at
@@ -677,10 +757,18 @@ FROM leaderboards
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
   AND deleted_at IS NULL
+  AND name > $2::text
 ORDER BY name
+LIMIT $3
 `
 
-type ListLeaderboardsForProjectRow struct {
+type ListLeaderboardsPageForProjectParams struct {
+	ProjectID int64
+	AfterName string
+	RowLimit  int32
+}
+
+type ListLeaderboardsPageForProjectRow struct {
 	ID                int64
 	Name              string
 	SortOrder         string
@@ -697,15 +785,18 @@ type ListLeaderboardsForProjectRow struct {
 	CreatedAt         pgtype.Timestamptz
 }
 
-func (q *Queries) ListLeaderboardsForProject(ctx context.Context, projectID int64) ([]ListLeaderboardsForProjectRow, error) {
-	rows, err := q.db.Query(ctx, listLeaderboardsForProject, projectID)
+// One page of live boards, keyset-paginated on name (live names are unique
+// per project). Player discovery and the management API list read it; the
+// caller reads one row more than the page to see if more rows exist.
+func (q *Queries) ListLeaderboardsPageForProject(ctx context.Context, arg ListLeaderboardsPageForProjectParams) ([]ListLeaderboardsPageForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listLeaderboardsPageForProject, arg.ProjectID, arg.AfterName, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListLeaderboardsForProjectRow
+	var items []ListLeaderboardsPageForProjectRow
 	for rows.Next() {
-		var i ListLeaderboardsForProjectRow
+		var i ListLeaderboardsPageForProjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,

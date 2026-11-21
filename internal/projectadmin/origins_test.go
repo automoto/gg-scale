@@ -1,6 +1,8 @@
 package projectadmin
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -51,6 +53,12 @@ func TestNormalizeOrigin_should_refuse_invalid_origins(t *testing.T) {
 	}
 }
 
+func TestNormalizeOrigin_should_refuse_host_longer_than_a_dns_name(t *testing.T) {
+	_, err := NormalizeOrigin("https://" + strings.Repeat("a", 250) + ".com")
+
+	assert.Error(t, err)
+}
+
 func TestNormalizeOrigins_should_remove_duplicates_after_normalizing(t *testing.T) {
 	got, err := NormalizeOrigins([]string{"https://a.example", "HTTPS://A.EXAMPLE/", "", "http://localhost:5173"}, 20)
 
@@ -62,4 +70,22 @@ func TestNormalizeOrigins_should_refuse_list_above_maximum(t *testing.T) {
 	_, err := NormalizeOrigins([]string{"https://a.example", "https://b.example", "https://c.example"}, 2)
 
 	assert.ErrorContains(t, err, "at most 2")
+}
+
+func TestNormalizeOrigins_should_stop_as_soon_as_the_list_passes_the_limit(t *testing.T) {
+	_, err := NormalizeOrigins([]string{"https://a.example", "https://b.example", "https://*.example"}, 1)
+
+	assert.ErrorIs(t, err, ErrOriginLimit)
+}
+
+func TestNormalizeOrigins_limit_error_should_be_a_limit_and_an_invalid_list(t *testing.T) {
+	_, err := NormalizeOrigins([]string{"https://a.example", "https://b.example"}, 1)
+
+	assert.Equal(t, []bool{true, true}, []bool{errors.Is(err, ErrOriginLimit), errors.Is(err, ErrInvalidOrigins)})
+}
+
+func TestNormalizeOrigin_invalid_origin_should_not_be_a_limit(t *testing.T) {
+	_, err := NormalizeOrigins([]string{"https://*.example"}, 20)
+
+	assert.False(t, errors.Is(err, ErrOriginLimit))
 }

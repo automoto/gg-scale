@@ -287,6 +287,11 @@ func (h *Handler) leaderboardFormHandler(w http.ResponseWriter, r *http.Request,
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, page(view))
 		return
+	case errors.Is(err, projectadmin.ErrLeaderboardLimit):
+		view.Error = msgLeaderboardLimit
+		w.WriteHeader(http.StatusConflict)
+		webutil.Render(r, w, page(view))
+		return
 	case err != nil:
 		slog.ErrorContext(r.Context(), "save leaderboard failed", "action", action, "err", err)
 		view.Error = "Save failed."
@@ -402,7 +407,7 @@ func (h *Handler) listLeaderboards(ctx context.Context, tenantID, projectID int6
 	var out []LeaderboardRowView
 	ctx = db.WithTenant(ctx, tenantID)
 	err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		rows, err := sqlcgen.New(tx).ListLeaderboardsForProject(ctx, projectID)
+		rows, err := sqlcgen.New(tx).ListAllLeaderboardsForProject(ctx, projectID)
 		if err != nil {
 			return fmt.Errorf("list leaderboards: %w", err)
 		}

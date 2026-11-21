@@ -14,6 +14,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
@@ -471,11 +472,28 @@ func buildQuotaOverrideRows(tier tenant.Tier, overrides map[string]int64) []Quot
 		quota.AxisOpenSessions:  ladder.OpenSessionsPerProject,
 
 		quota.AxisRelayAllocations: ladder.RelayAllocationsPerNode,
+		quota.AxisLeaderboards:     ladder.LeaderboardsPerProject,
 	}
 	axes := slices.Concat(quotaOverrideAxes, adminOnlyQuotaAxes)
 	rows := make([]QuotaOverrideRowView, 0, len(axes))
 	for _, a := range axes {
-		row := QuotaOverrideRowView{Axis: a.Value, Label: a.Label, DefaultLabel: quotaLimitLabel(defaults[a.Value])}
+		row := QuotaOverrideRowView{
+			Axis:         a.Value,
+			Label:        a.Label,
+			DefaultLabel: quotaLimitLabel(defaults[a.Value]),
+			Note:         "Applies when quota enforcement is on. -1 = unlimited.",
+			Min:          "-1",
+		}
+		// validateOverrideLimit refuses -1 for these axes.
+		switch a.Value {
+		case quota.AxisLeaderboards:
+			row.Note = "This limit always applies, also when quota enforcement is off. It cannot be unlimited."
+			row.Min = "0"
+		case quota.AxisOpenSessions:
+			row.Note = "Applies when quota enforcement is on. It cannot be unlimited or above " +
+				strconv.Itoa(gamesession.SessionsHardCap) + "."
+			row.Min = "0"
+		}
 		if v, ok := overrides[a.Value]; ok {
 			value := v
 			row.Override = &value

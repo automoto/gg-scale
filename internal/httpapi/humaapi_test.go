@@ -19,6 +19,7 @@ func TestServerError_status(t *testing.T) {
 		want int
 	}{
 		{"nul_byte_is_client_input", fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22021"}), http.StatusBadRequest},
+		{"json_nul_escape_is_client_input", fmt.Errorf("wrap: %w", &pgconn.PgError{Code: "22P05"}), http.StatusBadRequest},
 		{"other_pg_error", &pgconn.PgError{Code: "40001"}, http.StatusInternalServerError},
 		{"plain_error", errors.New("boom"), http.StatusInternalServerError},
 	}

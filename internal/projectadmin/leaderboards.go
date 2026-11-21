@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/period"
+	"github.com/automoto/gg-scale/internal/quota"
 )
 
 var (
@@ -23,7 +25,36 @@ var (
 	// has entries: collapsed bests are frozen under the order they were
 	// written with.
 	ErrSortOrderLocked = errors.New("projectadmin: sort order is fixed once scores exist")
+	// ErrLeaderboardLimit means the project is at its live leaderboard limit
+	// (quota.AxisLeaderboards). It wraps *quota.ErrQuotaExceeded.
+	ErrLeaderboardLimit = errors.New("projectadmin: the Game Project is at its leaderboard limit")
 )
+
+// checkLeaderboardLimit refuses one more live board when the project is at
+// its limit. The caller must hold the project row lock (LockLiveProject), so
+// two creates or restores at the same time cannot both pass. pending is the
+// number of live boards in the count that this write added (1 after a
+// restore, 0 before a create). Unlike the other quota axes it ignores
+// enforce_quotas: the limit is a safety cap on what player discovery
+// returns, not a plan limit.
+func checkLeaderboardLimit(ctx context.Context, q *sqlcgen.Queries, projectID, pending int64) error {
+	n, err := q.CountLiveLeaderboardsForProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	qc, err := q.GetTenantQuotaContext(ctx)
+	if err != nil {
+		return fmt.Errorf("leaderboard limit: tenant quota context: %w", err)
+	}
+	limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+	if err != nil {
+		return fmt.Errorf("leaderboard limit: %w", err)
+	}
+	if err := limits.CheckLeaderboards(n - pending); err != nil {
+		return fmt.Errorf("%w: %w", ErrLeaderboardLimit, err)
+	}
+	return nil
+}
 
 // LeaderboardSettings are the editable leaderboard settings. They are also
 // the revision snapshot. ScoreOperator is fixed at creation; an update
@@ -53,7 +84,9 @@ func (s LeaderboardSettings) auditPayload() map[string]any {
 	return p
 }
 
-// CreateLeaderboard creates a board and records revision 1.
+// CreateLeaderboard creates a board and records revision 1. It returns
+// ErrLeaderboardLimit when the project is at its live board limit, and
+// pgx.ErrNoRows when the project is not live in the tenant.
 func CreateLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID int64, s LeaderboardSettings, actor Actor) (int64, error) {
 	params := sqlcgen.CreateLeaderboardParams{
 		ProjectID:         projectID,
@@ -82,6 +115,12 @@ func CreateLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID i
 	ctx = db.WithTenant(ctx, tenantID)
 	err = pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		if _, err := q.LockLiveProject(ctx, projectID); err != nil {
+			return err
+		}
+		if err := checkLeaderboardLimit(ctx, q, projectID, 0); err != nil {
+			return err
+		}
 		var err error
 		if id, err = q.CreateLeaderboard(ctx, params); err != nil {
 			return translateDuplicate(err)
@@ -230,17 +269,27 @@ func DeleteLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID, 
 }
 
 // RestoreLeaderboard undoes a soft delete. It returns ErrDuplicateLeaderboard
-// when a live board in the project has the same name, and pgx.ErrNoRows when
-// no deleted board matched.
+// when a live board in the project has the same name, ErrLeaderboardLimit
+// when the project is at its live board limit, and pgx.ErrNoRows when no
+// deleted board matched.
 func RestoreLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID, id int64, actor Actor) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	return pool.Q(ctx, func(tx pgx.Tx) error {
-		n, err := sqlcgen.New(tx).RestoreLeaderboard(ctx, sqlcgen.RestoreLeaderboardParams{ProjectID: projectID, ID: id})
+		q := sqlcgen.New(tx)
+		if _, err := q.LockLiveProject(ctx, projectID); err != nil {
+			return err
+		}
+		// Restore first and check after, so a restore of a board that is not
+		// deleted still answers pgx.ErrNoRows. An error rolls the restore back.
+		n, err := q.RestoreLeaderboard(ctx, sqlcgen.RestoreLeaderboardParams{ProjectID: projectID, ID: id})
 		if err != nil {
 			return translateDuplicate(err)
 		}
 		if n == 0 {
 			return pgx.ErrNoRows
+		}
+		if err := checkLeaderboardLimit(ctx, q, projectID, 1); err != nil {
+			return err
 		}
 		return actor.audit(ctx, tx, tenantID, projectID, "leaderboard.restore", strconv.FormatInt(id, 10), nil)
 	})

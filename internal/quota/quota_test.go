@@ -188,3 +188,38 @@ func TestErrQuotaExceeded_is_a_distinct_error(t *testing.T) {
 	assert.True(t, errors.As(error(err), new(*quota.ErrQuotaExceeded)))
 	assert.Contains(t, err.Error(), "projects")
 }
+
+func TestLimitsForClass_should_use_configured_leaderboard_default_for_every_class(t *testing.T) {
+	quota.SetLeaderboardsPerProject(25)
+	t.Cleanup(func() { quota.SetLeaderboardsPerProject(1000) })
+
+	got := []int64{}
+	for _, tier := range []tenant.Tier{tenant.Tier0, tenant.Tier1, tenant.Tier2, tenant.Tier3} {
+		got = append(got, quota.LimitsForClass(tier).LeaderboardsPerProject)
+	}
+
+	assert.Equal(t, []int64{25, 25, 25, 25}, got)
+}
+
+func TestLimitsForClass_should_default_leaderboards_to_1000(t *testing.T) {
+	assert.Equal(t, int64(1000), quota.LimitsForClass(tenant.Tier0).LeaderboardsPerProject)
+}
+
+func TestResolve_should_apply_leaderboards_override(t *testing.T) {
+	got := quota.Resolve(tenant.Tier0, map[string]int64{quota.AxisLeaderboards: 5000})
+
+	assert.Equal(t, int64(5000), got.LeaderboardsPerProject)
+}
+
+func TestCheckLeaderboards_should_reject_at_limit(t *testing.T) {
+	l := quota.Limits{LeaderboardsPerProject: 3}
+
+	var qe *quota.ErrQuotaExceeded
+	assert.ErrorAs(t, l.CheckLeaderboards(3), &qe)
+}
+
+func TestCheckLeaderboards_should_allow_below_limit(t *testing.T) {
+	l := quota.Limits{LeaderboardsPerProject: 3}
+
+	assert.NoError(t, l.CheckLeaderboards(2))
+}

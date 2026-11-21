@@ -43,7 +43,7 @@ func (q *Queries) GetSettingsRevision(ctx context.Context, arg GetSettingsRevisi
 const insertSettingsRevision = `-- name: InsertSettingsRevision :exec
 INSERT INTO settings_revisions (
     tenant_id, project_id, resource_kind, resource_id, revision, snapshot,
-    actor_user_id, mcp_token_id, source
+    actor_user_id, management_token_id, source
 )
 VALUES (
     current_setting('app.tenant_id', true)::bigint,
@@ -54,14 +54,14 @@ VALUES (
 `
 
 type InsertSettingsRevisionParams struct {
-	ProjectID    int64
-	ResourceKind string
-	ResourceID   int64
-	Revision     int64
-	Snapshot     []byte
-	ActorUserID  *int64
-	McpTokenID   *int64
-	Source       string
+	ProjectID         int64
+	ResourceKind      string
+	ResourceID        int64
+	Revision          int64
+	Snapshot          []byte
+	ActorUserID       *int64
+	ManagementTokenID *int64
+	Source            string
 }
 
 func (q *Queries) InsertSettingsRevision(ctx context.Context, arg InsertSettingsRevisionParams) error {
@@ -72,7 +72,7 @@ func (q *Queries) InsertSettingsRevision(ctx context.Context, arg InsertSettings
 		arg.Revision,
 		arg.Snapshot,
 		arg.ActorUserID,
-		arg.McpTokenID,
+		arg.ManagementTokenID,
 		arg.Source,
 	)
 	return err
@@ -101,7 +101,7 @@ func (q *Queries) LatestSettingsRevision(ctx context.Context, arg LatestSettings
 }
 
 const listSettingsRevisions = `-- name: ListSettingsRevisions :many
-SELECT revision, snapshot, actor_user_id, mcp_token_id, source, created_at
+SELECT revision, snapshot, actor_user_id, management_token_id, source, created_at
 FROM settings_revisions
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND project_id = $1
@@ -117,12 +117,12 @@ type ListSettingsRevisionsParams struct {
 }
 
 type ListSettingsRevisionsRow struct {
-	Revision    int64
-	Snapshot    []byte
-	ActorUserID *int64
-	McpTokenID  *int64
-	Source      string
-	CreatedAt   pgtype.Timestamptz
+	Revision          int64
+	Snapshot          []byte
+	ActorUserID       *int64
+	ManagementTokenID *int64
+	Source            string
+	CreatedAt         pgtype.Timestamptz
 }
 
 func (q *Queries) ListSettingsRevisions(ctx context.Context, arg ListSettingsRevisionsParams) ([]ListSettingsRevisionsRow, error) {
@@ -138,7 +138,7 @@ func (q *Queries) ListSettingsRevisions(ctx context.Context, arg ListSettingsRev
 			&i.Revision,
 			&i.Snapshot,
 			&i.ActorUserID,
-			&i.McpTokenID,
+			&i.ManagementTokenID,
 			&i.Source,
 			&i.CreatedAt,
 		); err != nil {

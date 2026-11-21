@@ -89,6 +89,80 @@ func TestLeaderboardList_excludes_sibling_project_and_deleted_boards(t *testing.
 	assert.Equal(t, "mine", boards[0]["name"])
 }
 
+func TestLeaderboardList_should_return_every_board_above_the_management_list_size(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO leaderboards (tenant_id, project_id, name)
+		 SELECT $1, $2, 'board-' || lpad(g::text, 2, '0') FROM generate_series(1, 60) AS g`,
+		tenantID, projectID)
+	require.NoError(t, err)
+	srv := newServerForCluster(t, c)
+	token, _ := anonymousLoginWithID(t, srv.URL, "k")
+
+	// Act
+	boards := listLeaderboards(t, srv.URL, "k", token)
+
+	// Assert
+	assert.Len(t, boards, 60)
+}
+
+// listLeaderboardsPage gets one page of the board list.
+func listLeaderboardsPage(t *testing.T, srv, key, token, query string) (names []string, next string) {
+	t.Helper()
+	resp, body := authedReq(t, http.MethodGet, srv+"/v1/leaderboards"+query, key, token, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var out struct {
+		Leaderboards []struct {
+			Name string `json:"name"`
+		} `json:"leaderboards"`
+		NextCursor string `json:"next_cursor"`
+	}
+	require.NoError(t, json.Unmarshal(body, &out))
+	for _, b := range out.Leaderboards {
+		names = append(names, b.Name)
+	}
+	return names, out.NextCursor
+}
+
+func TestLeaderboardList_should_page_with_limit_and_cursor(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	for _, name := range []string{"charlie", "alpha", "bravo"} {
+		seedBoard(t, c, tenantID, projectID, name, boardOpts{})
+	}
+	srv := newServerForCluster(t, c)
+	token, _ := anonymousLoginWithID(t, srv.URL, "k")
+
+	// Act
+	first, cursor := listLeaderboardsPage(t, srv.URL, "k", token, "?limit=2")
+	second, end := listLeaderboardsPage(t, srv.URL, "k", token, "?limit=2&cursor="+cursor)
+
+	// Assert
+	assert.Equal(t, []any{[]string{"alpha", "bravo"}, []string{"charlie"}, ""}, []any{first, second, end})
+}
+
+func TestLeaderboardList_should_return_at_most_100_boards_per_page(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "k")
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`INSERT INTO leaderboards (tenant_id, project_id, name)
+		 SELECT $1, $2, 'board-' || lpad(g::text, 3, '0') FROM generate_series(1, 101) AS g`,
+		tenantID, projectID)
+	require.NoError(t, err)
+	srv := newServerForCluster(t, c)
+	token, _ := anonymousLoginWithID(t, srv.URL, "k")
+
+	// Act
+	names, next := listLeaderboardsPage(t, srv.URL, "k", token, "?limit=1000")
+
+	// Assert
+	assert.Equal(t, []any{100, "board-100"}, []any{len(names), next})
+}
+
 func TestLeaderboardFriends_ranks_accepted_friends_and_caller_only(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 2, "k")

@@ -1,0 +1,286 @@
+package httpapi
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/automoto/gg-scale/internal/managementtoken"
+	"github.com/automoto/gg-scale/internal/projectadmin"
+	"github.com/automoto/gg-scale/internal/tenant"
+)
+
+const projectAPIKeyLabelMax = 64
+
+// projectActor records a write as the token, not as the person who made it.
+func projectActor(p managementtoken.Principal) projectadmin.Actor {
+	return projectadmin.Actor{TokenID: p.TokenID, TokenCreatorID: p.CreatedByUserID}
+}
+
+type projectRevisionResult struct {
+	Revision int64 `json:"revision" doc:"The new revision number." example:"4"`
+}
+
+type projectSetRemoteConfigBody struct {
+	Config           json.RawMessage `json:"config" doc:"The full remote config, a JSON object, up to 64 KiB."`
+	ExpectedRevision int64           `json:"expected_revision" doc:"The newest revision number from the remote config read (0 if it has no revision)." example:"3"`
+}
+
+type projectSetRemoteConfigInput struct {
+	Body projectSetRemoteConfigBody
+}
+
+func setRemoteConfig(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetRemoteConfigInput) (projectRevisionResult, error) {
+	config, err := projectadmin.NormalizeJSONObject(string(in.Body.Config), projectadmin.RemoteConfigMaxBytes)
+	if err != nil {
+		return projectRevisionResult{}, huma.Error422UnprocessableEntity("config: " + err.Error())
+	}
+	rev, err := projectadmin.SetRemoteConfig(ctx, d.Pool, p.TenantID, p.ProjectID, config, &in.Body.ExpectedRevision, projectActor(p))
+	if err != nil {
+		return projectRevisionResult{}, projectWriteError(err)
+	}
+	return projectRevisionResult{Revision: rev}, nil
+}
+
+type projectRollbackBody struct {
+	Revision         int64 `json:"revision" doc:"The kept revision to apply." example:"2"`
+	ExpectedRevision int64 `json:"expected_revision" doc:"The newest revision number." example:"3"`
+}
+
+type projectRollbackRemoteConfigInput struct {
+	Body projectRollbackBody
+}
+
+func rollbackRemoteConfig(ctx context.Context, d Deps, p managementtoken.Principal, in *projectRollbackRemoteConfigInput) (projectRevisionResult, error) {
+	rev, err := projectadmin.RollbackRemoteConfig(ctx, d.Pool, p.TenantID, p.ProjectID, in.Body.Revision, &in.Body.ExpectedRevision, projectActor(p))
+	if err != nil {
+		return projectRevisionResult{}, projectWriteError(err)
+	}
+	return projectRevisionResult{Revision: rev}, nil
+}
+
+// ProjectLeaderboardFields are the leaderboard settings of the create and
+// the update body. huma merges an embedded struct into the body schema only
+// when its type is exported.
+type ProjectLeaderboardFields struct {
+	Name              string          `json:"name" doc:"1 to 120 characters." example:"weekly-high-scores"`
+	SortOrder         string          `json:"sort_order,omitempty" doc:"desc (high score first, default) or asc." example:"desc"`
+	ClientSubmissions bool            `json:"client_submissions,omitempty" doc:"Let game clients submit scores with a publishable key."`
+	ScoreMin          *int64          `json:"score_min,omitempty"`
+	ScoreMax          *int64          `json:"score_max,omitempty"`
+	ResetSchedule     string          `json:"reset_schedule,omitempty" doc:"none (default), daily, weekly, or monthly." example:"weekly"`
+	AttemptCap        *int32          `json:"attempt_cap,omitempty" minimum:"1" maximum:"2147483647" doc:"Maximum submissions per player per period."`
+	Metadata          json.RawMessage `json:"metadata,omitempty" doc:"Display metadata, a JSON object, up to 16 KiB."`
+}
+
+// projectLeaderboardSettings fills defaults and checks the metadata. Absent
+// metadata and JSON null both mean no metadata.
+func projectLeaderboardSettings(f ProjectLeaderboardFields, operator string) (projectadmin.LeaderboardSettings, error) {
+	s := projectadmin.LeaderboardSettings{
+		Name: f.Name, SortOrder: f.SortOrder, ScoreOperator: operator, ResetSchedule: f.ResetSchedule,
+		ClientSubmissions: f.ClientSubmissions, ScoreMin: f.ScoreMin, ScoreMax: f.ScoreMax, AttemptCap: f.AttemptCap,
+	}
+	metadata := f.Metadata
+	if s.SortOrder == "" {
+		s.SortOrder = "desc"
+	}
+	if s.ScoreOperator == "" {
+		s.ScoreOperator = "best"
+	}
+	if s.ResetSchedule == "" {
+		s.ResetSchedule = "none"
+	}
+	if len(metadata) == 0 || string(metadata) == "null" {
+		return s, nil
+	}
+	blob, err := projectadmin.NormalizeJSONObject(string(metadata), projectadmin.LeaderboardMetadataMaxBytes)
+	if err != nil {
+		return s, huma.Error422UnprocessableEntity("metadata: " + err.Error())
+	}
+	s.Metadata = blob
+	return s, nil
+}
+
+type projectCreateLeaderboardBody struct {
+	ProjectLeaderboardFields
+	ScoreOperator string `json:"score_operator,omitempty" doc:"best (default), set, or incr; fixed after creation." example:"best"`
+}
+
+type projectCreateLeaderboardInput struct {
+	Body projectCreateLeaderboardBody
+}
+
+type projectCreatedLeaderboard struct {
+	LeaderboardID int64 `json:"leaderboard_id" example:"7"`
+	Revision      int64 `json:"revision" example:"1"`
+}
+
+func createLeaderboard(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateLeaderboardInput) (projectCreatedLeaderboard, error) {
+	b := in.Body
+	s, err := projectLeaderboardSettings(b.ProjectLeaderboardFields, b.ScoreOperator)
+	if err != nil {
+		return projectCreatedLeaderboard{}, err
+	}
+	if err := projectadmin.ValidateLeaderboard(s, true); err != nil {
+		return projectCreatedLeaderboard{}, projectWriteError(err)
+	}
+	id, err := projectadmin.CreateLeaderboard(ctx, d.Pool, p.TenantID, p.ProjectID, s, projectActor(p))
+	if err != nil {
+		return projectCreatedLeaderboard{}, projectWriteError(err)
+	}
+	return projectCreatedLeaderboard{LeaderboardID: id, Revision: 1}, nil
+}
+
+type projectUpdateLeaderboardBody struct {
+	ExpectedRevision int64 `json:"expected_revision" doc:"The revision number from the leaderboard read." example:"1"`
+	ProjectLeaderboardFields
+}
+
+type projectUpdateLeaderboardInput struct {
+	LeaderboardID int64 `path:"leaderboard_id" doc:"Leaderboard ID." example:"7"`
+	Body          projectUpdateLeaderboardBody
+}
+
+func updateLeaderboard(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateLeaderboardInput) (projectRevisionResult, error) {
+	b := in.Body
+	s, err := projectLeaderboardSettings(b.ProjectLeaderboardFields, "")
+	if err != nil {
+		return projectRevisionResult{}, err
+	}
+	if err := projectadmin.ValidateLeaderboard(s, false); err != nil {
+		return projectRevisionResult{}, projectWriteError(err)
+	}
+	rev, err := projectadmin.UpdateLeaderboard(ctx, d.Pool, p.TenantID, p.ProjectID, in.LeaderboardID, s, &b.ExpectedRevision, projectActor(p))
+	if err != nil {
+		return projectRevisionResult{}, projectWriteError(err)
+	}
+	return projectRevisionResult{Revision: rev}, nil
+}
+
+type projectRollbackLeaderboardInput struct {
+	LeaderboardID int64 `path:"leaderboard_id" doc:"Leaderboard ID." example:"7"`
+	Body          projectRollbackBody
+}
+
+type projectLeaderboardRollback struct {
+	Revision int64  `json:"revision" example:"4"`
+	Note     string `json:"note"`
+}
+
+func rollbackLeaderboard(ctx context.Context, d Deps, p managementtoken.Principal, in *projectRollbackLeaderboardInput) (projectLeaderboardRollback, error) {
+	rev, err := projectadmin.RollbackLeaderboard(ctx, d.Pool, p.TenantID, p.ProjectID, in.LeaderboardID, in.Body.Revision, &in.Body.ExpectedRevision, projectActor(p))
+	if err != nil {
+		return projectLeaderboardRollback{}, projectWriteError(err)
+	}
+	return projectLeaderboardRollback{Revision: rev, Note: "Settings were rolled back. Scores did not change."}, nil
+}
+
+type projectDeletedResult struct {
+	Deleted bool   `json:"deleted"`
+	Note    string `json:"note"`
+}
+
+func deleteLeaderboard(ctx context.Context, d Deps, p managementtoken.Principal, in *projectLeaderboardPath) (projectDeletedResult, error) {
+	if err := projectadmin.DeleteLeaderboard(ctx, d.Pool, p.TenantID, p.ProjectID, in.LeaderboardID, projectActor(p)); err != nil {
+		return projectDeletedResult{}, projectWriteError(err)
+	}
+	return projectDeletedResult{Deleted: true, Note: "Scores are kept. Use restore_leaderboard to undo."}, nil
+}
+
+type projectRestoredResult struct {
+	Restored bool `json:"restored"`
+}
+
+func restoreLeaderboard(ctx context.Context, d Deps, p managementtoken.Principal, in *projectLeaderboardPath) (projectRestoredResult, error) {
+	if err := projectadmin.RestoreLeaderboard(ctx, d.Pool, p.TenantID, p.ProjectID, in.LeaderboardID, projectActor(p)); err != nil {
+		return projectRestoredResult{}, projectWriteError(err)
+	}
+	return projectRestoredResult{Restored: true}, nil
+}
+
+type projectCreateAPIKeyBody struct {
+	Label  string   `json:"label" doc:"1 to 64 characters." example:"web build"`
+	Scopes []string `json:"scopes,omitempty" doc:"Extra feature scopes: fleet or p2p_relay. matchmaker is always added."`
+}
+
+type projectCreateAPIKeyInput struct {
+	Body projectCreateAPIKeyBody
+}
+
+type projectCreatedAPIKey struct {
+	APIKeyID int64          `json:"api_key_id" example:"12"`
+	APIKey   string         `json:"api_key" doc:"The key value. It is returned only in this response." example:"ggp_..."`
+	KeyType  tenant.KeyType `json:"key_type" example:"publishable"`
+	Label    string         `json:"label" example:"web build (management token: ci)"`
+	Note     string         `json:"note"`
+}
+
+func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
+	label := in.Body.Label
+	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
+		return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
+	}
+	for _, r := range label {
+		if unicode.IsControl(r) {
+			return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity("label must not contain control characters")
+		}
+	}
+	// The token label goes into the key label, so a person can find the
+	// key in the dashboard and revoke it.
+	label = fmt.Sprintf("%s (management token: %s)", label, p.Label)
+	projectID := p.ProjectID
+	id, value, err := projectadmin.CreateAPIKey(ctx, d.Pool, d.RBAC, p.TenantID, projectadmin.NewAPIKey{
+		ProjectID: &projectID,
+		Label:     label,
+		Type:      tenant.KeyTypePublishable,
+		Scopes:    in.Body.Scopes,
+		MaxActive: d.ManagementMaxProjectAPIKeys,
+		Switches:  projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled},
+	}, projectActor(p))
+	if err != nil {
+		return projectCreatedAPIKey{}, projectWriteError(err)
+	}
+	return projectCreatedAPIKey{
+		APIKeyID: id,
+		APIKey:   value,
+		KeyType:  tenant.KeyTypePublishable,
+		Label:    label,
+		Note: "A publishable key is made to ship in a game client. The value is shown only now. " +
+			"Revoke it in the dashboard if it is not needed.",
+	}, nil
+}
+
+type projectSetAllowedOriginsBody struct {
+	Origins []string `json:"origins" doc:"The full list of browser origins, for example https://html-classic.itch.zone or http://localhost:5173."`
+}
+
+type projectSetAllowedOriginsInput struct {
+	Body projectSetAllowedOriginsBody
+}
+
+type projectAllowedOrigins struct {
+	Origins    []string `json:"origins"`
+	OldOrigins []string `json:"old_origins"`
+	Note       string   `json:"note"`
+}
+
+func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetAllowedOriginsInput) (projectAllowedOrigins, error) {
+	old, err := projectadmin.SetAllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID, in.Body.Origins, d.CORSMaxProjectOrigins, projectActor(p))
+	if err != nil {
+		return projectAllowedOrigins{}, projectWriteError(err)
+	}
+	now, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
+	if err != nil {
+		return projectAllowedOrigins{}, err
+	}
+	return projectAllowedOrigins{
+		Origins:    now,
+		OldOrigins: old,
+		Note: "To undo, call set_allowed_origins with old_origins. Each server uses the new list within " +
+			projectadmin.OriginCacheTTL.String() + ".",
+	}, nil
+}

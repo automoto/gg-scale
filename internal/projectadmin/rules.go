@@ -12,7 +12,7 @@ import (
 	"github.com/automoto/gg-scale/internal/period"
 )
 
-// Size limits for the JSON objects that the dashboard and the MCP tools
+// Size limits for the JSON objects that the dashboard and the management API
 // write. The database allows more; these are the editor limits.
 const (
 	RemoteConfigMaxBytes = 65536

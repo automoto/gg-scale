@@ -50,29 +50,34 @@ type Config struct {
 	// Defaults false: no relay issuer or UDP listener is built and relay entry
 	// points refuse regardless of RelaySharedSecret.
 	FeatureP2PRelayEnabled bool `env:"FEATURE_P2P_RELAY_ENABLED" envDefault:"false"`
-	// FeatureMCPEnabled mounts POST /mcp and the dashboard MCP token page.
-	// Defaults false.
-	FeatureMCPEnabled bool `env:"FEATURE_MCP_ENABLED" envDefault:"false"`
-	// MCPTokenMaxExpiryDays is the longest lifetime a person can give an MCP
-	// token. Default 365.
-	MCPTokenMaxExpiryDays int `env:"MCP_TOKEN_MAX_EXPIRY_DAYS" envDefault:"365"`
-	// MCPTokenRatePerSecond / MCPTokenRateBurst set the per-token request
-	// bucket on /mcp. Process-local, so with N app hosts the effective limit
-	// can be N times the value. Defaults 5 / 20.
-	MCPTokenRatePerSecond int `env:"MCP_TOKEN_RATE_PER_SECOND" envDefault:"5"`
-	MCPTokenRateBurst     int `env:"MCP_TOKEN_RATE_BURST" envDefault:"20"`
-	// MCPAuthFailuresPerMinute / MCPAuthFailureBurst set the per-IP bucket
-	// that only failed /mcp authentications use; valid tokens never use it.
-	// Defaults 10 / 10.
-	MCPAuthFailuresPerMinute int `env:"MCP_AUTH_FAILURES_PER_MINUTE" envDefault:"10"`
-	MCPAuthFailureBurst      int `env:"MCP_AUTH_FAILURE_BURST" envDefault:"10"`
-	// MCPMaxProjectTokens caps active (not revoked, not expired) MCP tokens
-	// for each project. Default 20.
-	MCPMaxProjectTokens int `env:"MCP_MAX_PROJECT_TOKENS" envDefault:"20"`
-	// MCPMaxProjectAPIKeys refuses the create_api_key tool when the project
-	// already has this many active keys (all keys, not only agent-made ones).
-	// The dashboard is not limited by it. Default 20.
-	MCPMaxProjectAPIKeys int `env:"MCP_MAX_PROJECT_API_KEYS" envDefault:"20"`
+	// FeatureManagementAPIEnabled mounts POST /mcp and the dashboard
+	// management token page. Defaults false.
+	FeatureManagementAPIEnabled bool `env:"FEATURE_MANAGEMENT_API_ENABLED" envDefault:"false"`
+	// ManagementTokenMaxExpiryDays is the longest lifetime a person can give
+	// a management token. Default 365.
+	ManagementTokenMaxExpiryDays int `env:"MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS" envDefault:"365"`
+	// ManagementTokenRatePerSecond / ManagementTokenRateBurst set the
+	// per-token request bucket. Process-local, so with N app hosts the
+	// effective limit can be N times the value. Defaults 5 / 20.
+	ManagementTokenRatePerSecond int `env:"MANAGEMENT_TOKEN_RATE_PER_SECOND" envDefault:"5"`
+	ManagementTokenRateBurst     int `env:"MANAGEMENT_TOKEN_RATE_BURST" envDefault:"20"`
+	// ManagementAuthFailuresPerMinute / ManagementAuthFailureBurst set the
+	// per-IP bucket that only failed token authentications use; valid tokens
+	// never use it. Defaults 10 / 10.
+	ManagementAuthFailuresPerMinute int `env:"MANAGEMENT_AUTH_FAILURES_PER_MINUTE" envDefault:"10"`
+	ManagementAuthFailureBurst      int `env:"MANAGEMENT_AUTH_FAILURE_BURST" envDefault:"10"`
+	// ManagementMaxProjectTokens caps active (not revoked, not expired)
+	// management tokens for each project. Default 20.
+	ManagementMaxProjectTokens int `env:"MANAGEMENT_MAX_PROJECT_TOKENS" envDefault:"20"`
+	// ManagementMaxProjectAPIKeys refuses the create_api_key tool when the
+	// project already has this many active keys (all keys, not only
+	// agent-made ones). The dashboard is not limited by it. Default 20.
+	ManagementMaxProjectAPIKeys int `env:"MANAGEMENT_MAX_PROJECT_API_KEYS" envDefault:"20"`
+	// LeaderboardMaxPerProject caps live leaderboards in each Game Project,
+	// for the dashboard and the management API. It applies also when the
+	// tenant does not enforce quotas. A platform admin can override it for a
+	// tenant (quota axis "leaderboards"). Default 1000.
+	LeaderboardMaxPerProject int `env:"LEADERBOARD_MAX_PER_PROJECT" envDefault:"1000"`
 
 	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
 	// by default so fleets stay off until an operator opts in; only consulted
