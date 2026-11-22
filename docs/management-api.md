@@ -207,16 +207,17 @@ the Game Project, as the dashboard pages do.
   person who made the token. A feature can be added only when the Game Project
   has it (422). The feature list replaces the old one.
 - `set_project_invite_limit` takes the invites for each inviter in an hour and
-  for the whole Game Project in a day (not for each email domain). `set_project_storage_limit` takes the size
-  of one storage value in MiB (`max_value_mb`). For both, 0 clears the limit,
+  for the whole Game Project in a day (not for each email domain).
+  `set_project_storage_limit` takes the size of one storage value in MiB (`max_value_mb`). For both, 0 clears the limit,
   so the default applies. A limit cannot be higher than the default or than
   the limit of the Account Tenant (422). Both return the limits as
   `get_project_limits` does.
 - The fleet writes need `FEATURE_FLEET_ENABLED` and the `dedicated_servers`
   feature grant. `create_fleet` takes a `backend` (`agones` or
-  `plugin:<name>`; use `plugin:<name>` for a new fleet) and a config. `<name>` is the name in
-  `FLEET_BACKEND=plugin:<name>`: lowercase letters, digits, `_` and `-`, at
-  most 64 characters, starting with a letter or digit. A bare `plugin` is
+  `plugin:<name>`; use `plugin:<name>` for a new fleet) and a config.
+  `<name>` is the name in `FLEET_BACKEND=plugin:<name>`. It cannot be empty
+  (`plugin:` is refused on create). It has lowercase letters, digits, `_`
+  and `-`, at most 64 characters, starting with a letter or digit. A bare `plugin` is
   also accepted: a fleet stored that way runs on any plugin backend. An agones
   config needs `fleet_name` and may have `namespace` and `selector.<label>`
   keys. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
@@ -322,8 +323,9 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   of `allocate_server`, and in the `cursor` of the leaderboard lists answer
   422. An `allocate_server` `fleet` that is too long also answers 422.
 - Allocation works on a plugin backend. A fleet stored as bare `plugin` runs
-  on any plugin backend. A fleet with another `plugin*` backend value (for
-  example `pluginx` or `plugin:`) answers 422 on the token fleet operations.
+  on any plugin backend. A fleet with another `plugin*` backend value that has
+  no `plugin:` prefix (for example `pluginx`) answers 422 on the token fleet
+  operations.
 - The Steam Web API key is input only. `get_steam_auth` says only whether a
   key is set.
 - Fleet operations exist only when the server has `FEATURE_FLEET_ENABLED` on.

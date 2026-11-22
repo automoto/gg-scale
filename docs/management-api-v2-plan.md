@@ -458,8 +458,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - A fleet backend for a plugin is now named `plugin:<name>`. A fleet stored as
   bare `plugin` keeps working. Allocation on plugin backends now works (it
   answered 409 before). A legacy fleet with another `plugin*` backend value
-  (for example `pluginx` or `plugin:`) now gets a 422 from management token
-  fleet operations.
+  without the `plugin:` prefix (for example `pluginx`) now gets a 422 from
+  management token fleet operations. A new fleet cannot have an empty plugin
+  name (`plugin:`).
 - `null` for `scopes` in `update_api_key_features` and for `origins` in
   `set_allowed_origins` now gives 422. `[]` still clears the list.
 - Token labels and API key labels (dashboard, token API, and sign-up) refuse
