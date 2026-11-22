@@ -32,6 +32,10 @@ func (f *fixture) writeCalls() map[string]writeCall {
 	deleted := f.board(f.projectA, "d"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	f.exec(`UPDATE leaderboards SET deleted_at = now() WHERE id = $1`, deleted)
 	key := f.key(f.tenantA, f.projectA, "publishable", "k"+strconv.FormatInt(time.Now().UnixNano(), 36))
+	// revoke has its own key, so it never makes the other key calls answer
+	// 404. A list that runs every call must run revoke before
+	// create_secret_api_key, so the project stays under the fixture key limit.
+	revoked := f.key(f.tenantA, f.projectA, "publishable", "r"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	return map[string]writeCall{
 		"set_remote_config":       {"config:write", http.MethodPut, "/v1/project/remote-config", `{"config":{"a":1},"expected_revision":0}`},
 		"rollback_remote_config":  {"config:write", http.MethodPost, "/v1/project/remote-config/rollback", `{"revision":1,"expected_revision":0}`},
@@ -44,7 +48,7 @@ func (f *fixture) writeCalls() map[string]writeCall {
 		"update_api_key_label":    {"keys:write", http.MethodPut, keyPath(key, "/label"), `{"label":"renamed"}`},
 		"update_api_key_features": {"keys:write", http.MethodPut, keyPath(key, "/features"), `{"scopes":["matchmaker"]}`},
 		"set_allowed_origins":     {"origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":["http://localhost:5173"]}`},
-		"revoke_api_key":          {"keys:revoke", http.MethodPost, keyPath(key, "/revoke"), ""},
+		"revoke_api_key":          {"keys:revoke", http.MethodPost, keyPath(revoked, "/revoke"), ""},
 		"create_secret_api_key":   {"keys:secret", http.MethodPost, "/v1/project/secret-api-keys", `{"label":"ci"}`},
 	}
 }
@@ -143,7 +147,7 @@ func TestProjectAPI_writes_should_answer_200_with_a_json_object(t *testing.T) {
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
 		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins",
-		"create_secret_api_key", "revoke_api_key"} {
+		"revoke_api_key", "create_secret_api_key"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 

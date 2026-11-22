@@ -291,12 +291,27 @@ func TestMissingDependency_should_name_keys_read_for_revoke(t *testing.T) {
 func TestTokenAccessValues_should_round_trip_through_the_form(t *testing.T) {
 	scopes := []string{managementtoken.ScopeConfigRead, managementtoken.ScopeConfigWrite, managementtoken.ScopeOriginsWrite,
 		managementtoken.ScopeMatchmakingRead, managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate, managementtoken.ScopeKeysWrite,
-		managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}
+		managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}
 	rows, risky := accessOptions(allScopes(), nil)
 
 	got, _ := scopesFromAccessForm(tokenAccessValues(scopes), rows, risky)
 
 	assert.ElementsMatch(t, scopes, got)
+}
+
+// "New token like this" for a token with no risky scope checks no risky
+// box: a risky box comes only from a token that has it.
+func TestTokenAccessValues_should_give_no_risky_value_for_a_token_without_risky_scopes(t *testing.T) {
+	var normal []string
+	for _, s := range managementtoken.Scopes {
+		if s.Class == managementtoken.ClassNormal {
+			normal = append(normal, s.Scope)
+		}
+	}
+
+	got := tokenAccessValues(normal)
+
+	assert.Empty(t, got["risky"])
 }
 
 func TestAccessWords(t *testing.T) {

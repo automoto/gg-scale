@@ -190,22 +190,32 @@ func TestCreateSecretAPIKey_value_should_be_in_the_create_response_only(t *testi
 	logs := captureLogs(t)
 	slog.Info("secret key log capture is on")
 
-	created := f.do(f.scopedToken("keys:secret"), http.MethodPost, secretKeysPath, `{"label":"ci"}`)
+	tok, tokenID := f.token(f.tenantA, f.projectA, f.ownerID, []string{"keys:secret"}, time.Hour)
+	created := f.do(tok, http.MethodPost, secretKeysPath, `{"label":"ci"}`)
 	require.Equal(t, http.StatusOK, created.status, created.raw)
-	value, _ := created.body["api_key"].(string)
-	require.True(t, strings.HasPrefix(value, "ggs_"), created.raw)
+	fromTool, _ := structured(f.call(tok, "create_secret_api_key", map[string]any{"label": "ci tool"}))["api_key"].(string)
+	values := []string{created.body["api_key"].(string), fromTool}
+	require.True(t, strings.HasPrefix(values[0], "ggs_") && strings.HasPrefix(values[1], "ggs_"), created.raw)
 	reader := f.scopedToken(readScopes...)
 	list := f.do(reader, http.MethodGet, "/v1/project/api-keys", "")
 	token := f.do(reader, http.MethodGet, "/v1/project/token", "")
-	tool := f.call(reader, "list_api_keys", map[string]any{})
+	tool := resultText(f.call(reader, "list_api_keys", map[string]any{}))
 	var audit string
 	require.NoError(t, f.owner.QueryRow(context.Background(),
-		`SELECT coalesce(string_agg(payload::text, ' '), '') FROM platform_audit_log`).Scan(&audit))
+		`SELECT string_agg(payload::text, ' ') FROM platform_audit_log WHERE action = 'control_panel.api_key.create'
+		AND actor_service = $1 AND payload->>'key_type' = 'secret' HAVING count(*) = 2`,
+		"management_token:"+strconv.FormatInt(tokenID, 10)).Scan(&audit))
+	leaked := []string{}
+	for _, value := range values {
+		for name, text := range map[string]string{"log": logs.String(), "list": list.raw, "list tool": tool, "token": token.raw, "audit": audit} {
+			if strings.Contains(text, value) {
+				leaked = append(leaked, name)
+			}
+		}
+	}
 
-	assert.Equal(t, []bool{true, true, false, false, false, false, false},
-		[]bool{strings.Contains(logs.String(), "secret key log capture is on"), strings.Contains(list.raw, `"label":"ci`),
-			strings.Contains(logs.String(), value), strings.Contains(list.raw, value), strings.Contains(token.raw, value),
-			strings.Contains(resultText(tool), value), strings.Contains(audit, value)})
+	assert.Equal(t, []any{true, true, []string{}},
+		[]any{strings.Contains(logs.String(), "secret key log capture is on"), strings.Contains(list.raw, `"label":"ci tool`), leaked})
 }
 
 func TestCreateSecretAPIKey_should_return_403_when_the_creator_lacks_the_secret_pair(t *testing.T) {

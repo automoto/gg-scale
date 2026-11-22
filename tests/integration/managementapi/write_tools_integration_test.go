@@ -34,6 +34,10 @@ func (f *fixture) writeToolCalls() map[string]struct {
 	deleted := f.board(f.projectA, "d"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	f.exec(`UPDATE leaderboards SET deleted_at = now() WHERE id = $1`, deleted)
 	key := f.key(f.tenantA, f.projectA, "publishable", "k"+strconv.FormatInt(time.Now().UnixNano(), 36))
+	// revoke has its own key, so it never makes the other key calls answer
+	// 404. A list that runs every call must run revoke before
+	// create_secret_api_key, so the project stays under the fixture key limit.
+	revoked := f.key(f.tenantA, f.projectA, "publishable", "r"+strconv.FormatInt(time.Now().UnixNano(), 36))
 	return map[string]struct {
 		scope string
 		args  map[string]any
@@ -49,7 +53,7 @@ func (f *fixture) writeToolCalls() map[string]struct {
 		"update_api_key_label":    {"keys:write", map[string]any{"api_key_id": key, "label": "renamed"}},
 		"update_api_key_features": {"keys:write", map[string]any{"api_key_id": key, "scopes": []string{"matchmaker"}}},
 		"set_allowed_origins":     {"origins:write", map[string]any{"origins": []string{"http://localhost:5173"}}},
-		"revoke_api_key":          {"keys:revoke", map[string]any{"api_key_id": key}},
+		"revoke_api_key":          {"keys:revoke", map[string]any{"api_key_id": revoked}},
 		"create_secret_api_key":   {"keys:secret", map[string]any{"label": "ci"}},
 	}
 }
@@ -92,7 +96,7 @@ func TestWriteTools_should_succeed_with_their_scope(t *testing.T) {
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
 		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins",
-		"create_secret_api_key", "revoke_api_key"} {
+		"revoke_api_key", "create_secret_api_key"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 
