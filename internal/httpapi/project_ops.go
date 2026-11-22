@@ -403,6 +403,41 @@ var projectOps = []projectOp{
 		handler: projectHandler(listAllocationEvents),
 	},
 	{
+		tool: "allocate_server",
+		description: "Starts a game server and costs money while it runs. Takes fleet (the name of a live fleet), region, " +
+			"and optional game_mode and capacity (default 1). Returns the allocation. A deleted or unknown fleet answers 404.",
+		scope:  managementtoken.ScopeAllocationsWrite,
+		pair:   rbac.ProjectAllocationObject,
+		action: rbac.ActionAllocate,
+		fleet:  true,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/allocations", OperationID: "allocateProjectServer",
+			Summary: "Start a game server",
+			Description: "Starts a game server from a live fleet and returns the allocation. This starts a billable server. " +
+				"The fleet is given by name. Answers 404 for a deleted fleet, an unknown fleet, or a fleet of another Game Project, " +
+				"and 403 when the backend of the fleet is not enabled for the Account Tenant. The request also needs the allocation " +
+				"allocate permission of the token creator.",
+		},
+		handler: projectHandler(allocateServer),
+	},
+	{
+		tool: "deallocate_server",
+		description: "Cannot be undone. Stops the game server of one allocation and ends a live match on it. " +
+			"An allocation that is already released is returned as it is.",
+		scope:  managementtoken.ScopeAllocationsWrite,
+		pair:   rbac.ProjectAllocationObject,
+		action: rbac.ActionDeallocate,
+		fleet:  true,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/allocations/{allocation_id}/deallocate", OperationID: "deallocateProjectServer",
+			Summary: "Stop a game server",
+			Description: "Stops the game server of one allocation and returns the allocation. This ends a live match and cannot be undone. " +
+				"An allocation that is already released is returned as it is. Answers 404 for an allocation of another Game Project. " +
+				"The request also needs the allocation deallocate permission of the token creator.",
+		},
+		handler: projectHandler(deallocateServer),
+	},
+	{
 		tool: "matchmaking_ticket_trace",
 		description: "Show the state of one matchmaking ticket. Give ticket_id (any state) or player_id " +
 			"(only the ticket the player has in the queue now). Finished tickets are kept for 24 hours. " +

@@ -29,6 +29,9 @@ const (
 	ActionUpdate  = "fleet.template.update"
 	ActionDelete  = "fleet.template.delete"
 	ActionRestore = "fleet.template.restore"
+
+	ActionAllocate   = "fleet.allocate.manual"
+	ActionDeallocate = "fleet.deallocate.manual"
 )
 
 var (
@@ -241,4 +244,65 @@ func RestoreFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id in
 		return nil, fmt.Errorf("fleet: restore fleet: %w", err)
 	}
 	return out, nil
+}
+
+// ServerAllocate is the input of AllocateServer. The fleet is a live fleet
+// of the project. A Capacity below 1 means 1.
+type ServerAllocate struct {
+	Fleet    *Fleet
+	Region   string
+	GameMode string
+	Capacity int
+}
+
+// AllocateServer starts a game server through the manager, with no
+// authorization. The audit row is written in the transaction that marks the
+// allocation ready: it commits with that change, and a failed audit write
+// frees the server again. A failed backend call leaves no audit row.
+func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAllocate, actor projectadmin.Actor) (*Allocation, error) {
+	if in.Capacity < 1 {
+		in.Capacity = 1
+	}
+	ctx = WithCommitHook(db.WithTenant(ctx, tenantID), func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
+		return actor.Audit(ctx, tx, tenantID, in.Fleet.ProjectID, ActionAllocate, strconv.FormatInt(int64(id), 10), map[string]any{
+			"fleet_id":   in.Fleet.ID,
+			"fleet_name": in.Fleet.Name,
+			"region":     in.Region,
+			"game_mode":  in.GameMode,
+			"capacity":   in.Capacity,
+		})
+	})
+	return m.Allocate(ctx, AllocationRequest{
+		TenantID:  tenantID,
+		ProjectID: in.Fleet.ProjectID,
+		FleetID:   in.Fleet.ID,
+		Region:    in.Region,
+		GameMode:  in.GameMode,
+		Capacity:  in.Capacity,
+	})
+}
+
+// DeallocateServer stops the game server of an allocation of the project,
+// with no authorization, and returns the allocation after the change. It
+// returns ErrNotFound for an allocation of another project. The backend
+// stops the server first; then the row is released and its audit row is
+// written in one transaction, so a failed backend call changes nothing and
+// can be retried. An allocation that is already released or failed is
+// returned as it is, with no new audit row.
+func DeallocateServer(ctx context.Context, m *Manager, tenantID, projectID int64, id AllocationID, actor projectadmin.Actor) (*Allocation, error) {
+	ctx = db.WithTenant(ctx, tenantID)
+	a, err := m.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if a.ProjectID != projectID {
+		return nil, ErrNotFound
+	}
+	hooked := WithCommitHook(ctx, func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
+		return actor.Audit(ctx, tx, tenantID, projectID, ActionDeallocate, strconv.FormatInt(int64(id), 10), nil)
+	})
+	if err := m.Deallocate(hooked, id); err != nil {
+		return nil, err
+	}
+	return m.Get(ctx, id)
 }

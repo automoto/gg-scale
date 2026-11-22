@@ -333,9 +333,9 @@ Do the stages in order. Write failing tests first. After each stage:
 - [x] `create_secret_api_key` (`keys:secret`): returns the value one time. Same key limit as `create_api_key`.
 - [x] `set_steam_auth`, `clear_steam_auth` (`steam:write`): the key is input only and is sealed as today.
 - [x] `invite_player`, `link_player` (`players:invite`): same throttle as the dashboard, plus an audit row.
-- [ ] `allocate_server`, `deallocate_server` (`allocations:write`).
-- [ ] Each tool description starts with the risk sentence.
-- [ ] Token page: add each risky box with its sentence and its dependency check.
+- [x] `allocate_server`, `deallocate_server` (`allocations:write`).
+- [x] Each tool description starts with the risk sentence.
+- [x] Token page: add each risky box with its sentence and its dependency check.
 - [ ] Tests: no preset has a class 2 scope; the token page shows the warning; the secret is not in any list or log.
 
 ### Stage 5: tenant token

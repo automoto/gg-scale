@@ -214,3 +214,11 @@ func TestScopes_players_invite_should_be_risky_with_the_players_pair_and_need_pl
 	assert.Equal(t, []any{ClassRisky, ScopePlayersRead, "project:42:players", rbac.ActionManage, "Invite and link players. Sends email."},
 		[]any{got.Class, got.Needs, got.Pair(42), got.Action, got.Label})
 }
+
+func TestScopes_allocations_write_should_be_risky_with_the_allocate_pair_and_need_fleet_read(t *testing.T) {
+	got, ok := Scope(ScopeAllocationsWrite)
+
+	require.True(t, ok)
+	assert.Equal(t, []any{ClassRisky, ScopeFleetRead, "project:42:allocation", rbac.ActionAllocate, "fleets", "Start and stop game servers. Stopping ends a live match."},
+		[]any{got.Class, got.Needs, got.Pair(42), got.Action, got.Resource, got.Label})
+}

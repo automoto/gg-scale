@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -341,6 +342,68 @@ func ownAllocation(ctx context.Context, d Deps, p managementtoken.Principal, id 
 
 func getAllocation(ctx context.Context, d Deps, p managementtoken.Principal, in *projectAllocationInput) (projectAllocation, error) {
 	_, _, a, err := ownAllocation(ctx, d, p, in.AllocationID)
+	if err != nil {
+		return projectAllocation{}, err
+	}
+	return newProjectAllocation(a), nil
+}
+
+type projectAllocateBody struct {
+	Fleet    string `json:"fleet" minLength:"1" example:"ranked" doc:"The name of a live fleet of this Game Project."`
+	Region   string `json:"region" minLength:"1" example:"eu" doc:"The region of the server."`
+	GameMode string `json:"game_mode,omitempty" example:"duel" doc:"The game mode. Optional."`
+	Capacity int    `json:"capacity,omitempty" minimum:"1" example:"2" doc:"The player capacity. The default is 1."`
+}
+
+type projectAllocateInput struct {
+	Body projectAllocateBody
+}
+
+// allocateServer starts a server as the dashboard does. A deleted fleet
+// answers 404 like a missing one. The caller cannot set labels or join data.
+func allocateServer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectAllocateInput) (projectAllocation, error) {
+	m, err := fleetManager(d)
+	if err != nil {
+		return projectAllocation{}, err
+	}
+	region := strings.TrimSpace(in.Body.Region)
+	name := strings.TrimSpace(in.Body.Fleet)
+	if region == "" || name == "" {
+		return projectAllocation{}, huma.Error422UnprocessableEntity("fleet and region are required")
+	}
+	f, err := m.Fleets().GetByName(db.WithTenant(ctx, p.TenantID), p.ProjectID, name)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		return projectAllocation{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectAllocation{}, err
+	}
+	if err := requireBackendFeature(ctx, d, p, f.Backend); err != nil {
+		return projectAllocation{}, err
+	}
+	a, err := fleet.AllocateServer(ctx, m, p.TenantID, fleet.ServerAllocate{
+		Fleet: f, Region: region, GameMode: strings.TrimSpace(in.Body.GameMode), Capacity: in.Body.Capacity,
+	}, projectActor(p))
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		return projectAllocation{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectAllocation{}, err
+	}
+	return newProjectAllocation(a), nil
+}
+
+// deallocateServer stops a server as the dashboard does. An allocation that
+// is already released is returned as it is, with no new audit row.
+func deallocateServer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectAllocationInput) (projectAllocation, error) {
+	m, err := fleetManager(d)
+	if err != nil {
+		return projectAllocation{}, err
+	}
+	a, err := fleet.DeallocateServer(ctx, m, p.TenantID, p.ProjectID, fleet.AllocationID(in.AllocationID), projectActor(p))
+	if errors.Is(err, fleet.ErrNotFound) {
+		return projectAllocation{}, errProjectNotFound()
+	}
 	if err != nil {
 		return projectAllocation{}, err
 	}

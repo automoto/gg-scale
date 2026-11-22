@@ -674,3 +674,40 @@ func TestManagementTokens_should_give_invite_with_players_read(t *testing.T) {
 	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}},
 		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
 }
+
+func newFleetTokenPanel(t *testing.T) tokenPanel {
+	t.Helper()
+	p := newTokenPanelWithFleet(t, true, true)
+	_, err := p.raw.Exec(context.Background(), `INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES ($1, 'dedicated_servers', true)`, p.tenantID)
+	require.NoError(t, err)
+	return p
+}
+
+func TestManagementTokens_should_refuse_allocations_write_without_fleets_read(t *testing.T) {
+	p := newFleetTokenPanel(t)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, body := p.create(t, c, csrf, url.Values{"access_fleets": {"none"}, "risky": {managementtoken.ScopeAllocationsWrite}})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
+		strings.Contains(body, "Needs read access to Fleets. Give that access or uncheck the box."), p.tokenCount(t)})
+}
+
+func TestManagementTokens_should_give_allocations_write_with_fleets_read(t *testing.T) {
+	p := newFleetTokenPanel(t)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_fleets": {"read"}, "risky": {managementtoken.ScopeAllocationsWrite}})
+
+	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite}},
+		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
+}
+
+func TestManagementTokens_should_refuse_allocations_write_when_the_fleet_switch_is_off(t *testing.T) {
+	p := newTokenPanelWithFleet(t, true, false)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopeAllocationsWrite}})
+
+	assert.Equal(t, []any{http.StatusForbidden, 0}, []any{resp.StatusCode, p.tokenCount(t)})
+}

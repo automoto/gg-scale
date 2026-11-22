@@ -54,6 +54,27 @@ func (s *PostgresStore) InsertPending(ctx context.Context, req AllocationRequest
 	return id, nil
 }
 
+type commitHookKey struct{}
+
+// CommitHook runs inside the transaction that marks an allocation ready or
+// released, so a row such as an audit row commits or rolls back with it.
+type CommitHook func(ctx context.Context, tx pgx.Tx, id AllocationID) error
+
+// WithCommitHook returns a context whose allocate or deallocate runs hook in
+// the transaction of the final row change. If the hook fails, the change
+// rolls back and the manager handles it as a failed row change.
+func WithCommitHook(ctx context.Context, hook CommitHook) context.Context {
+	return context.WithValue(ctx, commitHookKey{}, hook)
+}
+
+func runCommitHook(ctx context.Context, tx pgx.Tx, id AllocationID) error {
+	hook, ok := ctx.Value(commitHookKey{}).(CommitHook)
+	if !ok {
+		return nil
+	}
+	return hook(ctx, tx, id)
+}
+
 // MarkReady flips a pending row to 'ready' and stamps backend_ref + address. It
 // returns an error when the row is no longer pending, so the manager frees the
 // server instead of reviving a released row.
@@ -70,7 +91,7 @@ func (s *PostgresStore) MarkReady(ctx context.Context, id AllocationID, backendR
 		if n == 0 {
 			return fmt.Errorf("allocation %d is no longer pending", id)
 		}
-		return nil
+		return runCommitHook(ctx, tx, id)
 	})
 }
 
@@ -84,7 +105,10 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, id AllocationID) error {
 // Release marks the row 'shutdown' and stamps released_at.
 func (s *PostgresStore) Release(ctx context.Context, id AllocationID) error {
 	return s.pool.Q(ctx, func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).ReleaseAllocation(ctx, int64(id))
+		if err := sqlcgen.New(tx).ReleaseAllocation(ctx, int64(id)); err != nil {
+			return err
+		}
+		return runCommitHook(ctx, tx, id)
 	})
 }
 

@@ -1706,6 +1706,37 @@ components:
       required:
         - updated
       type: object
+    ProjectAllocateBody:
+      additionalProperties: false
+      properties:
+        capacity:
+          description: The player capacity. The default is 1.
+          examples:
+            - 2
+          format: int64
+          minimum: 1
+          type: integer
+        fleet:
+          description: The name of a live fleet of this Game Project.
+          examples:
+            - ranked
+          minLength: 1
+          type: string
+        game_mode:
+          description: The game mode. Optional.
+          examples:
+            - duel
+          type: string
+        region:
+          description: The region of the server.
+          examples:
+            - eu
+          minLength: 1
+          type: string
+      required:
+        - fleet
+        - region
+      type: object
     ProjectAllocation:
       additionalProperties: false
       properties:
@@ -6028,6 +6059,33 @@ paths:
       summary: List allocations
       tags:
         - Project Management
+    post:
+      description: Starts a game server from a live fleet and returns the allocation. This starts a billable server. The fleet is given by name. Answers 404 for a deleted fleet, an unknown fleet, or a fleet of another Game Project, and 403 when the backend of the fleet is not enabled for the Account Tenant. The request also needs the allocation allocate permission of the token creator.
+      operationId: allocateProjectServer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectAllocateBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllocation"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Start a game server
+      tags:
+        - Project Management
   /v1/project/allocations/{allocation_id}:
     get:
       description: Returns one allocation. An allocation of another Game Project answers 404. The request also needs the allocation read permission of the token creator.
@@ -6058,6 +6116,38 @@ paths:
       security:
         - ManagementToken: []
       summary: Get an allocation
+      tags:
+        - Project Management
+  /v1/project/allocations/{allocation_id}/deallocate:
+    post:
+      description: Stops the game server of one allocation and returns the allocation. This ends a live match and cannot be undone. An allocation that is already released is returned as it is. Answers 404 for an allocation of another Game Project. The request also needs the allocation deallocate permission of the token creator.
+      operationId: deallocateProjectServer
+      parameters:
+        - description: The allocation ID.
+          in: path
+          name: allocation_id
+          required: true
+          schema:
+            description: The allocation ID.
+            format: int64
+            minimum: 1
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAllocation"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Stop a game server
       tags:
         - Project Management
   /v1/project/allocations/{allocation_id}/events:

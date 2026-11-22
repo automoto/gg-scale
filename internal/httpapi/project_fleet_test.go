@@ -14,9 +14,11 @@ import (
 	"github.com/automoto/gg-scale/internal/rbac"
 )
 
-var fleetTools = []string{"create_fleet", "delete_fleet", "get_allocation", "get_fleet", "list_allocation_events", "list_allocations", "list_fleets", "restore_fleet", "update_fleet"}
+var fleetTools = []string{"allocate_server", "create_fleet", "deallocate_server", "delete_fleet", "get_allocation", "get_fleet", "list_allocation_events", "list_allocations", "list_fleets", "restore_fleet", "update_fleet"}
 
 var fleetWriteTools = []string{"create_fleet", "delete_fleet", "restore_fleet", "update_fleet"}
+
+var allocationWriteTools = []string{"allocate_server", "deallocate_server"}
 
 // registeredTools returns the sorted tool names of the /v1/project operations
 // that registerProjectManagementRoutes adds for d, other than the open ones.
@@ -25,7 +27,7 @@ func registeredTools(d Deps) []string {
 	registerProjectManagementRoutes(groupAPI(chi.NewRouter(), cfg), d)
 	var out []string
 	for _, tool := range managementToolArguments(cfg.OpenAPI) {
-		if scope := tool.op.Metadata[managementScopeMetadata]; scope == managementtoken.ScopeFleetRead || scope == managementtoken.ScopeFleetWrite {
+		if scope := tool.op.Metadata[managementScopeMetadata]; scope == managementtoken.ScopeFleetRead || scope == managementtoken.ScopeFleetWrite || scope == managementtoken.ScopeAllocationsWrite {
 			out = append(out, tool.op.Metadata[managementToolMetadata].(string))
 		}
 	}
@@ -58,11 +60,14 @@ func TestProjectFleetOps_should_need_the_fleet_read_or_write_scope(t *testing.T)
 		if slices.Contains(fleetWriteTools, tool) {
 			want[tool] = managementtoken.ScopeFleetWrite
 		}
+		if slices.Contains(allocationWriteTools, tool) {
+			want[tool] = managementtoken.ScopeAllocationsWrite
+		}
 	}
 	assert.Equal(t, want, got)
 }
 
-func TestProjectFleetOps_allocation_rows_should_check_the_allocation_read_pair(t *testing.T) {
+func TestProjectFleetOps_allocation_rows_should_check_their_allocation_pair(t *testing.T) {
 	got := map[string]string{}
 	for _, row := range projectOps {
 		if row.fleet && row.pair != nil {
@@ -71,7 +76,10 @@ func TestProjectFleetOps_allocation_rows_should_check_the_allocation_read_pair(t
 	}
 
 	want := "project:42:allocation read"
-	assert.Equal(t, map[string]string{"list_allocations": want, "get_allocation": want, "list_allocation_events": want}, got)
+	assert.Equal(t, map[string]string{
+		"list_allocations": want, "get_allocation": want, "list_allocation_events": want,
+		"allocate_server": "project:42:allocation allocate", "deallocate_server": "project:42:allocation deallocate",
+	}, got)
 }
 
 func fleetProbe(t *testing.T, grant bool, role string, scopes ...string) int {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -219,4 +220,23 @@ func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
 	_, err = mgr.Allocate(ctx, fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local", Capacity: 1})
 
 	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
+}
+
+func TestManager_should_roll_back_the_ready_change_when_the_commit_hook_fails(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), fakeBackend{name: "agones"}, fleet.ManagerOptions{
+		Clock: func(int) time.Duration { return 0 },
+	})
+	tmpl, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
+		ProjectID: projectID, Name: "hooked", Backend: "agones", Config: map[string]string{"fleet_name": "hooked"},
+	}, actor)
+	require.NoError(t, err)
+	hooked := fleet.WithCommitHook(ctx, func(context.Context, pgx.Tx, fleet.AllocationID) error { return errors.New("audit failed") })
+
+	_, err = mgr.Allocate(hooked, fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local", Capacity: 1})
+
+	rows, _, lerr := mgr.List(ctx, projectID, true, 10, 0)
+	require.NoError(t, lerr)
+	assert.Equal(t, []any{true, 1, fleet.StatusFailed}, []any{err != nil, len(rows), rows[0].Status})
 }

@@ -3,6 +3,7 @@
 package managementapi_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -26,12 +27,34 @@ func newFleetFixture(t *testing.T) *fixture {
 	f := newFixtureWith(t, func(d *httpapi.Deps) {
 		d.ControlPanel.FleetEnabled = true
 		pool = d.Pool
-		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), nil, fleet.ManagerOptions{})
+		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), fakeBackend{}, fleet.ManagerOptions{})
 	})
 	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES
 		($1, 'dedicated_servers', true), ($1, 'fleet_agones_backend', true), ($1, 'fleet_plugin_backend', true)`, f.tenantA)
 	return f
 }
+
+// fakeBackend starts and stops servers without a cluster. Its server has the
+// ref "gs-new". The backend name is agones.
+type fakeBackend struct{}
+
+func (fakeBackend) Name() string { return "agones" }
+
+func (fakeBackend) Allocate(context.Context, fleet.AllocationRequest) (*fleet.Allocation, error) {
+	return &fleet.Allocation{BackendRef: "gs-new", Address: "198.51.100.1:7777", Status: fleet.StatusReady}, nil
+}
+
+func (fakeBackend) Deallocate(context.Context, fleet.AllocationID, string) error { return nil }
+
+func (fakeBackend) Status(context.Context, fleet.AllocationID, string) (fleet.Status, error) {
+	return fleet.StatusReady, nil
+}
+
+func (fakeBackend) Watch(context.Context, fleet.AllocationID, string) (<-chan fleet.StatusUpdate, error) {
+	return nil, fleet.ErrUnsupported
+}
+
+func (fakeBackend) HealthCheck(context.Context) error { return nil }
 
 func (f *fixture) fleet(projectID int64, name string) int64 {
 	f.t.Helper()
@@ -93,6 +116,19 @@ func TestFleets_should_list_the_tools_when_the_fleet_switch_is_on(t *testing.T) 
 	for _, tool := range []string{"list_fleets", "get_fleet", "list_allocations", "get_allocation", "list_allocation_events"} {
 		assert.Contains(t, text, "name:"+tool)
 	}
+}
+
+func TestAllocationWrite_should_list_its_tools_only_with_the_scope(t *testing.T) {
+	f := newFleetFixture(t)
+	with := f.scopedToken(managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite)
+	without := f.scopedToken(managementtoken.ScopeFleetRead)
+
+	_, listed := f.post(with, toolsList)
+	_, hidden := f.post(without, toolsList)
+
+	assert.Equal(t, []bool{true, true, false, false}, []bool{
+		strings.Contains(fmt.Sprint(listed), "name:allocate_server"), strings.Contains(fmt.Sprint(listed), "name:deallocate_server"),
+		strings.Contains(fmt.Sprint(hidden), "name:allocate_server"), strings.Contains(fmt.Sprint(hidden), "name:deallocate_server")})
 }
 
 func TestFleets_should_list_own_project_fleets_and_page_them(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -224,14 +225,9 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	alloc, err := h.fleet.Allocate(tenantCtx, fleet.AllocationRequest{
-		TenantID:  tenantID,
-		ProjectID: projectID,
-		FleetID:   f.ID,
-		Region:    region,
-		GameMode:  gameMode,
-		Capacity:  capacity,
-	})
+	alloc, err := fleet.AllocateServer(r.Context(), h.fleet, tenantID, fleet.ServerAllocate{
+		Fleet: f, Region: region, GameMode: gameMode, Capacity: capacity,
+	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "manual allocate failed", "err", err, "tenant", tenantID, "project", projectID)
 		view.Error = "Allocate failed: " + err.Error()
@@ -239,19 +235,9 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.allocate.manual", strconv.FormatInt(int64(alloc.ID), 10), map[string]any{
-		"project_id": projectID,
-		"fleet_id":   f.ID,
-		"fleet_name": f.Name,
-		"region":     region,
-		"game_mode":  gameMode,
-		"capacity":   capacity,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.allocate.manual", "err", auditErr)
-	}
 	target := allocationsBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
 		queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 }
 
 // loadFleetOptions fetches active fleet templates for the project so the
@@ -342,34 +328,22 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
 	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
 		return
 	}
-	// Confirm the allocation belongs to this project before mutating it. RLS
-	// already confines the row to the tenant, but the authorization object is
-	// project-scoped, so a project boundary must be enforced here too — the
-	// read paths do this via loadAllocationDetail; the mutating path must match.
-	if _, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID); err != nil {
-		if errors.Is(err, fleet.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
+	session, _ := sessionFromContext(r.Context())
+	_, err := fleet.DeallocateServer(r.Context(), h.fleet, tenantID, projectID, fleet.AllocationID(allocID), projectadmin.Actor{UserID: session.User.ID})
+	if errors.Is(err, fleet.ErrNotFound) {
+		http.NotFound(w, r)
 		return
 	}
-	if err := h.fleet.Deallocate(tenantCtx, fleet.AllocationID(allocID)); err != nil {
+	if err != nil {
 		slog.ErrorContext(r.Context(), "manual deallocate failed", "err", err, "alloc", allocID)
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)
 		return
 	}
-	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.deallocate.manual",
-		strconv.FormatInt(allocID, 10), map[string]any{"project_id": projectID}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.deallocate.manual", "err", auditErr)
-	}
 	target := allocationsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 }
 
 // fleetBackendsPage shows the backends seen across this tenant's allocations

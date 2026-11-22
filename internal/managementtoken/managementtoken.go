@@ -36,6 +36,7 @@ const (
 	ScopeLimitsWrite       = "limits:write"
 	ScopeFleetRead         = "fleet:read"
 	ScopeFleetWrite        = "fleet:write"
+	ScopeAllocationsWrite  = "allocations:write"
 )
 
 // Scope classes.
@@ -75,7 +76,9 @@ func projectObject(int64) string { return rbac.ObjectProject }
 // (players, read), so the player scopes use (players, manage): a pair that
 // is not weaker than the pages and that each such role passes. The fleet
 // pages check (fleet, read), so fleet:read uses it. The allocation reads
-// also check their own pair, (allocation, read), on each request. The key
+// also check their own pair, (allocation, read), on each request. The
+// allocations:write scope uses the allocate pair; stopping a server also
+// checks (allocation, deallocate) on each request. The key
 // write scopes use the publishable key pair; each request also checks the
 // pair of the target key's type, so a secret key needs the secret key pair.
 var Scopes = []ScopePair{
@@ -114,6 +117,10 @@ var Scopes = []ScopePair{
 	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeFleetRead, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionRead, Resource: "fleets"},
 	{Scope: ScopeFleetWrite, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionManage, Resource: "fleets"},
+	{
+		Scope: ScopeAllocationsWrite, Class: ClassRisky, Pair: rbac.ProjectAllocationObject, Action: rbac.ActionAllocate, Resource: "fleets",
+		Label: "Start and stop game servers. Stopping ends a live match.", Needs: ScopeFleetRead,
+	},
 }
 
 // Resource is one row of the access table on the token page.
