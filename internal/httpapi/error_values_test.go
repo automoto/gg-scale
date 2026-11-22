@@ -224,15 +224,17 @@ func TestBodyParseError_should_not_return_body_text(t *testing.T) {
 	}
 }
 
-func TestBodyParseError_should_say_the_body_is_not_valid_json(t *testing.T) {
+func TestBodyParseError_should_say_the_body_could_not_be_decoded(t *testing.T) {
 	s := newProbeServer(t)
 
 	rec := s.do(http.MethodPost, "/v1/auth/login", `{"password":^`)
 
-	assert.Contains(t, rec.Body.String(), `"message":"request body is not valid JSON"`)
+	assert.Contains(t, rec.Body.String(), `"message":"request body could not be decoded"`)
 }
 
-func TestBodyParseError_should_not_return_body_text_over_mcp(t *testing.T) {
+func TestMCPEnvelopeParseError_should_not_return_body_text(t *testing.T) {
+	// The JSON-RPC envelope does not parse, so huma mcp answers before any
+	// tool body is decoded.
 	s := newProbeServer(t)
 
 	got := s.mcpRaw(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_api_key","arguments":{"label":^` + probeMarker + `}}}`)
@@ -245,11 +247,23 @@ func TestBodyParseError_should_not_return_a_duplicate_key_body_over_mcp(t *testi
 
 	got := s.mcp("create_fleet", `{"name":"a","backend":"plugin:x","config":{"api_token":"`+probeMarker+`","api_token":"b"}}`)
 
-	assert.Equal(t, []any{true, false}, []any{strings.Contains(got, "request body is not valid JSON"), strings.Contains(got, probeMarker)}, got)
+	assert.Equal(t, []any{true, false}, []any{strings.Contains(got, "request body could not be decoded"), strings.Contains(got, probeMarker)}, got)
 }
 
 // The session verify route decodes its own body and answers one opaque 401
 // for every failure.
+func TestBodyDecodeError_should_not_return_body_text_for_valid_json_of_the_wrong_size(t *testing.T) {
+	s := newProbeServer(t)
+
+	// The JSON is valid and passes validation, but 1e30 does not fit the
+	// int64 of expected_revision, so the decode into the input fails.
+	rec := s.do(http.MethodPut, "/v1/project/remote-config", `{"config":{},"expected_revision":1e30}`)
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, false, true},
+		[]any{rec.Code, strings.Contains(rec.Body.String(), "1e30"), strings.Contains(rec.Body.String(), "request body could not be decoded")},
+		rec.Body.String())
+}
+
 func TestVerifyPlayerSession_should_not_return_the_session_token(t *testing.T) {
 	signer, err := auth.NewSignerRandom()
 	require.NoError(t, err)

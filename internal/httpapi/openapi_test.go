@@ -295,3 +295,11 @@ func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {
 	assert.Contains(t, item.Post.Responses, "200")
 	assert.Contains(t, item.Post.Responses, "401")
 }
+
+func TestOpenAPIDoc_error_detail_value_says_it_is_left_out(t *testing.T) {
+	doc := OpenAPIDoc("test")
+
+	value := doc.Components.Schemas.Map()["ErrorDetail"].Properties["value"]
+
+	assert.Equal(t, errorDetailValueDescription, value.Description)
+}

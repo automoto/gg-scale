@@ -220,16 +220,17 @@ func dropErrorValues(_ huma.Context, _ string, v any) (any, error) {
 	return v, nil
 }
 
-// errInvalidJSONBody is the message of every request body that does not
-// parse. The decoder error quotes the first bad byte of the body.
-var errInvalidJSONBody = errors.New("request body is not valid JSON")
+// errBodyDecode is the message of every request body that does not decode:
+// JSON that does not parse, or valid JSON that does not fit the input type.
+// The decoder error quotes the first bad byte or the number.
+var errBodyDecode = errors.New("request body could not be decoded")
 
-// jsonFormat is huma's JSON format with a fixed parse error message.
+// jsonFormat is huma's JSON format with a fixed decode error message.
 var jsonFormat = huma.Format{
 	Marshal: huma.DefaultJSONFormat.Marshal,
 	Unmarshal: func(data []byte, v any) error {
 		if huma.DefaultJSONFormat.Unmarshal(data, v) != nil {
-			return errInvalidJSONBody
+			return errBodyDecode
 		}
 		return nil
 	},

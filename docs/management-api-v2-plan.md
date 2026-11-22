@@ -480,9 +480,10 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - Validation errors no longer include the refused value (`errors[].value`).
   This is for every API operation and MCP tool. Only the 409
   `ticket_already_active` keeps the active ticket id in `errors[].value`.
-- A request body that is not valid JSON now gives the fixed message
-  `request body is not valid JSON` (400). Before, the message quoted the
-  first bad byte.
+- A request body that cannot be decoded (JSON that does not parse, or a
+  value that does not fit its field, such as `1e30` for an integer) now
+  gives the fixed message `request body could not be decoded`. Before, the
+  message quoted the first bad byte or the number.
 - `POST /v1/auth/delete/cancel` with a bad email still answers 422 at
   `body.email`, but the message is now `expected a valid email address`.
   Before, the message quoted part of the address.

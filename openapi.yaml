@@ -200,7 +200,7 @@ components:
           description: Error message text
           type: string
         value:
-          description: The value at the given location
+          description: "The server leaves this out, except for one case: on a 409 ticket_already_active, the entry at location active_ticket_id holds the id of the active ticket."
       type: object
     ErrorModel:
       additionalProperties: false

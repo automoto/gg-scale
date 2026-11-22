@@ -29,6 +29,9 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	enrichVerifyOp(doc)
 	addWebSocketStub(doc)
 	noteSecretKeyOperations(doc)
+	if detail := doc.Components.Schemas.Map()["ErrorDetail"]; detail != nil && detail.Properties["value"] != nil {
+		detail.Properties["value"].Description = errorDetailValueDescription
+	}
 	return doc
 }
 
@@ -163,3 +166,8 @@ func secretKeyOnly(op *huma.Operation) bool {
 	}
 	return true
 }
+
+// errorDetailValueDescription documents what dropErrorValues leaves in
+// errors[].value.
+const errorDetailValueDescription = "The server leaves this out, except for one case: on a 409 " +
+	"ticket_already_active, the entry at location active_ticket_id holds the id of the active ticket."
