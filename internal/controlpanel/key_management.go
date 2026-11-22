@@ -231,9 +231,6 @@ func (h *Handler) createAPIKey(ctx context.Context, actorID int64, in createKeyI
 		Label:     in.Label,
 		Type:      in.KeyType,
 	}, projectadmin.Actor{UserID: actorID})
-	if errors.Is(err, projectadmin.ErrProjectNotInTenant) {
-		return createKeyResult{}, errProjectNotInTenant
-	}
 	if err != nil {
 		return createKeyResult{}, err
 	}

@@ -441,7 +441,7 @@ func (h *Handler) sendInviteEmail(ctx context.Context, res inviteResult, subject
 		slog.WarnContext(ctx, "control panel invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
 		return
 	}
-	if h.inviteEmailSuppressed(ctx, res.Email) {
+	if projectadmin.EmailSuppressed(ctx, h.pool, res.Email) {
 		return
 	}
 	link := h.inviteAcceptURL(res.Code)
@@ -481,17 +481,7 @@ func (h *Handler) tenantDisplayName(ctx context.Context, tenantID int64) string 
 	if err != nil {
 		return ""
 	}
-	return headerSafeName(name, "")
-}
-
-// headerSafeName returns name when it can be embedded in a mail subject —
-// printable and small enough that the composed header stays far under RFC
-// 5322's line limit — else fallback. Resource names are user-controlled and
-// barely validated at creation; a weird name must degrade the email copy,
-// not break delivery (the SMTP send error would only be logged while the
-// operator sees a success flash).
-func headerSafeName(name, fallback string) string {
-	return projectadmin.HeaderSafeName(name, fallback)
+	return projectadmin.HeaderSafeName(name, "")
 }
 
 func (h *Handler) inviteAcceptURL(code string) string {

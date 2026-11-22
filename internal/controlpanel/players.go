@@ -27,7 +27,7 @@ const playersPerPage = 25
 // errProjectNotInTenant is returned when the URL projectID does not
 // belong to the URL tenantID — guards against tenant-A admins crafting
 // requests against tenant-B projects.
-var errProjectNotInTenant = errors.New("control panel: project not in tenant")
+var errProjectNotInTenant = projectadmin.ErrProjectNotInTenant
 
 // PlayerView is one row in the player list/detail page.
 type PlayerView struct {

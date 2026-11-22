@@ -196,7 +196,7 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 		h.redirectRateLimits(w, r, tenantID, "Connection limits cannot exceed 500,000 without a capacity-reviewed release.")
 	case errors.Is(err, errConnectionEnvOverride):
 		h.redirectRateLimits(w, r, tenantID, "REALTIME_MAX_PER_TENANT is active; unset it before editing tenant connection limits.")
-	case errors.Is(err, errProjectNotInTenant), errors.Is(err, projectadmin.ErrProjectNotInTenant):
+	case errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		http.Error(w, "Game Project not found", http.StatusNotFound)
 	default:
 		http.Error(w, "rate limit update failed", http.StatusInternalServerError)
