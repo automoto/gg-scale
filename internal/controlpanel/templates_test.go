@@ -828,8 +828,9 @@ func TestManagementTokensPage_should_wrap_tables_and_long_labels(t *testing.T) {
 		Tokens:    []ManagementTokenRowView{{ID: 1, Label: "x"}},
 	}))
 
-	assert.Contains(t, html, `class="table-scroll"`)
-	assert.Contains(t, html, `class="wrap-cell"`)
+	for _, want := range []string{`class="table-scroll"`, `token-table`, `access-table`, `data-label="Created by"`, `class="row-actions"`, `class="wrap-cell"`} {
+		assert.Contains(t, html, want)
+	}
 }
 
 func TestFleetsPage_should_scroll_the_deleted_fleets_table(t *testing.T) {
@@ -839,4 +840,5 @@ func TestFleetsPage_should_scroll_the_deleted_fleets_table(t *testing.T) {
 	}))
 
 	assert.Contains(t, html, `class="table-scroll"`)
+	assert.Contains(t, html, `deleted-table`)
 }

@@ -9574,7 +9574,7 @@ func FleetsListPage(vm FleetsListView) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(vm.DeletedFleets) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 833, "<section class=\"card\"><h2>Deleted fleets</h2><div class=\"table-scroll\"><table class=\"data-table\"><thead><tr><th>Name</th><th>Backend</th><th></th></tr></thead> <tbody>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 833, "<section class=\"card\"><h2>Deleted fleets</h2><div class=\"table-scroll\"><table class=\"data-table deleted-table\"><thead><tr><th>Name</th><th>Backend</th><th></th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -13197,14 +13197,14 @@ func ManagementTokensPage(vm ManagementTokensView) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1171, "<form method=\"post\" action=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1171, "<form class=\"token-form\" method=\"post\" action=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var669 string
 			templ_7745c5c3_Var669, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID))).ResolveURL(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3298, Col: 90}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlpanel/templates.templ`, Line: 3298, Col: 109}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var669)
 			if templ_7745c5c3_Err != nil {

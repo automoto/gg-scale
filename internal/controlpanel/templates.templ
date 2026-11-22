@@ -640,7 +640,7 @@ templ apiKeyFeatureCell(tenantID int64, csrf string, key APIKeyView) {
 			hx-target="#modal-root"
 			hx-swap="innerHTML"
 		>Manage features</button>
-									</div>
+	</div>
 }
 
 templ APIKeyFeaturesDialog(tenantID int64, csrf string, key APIKeyView) {
@@ -2377,7 +2377,7 @@ templ FleetsListPage(vm FleetsListView) {
 			<section class="card">
 				<h2>Deleted fleets</h2>
 				<div class="table-scroll">
-				<table class="data-table">
+				<table class="data-table deleted-table">
 					<thead>
 						<tr>
 							<th>Name</th>
@@ -2486,7 +2486,7 @@ templ agonesFleetFields(vm NewFleetView) {
 	<div class="kv-row">
 		<input name="selector_key[]" placeholder="key"/>
 		<input name="selector_value[]" placeholder="value"/>
-									</div>
+	</div>
 }
 
 templ pluginFleetFields(vm NewFleetView) {
@@ -2503,7 +2503,7 @@ templ pluginFleetFields(vm NewFleetView) {
 	<div class="kv-row">
 		<input name="config_key[]" placeholder="key"/>
 		<input name="config_value[]" placeholder="value"/>
-									</div>
+	</div>
 }
 
 templ EditFleetPage(vm EditFleetView) {
@@ -2669,7 +2669,7 @@ templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
 			<input name="score_max" value={ vm.ScoreMax } inputmode="numeric" placeholder="none" aria-describedby="score_max-error"/>
 			@fieldError(vm.FieldErrors, "score_max")
 		</label>
-									</div>
+	</div>
 	<div class="grid">
 		<label>
 			Reset schedule
@@ -2686,7 +2686,7 @@ templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
 			<input name="attempt_cap" value={ vm.AttemptCap } inputmode="numeric" placeholder="unlimited" aria-describedby="attempt_cap-error"/>
 			@fieldError(vm.FieldErrors, "attempt_cap")
 		</label>
-									</div>
+	</div>
 	if edit && vm.ResetSchedule != "none" {
 		<p class="muted">Current period: { stringFromInt(int64(vm.CurrentPeriod)) }</p>
 	}
@@ -3295,7 +3295,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 			if vm.RiskyNotice != "" {
 				<p role="status">A link checked risky access in this form: { vm.RiskyNotice } Read it before you create the token. Uncheck the box if you do not want it.</p>
 			}
-			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) }>
+			<form class="token-form" method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Label
