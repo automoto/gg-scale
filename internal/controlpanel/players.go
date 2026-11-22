@@ -1,9 +1,7 @@
 package controlpanel
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -13,200 +11,23 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/auditlog"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
-	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/remoteaddr"
-	"github.com/automoto/gg-scale/internal/verifycode"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const playersPerPage = 25
 
-type playerInviteResult struct {
-	ID        int64
-	Email     string
-	Code      string
-	ExpiresAt time.Time
-}
-
 // errProjectNotInTenant is returned when the URL projectID does not
 // belong to the URL tenantID — guards against tenant-A admins crafting
-// invites against tenant-B projects.
+// requests against tenant-B projects.
 var errProjectNotInTenant = errors.New("control panel: project not in tenant")
-
-// errPlayerEmailTaken means the email is already owned by a different player in
-// the project, so it can't be bound onto the "link player" target row.
-var errPlayerEmailTaken = errors.New("control panel: email already used by another player")
-
-// createPlayerInvite mints a code, persists the row (privileged path), and
-// returns the plaintext code so the caller can email it. A non-nil targetPlayer
-// makes this an admin "link player" invite: acceptance binds the proven email
-// onto that existing row, and any prior open invite for it is superseded.
-func (h *Handler) createPlayerInvite(ctx context.Context, tenantID, projectID int64, email string, invitedBy int64, targetPlayer *int64) (playerInviteResult, error) {
-	code, err := verifycode.GenerateInviteCode()
-	if err != nil {
-		return playerInviteResult{}, fmt.Errorf("invite code: %w", err)
-	}
-	codeHash := verifycode.Hash(nil, code)
-	expiresAt := h.now().Add(verifycode.InviteTTL)
-
-	var row sqlcgen.CreatePlayerInvitationRow
-	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		// Set app.tenant_id first so RLS on projects + player_invitations
-		// admits both the ownership check and the insert.
-		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", stringFromInt(tenantID)); err != nil {
-			return fmt.Errorf("set app.tenant_id: %w", err)
-		}
-		// Defense-in-depth: confirm the project actually belongs to the
-		// route's tenant before inserting. RLS already filters projects
-		// to the set tenant_id, so ErrNoRows here means "project not
-		// in this tenant"; the explicit TenantID equality is paranoia
-		// for the day someone tightens RLS to a different rule.
-		proj, perr := q.GetProjectTenant(ctx, projectID)
-		if errors.Is(perr, pgx.ErrNoRows) {
-			return errProjectNotInTenant
-		}
-		if perr != nil {
-			return perr
-		}
-		if proj.TenantID != tenantID {
-			return errProjectNotInTenant
-		}
-		if targetPlayer != nil {
-			// Reject if the email already belongs to a different player: the
-			// email unique index would block the bind on accept anyway, and a
-			// clear up-front error beats a late conflict.
-			existing, eerr := q.GetPlayerForAccountLink(ctx, sqlcgen.GetPlayerForAccountLinkParams{
-				ProjectID: projectID, Email: &email,
-			})
-			switch {
-			case eerr == nil && existing.ID != *targetPlayer:
-				return errPlayerEmailTaken
-			case eerr != nil && !errors.Is(eerr, pgx.ErrNoRows):
-				return eerr
-			}
-			// Supersede any prior open invite that would collide with this one —
-			// keyed on the target row or the (project_id, email) open-invite
-			// unique index — so the resend isn't rejected by that index.
-			if rerr := q.RevokeSupersededPlayerInvitations(ctx, sqlcgen.RevokeSupersededPlayerInvitationsParams{
-				ProjectID:       projectID,
-				ProjectPlayerID: targetPlayer,
-				Email:           email,
-			}); rerr != nil {
-				return rerr
-			}
-		}
-		r, qerr := q.CreatePlayerInvitation(ctx, sqlcgen.CreatePlayerInvitationParams{
-			ProjectID:       projectID,
-			Email:           email,
-			CodeHash:        codeHash,
-			ExpiresAt:       pgtype.Timestamptz{Time: expiresAt, Valid: true},
-			InvitedByUserID: invitedBy,
-			ProjectPlayerID: targetPlayer,
-		})
-		if qerr != nil {
-			return qerr
-		}
-		row = r
-		return nil
-	})
-	if err != nil {
-		return playerInviteResult{}, err
-	}
-	return playerInviteResult{
-		ID:        row.ID,
-		Email:     email,
-		Code:      code,
-		ExpiresAt: row.ExpiresAt.Time,
-	}, nil
-}
-
-// errInviteThrottled marks a send rejected by the per-recipient/inviter/domain
-// throttle so the caller can render its own 429 with the retry hint.
-var errInviteThrottled = errors.New("control panel: invite throttled")
-
-// createAndSendPlayerInvite is the throttle → create → refund-on-error →
-// metrics → email pipeline shared by the invite-player and link-player
-// handlers. targetPlayer is nil for a plain invite or the row id for a link
-// invite. On a throttle rejection it returns errInviteThrottled with the
-// retry-after seconds; on a create failure it refunds the debited token and
-// returns the underlying error. How the error is presented (full page vs
-// dialog fragment) is left to the caller.
-func (h *Handler) createAndSendPlayerInvite(r *http.Request, tenantID, projectID, inviterID int64, email string, targetPlayer *int64) (playerInviteResult, int, error) {
-	if retry, throttled := h.inviteThrottled(r.Context(), inviterID, tenantID, projectID, email); throttled {
-		return playerInviteResult{}, retry, errInviteThrottled
-	}
-	res, err := h.createPlayerInvite(r.Context(), tenantID, projectID, email, inviterID, targetPlayer)
-	if err != nil {
-		// The throttle already debited this send; the invite didn't happen, so
-		// return the tokens rather than charging a failed attempt against quota.
-		h.inviteRefund(r.Context(), inviterID, tenantID, projectID, email)
-		return playerInviteResult{}, 0, err
-	}
-	h.metrics.InviteSent(observability.InvitePlayer)
-	session, _ := sessionFromContext(r.Context())
-	h.sendPlayerInviteEmail(r.Context(), res, tenantID, projectID, session.User.Email)
-	return res, 0, nil
-}
-
-// sendPlayerInviteEmail mails the invite recipient a magic link into the
-// player site. Failure is logged but does not block the request. Suppressed
-// (unsubscribed) addresses are dropped; the invite itself still exists.
-func (h *Handler) sendPlayerInviteEmail(ctx context.Context, res playerInviteResult, tenantID, projectID int64, inviterEmail string) {
-	if h.mailer == nil || h.cfg.MailFrom == "" {
-		slog.WarnContext(ctx, "player invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
-		return
-	}
-	if h.inviteEmailSuppressed(ctx, res.Email) {
-		return
-	}
-	gameName := h.projectDisplayName(ctx, tenantID, projectID)
-	base := strings.TrimRight(h.cfg.BaseURL, "/")
-	link := base + "/v1/players/p/" + strconv.FormatInt(projectID, 10) + "/invite/accept?code=" + url.QueryEscape(res.Code)
-	unsubscribe := webutil.EmailUnsubscribeURL(h.cfg.BaseURL, h.verifySigningKey, res.Email)
-	body := fmt.Sprintf(
-		"%s invited you to play %s.\n\n"+
-			"Accept the invite and set up your player account here:\n%s\n\n"+
-			"ggscale is the player-account service %s uses for sign-in, saves, friends, and leaderboards. "+
-			"One ggscale account works across every game built on it.\n\n"+
-			"This invite expires %s.\n\n"+
-			"Don't want invite emails? Unsubscribe: %s",
-		inviterEmail, gameName, link, gameName,
-		res.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC"), unsubscribe)
-	if err := h.mailer.Send(ctx, mailer.Message{
-		From:            h.cfg.MailFrom,
-		To:              []string{res.Email},
-		Subject:         "You're invited to play " + gameName,
-		Body:            body,
-		ListUnsubscribe: unsubscribe,
-	}); err != nil {
-		slog.ErrorContext(ctx, "player invite mailer", "err", err, "invite_id", res.ID)
-	}
-}
-
-// projectDisplayName resolves the project (game) name for invite copy, with
-// a generic fallback when the lookup fails or the name is not header-safe.
-func (h *Handler) projectDisplayName(ctx context.Context, tenantID, projectID int64) string {
-	const fallback = "a game on ggscale"
-	projects, err := h.listProjects(ctx, tenantID)
-	if err != nil {
-		return fallback
-	}
-	for _, p := range projects {
-		if p.ID == projectID {
-			return headerSafeName(p.Name, fallback)
-		}
-	}
-	return fallback
-}
 
 // PlayerView is one row in the player list/detail page.
 type PlayerView struct {
@@ -458,21 +279,22 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	res, retry, err := h.createAndSendPlayerInvite(r, tenantID, projectID, session.User.ID, email, nil)
+	res, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, nil, h.now(), projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		view := InvitePlayerView{
 			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
 			TenantID: tenantID, ProjectID: projectID, Email: email,
 		}
+		var throttled *projectadmin.InviteThrottledError
 		switch {
-		case errors.Is(err, errInviteThrottled):
-			w.Header().Set("Retry-After", strconv.Itoa(retry))
-			view.Error = "Too many invites in a short time. Try again in " + strconv.Itoa(retry) + "s."
+		case errors.As(err, &throttled):
+			w.Header().Set("Retry-After", strconv.Itoa(throttled.RetryAfter))
+			view.Error = "Too many invites in a short time. Try again in " + strconv.Itoa(throttled.RetryAfter) + "s."
 			w.WriteHeader(http.StatusTooManyRequests)
-		case errors.Is(err, errProjectNotInTenant):
+		case errors.Is(err, projectadmin.ErrProjectNotInTenant):
 			view.Error = "That Game Project does not belong to this Account Tenant."
 			w.WriteHeader(http.StatusNotFound)
-		case isUniqueViolation(err):
+		case errors.Is(err, projectadmin.ErrInvitePending):
 			view.Error = "An invite for that email is already pending."
 			w.WriteHeader(http.StatusConflict)
 		default:
@@ -583,18 +405,19 @@ func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		h.renderLinkDialogError(w, r, vm, http.StatusUnprocessableEntity, "Enter a valid email.")
 		return
 	}
-	res, retry, err := h.createAndSendPlayerInvite(r, tenantID, projectID, session.User.ID, email, &playerID)
+	res, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, &playerID, h.now(), projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
+		var throttled *projectadmin.InviteThrottledError
 		switch {
-		case errors.Is(err, errInviteThrottled):
-			w.Header().Set("Retry-After", strconv.Itoa(retry))
+		case errors.As(err, &throttled):
+			w.Header().Set("Retry-After", strconv.Itoa(throttled.RetryAfter))
 			h.renderLinkDialogError(w, r, vm, http.StatusTooManyRequests,
-				"Too many invites in a short time. Try again in "+strconv.Itoa(retry)+"s.")
-		case errors.Is(err, errProjectNotInTenant):
-			h.renderLinkDialogError(w, r, vm, http.StatusNotFound, "That Game Project does not belong to this Account Tenant.")
-		case errors.Is(err, errPlayerEmailTaken):
+				"Too many invites in a short time. Try again in "+strconv.Itoa(throttled.RetryAfter)+"s.")
+		case errors.Is(err, projectadmin.ErrProjectNotInTenant), errors.Is(err, projectadmin.ErrPlayerNotFound):
+			h.renderLinkDialogError(w, r, vm, http.StatusNotFound, "That player does not belong to this Game Project.")
+		case errors.Is(err, projectadmin.ErrPlayerEmailTaken):
 			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "That email is already used by another player in this Game Project.")
-		case isUniqueViolation(err):
+		case errors.Is(err, projectadmin.ErrInvitePending):
 			h.renderLinkDialogError(w, r, vm, http.StatusConflict, "An invite for that email is already pending.")
 		default:
 			slog.ErrorContext(r.Context(), "player link: create", "err", err)

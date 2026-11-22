@@ -15,6 +15,7 @@ import (
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -490,14 +491,7 @@ func (h *Handler) tenantDisplayName(ctx context.Context, tenantID int64) string 
 // not break delivery (the SMTP send error would only be logged while the
 // operator sees a success flash).
 func headerSafeName(name, fallback string) string {
-	const maxNameBytes = 120
-	if name == "" || len(name) > maxNameBytes {
-		return fallback
-	}
-	if _, err := webutil.SanitizeHeader(name); err != nil {
-		return fallback
-	}
-	return name
+	return projectadmin.HeaderSafeName(name, fallback)
 }
 
 func (h *Handler) inviteAcceptURL(code string) string {

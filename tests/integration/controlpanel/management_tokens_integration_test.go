@@ -654,3 +654,23 @@ func TestManagementTokens_should_give_steam_write_only_when_checked(t *testing.T
 
 	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeSteamWrite}}, []any{resp.StatusCode, p.onlyTokenScopes(t)})
 }
+
+func TestManagementTokens_should_refuse_invite_without_players_read(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, body := p.create(t, c, csrf, url.Values{"access_players": {"none"}, "risky": {managementtoken.ScopePlayersInvite}})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
+		strings.Contains(body, "Needs read access to Players. Give that access or uncheck the box."), p.tokenCount(t)})
+}
+
+func TestManagementTokens_should_give_invite_with_players_read(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersInvite}})
+
+	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}},
+		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
+}

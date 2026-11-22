@@ -111,6 +111,7 @@ type Handler struct {
 	overrides        ratelimit.OverrideStore
 	connectionEnvMax int64
 	inviteThrottle   *ratelimit.InviteThrottle
+	playerInvites    *projectadmin.PlayerInviter
 	reg              prometheus.Registerer
 	cfg              Config
 	bootstrap        *Bootstrap
@@ -411,6 +412,10 @@ func newHandler(d Deps) *Handler {
 	if d.Limiter != nil && d.Registry != nil {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
 			WithOverrides(d.RateLimitOverrides)
+	}
+	h.playerInvites = &projectadmin.PlayerInviter{
+		Pool: d.Pool, Throttle: h.inviteThrottle, Mailer: d.Mailer, MailFrom: d.Config.MailFrom,
+		BaseURL: d.Config.BaseURL, SigningKey: h.verifySigningKey, Metrics: d.Metrics,
 	}
 	return h
 }

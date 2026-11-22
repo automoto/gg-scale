@@ -31,6 +31,7 @@ const (
 	ScopePlayersRead       = "players:read"
 	ScopePlayersPII        = "players:pii"
 	ScopePlayersWrite      = "players:write"
+	ScopePlayersInvite     = "players:invite"
 	ScopeLimitsRead        = "limits:read"
 	ScopeLimitsWrite       = "limits:write"
 	ScopeFleetRead         = "fleet:read"
@@ -105,6 +106,10 @@ var Scopes = []ScopePair{
 		Label: "See player email and display name. They go into agent logs.", Needs: ScopePlayersRead,
 	},
 	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
+	{
+		Scope: ScopePlayersInvite, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
+		Label: "Invite and link players. Sends email.", Needs: ScopePlayersRead,
+	},
 	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeFleetRead, Class: ClassNormal, Pair: rbac.ProjectFleetObject, Action: rbac.ActionRead, Resource: "fleets"},

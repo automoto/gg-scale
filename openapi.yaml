@@ -2123,6 +2123,17 @@ components:
         - open_sessions
         - leaderboards
       type: object
+    ProjectInviteBody:
+      additionalProperties: false
+      properties:
+        email:
+          description: The address that gets the invite email.
+          examples:
+            - player@example.com
+          type: string
+      required:
+        - email
+      type: object
     ProjectInviteLimits:
       additionalProperties: false
       properties:
@@ -2331,6 +2342,30 @@ components:
         - created_at
         - disabled_at
         - delete_requested_at
+      type: object
+    ProjectPlayerInvite:
+      additionalProperties: false
+      properties:
+        email:
+          description: Text that was given as input. Only with the players:pii scope.
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        invite_id:
+          examples:
+            - 12
+          format: int64
+          type: integer
+        player_id:
+          description: The player that the invite links. Absent for a plain invite.
+          examples:
+            - 42
+          format: int64
+          type: integer
+      required:
+        - invite_id
+        - expires_at
       type: object
     ProjectPlayerList:
       additionalProperties: false
@@ -6957,6 +6992,34 @@ paths:
       summary: List players
       tags:
         - Project Management
+  /v1/project/players/invite:
+    post:
+      description: Sends an invite email to the address and returns the invite. Answers 422 for an invalid address, 409 when an invite for it is pending, and 429 with Retry-After when the invite limit is used. The email address is in the result only with the players:pii scope.
+      operationId: inviteProjectPlayer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInviteBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPlayerInvite"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Invite a player
+      tags:
+        - Project Management
   /v1/project/players/{player_id}:
     get:
       description: Returns one player of the Game Project. Answers 404 for a player of another Game Project. email and display_name are in the result only with the players:pii scope; they are text that players wrote.
@@ -7092,6 +7155,45 @@ paths:
       security:
         - ManagementToken: []
       summary: Disable or enable a player
+      tags:
+        - Project Management
+  /v1/project/players/{player_id}/link:
+    post:
+      description: Sends a link invite email for one player of the Game Project and returns the invite. Answers 404 for a player of another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, and 429 with Retry-After when the invite limit is used.
+      operationId: linkProjectPlayer
+      parameters:
+        - description: Player ID.
+          in: path
+          name: player_id
+          required: true
+          schema:
+            description: Player ID.
+            examples:
+              - 42
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInviteBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectPlayerInvite"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Link a player to an email address
       tags:
         - Project Management
   /v1/project/remote-config:

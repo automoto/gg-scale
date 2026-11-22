@@ -133,6 +133,7 @@ func TestTransport_tools_list_should_have_exactly_the_table_tools_for_all_scopes
 		"rollback_leaderboard", "delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features",
 		"set_allowed_origins", "set_player_disabled", "request_player_delete", "cancel_player_delete",
 		"set_project_invite_limit", "set_project_storage_limit", "revoke_api_key", "create_secret_api_key", "set_steam_auth", "clear_steam_auth",
+		"invite_player", "link_player",
 	}, readTools...), toolNames(out))
 }
 

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
@@ -421,4 +422,64 @@ func clearSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, _ 
 		return projectSteamAuth{}, projectWriteError(err)
 	}
 	return getSteamAuth(ctx, d, p, nil)
+}
+
+// newPlayerInviter builds the invite sender of the token routes. It uses the
+// same limiter, overrides, and mail settings as the dashboard, so both share
+// one invite throttle.
+func newPlayerInviter(d Deps, reg prometheus.Registerer) *projectadmin.PlayerInviter {
+	inviter := &projectadmin.PlayerInviter{
+		Pool: d.Pool, Mailer: d.Mailer, MailFrom: d.MailFrom, BaseURL: d.ControlPanel.BaseURL,
+		SigningKey: d.EmailVerifySigningKey, Metrics: d.Metrics,
+	}
+	if d.Limiter != nil {
+		inviter.Throttle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, reg).WithOverrides(d.RateLimitOverrides)
+	}
+	return inviter
+}
+
+type projectInviteBody struct {
+	Email string `json:"email" doc:"The address that gets the invite email." example:"player@example.com"`
+}
+
+type projectInvitePlayerInput struct {
+	Body projectInviteBody
+}
+
+type projectLinkPlayerInput struct {
+	ProjectPlayerPath
+	Body projectInviteBody
+}
+
+// projectPlayerInvite is the result of an invite or a link. email is absent
+// unless the token has players:pii.
+type projectPlayerInvite struct {
+	InviteID  int64     `json:"invite_id" example:"12"`
+	PlayerID  *int64    `json:"player_id,omitempty" doc:"The player that the invite links. Absent for a plain invite." example:"42"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Email     *string   `json:"email,omitempty" doc:"Text that was given as input. Only with the players:pii scope."`
+}
+
+func playerInviteResult(p managementtoken.Principal, res projectadmin.PlayerInvite, playerID *int64) projectPlayerInvite {
+	out := projectPlayerInvite{InviteID: res.ID, PlayerID: playerID, ExpiresAt: res.ExpiresAt}
+	if p.HasScope(managementtoken.ScopePlayersPII) {
+		out.Email = &res.Email
+	}
+	return out
+}
+
+func invitePlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectInvitePlayerInput) (projectPlayerInvite, error) {
+	res, err := d.PlayerInviter.Invite(ctx, p.TenantID, p.ProjectID, in.Body.Email, nil, time.Now(), projectActor(p))
+	if err != nil {
+		return projectPlayerInvite{}, projectWriteError(err)
+	}
+	return playerInviteResult(p, res, nil), nil
+}
+
+func linkPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectLinkPlayerInput) (projectPlayerInvite, error) {
+	res, err := d.PlayerInviter.Invite(ctx, p.TenantID, p.ProjectID, in.Body.Email, &in.PlayerID, time.Now(), projectActor(p))
+	if err != nil {
+		return projectPlayerInvite{}, projectWriteError(err)
+	}
+	return playerInviteResult(p, res, &in.PlayerID), nil
 }

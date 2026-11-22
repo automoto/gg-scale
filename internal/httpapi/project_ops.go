@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -192,6 +193,7 @@ func errProjectNotFound() error { return huma.Error404NotFound(projectNotFoundTe
 // client errors. Other errors are returned unchanged and become a 500.
 func projectWriteError(err error) error {
 	var limitErr projectadmin.LimitError
+	var throttled *projectadmin.InviteThrottledError
 	switch {
 	case err == nil:
 		return nil
@@ -199,6 +201,11 @@ func projectWriteError(err error) error {
 		errors.Is(err, projectadmin.ErrPlayerNotFound):
 		return errProjectNotFound()
 	case errors.Is(err, projectadmin.ErrPlayerDeletePending), errors.Is(err, projectadmin.ErrPlayerDeleteRequested):
+		return huma.Error409Conflict(err.Error())
+	case errors.As(err, &throttled):
+		return huma.ErrorWithHeaders(huma.Error429TooManyRequests(err.Error()),
+			http.Header{"Retry-After": {strconv.Itoa(throttled.RetryAfter)}})
+	case errors.Is(err, projectadmin.ErrPlayerEmailTaken), errors.Is(err, projectadmin.ErrInvitePending):
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, projectadmin.ErrNoPendingDelete):
 		return huma.Error404NotFound(err.Error())
@@ -222,6 +229,7 @@ func projectWriteError(err error) error {
 	case errors.As(err, &limitErr),
 		errors.Is(err, projectadmin.ErrInvalidLeaderboard),
 		errors.Is(err, projectadmin.ErrInvalidOrigins),
+		errors.Is(err, projectadmin.ErrInvalidPlayerEmail),
 		errors.Is(err, projectadmin.ErrInvalidSteamAppID),
 		errors.Is(err, projectadmin.ErrInvalidSteamKey),
 		errors.Is(err, projectadmin.ErrSteamKeyMissing),
@@ -713,6 +721,36 @@ var projectOps = []projectOp{
 				"Game Project, and 409 when a delete request is pending.",
 		},
 		handler: projectHandler(setPlayerDisabled),
+	},
+	{
+		tool: "invite_player",
+		description: "Sends an email. Invite a player to this Game Project by email address. The address gets a link to accept the invite " +
+			"and set up a player account. The invite is limited in the same way as in the dashboard (each inviter and each email domain), " +
+			"and answers 429 with Retry-After when the limit is used. The result has no address unless the token has players:pii.",
+		scope: managementtoken.ScopePlayersInvite,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/players/invite", OperationID: "inviteProjectPlayer",
+			Summary: "Invite a player",
+			Description: "Sends an invite email to the address and returns the invite. Answers 422 for an invalid address, 409 when an " +
+				"invite for it is pending, and 429 with Retry-After when the invite limit is used. The email address is in the result " +
+				"only with the players:pii scope.",
+		},
+		handler: projectHandler(invitePlayer),
+	},
+	{
+		tool: "link_player",
+		description: "Sends an email. Send a link invite to one player of this Game Project that has no email yet. When the invite is " +
+			"accepted, the address and its account are bound to that player. An open invite for the player is replaced. " +
+			"Limited in the same way as invite_player. The result has no address unless the token has players:pii.",
+		scope: managementtoken.ScopePlayersInvite,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/players/{player_id}/link", OperationID: "linkProjectPlayer",
+			Summary: "Link a player to an email address",
+			Description: "Sends a link invite email for one player of the Game Project and returns the invite. Answers 404 for a player of " +
+				"another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, " +
+				"and 429 with Retry-After when the invite limit is used.",
+		},
+		handler: projectHandler(linkPlayer),
 	},
 	{
 		tool: "request_player_delete",

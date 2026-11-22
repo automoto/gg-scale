@@ -206,3 +206,11 @@ func resourceNamed(name string) Resource {
 	i := slices.IndexFunc(Resources, func(r Resource) bool { return r.Name == name })
 	return Resources[i]
 }
+
+func TestScopes_players_invite_should_be_risky_with_the_players_pair_and_need_players_read(t *testing.T) {
+	got, ok := Scope(ScopePlayersInvite)
+
+	require.True(t, ok)
+	assert.Equal(t, []any{ClassRisky, ScopePlayersRead, "project:42:players", rbac.ActionManage, "Invite and link players. Sends email."},
+		[]any{got.Class, got.Needs, got.Pair(42), got.Action, got.Label})
+}

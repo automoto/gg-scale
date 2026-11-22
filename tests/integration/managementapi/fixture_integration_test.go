@@ -179,6 +179,7 @@ type response struct {
 	status int
 	body   map[string]any
 	raw    string
+	header http.Header
 }
 
 func (f *fixture) do(token, method, path, body string, header ...string) response {
@@ -205,7 +206,7 @@ func (f *fixture) do(token, method, path, body string, header ...string) respons
 	require.NoError(f.t, err)
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
-	return response{status: resp.StatusCode, body: out, raw: string(raw)}
+	return response{status: resp.StatusCode, body: out, raw: string(raw), header: resp.Header}
 }
 
 // detail is the problem+json detail text of an error answer.

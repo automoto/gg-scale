@@ -108,6 +108,12 @@ func TestMissingDependency_should_name_the_needed_access_for_pii_without_players
 	assert.Contains(t, got, "Needs read access to Players")
 }
 
+func TestMissingDependency_should_name_players_read_for_invite(t *testing.T) {
+	got := missingDependency([]string{managementtoken.ScopePlayersInvite})
+
+	assert.Contains(t, got, "Needs read access to Players")
+}
+
 func TestMissingDependency_should_be_empty_with_players_read(t *testing.T) {
 	assert.Empty(t, missingDependency([]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}))
 }
@@ -267,6 +273,8 @@ func TestAccessOptions_should_build_the_key_risky_boxes_from_the_scope_table(t *
 			Label: "Create secret API keys. The key value is returned to the token user."},
 		managementtoken.ScopeSteamWrite: {Scope: managementtoken.ScopeSteamWrite,
 			Label: "Change the Steam Web API key. The old key is lost."},
+		managementtoken.ScopePlayersInvite: {Scope: managementtoken.ScopePlayersInvite,
+			Label: "Invite and link players. Sends email.", Needs: "Needs read access to Players"},
 	}
 	_, risky := accessOptions(allScopes(), nil)
 	for scope, want := range cases {

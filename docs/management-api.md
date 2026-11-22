@@ -141,8 +141,10 @@ token that needs it.
 | `keys:secret` | `create_secret_api_key` | `POST /v1/project/secret-api-keys` | Returns a secret. The `ggs_` key value is in the result one time only. It is never in `list_api_keys`, `get_token`, the audit log, or the server log. Needs permission to manage secret keys for the person who made the token. Same label, scope, and `MANAGEMENT_MAX_PROJECT_API_KEYS` rules as `create_api_key`. |
 | `steam:write` | `set_steam_auth` | `PUT /v1/project/steam-auth` | Cannot be undone: the old Web API key is lost. Takes `app_id` and `web_api_key` (input only; same checks as the dashboard). Leave `web_api_key` out to keep the stored key and change the App ID; this is refused when no key is stored. The key is sealed as in the dashboard and is never in a result, the audit log, or the server log. Returns the `get_steam_auth` shape. |
 | `steam:write` | `clear_steam_auth` | `DELETE /v1/project/steam-auth` | Cannot be undone: removes the App ID and the Web API key, and Steam sign-in stops. Returns the `get_steam_auth` shape. |
+| `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, each email domain in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id` and `expires_at`, and `email` only with `players:pii`. The audit row has no address. Needs `players:read`. |
+| `players:invite` | `link_player` | `POST /v1/project/players/{player_id}/link` | Sends an email. Same as `invite_player`, for one existing player: when the invite is accepted, the address and its account are bound to that player, and an open invite for the player is replaced. 404 for a player of another Game Project, 409 when another player has the address. |
 
-Each risky tool description starts with its risk ("Cannot be undone." or
+Each risky tool description starts with its risk ("Cannot be undone.", "Sends an email." or
 "Returns a secret."), so the agent sees the risk in its tool list.
 
 ### What a token can do
