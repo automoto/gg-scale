@@ -61,3 +61,17 @@ func TestPlayerInviterSend_should_log_the_domain_and_not_the_address_without_a_m
 	assert.Contains(t, out, "domain=example.org")
 	assert.NotContains(t, out, "secret.person")
 }
+
+func TestEmailDomain(t *testing.T) {
+	tests := []struct{ name, in, want string }{
+		{"plain address", "a@example.org", "example.org"},
+		{"at sign in the local part", "a@b@example.org", "example.org"},
+		{"quoted local part with at sign", `"x@y"@example.org`, "example.org"},
+		{"no at sign", "nodomain", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, emailDomain(tc.in))
+		})
+	}
+}

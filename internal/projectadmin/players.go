@@ -398,6 +398,9 @@ func EmailSuppressed(ctx context.Context, pool *db.Pool, email string) bool {
 // emailDomain returns the part after the last "@", for logs that must not
 // hold the full address.
 func emailDomain(email string) string {
-	_, domain, _ := strings.Cut(email, "@")
-	return domain
+	i := strings.LastIndex(email, "@")
+	if i < 0 {
+		return ""
+	}
+	return email[i+1:]
 }
