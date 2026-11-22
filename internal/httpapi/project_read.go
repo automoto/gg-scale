@@ -8,9 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
@@ -24,6 +22,7 @@ import (
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // projectMaxListRows caps the key list in the health check. The list
@@ -856,7 +855,7 @@ func decodeQueueCursor(s string) (queueCursor, bool) {
 	}
 	// Postgres rejects a NUL byte in a text value.
 	for _, v := range []string{c.Mode, c.Region, c.GameMode, c.Status} {
-		if !utf8.ValidString(v) || strings.ContainsRune(v, 0) {
+		if !webutil.ValidText(v) {
 			return queueCursor{}, false
 		}
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -240,9 +239,8 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
-	target := allocationsBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
-		queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+	id := strconv.FormatInt(int64(alloc.ID), 10)
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID)+"/"+id, "Allocation #"+id+" created.")
 }
 
 // loadFleetOptions fetches active fleet templates for the project so the
@@ -347,8 +345,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)
 		return
 	}
-	target := allocationsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
-	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID), "Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
 }
 
 // fleetBackendsPage shows the backends seen across this tenant's allocations

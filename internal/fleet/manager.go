@@ -285,10 +285,6 @@ func (m *Manager) Backend() Backend {
 // CRUD pages. Tenant scoping happens inside the store via RLS.
 func (m *Manager) Fleets() FleetStore { return m.fleets }
 
-// MaxCapacity returns the largest capacity of one manual allocation. Zero
-// means no limit.
-func (m *Manager) MaxCapacity() int { return m.opts.MaxCapacity }
-
 func defaultBackoff(attempt int) time.Duration {
 	d := 100 * time.Millisecond
 	for i := 1; i < attempt; i++ {

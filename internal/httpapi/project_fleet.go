@@ -32,20 +32,13 @@ type projectFleet struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 }
 
-// fleetConfig returns the config that a token may see: only the agones
-// backend, whose keys are known and not secret. A plugin config is free-form
-// and may hold a secret.
-func fleetConfig(f *fleet.Fleet) map[string]string {
-	if f.Backend != "agones" {
-		return nil
-	}
-	return f.Config
-}
-
+// newProjectFleet shows the config, when withConfig is set, of the agones
+// backend only: its keys are known and not secret. A plugin config is
+// free-form and may hold a secret.
 func newProjectFleet(f *fleet.Fleet, withConfig bool) projectFleet {
 	out := projectFleet{ID: f.ID, Name: f.Name, Backend: f.Backend, CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt}
-	if withConfig {
-		out.Config = fleetConfig(f)
+	if withConfig && f.Backend == "agones" {
+		out.Config = f.Config
 	}
 	return out
 }
@@ -98,19 +91,32 @@ type projectFleetInput struct {
 	FleetID int64 `path:"fleet_id" minimum:"1" doc:"The fleet ID."`
 }
 
-func getFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectFleetInput) (projectFleet, error) {
+// projectFleetByID returns the fleet (live or deleted) of this project, or
+// answers 404.
+func projectFleetByID(ctx context.Context, d Deps, p managementtoken.Principal, id int64) (*fleet.Fleet, error) {
 	m, err := fleetManager(d)
 	if err != nil {
-		return projectFleet{}, err
+		return nil, err
 	}
-	f, err := m.Fleets().GetByID(db.WithTenant(ctx, p.TenantID), in.FleetID)
+	f, err := m.Fleets().GetByID(db.WithTenant(ctx, p.TenantID), id)
 	if errors.Is(err, fleet.ErrFleetNotFound) {
-		return projectFleet{}, errProjectNotFound()
+		return nil, errProjectNotFound()
 	}
+	if err != nil {
+		return nil, err
+	}
+	if f.ProjectID != p.ProjectID {
+		return nil, errProjectNotFound()
+	}
+	return f, nil
+}
+
+func getFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *projectFleetInput) (projectFleet, error) {
+	f, err := projectFleetByID(ctx, d, p, in.FleetID)
 	if err != nil {
 		return projectFleet{}, err
 	}
-	if f.ProjectID != p.ProjectID || f.DeletedAt != nil {
+	if f.DeletedAt != nil {
 		return projectFleet{}, errProjectNotFound()
 	}
 	return newProjectFleet(f, true), nil
@@ -152,19 +158,9 @@ func requireBackendFeature(ctx context.Context, d Deps, p managementtoken.Princi
 // ownFleet returns the fleet (live or deleted) of this project and checks
 // the grant of its backend, or answers 404.
 func ownFleet(ctx context.Context, d Deps, p managementtoken.Principal, id int64) (*fleet.Fleet, error) {
-	m, err := fleetManager(d)
+	f, err := projectFleetByID(ctx, d, p, id)
 	if err != nil {
 		return nil, err
-	}
-	f, err := m.Fleets().GetByID(db.WithTenant(ctx, p.TenantID), id)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		return nil, errProjectNotFound()
-	}
-	if err != nil {
-		return nil, err
-	}
-	if f.ProjectID != p.ProjectID {
-		return nil, errProjectNotFound()
 	}
 	if err := requireBackendFeature(ctx, d, p, f.Backend); err != nil {
 		return nil, err
@@ -313,27 +309,26 @@ type projectAllocationInput struct {
 
 // ownAllocation returns the allocation, or a 404 when it is not one of this
 // project.
-func ownAllocation(ctx context.Context, d Deps, p managementtoken.Principal, id int64) (context.Context, *fleet.Manager, *fleet.Allocation, error) {
+func ownAllocation(ctx context.Context, d Deps, p managementtoken.Principal, id int64) (*fleet.Allocation, error) {
 	m, err := fleetManager(d)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	ctx = db.WithTenant(ctx, p.TenantID)
-	a, err := m.Get(ctx, fleet.AllocationID(id))
+	a, err := m.Get(db.WithTenant(ctx, p.TenantID), fleet.AllocationID(id))
 	if errors.Is(err, fleet.ErrNotFound) {
-		return nil, nil, nil, errProjectNotFound()
+		return nil, errProjectNotFound()
 	}
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
 	if a.ProjectID != p.ProjectID {
-		return nil, nil, nil, errProjectNotFound()
+		return nil, errProjectNotFound()
 	}
-	return ctx, m, a, nil
+	return a, nil
 }
 
 func getAllocation(ctx context.Context, d Deps, p managementtoken.Principal, in *projectAllocationInput) (projectAllocation, error) {
-	_, _, a, err := ownAllocation(ctx, d, p, in.AllocationID)
+	a, err := ownAllocation(ctx, d, p, in.AllocationID)
 	if err != nil {
 		return projectAllocation{}, err
 	}
@@ -376,16 +371,11 @@ func allocateServer(ctx context.Context, d Deps, p managementtoken.Principal, in
 	a, err := fleet.AllocateServer(ctx, m, p.TenantID, fleet.ServerAllocate{
 		Fleet: f, Region: region, GameMode: strings.TrimSpace(in.Body.GameMode), Capacity: in.Body.Capacity,
 	}, projectActor(p))
-	var invalid fleet.InvalidError
-	switch {
-	case errors.Is(err, fleet.ErrFleetNotFound):
-		return projectAllocation{}, errProjectNotFound()
-	case errors.As(err, &invalid):
-		return projectAllocation{}, huma.Error422UnprocessableEntity(invalid.Error())
-	case errors.Is(err, fleet.ErrFleetBackendMismatch):
+	if errors.Is(err, fleet.ErrFleetBackendMismatch) {
 		return projectAllocation{}, huma.Error409Conflict("the fleet backend is not the backend of this server")
-	case err != nil:
-		return projectAllocation{}, err
+	}
+	if err != nil {
+		return projectAllocation{}, fleetWriteError(err)
 	}
 	return newProjectAllocation(a), nil
 }
@@ -429,15 +419,14 @@ type projectListAllocationEventsInput struct {
 // allocationEventRing events for an allocation, so one read gets all of them.
 // The cursor is the ID of the last event of the page.
 func listAllocationEvents(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListAllocationEventsInput) (projectAllocationEventList, error) {
-	ctx, m, _, err := ownAllocation(ctx, d, p, in.AllocationID)
-	if err != nil {
+	if _, err := ownAllocation(ctx, d, p, in.AllocationID); err != nil {
 		return projectAllocationEventList{}, err
 	}
 	before, ok := decodeIDCursor(in.Cursor)
 	if !ok {
 		return projectAllocationEventList{}, errBadCursor()
 	}
-	all, err := m.ListEvents(ctx, fleet.AllocationID(in.AllocationID), allocationEventRing)
+	all, err := d.Fleet.ListEvents(db.WithTenant(ctx, p.TenantID), fleet.AllocationID(in.AllocationID), allocationEventRing)
 	if err != nil {
 		return projectAllocationEventList{}, err
 	}

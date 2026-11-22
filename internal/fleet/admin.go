@@ -4,18 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 // Limits on a fleet config, for the dashboard form and the management API.
@@ -27,13 +27,13 @@ const (
 // Audit actions of the fleet writes. The dashboard and tokens use the same
 // names, with different actors.
 const (
-	ActionCreate  = "fleet.template.create"
-	ActionUpdate  = "fleet.template.update"
-	ActionDelete  = "fleet.template.delete"
-	ActionRestore = "fleet.template.restore"
+	actionCreate  = "fleet.template.create"
+	actionUpdate  = "fleet.template.update"
+	actionDelete  = "fleet.template.delete"
+	actionRestore = "fleet.template.restore"
 
-	ActionAllocate   = "fleet.allocate.manual"
-	ActionDeallocate = "fleet.deallocate.manual"
+	actionAllocate   = "fleet.allocate.manual"
+	actionDeallocate = "fleet.deallocate.manual"
 )
 
 var (
@@ -106,19 +106,17 @@ func validateBackend(backend string) error {
 }
 
 func translateName(err error) error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+	if webutil.IsUniqueViolation(err) {
 		return ErrFleetNameTaken
 	}
 	return err
 }
 
+// configKeys returns the sorted keys. It is never nil, so the audit row has
+// [] and not null for no config.
 func configKeys(cfg map[string]string) []string {
-	keys := make([]string, 0, len(cfg))
-	for k := range cfg {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := slices.AppendSeq(make([]string, 0, len(cfg)), maps.Keys(cfg))
+	slices.Sort(keys)
 	return keys
 }
 
@@ -151,7 +149,7 @@ func CreateFleet(ctx context.Context, pool *db.Pool, tenantID int64, in FleetCre
 			return ferr
 		}
 		out = f
-		return actor.Audit(ctx, tx, tenantID, in.ProjectID, ActionCreate, strconv.FormatInt(f.ID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, in.ProjectID, actionCreate, strconv.FormatInt(f.ID, 10), map[string]any{
 			"fleet_name": f.Name, "backend": f.Backend, "config_keys": configKeys(in.Config),
 		})
 	})
@@ -204,7 +202,7 @@ func UpdateFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id int
 			return ferr
 		}
 		out = f
-		return actor.Audit(ctx, tx, tenantID, projectID, ActionUpdate, strconv.FormatInt(id, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, actionUpdate, strconv.FormatInt(id, 10), map[string]any{
 			"fleet_name": f.Name, "backend": f.Backend, "config_keys": configKeys(f.Config),
 		})
 	})
@@ -225,7 +223,7 @@ func DeleteFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id int
 		if err != nil {
 			return err
 		}
-		return actor.Audit(ctx, tx, tenantID, projectID, ActionDelete, strconv.FormatInt(id, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, actionDelete, strconv.FormatInt(id, 10), map[string]any{
 			"fleet_name": row.Name, "backend": row.Backend,
 		})
 	})
@@ -253,7 +251,7 @@ func RestoreFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id in
 			return ferr
 		}
 		out = f
-		return actor.Audit(ctx, tx, tenantID, projectID, ActionRestore, strconv.FormatInt(id, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, actionRestore, strconv.FormatInt(id, 10), map[string]any{
 			"fleet_name": f.Name, "backend": f.Backend,
 		})
 	})
@@ -275,7 +273,7 @@ type ServerAllocate struct {
 // validateText reports whether s is a valid name, backend, region, or game
 // mode: valid UTF-8 with no NUL byte, at most MaxConfigKeyOrVal bytes.
 func validateText(s string) bool {
-	return len(s) <= MaxConfigKeyOrVal && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
+	return len(s) <= MaxConfigKeyOrVal && webutil.ValidText(s)
 }
 
 // validateAllocate checks the client input of AllocateServer. The messages
@@ -299,14 +297,14 @@ func validateAllocate(in ServerAllocate, maxCapacity int) error {
 // allocation ready: it commits with that change, and a failed audit write
 // frees the server again. A failed backend call leaves no audit row.
 func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAllocate, actor projectadmin.Actor) (*Allocation, error) {
-	if err := validateAllocate(in, m.MaxCapacity()); err != nil {
+	if err := validateAllocate(in, m.opts.MaxCapacity); err != nil {
 		return nil, err
 	}
 	if in.Capacity == 0 {
 		in.Capacity = 1
 	}
 	ctx = WithCommitHook(db.WithTenant(ctx, tenantID), func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
-		return actor.Audit(ctx, tx, tenantID, in.Fleet.ProjectID, ActionAllocate, strconv.FormatInt(int64(id), 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, in.Fleet.ProjectID, actionAllocate, strconv.FormatInt(int64(id), 10), map[string]any{
 			"fleet_id":   in.Fleet.ID,
 			"fleet_name": in.Fleet.Name,
 			"region":     in.Region,
@@ -341,7 +339,7 @@ func DeallocateServer(ctx context.Context, m *Manager, tenantID, projectID int64
 		return nil, ErrNotFound
 	}
 	hooked := WithCommitHook(ctx, func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
-		return actor.Audit(ctx, tx, tenantID, projectID, ActionDeallocate, strconv.FormatInt(int64(id), 10), nil)
+		return actor.Audit(ctx, tx, tenantID, projectID, actionDeallocate, strconv.FormatInt(int64(id), 10), nil)
 	})
 	if err := m.Deallocate(hooked, id); err != nil {
 		return nil, err

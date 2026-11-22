@@ -136,13 +136,14 @@ func TestNewProjectAllocation_should_hide_a_region_with_spaces(t *testing.T) {
 	assert.Equal(t, "[client text hidden, 36 bytes]", got)
 }
 
-func TestFleetConfig_should_show_only_the_agones_config(t *testing.T) {
+func TestNewProjectFleet_should_show_only_the_agones_config(t *testing.T) {
 	cfg := map[string]string{"k": "v"}
 
 	got := []map[string]string{
-		fleetConfig(&fleet.Fleet{Backend: "agones", Config: cfg}),
-		fleetConfig(&fleet.Fleet{Backend: "plugin", Config: cfg}),
+		newProjectFleet(&fleet.Fleet{Backend: "agones", Config: cfg}, true).Config,
+		newProjectFleet(&fleet.Fleet{Backend: "plugin", Config: cfg}, true).Config,
+		newProjectFleet(&fleet.Fleet{Backend: "agones", Config: cfg}, false).Config,
 	}
 
-	assert.Equal(t, []map[string]string{cfg, nil}, got)
+	assert.Equal(t, []map[string]string{cfg, nil, nil}, got)
 }

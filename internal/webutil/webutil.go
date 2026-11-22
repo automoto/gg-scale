@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/a-h/templ"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -114,6 +115,12 @@ func Render(r *http.Request, w http.ResponseWriter, c templ.Component) {
 func InternalError(w http.ResponseWriter, msg string, err error) {
 	slog.Error(msg, "error", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// ValidText reports whether s is valid UTF-8 with no NUL byte. Postgres
+// refuses other text values.
+func ValidText(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 
 // IsUniqueViolation reports whether err is (or wraps) a Postgres 23505

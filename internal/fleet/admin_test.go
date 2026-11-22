@@ -14,6 +14,11 @@ import (
 
 func TestValidateConfig(t *testing.T) {
 	long := strings.Repeat("x", fleet.MaxConfigKeyOrVal+1)
+	manyKeys, manySelectors := map[string]string{}, map[string]string{"fleet_name": "gs"}
+	for i := 0; i <= fleet.MaxConfigKeys; i++ {
+		manyKeys[strconv.Itoa(i)] = "v"
+		manySelectors["selector."+strconv.Itoa(i)] = "v"
+	}
 	cases := []struct {
 		name    string
 		backend string
@@ -25,6 +30,8 @@ func TestValidateConfig(t *testing.T) {
 		{"should_refuse_unknown_agones_key", "agones", map[string]string{"fleet_name": "gs", "other": "v"}, true},
 		{"should_accept_free_form_plugin_config", "plugin:demo", map[string]string{"api_key": "v"}, false},
 		{"should_refuse_a_long_value", "plugin:demo", map[string]string{"k": long}, true},
+		{"should_refuse_too_many_keys", "plugin:demo", manyKeys, true},
+		{"should_refuse_too_many_selector_keys", "agones", manySelectors, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,15 +43,6 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestValidateConfig_should_refuse_too_many_keys(t *testing.T) {
-	cfg := map[string]string{}
-	for i := 0; i <= fleet.MaxConfigKeys; i++ {
-		cfg[strings.Repeat("k", i+1)] = "v"
-	}
-
-	assert.Error(t, fleet.ValidateConfig("plugin:demo", cfg))
-}
-
 func TestValidateConfig_should_accept_what_the_dashboard_form_allows(t *testing.T) {
 	cfg := map[string]string{"fleet_name": "gs", "namespace": "ns"}
 	for i := 0; i < fleet.MaxConfigKeys; i++ {
@@ -52,15 +50,6 @@ func TestValidateConfig_should_accept_what_the_dashboard_form_allows(t *testing.
 	}
 
 	assert.NoError(t, fleet.ValidateConfig("agones", cfg))
-}
-
-func TestValidateConfig_should_refuse_too_many_selector_keys(t *testing.T) {
-	cfg := map[string]string{"fleet_name": "gs"}
-	for i := 0; i <= fleet.MaxConfigKeys; i++ {
-		cfg["selector."+strconv.Itoa(i)] = "v"
-	}
-
-	assert.Error(t, fleet.ValidateConfig("agones", cfg))
 }
 
 func TestAllocateServer_should_refuse_bad_input_before_any_backend_call(t *testing.T) {

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/db"
@@ -290,7 +289,7 @@ func (i *PlayerInviter) create(ctx context.Context, tenantID, projectID int64, e
 			InvitedByUserID: actor.authzUserID(),
 			ProjectPlayerID: targetPlayer,
 		})
-		if isUniqueViolation(err) {
+		if webutil.IsUniqueViolation(err) {
 			return ErrInvitePending
 		}
 		if err != nil {
@@ -306,11 +305,6 @@ func (i *PlayerInviter) create(ctx context.Context, tenantID, projectID int64, e
 		return PlayerInvite{}, inviteMail{}, err
 	}
 	return PlayerInvite{ID: row.ID, Email: email, ExpiresAt: row.ExpiresAt.Time}, mail, nil
-}
-
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // checkLinkTarget refuses a player that is not in the project, and an

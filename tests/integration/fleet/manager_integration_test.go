@@ -47,7 +47,7 @@ func (fakeBackend) HealthCheck(context.Context) error { return nil }
 // TestManager_resolves_fleet_then_allocates is the load-bearing assertion for
 // the fleet-template feature: an operator-authored fleet row in Postgres
 // translates into an allocation whose persisted row records the fleet it came
-// from. Exercises PostgresFleetStore.Create, Manager.Allocate (fleet lookup +
+// from. Exercises CreateFleet, Manager.Allocate (fleet lookup +
 // backend dispatch), and the allocation store, against a real Postgres.
 func TestManager_resolves_fleet_then_allocates(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)

@@ -35,7 +35,7 @@ type Fleet struct {
 	DeletedAt *time.Time
 }
 
-// FleetCreate is the input shape for FleetStore.Create. Tenant id is read
+// FleetCreate is the input shape for CreateFleet. Tenant id is read
 // from the request context via RLS; passing it as a parameter would let
 // callers bypass the policy. The Fleet prefix disambiguates it from
 // fleet.Store, which serves allocations rather than templates.

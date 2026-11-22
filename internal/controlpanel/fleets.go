@@ -46,7 +46,7 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, f := range deleted {
-			view.DeletedFleets = append(view.DeletedFleets, DeletedFleetRowView{ID: f.ID, Name: f.Name, Backend: f.Backend})
+			view.DeletedFleets = append(view.DeletedFleets, FleetRowView{ID: f.ID, Name: f.Name, Backend: f.Backend})
 		}
 		for _, f := range fleets {
 			view.Fleets = append(view.Fleets, FleetRowView{
@@ -163,37 +163,18 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+f.Name+"\" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet \""+f.Name+"\" created.")
 }
 
 // fleetsEditPage renders the edit form prefilled with the fleet's current
 // values. Name can change; backend is fixed (changing backend would break
 // existing allocations referencing the row).
 func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, f, ok := h.projectFleet(w, r, false)
 	if !ok {
 		return
 	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	f, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if f.ProjectID != projectID || f.DeletedAt != nil {
+	if f.DeletedAt != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -214,35 +195,11 @@ func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
 // fleetsUpdateHandler persists changes to name / config. Backend is fixed
 // on update; recreating under a different backend is the supported path.
 func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
 	if !ok {
 		return
 	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	if !webutil.ParseForm(w, r) {
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.NotFound(w, r)
-		return
-	}
+	fleetID := existing.ID
 	session, _ := sessionFromContext(r.Context())
 	name := strings.TrimSpace(r.Form.Get("name"))
 	cfg, fieldErrors := parseFleetConfigForm(existing.Backend, r.Form)
@@ -281,45 +238,22 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+name+"\" updated.")
-	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet \""+name+"\" updated.")
 }
 
 // fleetsDeleteHandler soft-deletes the template. Historical allocations
 // keep their fleet_id reference; the control panel surfaces the (now-deleted)
 // name from the row.
 func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, false)
 	if !ok {
-		return
-	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.NotFound(w, r)
 		return
 	}
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := fleet.DeleteFleet(r.Context(), h.pool, tenantID, projectID, fleetID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+	if err := fleet.DeleteFleet(r.Context(), h.pool, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		if errors.Is(err, fleet.ErrFleetNotFound) {
 			http.NotFound(w, r)
 			return
@@ -328,56 +262,73 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet deleted.")
-	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and a constant message
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet deleted.")
 }
 
 // fleetsRestoreHandler brings back a deleted template. A live template with
 // the same name blocks the restore.
 func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, false)
 	if !ok {
-		return
-	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.NotFound(w, r)
 		return
 	}
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	f, err := fleet.RestoreFleet(r.Context(), h.pool, tenantID, projectID, fleetID, projectadmin.Actor{UserID: session.User.ID})
-	base := fleetsBasePath(tenantID, projectID) + queryFlash
+	f, err := fleet.RestoreFleet(r.Context(), h.pool, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
+	base := fleetsBasePath(tenantID, projectID)
 	switch {
 	case errors.Is(err, fleet.ErrFleetNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, fleet.ErrFleetNameTaken):
-		http.Redirect(w, r, base+url.QueryEscape("Cannot restore: a fleet with that name exists. Rename or delete it first."), http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+		redirectFlash(w, r, base, "Cannot restore: a fleet with that name exists. Rename or delete it first.")
 	case err != nil:
 		slog.ErrorContext(r.Context(), "restore fleet failed", "err", err)
 		http.Error(w, "restore failed", http.StatusInternalServerError)
 	default:
-		http.Redirect(w, r, base+url.QueryEscape("Fleet \""+f.Name+"\" restored."), http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
+		redirectFlash(w, r, base, "Fleet \""+f.Name+"\" restored.")
 	}
+}
+
+// projectFleet parses the IDs of a fleet route and returns the fleet (live or
+// deleted) of the project. On failure it writes the answer and ok is false.
+// parseForm reads the form after the backend check and before the lookup.
+func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, parseForm bool) (tenantID, projectID int64, f *fleet.Fleet, ok bool) {
+	tenantID, projectID, ok = h.parseTenantAndProject(w, r)
+	if !ok {
+		return 0, 0, nil, false
+	}
+	fleetID, ok := parsePathID(w, r, "fleetID")
+	if !ok {
+		return 0, 0, nil, false
+	}
+	if h.fleet == nil {
+		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
+		return 0, 0, nil, false
+	}
+	if parseForm && !webutil.ParseForm(w, r) {
+		return 0, 0, nil, false
+	}
+	f, err := h.fleet.Fleets().GetByID(db.WithTenant(r.Context(), tenantID), fleetID)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		http.NotFound(w, r)
+		return 0, 0, nil, false
+	}
+	if err != nil {
+		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
+		return 0, 0, nil, false
+	}
+	if f.ProjectID != projectID {
+		http.NotFound(w, r)
+		return 0, 0, nil, false
+	}
+	return tenantID, projectID, f, true
+}
+
+// redirectFlash redirects to base with a flash message.
+func redirectFlash(w http.ResponseWriter, r *http.Request, base, msg string) {
+	http.Redirect(w, r, base+queryFlash+url.QueryEscape(msg), http.StatusSeeOther) //nolint:gosec // base is built from parsed integer IDs and msg is escaped
 }
 
 // fleetFormError returns the text and HTTP status for a failed fleet write.
@@ -441,32 +392,23 @@ func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]stri
 // truncated so callers can surface a field error.
 func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overCap bool) {
 	pairs = map[string]string{}
-	if len(keys) > fleetFormKeyValuePairsCap {
+	if len(keys) > fleet.MaxConfigKeys {
 		overCap = true
-		keys = keys[:fleetFormKeyValuePairsCap]
+		keys = keys[:fleet.MaxConfigKeys]
 	}
 	for i, k := range keys {
 		k = strings.TrimSpace(k)
-		if k == "" || len(k) > fleetFormKeyOrValueLenCap || i >= len(values) {
+		if k == "" || len(k) > fleet.MaxConfigKeyOrVal || i >= len(values) {
 			continue
 		}
 		v := strings.TrimSpace(values[i])
-		if len(v) > fleetFormKeyOrValueLenCap {
+		if len(v) > fleet.MaxConfigKeyOrVal {
 			continue
 		}
 		pairs[k] = v
 	}
 	return pairs, overCap
 }
-
-// fleetFormKeyValuePairsCap is the upper bound on selector_key[] / config_key[]
-// arrays. Bounded only by the overall form-body limit before this; a single
-// request used to be able to stuff thousands of entries into a fleet config,
-// JSON-serialise them, store them, and re-render them on the next page load.
-const fleetFormKeyValuePairsCap = fleet.MaxConfigKeys
-
-// fleetFormKeyOrValueLenCap bounds a single key or value within those forms.
-const fleetFormKeyOrValueLenCap = fleet.MaxConfigKeyOrVal
 
 // summarizeFleetConfig returns a one-line preview for the list page, so
 // operators can scan templates without opening each one.
