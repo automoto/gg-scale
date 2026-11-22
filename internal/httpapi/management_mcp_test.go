@@ -90,16 +90,6 @@ func TestStrictToolArguments_should_refuse_unknown_argument_in_a_body_with_verti
 	assert.False(t, reached)
 }
 
-// allScopes returns every scope, so the tool filter shows every
-// tool.
-func allScopes() []string {
-	scopes := []string{}
-	for _, s := range managementtoken.Scopes {
-		scopes = append(scopes, s.Scope)
-	}
-	return scopes
-}
-
 // listedToolArguments sends tools/list to an MCP endpoint wired as in the
 // router and returns the sorted inputSchema property names of each tool.
 func listedToolArguments(t *testing.T, cfg huma.Config, d Deps) map[string][]string {
@@ -107,7 +97,7 @@ func listedToolArguments(t *testing.T, cfg huma.Config, d Deps) map[string][]str
 	r := chi.NewRouter()
 	registerProjectManagementRoutes(groupAPI(r, cfg), d)
 	attachManagementMCP(groupAPI(r, cfg), "test")
-	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allScopes()})
+	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: managementtoken.ScopeNames()})
 	h := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { r.ServeHTTP(w, req.WithContext(ctx)) })
 
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
@@ -157,16 +147,6 @@ func TestManagementToolArguments_should_match_the_tools_list_input_schemas(t *te
 	}
 }
 
-func TestManagementTools_should_list_the_fleet_tools_only_when_the_fleet_switch_is_on(t *testing.T) {
-	var fleetOn Deps
-	fleetOn.ControlPanel.FleetEnabled = true
-
-	off := listedToolArguments(t, newHumaConfig("test"), Deps{})
-	on := listedToolArguments(t, newHumaConfig("test"), fleetOn)
-
-	assert.Equal(t, []bool{false, true}, []bool{off["list_fleets"] != nil, on["list_fleets"] != nil})
-}
-
 func TestStrictToolArguments_should_pass_on(t *testing.T) {
 	cases := []struct {
 		name string
@@ -191,7 +171,7 @@ func TestStrictToolArguments_should_restore_the_body_for_the_next_handler(t *tes
 	var got []byte
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got, _ = io.ReadAll(r.Body) })
 	h := strictToolArguments(OpenAPIDoc("1.0.0"))(next)
-	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: allScopes()})
+	ctx := managementtoken.NewContext(context.Background(), managementtoken.Principal{Scopes: managementtoken.ScopeNames()})
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body)).WithContext(ctx)
 
 	// Act

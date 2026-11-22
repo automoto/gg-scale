@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/automoto/gg-scale/internal/cache/memory"
 	"github.com/automoto/gg-scale/internal/ratelimit"
@@ -53,35 +52,24 @@ func TestScopes_risky_scopes_should_have_a_label_and_a_known_dependency(t *testi
 	}
 }
 
-func TestScopes_players_pii_should_need_players_read(t *testing.T) {
-	got, _ := Scope(ScopePlayersPII)
-
-	assert.Equal(t, []any{ClassRisky, ScopePlayersRead}, []any{got.Class, got.Needs})
-}
-
-func TestScopes_steam_write_should_be_risky_with_the_config_update_pair(t *testing.T) {
-	got, ok := Scope(ScopeSteamWrite)
-
-	require.True(t, ok)
-	assert.Equal(t, []any{ClassRisky, rbac.ProjectConfigObject(42), rbac.ActionUpdate, "", "Change the Steam Web API key. The old key is lost."},
-		[]any{got.Class, got.Pair(42), got.Action, got.Needs, got.Label})
-}
-
-func TestScopes_key_risky_scopes(t *testing.T) {
-	cases := map[string]ScopePair{
-		ScopeKeysRevoke: {Class: ClassRisky, Action: rbac.ActionManage, Resource: "keys", Needs: ScopeKeysRead,
-			Label: "Revoke API keys. Cannot be undone; a game that uses the key stops."},
-		ScopeKeysSecret: {Class: ClassRisky, Action: rbac.ActionManage, Resource: "keys",
-			Label: "Create secret API keys. The key value is returned to the token user."},
+// Each risky scope pins its class, creator pair, resource, and dependency.
+// The labels are checked by
+// TestScopes_risky_scopes_should_have_a_label_and_a_known_dependency.
+func TestScopes_risky_scopes_should_have_their_pair_and_dependency(t *testing.T) {
+	cases := map[string]struct{ pair, action, resource, needs string }{
+		ScopeKeysRevoke:       {rbac.ObjectAPIKeyPublic, rbac.ActionManage, "keys", ScopeKeysRead},
+		ScopeKeysSecret:       {rbac.ObjectAPIKeySecret, rbac.ActionManage, "keys", ""},
+		ScopeSteamWrite:       {rbac.ProjectConfigObject(42), rbac.ActionUpdate, "config", ""},
+		ScopePlayersPII:       {rbac.ProjectPlayersObject(42), rbac.ActionManage, "players", ScopePlayersRead},
+		ScopePlayersInvite:    {rbac.ProjectPlayersObject(42), rbac.ActionManage, "players", ScopePlayersRead},
+		ScopeAllocationsWrite: {rbac.ProjectAllocationObject(42), rbac.ActionAllocate, "fleets", ScopeFleetRead},
 	}
-	pairs := map[string]string{ScopeKeysRevoke: rbac.ObjectAPIKeyPublic, ScopeKeysSecret: rbac.ObjectAPIKeySecret}
 	for scope, want := range cases {
 		t.Run(scope, func(t *testing.T) {
 			got, ok := Scope(scope)
-			require.True(t, ok)
 
-			assert.Equal(t, []any{want.Class, pairs[scope], want.Action, want.Resource, want.Needs, want.Label},
-				[]any{got.Class, got.Pair(42), got.Action, got.Resource, got.Needs, got.Label})
+			assert.Equal(t, []any{true, ClassRisky, want.pair, want.action, want.resource, want.needs},
+				[]any{ok, got.Class, got.Pair(42), got.Action, got.Resource, got.Needs})
 		})
 	}
 }
@@ -205,20 +193,4 @@ func TestResource_should_have_no_write_scopes_for_matchmaking(t *testing.T) {
 func resourceNamed(name string) Resource {
 	i := slices.IndexFunc(Resources, func(r Resource) bool { return r.Name == name })
 	return Resources[i]
-}
-
-func TestScopes_players_invite_should_be_risky_with_the_players_pair_and_need_players_read(t *testing.T) {
-	got, ok := Scope(ScopePlayersInvite)
-
-	require.True(t, ok)
-	assert.Equal(t, []any{ClassRisky, ScopePlayersRead, "project:42:players", rbac.ActionManage, "Invite and link players. Sends email."},
-		[]any{got.Class, got.Needs, got.Pair(42), got.Action, got.Label})
-}
-
-func TestScopes_allocations_write_should_be_risky_with_the_allocate_pair_and_need_fleet_read(t *testing.T) {
-	got, ok := Scope(ScopeAllocationsWrite)
-
-	require.True(t, ok)
-	assert.Equal(t, []any{ClassRisky, ScopeFleetRead, "project:42:allocation", rbac.ActionAllocate, "fleets", "Start and stop game servers. Stopping ends a live match."},
-		[]any{got.Class, got.Needs, got.Pair(42), got.Action, got.Resource, got.Label})
 }

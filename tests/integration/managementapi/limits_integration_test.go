@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 )
@@ -59,8 +58,7 @@ func TestLimits_should_return_403_when_the_creator_lost_the_project_pair(t *test
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{managementtoken.ScopeLimitsRead, managementtoken.ScopeLimitsWrite}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "project", "manage")
 
 	// Act
 	got := []int{

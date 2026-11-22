@@ -106,8 +106,7 @@ func TestRevokeAPIKey_should_return_403_when_the_creator_lacks_the_publishable_p
 	id := f.key(f.tenantA, f.projectA, "publishable", "k")
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"keys:revoke"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:publishable' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "api_key:publishable", "manage")
 
 	got := f.do(tok, http.MethodPost, keyPath(id, "/revoke"), "")
 
@@ -120,8 +119,7 @@ func TestRevokeAPIKey_should_return_403_for_a_secret_key_when_the_creator_lacks_
 	public := f.key(f.tenantA, f.projectA, "publishable", "pub")
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"keys:revoke"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "api_key:secret", "manage")
 
 	denied := f.do(tok, http.MethodPost, keyPath(secret, "/revoke"), "")
 	allowed := f.do(tok, http.MethodPost, keyPath(public, "/revoke"), "")
@@ -222,8 +220,7 @@ func TestCreateSecretAPIKey_should_return_403_when_the_creator_lacks_the_secret_
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"keys:secret"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "api_key:secret", "manage")
 
 	got := f.do(tok, http.MethodPost, secretKeysPath, `{"label":"ci"}`)
 

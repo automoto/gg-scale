@@ -176,8 +176,7 @@ func TestProjectAPI_should_be_refused_when_the_creator_lacks_the_pair(t *testing
 			f := newFixture(t)
 			admin := f.user("admin@example.com", f.tenantA, "admin")
 			tok, _ := f.token(f.tenantA, f.projectA, admin, []string{c.scope}, time.Hour)
-			f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = $1 AND v3 = $2`, c.object, c.action)
-			require.NoError(t, f.authz.ReloadPolicy())
+			f.dropPair("role:tenant_admin", c.object, c.action)
 
 			got := f.do(tok, c.method, c.path, c.body)
 

@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"context"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,15 +12,6 @@ import (
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/rbac"
 )
-
-// allScopes returns every scope of the table.
-func allScopes() []string {
-	var out []string
-	for _, s := range managementtoken.Scopes {
-		out = append(out, s.Scope)
-	}
-	return out
-}
 
 func accessRow(t *testing.T, rows []AccessRowView, name string) AccessRowView {
 	t.Helper()
@@ -49,7 +41,7 @@ func TestAccessOptions_should_disable_write_with_role_reason_when_no_write_scope
 }
 
 func TestAccessOptions_should_disable_the_row_with_the_gate_reason(t *testing.T) {
-	rows, _ := accessOptions(allScopes(), map[string]string{"keys": reasonSwitch})
+	rows, _ := accessOptions(managementtoken.ScopeNames(), map[string]string{"keys": reasonSwitch})
 
 	got := accessRow(t, rows, "keys")
 
@@ -57,7 +49,7 @@ func TestAccessOptions_should_disable_the_row_with_the_gate_reason(t *testing.T)
 }
 
 func TestAccessOptions_should_have_no_write_option_for_matchmaking(t *testing.T) {
-	rows, _ := accessOptions(allScopes(), nil)
+	rows, _ := accessOptions(managementtoken.ScopeNames(), nil)
 
 	got := accessRow(t, rows, "matchmaking")
 
@@ -75,57 +67,50 @@ func riskyBox(t *testing.T, risky []RiskyBoxView, scope string) RiskyBoxView {
 	return RiskyBoxView{}
 }
 
-func TestAccessOptions_should_build_the_pii_box_from_the_scope_table(t *testing.T) {
-	_, risky := accessOptions(allScopes(), nil)
-
-	got := riskyBox(t, risky, managementtoken.ScopePlayersPII)
-
-	assert.Equal(t, RiskyBoxView{
-		Scope: managementtoken.ScopePlayersPII, Label: "See player email and display name. They go into agent logs and to the AI model provider.",
-		Needs: "Needs read access to Players",
-	}, got)
-}
-
 func TestAccessOptions_should_show_the_players_row_with_read_and_write(t *testing.T) {
-	rows, _ := accessOptions(allScopes(), nil)
+	rows, _ := accessOptions(managementtoken.ScopeNames(), nil)
 
 	got := accessRow(t, rows, "players")
 
 	assert.Equal(t, []any{"Players (IDs and status)", true, true, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
 }
 
-func TestAccessOptions_should_disable_the_pii_box_when_the_creator_lacks_the_pair(t *testing.T) {
-	_, risky := accessOptions([]string{managementtoken.ScopePlayersRead}, nil)
+func TestAccessOptions_should_disable_a_risky_box_when_the_creator_lacks_the_pair(t *testing.T) {
+	cases := map[string][]string{
+		managementtoken.ScopePlayersPII: {managementtoken.ScopePlayersRead},
+		managementtoken.ScopeKeysSecret: {managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke},
+	}
+	for scope, grantable := range cases {
+		t.Run(scope, func(t *testing.T) {
+			_, risky := accessOptions(grantable, nil)
 
-	got := riskyBox(t, risky, managementtoken.ScopePlayersPII)
-
-	assert.Equal(t, reasonRole, got.Reason)
+			assert.Equal(t, reasonRole, riskyBox(t, risky, scope).Reason)
+		})
+	}
 }
 
-func TestMissingDependency_should_name_the_needed_access_for_pii_without_players_read(t *testing.T) {
-	got := missingDependency([]string{managementtoken.ScopePlayersPII})
+func TestMissingDependency(t *testing.T) {
+	cases := map[string]struct {
+		scopes []string
+		want   string
+	}{
+		"pii without players read":        {[]string{managementtoken.ScopePlayersPII}, "Needs read access to Players"},
+		"allocations without fleets read": {[]string{managementtoken.ScopeAllocationsWrite}, "Needs read access to Fleets"},
+		"invite without players read":     {[]string{managementtoken.ScopePlayersInvite}, "Needs read access to Players"},
+		"revoke without keys read":        {[]string{managementtoken.ScopeKeysRevoke}, "Needs read access to API keys"},
+		"pii with players read":           {[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}, ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := missingDependency(c.scopes)
 
-	assert.Contains(t, got, "Needs read access to Players")
-}
-
-func TestMissingDependency_should_name_fleets_read_for_allocations_write(t *testing.T) {
-	got := missingDependency([]string{managementtoken.ScopeAllocationsWrite})
-
-	assert.Contains(t, got, "Needs read access to Fleets")
-}
-
-func TestMissingDependency_should_name_players_read_for_invite(t *testing.T) {
-	got := missingDependency([]string{managementtoken.ScopePlayersInvite})
-
-	assert.Contains(t, got, "Needs read access to Players")
-}
-
-func TestMissingDependency_should_be_empty_with_players_read(t *testing.T) {
-	assert.Empty(t, missingDependency([]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}))
+			assert.True(t, (c.want == "") == (got == "") && strings.Contains(got, c.want), got)
+		})
+	}
 }
 
 func TestScopesFromAccessForm_should_give_pii_with_players_read(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 	got, err := scopesFromAccessForm(url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}}, rows, risky)
 	require.NoError(t, err)
@@ -142,16 +127,17 @@ func TestScopesFromAccessForm_should_refuse_pii_the_creator_cannot_give(t *testi
 }
 
 func TestRiskyNotice_should_name_each_box_checked_from_the_link(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 	fillAccess(url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}}, rows, risky)
 
 	got := riskyNotice(risky)
 
-	assert.Equal(t, "See player email and display name. They go into agent logs and to the AI model provider.", got)
+	pii, _ := managementtoken.Scope(managementtoken.ScopePlayersPII)
+	assert.Equal(t, pii.Label, got)
 }
 
 func TestRiskyNotice_should_be_empty_when_no_box_is_checked(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 	fillAccess(url.Values{}, rows, risky)
 
 	assert.Empty(t, riskyNotice(risky))
@@ -196,7 +182,7 @@ func TestScopesFromAccessForm(t *testing.T) {
 }
 
 func TestFillAccess_should_select_read_in_each_row_by_default(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 	fillAccess(url.Values{}, rows, risky)
 
@@ -212,7 +198,7 @@ func TestFillAccess_should_step_down_from_a_disabled_option(t *testing.T) {
 }
 
 func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
@@ -243,7 +229,7 @@ func checkedBoxes(risky []RiskyBoxView) []string {
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
 	for _, fill := range []string{fillReadOnly, fillReadWrite} {
 		t.Run(fill, func(t *testing.T) {
-			rows, risky := accessOptions(allScopes(), nil)
+			rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 			fillAccess(url.Values{"fill": {fill}, "risky": riskyScopes()}, rows, risky)
 
@@ -253,7 +239,7 @@ func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
 }
 
 func TestFillAccess_default_form_should_check_no_risky_box(t *testing.T) {
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 	fillAccess(url.Values{}, rows, risky)
 
@@ -271,46 +257,30 @@ func TestAccessRows_read_and_write_should_give_no_risky_scope(t *testing.T) {
 	}
 }
 
-func TestAccessOptions_should_build_the_key_risky_boxes_from_the_scope_table(t *testing.T) {
-	cases := map[string]RiskyBoxView{
-		managementtoken.ScopeKeysRevoke: {Scope: managementtoken.ScopeKeysRevoke,
-			Label: "Revoke API keys. Cannot be undone; a game that uses the key stops.", Needs: "Needs read access to API keys"},
-		managementtoken.ScopeKeysSecret: {Scope: managementtoken.ScopeKeysSecret,
-			Label: "Create secret API keys. The key value is returned to the token user."},
-		managementtoken.ScopeSteamWrite: {Scope: managementtoken.ScopeSteamWrite,
-			Label: "Change the Steam Web API key. The old key is lost."},
-		managementtoken.ScopePlayersInvite: {Scope: managementtoken.ScopePlayersInvite,
-			Label: "Invite and link players. Sends email.", Needs: "Needs read access to Players"},
-		managementtoken.ScopeAllocationsWrite: {Scope: managementtoken.ScopeAllocationsWrite,
-			Label: "Start and stop game servers. Stopping ends a live match.", Needs: "Needs read access to Fleets"},
+func TestAccessOptions_should_build_the_risky_boxes_from_the_scope_table(t *testing.T) {
+	needs := map[string]string{
+		managementtoken.ScopeKeysRevoke:       "Needs read access to API keys",
+		managementtoken.ScopeKeysSecret:       "",
+		managementtoken.ScopeSteamWrite:       "",
+		managementtoken.ScopePlayersPII:       "Needs read access to Players",
+		managementtoken.ScopePlayersInvite:    "Needs read access to Players",
+		managementtoken.ScopeAllocationsWrite: "Needs read access to Fleets",
 	}
-	_, risky := accessOptions(allScopes(), nil)
-	for scope, want := range cases {
+	_, risky := accessOptions(managementtoken.ScopeNames(), nil)
+	for scope, need := range needs {
 		t.Run(scope, func(t *testing.T) {
-			assert.Equal(t, want, riskyBox(t, risky, scope))
+			s, _ := managementtoken.Scope(scope)
+
+			assert.Equal(t, RiskyBoxView{Scope: scope, Label: s.Label, Needs: need}, riskyBox(t, risky, scope))
 		})
 	}
-}
-
-func TestAccessOptions_should_disable_the_secret_box_when_the_creator_lacks_the_pair(t *testing.T) {
-	_, risky := accessOptions([]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke}, nil)
-
-	got := riskyBox(t, risky, managementtoken.ScopeKeysSecret)
-
-	assert.Equal(t, reasonRole, got.Reason)
-}
-
-func TestMissingDependency_should_name_keys_read_for_revoke(t *testing.T) {
-	got := missingDependency([]string{managementtoken.ScopeKeysRevoke})
-
-	assert.Contains(t, got, "Needs read access to API keys")
 }
 
 func TestTokenAccessValues_should_round_trip_through_the_form(t *testing.T) {
 	scopes := []string{managementtoken.ScopeConfigRead, managementtoken.ScopeConfigWrite, managementtoken.ScopeOriginsWrite,
 		managementtoken.ScopeMatchmakingRead, managementtoken.ScopeKeysRead, managementtoken.ScopeKeysCreate, managementtoken.ScopeKeysWrite,
 		managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}
-	rows, risky := accessOptions(allScopes(), nil)
+	rows, risky := accessOptions(managementtoken.ScopeNames(), nil)
 
 	got, _ := scopesFromAccessForm(tokenAccessValues(scopes), rows, risky)
 

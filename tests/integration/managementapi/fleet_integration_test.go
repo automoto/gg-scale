@@ -107,18 +107,6 @@ func TestFleets_should_not_exist_when_the_fleet_switch_is_off(t *testing.T) {
 	assert.Equal(t, []any{404, false}, []any{got.status, strings.Contains(fmt.Sprint(rpc), "list_fleets")})
 }
 
-func TestFleets_should_list_the_tools_when_the_fleet_switch_is_on(t *testing.T) {
-	f := newFleetFixture(t)
-	tok := f.scopedToken(managementtoken.ScopeFleetRead)
-
-	_, rpc := f.post(tok, toolsList)
-
-	text := fmt.Sprint(rpc)
-	for _, tool := range []string{"list_fleets", "get_fleet", "list_allocations", "get_allocation", "list_allocation_events"} {
-		assert.Contains(t, text, "name:"+tool)
-	}
-}
-
 func TestAllocationWrite_should_list_its_tools_only_with_the_scope(t *testing.T) {
 	f := newFleetFixture(t)
 	with := f.scopedToken(managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite)

@@ -113,8 +113,7 @@ func TestWriteTools_should_be_refused_when_creator_lacks_the_pair(t *testing.T) 
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"config:write"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:config'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "project:*:config", "update")
 
 	res := f.call(tok, "set_remote_config", map[string]any{"config": map[string]any{"a": 1}, "expected_revision": 0})
 

@@ -527,35 +527,61 @@ func TestAPIKeys_dashboard_label_and_features_should_write_audit_rows_as_the_use
 }
 
 func TestManagementTokens_should_refuse_a_risky_scope_the_creator_cannot_give(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "admin@example.com", "admin")
-	p.dropAdminPair(t, "project:*:players")
+	cases := map[string]string{
+		managementtoken.ScopePlayersPII: "project:*:players",
+		managementtoken.ScopeKeysSecret: "api_key:secret",
+	}
+	for scope, object := range cases {
+		t.Run(scope, func(t *testing.T) {
+			p := newTokenPanel(t, true)
+			c, csrf, _ := p.member(t, "admin@example.com", "admin")
+			p.dropAdminPair(t, object)
 
-	resp, body := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopePlayersPII}})
+			resp, body := p.create(t, c, csrf, url.Values{"risky": {scope}})
 
-	assert.Equal(t, []any{http.StatusForbidden, true, 0},
-		[]any{resp.StatusCode, strings.Contains(body, `"players:pii"`), p.tokenCount(t)})
+			assert.Equal(t, []any{http.StatusForbidden, true, 0},
+				[]any{resp.StatusCode, strings.Contains(body, `"`+scope+`"`), p.tokenCount(t)})
+		})
+	}
 }
 
-func TestManagementTokens_should_refuse_pii_without_players_read(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+// A risky scope with a Needs is refused without the read access of its row,
+// and given with it.
+func TestManagementTokens_risky_scope_should_need_its_read_access(t *testing.T) {
+	cases := map[string]struct {
+		field, need string
+		risky, want []string
+		fleet       bool
+	}{
+		"players:pii": {"access_players", "Players", []string{managementtoken.ScopePlayersPII},
+			[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}, false},
+		"keys": {"access_keys", "API keys", []string{managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret},
+			[]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}, false},
+		"players:invite": {"access_players", "Players", []string{managementtoken.ScopePlayersInvite},
+			[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}, false},
+		"allocations:write": {"access_fleets", "Fleets", []string{managementtoken.ScopeAllocationsWrite},
+			[]string{managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite}, true},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			var p tokenPanel
+			if c.fleet {
+				p = newFleetTokenPanel(t)
+			} else {
+				p = newTokenPanel(t, true)
+			}
+			client, csrf, _ := p.member(t, "owner@example.com", "owner")
 
-	resp, body := p.create(t, c, csrf, url.Values{"label": {"keep-me"}, "access_players": {"none"}, "risky": {managementtoken.ScopePlayersPII}})
+			refused, body := p.create(t, client, csrf, url.Values{"label": {"keep-me"}, c.field: {"none"}, "risky": c.risky})
+			countAfterRefuse := p.tokenCount(t)
+			given, _ := p.create(t, client, csrf, url.Values{c.field: {"read"}, "risky": c.risky})
 
-	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, true, false, 0}, []any{resp.StatusCode,
-		strings.Contains(body, "Needs read access to Players. Give that access or uncheck the box."),
-		strings.Contains(body, `value="keep-me"`), strings.Contains(body, "A link checked risky access"), p.tokenCount(t)})
-}
-
-func TestManagementTokens_should_give_pii_with_players_read(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII}})
-
-	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}},
-		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
+			assert.Equal(t, []any{http.StatusUnprocessableEntity, true, true, false, 0, http.StatusOK, c.want}, []any{refused.StatusCode,
+				strings.Contains(body, "Needs read access to "+c.need+". Give that access or uncheck the box."),
+				strings.Contains(body, `value="keep-me"`), strings.Contains(body, "A link checked risky access"), countAfterRefuse,
+				given.StatusCode, p.onlyTokenScopes(t)})
+		})
+	}
 }
 
 func TestManagementTokens_page_should_show_the_pii_box_with_its_dependency(t *testing.T) {
@@ -614,38 +640,6 @@ func TestManagementTokens_page_should_show_the_key_risky_boxes_in_the_risky_grou
 	assert.Equal(t, []bool{true, true, true}, []bool{group >= 0 && revoke > group, secret > group, strings.Contains(body, "Needs read access to API keys")})
 }
 
-func TestManagementTokens_should_refuse_keys_revoke_without_keys_read(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, body := p.create(t, c, csrf, url.Values{"access_keys": {"none"}, "risky": {managementtoken.ScopeKeysRevoke}})
-
-	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
-		strings.Contains(body, "Needs read access to API keys. Give that access or uncheck the box."), p.tokenCount(t)})
-}
-
-func TestManagementTokens_should_give_the_key_risky_scopes_only_when_checked(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, _ := p.create(t, c, csrf, url.Values{"access_keys": {"read"},
-		"risky": {managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}})
-
-	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}},
-		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
-}
-
-func TestManagementTokens_should_refuse_keys_secret_when_the_creator_lacks_the_secret_pair(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "admin@example.com", "admin")
-	p.dropAdminPair(t, "api_key:secret")
-
-	resp, body := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopeKeysSecret}})
-
-	assert.Equal(t, []any{http.StatusForbidden, true, 0},
-		[]any{resp.StatusCode, strings.Contains(body, `"keys:secret"`), p.tokenCount(t)})
-}
-
 func TestManagementTokens_should_give_steam_write_only_when_checked(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")
@@ -655,52 +649,12 @@ func TestManagementTokens_should_give_steam_write_only_when_checked(t *testing.T
 	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeSteamWrite}}, []any{resp.StatusCode, p.onlyTokenScopes(t)})
 }
 
-func TestManagementTokens_should_refuse_invite_without_players_read(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, body := p.create(t, c, csrf, url.Values{"access_players": {"none"}, "risky": {managementtoken.ScopePlayersInvite}})
-
-	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
-		strings.Contains(body, "Needs read access to Players. Give that access or uncheck the box."), p.tokenCount(t)})
-}
-
-func TestManagementTokens_should_give_invite_with_players_read(t *testing.T) {
-	p := newTokenPanel(t, true)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, _ := p.create(t, c, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersInvite}})
-
-	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}},
-		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
-}
-
 func newFleetTokenPanel(t *testing.T) tokenPanel {
 	t.Helper()
 	p := newTokenPanelWithFleet(t, true, true)
 	_, err := p.raw.Exec(context.Background(), `INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES ($1, 'dedicated_servers', true)`, p.tenantID)
 	require.NoError(t, err)
 	return p
-}
-
-func TestManagementTokens_should_refuse_allocations_write_without_fleets_read(t *testing.T) {
-	p := newFleetTokenPanel(t)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, body := p.create(t, c, csrf, url.Values{"access_fleets": {"none"}, "risky": {managementtoken.ScopeAllocationsWrite}})
-
-	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
-		strings.Contains(body, "Needs read access to Fleets. Give that access or uncheck the box."), p.tokenCount(t)})
-}
-
-func TestManagementTokens_should_give_allocations_write_with_fleets_read(t *testing.T) {
-	p := newFleetTokenPanel(t)
-	c, csrf, _ := p.member(t, "owner@example.com", "owner")
-
-	resp, _ := p.create(t, c, csrf, url.Values{"access_fleets": {"read"}, "risky": {managementtoken.ScopeAllocationsWrite}})
-
-	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite}},
-		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
 }
 
 func TestManagementTokens_should_refuse_allocations_write_when_the_fleet_switch_is_off(t *testing.T) {

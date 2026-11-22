@@ -103,8 +103,7 @@ func TestPlayers_should_return_403_when_the_creator_lacks_the_players_pair(t *te
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{managementtoken.ScopePlayersRead}, 3600e9)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:players' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "project:*:players", "manage")
 
 	// Act
 	got := f.do(tok, http.MethodGet, "/v1/project/players", "")
@@ -232,8 +231,7 @@ func TestPlayerWrite_should_return_403_when_the_creator_lacks_the_players_pair(t
 	id := f.player(f.projectA)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{managementtoken.ScopePlayersWrite}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'project:*:players' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "project:*:players", "manage")
 
 	got := f.do(tok, http.MethodPut, playerPath(id)+"/disabled", `{"disabled":true}`)
 

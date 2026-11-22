@@ -45,8 +45,7 @@ func TestAPIKeyWrite_should_return_403_when_the_creator_lacks_the_publishable_pa
 	id := f.key(f.tenantA, f.projectA, "publishable", "old")
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"keys:write"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:publishable' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "api_key:publishable", "manage")
 
 	got := f.do(tok, http.MethodPut, keyPath(id, "/label"), `{"label":"new"}`)
 
@@ -59,8 +58,7 @@ func TestAPIKeyWrite_should_return_403_for_a_secret_key_when_the_creator_lacks_t
 	public := f.key(f.tenantA, f.projectA, "publishable", "pub")
 	admin := f.user("admin@example.com", f.tenantA, "admin")
 	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{"keys:write"}, time.Hour)
-	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = 'role:tenant_admin' AND v2 = 'api_key:secret' AND v3 = 'manage'`)
-	require.NoError(t, f.authz.ReloadPolicy())
+	f.dropPair("role:tenant_admin", "api_key:secret", "manage")
 
 	denied := f.do(tok, http.MethodPut, keyPath(secret, "/label"), `{"label":"new"}`)
 	allowed := f.do(tok, http.MethodPut, keyPath(public, "/label"), `{"label":"new"}`)
