@@ -319,10 +319,10 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   characters. This holds for the dashboard, the token API, and sign-up too.
 - `null` for `scopes` in `update_api_key_features` or for `origins` in
   `set_allowed_origins` answers 422. An empty list `[]` still clears the list.
-- NUL in a fleet config, in the `fleet` and `external_id` of
-  `allocate_server`, and in the `cursor` of the leaderboard lists answers
-  422. Invalid UTF-8 in a JSON body answers 400 (see Errors). An
-  `allocate_server` `fleet` that is too long also answers 422.
+- NUL and invalid UTF-8 in a fleet config, in the `fleet` and `external_id`
+  of `allocate_server`, and in the `cursor` of the leaderboard lists answer
+  422. An `allocate_server` `fleet` that is too long also answers 422. In a
+  JSON body, invalid UTF-8 answers 400 first (see Errors).
 - Allocation works on a plugin backend. A fleet stored as bare `plugin` runs
   on any plugin backend. A fleet with another `plugin*` backend value that has
   no `plugin:` prefix (for example `pluginx`) answers 422 on the token fleet

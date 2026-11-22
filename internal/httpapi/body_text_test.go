@@ -91,6 +91,17 @@ func TestBadText_should_be_refused_over_mcp(t *testing.T) {
 	}
 }
 
+// The probe server cannot answer 200: the call passes the text check and is
+// refused later by the handler.
+func TestGoodText_should_pass_the_text_check_over_mcp(t *testing.T) {
+	s := newProbeServer(t)
+
+	got := s.mcp("create_api_key", `{"label":"😀"}`)
+
+	assert.Equal(t, []any{true, false},
+		[]any{strings.Contains(got, `\"status\":401`), strings.Contains(got, `request body is not valid UTF-8 text`)}, got)
+}
+
 type echoNameInput struct {
 	Body struct {
 		Name string `json:"name"`
