@@ -904,7 +904,7 @@ func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, path, http.StatusSeeOther)
+	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and an escaped message
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {
