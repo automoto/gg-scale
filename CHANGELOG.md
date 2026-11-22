@@ -11,6 +11,72 @@ and in the planning document for that work. Sections older than `v0.9.6`
 predate this rule, and not all of them match a tag.
 
 
+## [Unreleased]
+
+### Breaking
+
+- **Management tokens now need read scopes.** Before, every token could use
+  every read. Now each resource has a read scope (`config:read`,
+  `leaderboards:read`, `keys:read`, `players:read`, `matchmaking:read`,
+  `limits:read`, `fleet:read`). A token made before this release has only its
+  write scopes and no read access. Make a new token.
+
+### Added
+
+- Add the management API operations for keys: `list_api_keys` is now paged,
+  and `update_api_key_label`, `update_api_key_features`, `revoke_api_key`, and
+  `create_secret_api_key` are new.
+- Add the operations for players: `list_players`, `get_player`,
+  `set_player_disabled`, `request_player_delete`, `cancel_player_delete`,
+  `invite_player`, and `link_player`.
+- Add the operations for limits: `get_project_limits`,
+  `set_project_invite_limit`, and `set_project_storage_limit`.
+- Add the operations for matchmaking and Steam: `get_matchmaking_queue`,
+  `get_steam_auth`, `set_steam_auth`, and `clear_steam_auth`.
+- Add the operations for fleets and allocations: `list_fleets`, `get_fleet`,
+  `create_fleet`, `update_fleet`, `delete_fleet`, `restore_fleet`,
+  `list_allocations`, `get_allocation`, `list_allocation_events`,
+  `allocate_server`, and `deallocate_server`. They need
+  `FEATURE_FLEET_ENABLED` and the `dedicated_servers` feature grant.
+- Add `get_token` (`GET /v1/project/token`). It shows the scopes of a token
+  and the scopes that its creator can still use.
+- Add `limit`, `cursor`, and `next_cursor` to every list operation. This
+  replaces the fixed 50 rows.
+- Add `FLEET_ALLOCATION_MAX_CAPACITY` (default `100`), the largest capacity of
+  one manual allocation.
+
+### Changed
+
+- Risky operations have their own opt-in scopes. No preset includes them, and
+  the token page shows them in a separate group with a warning:
+  `keys:revoke`, `keys:secret`, `steam:write`, `players:pii`,
+  `players:invite`, and `allocations:write`. Some of them need a read scope on
+  the same token.
+- A token can now do things that the old rules did not allow, each behind a
+  scope: revoke an API key (`keys:revoke`), create a secret API key and see its
+  value one time (`keys:secret`), set or clear the Steam Web API key
+  (`steam:write`), see player email and display name (`players:pii`), invite
+  and link players (`players:invite`), and start and stop game servers
+  (`allocations:write`). The values of existing keys and the Steam Web API key
+  are still never returned.
+- A token can request a player delete with `players:write`. The deletion
+  starts after `PLAYER_DELETE_GRACE_PERIOD`, and `cancel_player_delete` undoes
+  it before then.
+- `project_health_check` leaves out each section that the token has no read
+  scope for.
+- The management token page has an access table with **No access**, **Read**,
+  and **Read and write** for each resource, **Quick fill** links, a group for
+  risky access, and a reason on each option that you cannot give. A new token
+  is read-only by default. Each token in the list shows its access in words, a
+  count of inactive permissions when its creator lost a right, and a **New
+  token like this** link. A token never changes after you make it.
+- The dashboard writes an audit row in the same transaction as the change for
+  player disable (new row), invite, link, limits, and fleet changes. If the
+  audit row fails, the action now fails too.
+- The dashboard fleet list has a **Restore** button for a deleted fleet.
+- The dashboard allocation form is limited by `FLEET_ALLOCATION_MAX_CAPACITY`.
+
+
 ## [v0.9.64] - 2026-09-28
 
 ### Added

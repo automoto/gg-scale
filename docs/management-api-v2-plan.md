@@ -1,7 +1,8 @@
 # Management API v2: more operations, finer token permissions
 
-Status: plan written 2026-11-21. Not started. Depends on PR #107
-(`docs/management-api-plan.md`), which must be merged first.
+Status: plan written 2026-11-21. Stages 1 to 4 and 6 are done. Stage 5
+(tenant token) is not started. Depends on PR #107
+(`docs/management-api-plan.md`), which was merged first.
 
 This plan adds operations to the project management API. Each operation serves
 three clients with no difference: plain HTTP (`/v1/project/...`), the coming
@@ -345,9 +346,9 @@ Do the stages in order. Write failing tests first. After each stage:
 
 ### Stage 6: documents
 
-- [ ] `docs/management-api.md`: scope table, classes, presets, and each new operation.
-- [ ] Release notes: read scopes (old tokens lose reads; make a new token), the new operations, and the changed rules.
-- [ ] `openapi.yaml` (`make openapi`).
+- [x] `docs/management-api.md`: scope table, classes, presets, and each new operation.
+- [x] Release notes: read scopes (old tokens lose reads; make a new token), the new operations, and the changed rules.
+- [x] `openapi.yaml` (`make openapi`).
 
 ## Risks
 
