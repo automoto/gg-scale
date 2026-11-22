@@ -122,7 +122,7 @@ server refuse the token without it:
   disabled, with the reason, when one is missing.
 - A normal row maps to these scopes: Remote config and origins
   (`config:*`, `origins:write`), Leaderboards, API keys (`keys:read`,
-  `keys:create`, `keys:write`), Players (`players:*`), Matchmaking, Project
+  `keys:create`, `keys:write`), Players (`players:read`, `players:write`), Matchmaking, Project
   limits, Fleets (`fleet:*`).
 - **New token like this** in the token list fills the form with the access of
   that token, including its risky boxes. You still select **Create token**.
