@@ -234,6 +234,7 @@ func TestControlPanel_should_refuse_a_cross_site_write_on_every_route(t *testing
 		return nil
 	}))
 
+	require.NotEmpty(t, refused)
 	assert.Equal(t, want, refused)
 }
 
@@ -248,4 +249,19 @@ func refusedAsCrossOrigin(h http.Handler, req *http.Request) (refused bool) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "cross-origin request detected")
+}
+
+func TestControlPanel_should_trust_a_post_from_the_base_url_origin(t *testing.T) {
+	h := controlpanel.New(controlpanel.Deps{
+		VerifySigningKey: make([]byte, verifycode.SigningKeySize),
+		Config:           controlpanel.Config{BaseURL: "https://panel.example"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://ggscale:8080/setup/token", nil)
+	req.Header.Set("Origin", "https://panel.example")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	// With setup disabled, POST /setup/token answers 410 before any work.
+	assert.Equal(t, http.StatusGone, rec.Code)
 }

@@ -157,8 +157,9 @@ func TestControlPanelFleet_list_then_allocate_then_appears_in_table(t *testing.T
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
@@ -207,7 +208,8 @@ func TestControlPanelFleet_allocate_should_refuse_a_capacity_above_the_limit_wit
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
-	backend := newStubBackend("stub")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
@@ -221,14 +223,19 @@ func TestControlPanelFleet_allocate_should_refuse_a_capacity_above_the_limit_wit
 }
 
 func TestControlPanelFleet_allocate_should_need_the_backend_grant(t *testing.T) {
+	allGrants := []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend, rbac.FeatureFleetPluginBackend}
 	cases := []struct {
 		name       string
+		backend    string
 		grants     []rbac.Feature
 		wantStatus int
 		wantRows   int
 	}{
-		{"refused_without_backend_grant", []rbac.Feature{rbac.FeatureDedicatedServers}, http.StatusForbidden, 0},
-		{"works_with_backend_grant", []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend}, http.StatusSeeOther, 1},
+		{"refused_without_backend_grant", "agones", []rbac.Feature{rbac.FeatureDedicatedServers}, http.StatusForbidden, 0},
+		{"works_with_backend_grant", "agones", []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend}, http.StatusSeeOther, 1},
+		// A stored backend that maps to no grant, run by a backend of the
+		// same name so the manager would accept it.
+		{"refused_for_a_backend_with_no_grant", "docker", allGrants, http.StatusForbidden, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,10 +246,10 @@ func TestControlPanelFleet_allocate_should_need_the_backend_grant(t *testing.T) 
 			for _, g := range tc.grants {
 				seedFeatureGrant(t, c, tenantID, projectID, g)
 			}
-			backend := newStubBackend("agones")
+			backend := newStubBackend(tc.backend)
 			srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 			cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
-			fleetName := seedFleetTemplate(t, c, tenantID, projectID, "agones")
+			fleetName := seedFleetTemplate(t, c, tenantID, projectID, tc.backend)
 			base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
 				"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
 
@@ -263,8 +270,9 @@ func TestControlPanelFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
@@ -301,8 +309,9 @@ func TestControlPanelFleet_deallocate_rejects_wrong_typed_id_then_succeeds(t *te
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
@@ -369,8 +378,9 @@ func TestControlPanelFleet_RLS_isolates_allocations_across_tenants(t *testing.T)
 	seedControlPanelMembership(t, c, aliceID, tenantA, "owner")
 	seedControlPanelMembership(t, c, bobID, tenantB, "owner")
 	seedFeatureGrant(t, c, tenantA, projectA, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantA, projectA, rbac.FeatureFleetAgonesBackend)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	fleetA := seedFleetTemplate(t, c, tenantA, projectA, backend.Name())
 
@@ -423,7 +433,7 @@ func TestControlPanelFleet_backends_page_surfaces_unreachable_backend(t *testing
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	backend.healthy.Store(false)
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
@@ -447,7 +457,7 @@ func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing
 	var fleetID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
-		 VALUES ($1, $2, 'mm-fleet', 'stub', '{}'::jsonb) RETURNING id`,
+		 VALUES ($1, $2, 'mm-fleet', 'agones', '{}'::jsonb) RETURNING id`,
 		tenantID, projectID).Scan(&fleetID))
 	// Seed 3 queued tickets across two (region, game_mode) buckets. One
 	// player per ticket: matchmaking_tickets_one_active_idx allows a player
@@ -468,7 +478,7 @@ func TestControlPanelMatchmaker_queue_lists_buckets_grouped_by_region(t *testing
 		require.NoError(t, err)
 	}
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 
@@ -496,7 +506,7 @@ func TestControlPanelFleet_view_pages_require_object_read_scope(t *testing.T) {
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 
 	base := fmt.Sprintf("%s/v1/control-panel/tenants/%d/projects/%d", srv.URL, tenantID, projectID)
@@ -534,7 +544,7 @@ func TestControlPanelPlugins_page_no_backend_shows_empty_state(t *testing.T) {
 	platformID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", true)
 	_ = platformID
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
 	cookie, _ := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
 
@@ -546,7 +556,7 @@ func TestControlPanelPlugins_page_renders_snapshot_when_provided(t *testing.T) {
 	c := startCluster(t)
 	_ = seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", true)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	snapshot := func() *controlpanel.PluginSnapshot {
 		return &controlpanel.PluginSnapshot{
 			Name: "ovh", Version: "1.2.3", ProtocolVersion: 1,
@@ -596,9 +606,10 @@ func TestControlPanelFleet_delete_then_restore_lists_the_fleet_again_and_audits_
 	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
 	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
 	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
-	srv, _ := newControlPanelFleetServer(t, c, newStubBackend("stub"), nil)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+	srv, _ := newControlPanelFleetServer(t, c, newStubBackend("agones"), nil)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
-	name := seedFleetTemplate(t, c, tenantID, projectID, "stub")
+	name := seedFleetTemplate(t, c, tenantID, projectID, "agones")
 	var fleetID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT id FROM fleets WHERE tenant_id = $1 AND name = $2`, tenantID, name).Scan(&fleetID))

@@ -29,6 +29,7 @@ var crossOriginCases = []struct {
 	{"refused_for_another_origin", "https://evil.example", "", false},
 	{"refused_for_a_cross_site_fetch", "", "cross-site", false},
 	{"works_for_the_same_origin", selfOrigin, "", true},
+	{"works_for_a_same_origin_fetch", "", "same-origin", true},
 	{"works_with_no_origin", "", "", true},
 }
 
@@ -111,15 +112,22 @@ func TestPlayerAccount_logout_should_check_the_request_origin(t *testing.T) {
 }
 
 // Games call the bearer API from other origins with CORS, so the cross-origin
-// check must not apply to it.
+// check must not apply to it: a cross-site post gets the same answer as a
+// post with no Origin.
 func TestBearerAPI_should_not_refuse_a_cross_site_post(t *testing.T) {
 	c := startCluster(t)
 	srv, _ := newControlPanelAndPlayerServer(t, c)
+	login := srv.URL + "/v1/auth/login"
+	plain := postFormWithOrigin(t, noRedirectClient(), login, url.Values{}, "", "", nil)
+	plainBody, err := io.ReadAll(plain.Body)
+	require.NoError(t, err)
+	plain.Body.Close()
 
-	resp := postFormWithOrigin(t, noRedirectClient(), srv.URL+"/v1/auth/login", url.Values{}, "https://evil.example", "cross-site", nil)
+	resp := postFormWithOrigin(t, noRedirectClient(), login, url.Values{}, "https://evil.example", "cross-site", nil)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	resp.Body.Close()
 
-	assert.NotContains(t, string(body), "cross-origin request detected")
+	require.NotEqual(t, http.StatusForbidden, plain.StatusCode, string(plainBody))
+	assert.Equal(t, []any{plain.StatusCode, string(plainBody)}, []any{resp.StatusCode, string(body)})
 }

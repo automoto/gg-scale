@@ -273,7 +273,8 @@ type Config struct {
 	ControlPanelCookieSecure bool `env:"CONTROL_PANEL_COOKIE_SECURE" envDefault:"false"`
 	// ControlPanelBaseURL is the externally-visible origin prefixed onto magic
 	// links emitted in control panel invite emails. Empty means relative paths
-	// (fine for local dev; bad for production).
+	// (fine for local dev; bad for production). Its origin is also a trusted
+	// origin for the cross-origin check on the dashboard and player pages.
 	ControlPanelBaseURL string `env:"CONTROL_PANEL_BASE_URL"`
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`

@@ -116,7 +116,7 @@ func TestFleetAllocationTicket_deniesAfterFeatureGrantRevokedAndCacheRefresh(t *
 		tenantID, projectID, string(rbac.FeatureDedicatedServers))
 	require.NoError(t, err)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
 	srv := newFleetMatchmakerServerForCluster(t, c, backend)
 	createTicket := func() int {
@@ -166,7 +166,7 @@ func TestMatchmakerTicket_deniesAfterExplicitDisableGrantAndCacheRefresh(t *test
 		tenantID, projectID)
 	require.NoError(t, err)
 
-	srv := newFleetMatchmakerServerForCluster(t, c, newStubBackend("stub"))
+	srv := newFleetMatchmakerServerForCluster(t, c, newStubBackend("agones"))
 	createTicket := func() int {
 		access := anonymousLogin(t, srv.URL, "mm-deprovision")
 		resp, body := authedReq(t, http.MethodPost, srv.URL+"/v1/matchmaker/tickets", "mm-deprovision", access, map[string]any{

@@ -106,12 +106,14 @@ func (h *Handler) requireControlPanelFleetMutation(w http.ResponseWriter, r *htt
 }
 
 // requireControlPanelBackendFeature checks the feature grant of a fleet
-// backend. A backend name with no grant passes here; the fleet writes refuse
-// it when they check the name.
+// backend. A backend name that maps to no grant is refused. Allocate runs no
+// other name check: Manager.Allocate only refuses a fleet whose backend does
+// not match the running one (fleet.BackendMatches).
 func (h *Handler) requireControlPanelBackendFeature(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
 	feature, ok := rbac.BackendFeature(backend)
 	if !ok {
-		return true
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
 	}
 	return h.requireControlPanelFeature(w, r, tenantID, projectID, feature)
 }

@@ -515,8 +515,12 @@ This text is for the CHANGELOG section that is written when the release is tagge
   `structuredContent`).
 - The dashboard allocate form now also needs the feature grant of the fleet
   backend (`fleet_agones_backend` or `fleet_plugin_backend`), as fleet create
-  and edit and the management API do. Without it, the form answers 403.
+  and edit and the management API do. Without it, the form answers 403. The
+  dashboard fleet and allocate forms also answer 403 for a fleet whose stored
+  backend is not `agones`, `plugin` or `plugin:<name>`.
 - The dashboard and the player account pages refuse a form post from another
   origin with 403 (`net/http.CrossOriginProtection`), in addition to the CSRF
   value. A request with no `Origin` and no `Sec-Fetch-Site` header still
-  passes. A reverse proxy must keep the `Host` header.
+  passes. The origin of `CONTROL_PANEL_BASE_URL` is trusted, so the forms work
+  behind a proxy that changes the `Host` header when it is set; otherwise the
+  proxy must keep the `Host` header.

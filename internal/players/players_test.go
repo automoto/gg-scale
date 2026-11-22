@@ -205,6 +205,7 @@ func TestPlayerSite_should_refuse_a_cross_site_write_on_every_route(t *testing.T
 		return nil
 	}))
 
+	require.NotEmpty(t, refused)
 	assert.Equal(t, want, refused)
 }
 
@@ -219,4 +220,16 @@ func refusedAsCrossOrigin(h http.Handler, req *http.Request) (refused bool) {
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "cross-origin request detected")
+}
+
+func TestPlayerSite_should_trust_a_post_from_the_base_url_origin(t *testing.T) {
+	h := New(Deps{Config: Config{Mount: true, BaseURL: "https://play.example"}, VerifySigningKey: playerTestVerifySigningKey})
+	req := httptest.NewRequest(http.MethodPost, "http://ggscale:8080/account/signup", nil)
+	req.Header.Set("Origin", "https://play.example")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	// The request passed the origin check and reached the CSRF check.
+	assert.Equal(t, "missing csrf cookie\n", rec.Body.String())
 }
