@@ -302,13 +302,10 @@ func (s *Supervisor) backend() (fleet.Backend, error) {
 	return s.current.Backend, nil
 }
 
-// Name forwards to the live plugin, or returns "plugin" if none.
+// Name returns plugin:<launch name>, the FLEET_BACKEND value and the backend
+// string fleets are stored with. It does not depend on a live plugin.
 func (s *Supervisor) Name() string {
-	b, err := s.backend()
-	if err != nil {
-		return "plugin"
-	}
-	return b.Name()
+	return "plugin:" + s.cfg.Launch.Name
 }
 
 // Allocate forwards to the live plugin.

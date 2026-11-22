@@ -76,3 +76,33 @@ func TestAllocateServer_should_refuse_bad_input_before_any_backend_call(t *testi
 		})
 	}
 }
+
+func TestValidateBackend(t *testing.T) {
+	cases := []struct {
+		name    string
+		backend string
+		wantErr bool
+	}{
+		{"should_accept_agones", "agones", false},
+		{"should_accept_bare_plugin", "plugin", false},
+		{"should_accept_named_plugin", "plugin:example", false},
+		{"should_accept_name_with_dash_underscore_digit", "plugin:my_plug-1", false},
+		{"should_refuse_empty_plugin_name", "plugin:", true},
+		{"should_refuse_slash_in_name", "plugin:a/b", true},
+		{"should_refuse_dot_dot_in_name", "plugin:..", true},
+		{"should_refuse_space_in_name", "plugin:a b", true},
+		{"should_refuse_control_char_in_name", "plugin:a\x01b", true},
+		{"should_refuse_upper_case_in_name", "plugin:Example", true},
+		{"should_refuse_name_over_64_chars", "plugin:" + strings.Repeat("a", 65), true},
+		{"should_refuse_plugin_prefix_without_colon", "pluginx", true},
+		{"should_refuse_unknown_backend", "memory", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := fleet.ValidateBackendForTest(tc.backend)
+
+			var invalid fleet.InvalidError
+			assert.Equal(t, tc.wantErr, errors.As(err, &invalid))
+		})
+	}
+}

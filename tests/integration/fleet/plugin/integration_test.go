@@ -168,3 +168,19 @@ func TestSupervisor_CloseDuringRestartIsNoOrphan(t *testing.T) {
 		assert.Zero(t, sup.Pid())
 	}
 }
+
+// TestSupervisor_NameIsPluginPrefixedLaunchName pins the backend string that
+// FLEET_BACKEND=plugin:<name> produces, which fleet rows must match.
+func TestSupervisor_NameIsPluginPrefixedLaunchName(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; -short set")
+	}
+	dir := buildExamplePlugin(t)
+	sup, err := fleetplugin.NewSupervisor(fleetplugin.SupervisorConfig{
+		Launch: fleetplugin.LaunchConfig{Dir: dir, Name: "example"},
+	})
+	require.NoError(t, err)
+	defer func() { _ = sup.Close() }()
+
+	assert.Equal(t, "plugin:example", sup.Name())
+}

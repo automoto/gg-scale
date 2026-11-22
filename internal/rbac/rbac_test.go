@@ -353,7 +353,9 @@ func TestBackendFeature_maps_backend_names(t *testing.T) {
 		ok      bool
 	}{
 		{"agones", rbac.FeatureFleetAgonesBackend, true},
+		{"plugin", rbac.FeatureFleetPluginBackend, true},
 		{"plugin:ovh", rbac.FeatureFleetPluginBackend, true},
+		{"pluginx", "", false},
 		{"memory", "", false},
 	}
 	for _, c := range cases {

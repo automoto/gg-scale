@@ -263,7 +263,7 @@ func (h *Handler) loadFleetOptions(ctx context.Context, tenantID, projectID int6
 			ID:                f.ID,
 			Name:              f.Name,
 			Backend:           f.Backend,
-			BackendMatches:    f.Backend == backend,
+			BackendMatches:    fleet.BackendMatches(f.Backend, backend),
 			BackendConfigured: backend,
 		})
 	}

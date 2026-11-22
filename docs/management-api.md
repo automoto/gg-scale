@@ -214,10 +214,13 @@ the Game Project, as the dashboard pages do.
   `get_project_limits` does.
 - The fleet writes need `FEATURE_FLEET_ENABLED` and the `dedicated_servers`
   feature grant. `create_fleet` takes a `backend` (`agones` or
-  `plugin:<name>`) and a config. An agones config needs `fleet_name` and may
-  have `namespace` and `selector.<label>` keys. The name and the backend are
-  at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the dashboard form
-  has the same rule). `delete_fleet` hides the fleet
+  `plugin:<name>`) and a config. `<name>` is the name in
+  `FLEET_BACKEND=plugin:<name>`: lowercase letters, digits, `_` and `-`, at
+  most 64 characters, starting with a letter or digit. A bare `plugin` is
+  also accepted: a fleet stored that way runs on any plugin backend. An agones
+  config needs `fleet_name` and may have `namespace` and `selector.<label>`
+  keys. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
+  dashboard form has the same rule). `delete_fleet` hides the fleet
   from new allocations; live allocations and their history stay.
   `restore_fleet` brings the fleet back with the same ID, name, backend, and
   config (409 when a live fleet has the name now). The backend of a fleet

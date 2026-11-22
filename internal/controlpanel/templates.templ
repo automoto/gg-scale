@@ -1,6 +1,7 @@
 package controlpanel
 
 import (
+	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/webassets"
 )
@@ -2436,7 +2437,7 @@ templ NewFleetPage(vm NewFleetView) {
 						hx-include="this"
 						hx-swap="innerHTML">
 						<option value="agones" selected?={ vm.Backend == "agones" || vm.Backend == "" }>agones</option>
-						<option value="plugin" selected?={ vm.Backend == "plugin" }>plugin</option>
+						<option value={ fleetPluginOption(vm.BackendConfigured) } selected?={ fleetBackendKind(vm.Backend) == "plugin" }>plugin</option>
 					</select>
 					@fieldError(vm.FieldErrors, "backend")
 				</label>
@@ -2518,7 +2519,7 @@ templ EditFleetPage(vm EditFleetView) {
 				<h1>{ vm.Name }</h1>
 				<p class="subtitle">
 					Backend: <code>{ vm.Backend }</code>
-					if vm.Backend != vm.BackendConfigured {
+					if !fleet.BackendMatches(vm.Backend, vm.BackendConfigured) {
 						<small class="muted"> — does not match configured backend <code>{ vm.BackendConfigured }</code>; allocations will be refused.</small>
 					}
 				</p>

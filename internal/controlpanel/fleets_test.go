@@ -206,3 +206,17 @@ func TestFleetsListPage_lists_deleted_fleets_with_a_restore_form(t *testing.T) {
 	assert.Contains(t, html, `action="/v1/control-panel/tenants/1/projects/2/fleets/7/restore"`)
 	assert.Contains(t, html, `name="_csrf" value="tok"`)
 }
+
+func TestNewFleetPage_plugin_option_stores_the_configured_plugin_name(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:ovh",
+	}))
+	assert.Contains(t, html, `<option value="plugin:ovh"`)
+}
+
+func TestNewFleetPage_plugin_option_is_selected_for_the_configured_plugin(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:ovh", Backend: "plugin:ovh",
+	}))
+	assert.Contains(t, html, `<option value="plugin:ovh" selected`)
+}

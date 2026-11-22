@@ -620,7 +620,7 @@ func BackendFeature(backend string) (Feature, bool) {
 	switch {
 	case backend == "agones":
 		return FeatureFleetAgonesBackend, true
-	case strings.HasPrefix(backend, "plugin"):
+	case backend == "plugin" || strings.HasPrefix(backend, "plugin:"):
 		return FeatureFleetPluginBackend, true
 	default:
 		return "", false

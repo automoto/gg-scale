@@ -636,3 +636,34 @@ func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
 
 	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
 }
+
+func TestManagerAllocate_plugin_backend_names(t *testing.T) {
+	cases := []struct {
+		name    string
+		stored  string
+		running string
+		wantErr bool
+	}{
+		{"should_allocate_when_stored_name_equals_running_name", "plugin:example", "plugin:example", false},
+		{"should_allocate_when_stored_bare_plugin_and_running_any_plugin", "plugin", "plugin:example", false},
+		{"should_refuse_when_stored_plugin_name_differs", "plugin:other", "plugin:example", true},
+		{"should_refuse_when_stored_bare_plugin_and_running_agones", "plugin", "agones", true},
+		{"should_refuse_when_stored_agones_and_running_plugin", "agones", "plugin:example", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{name: tc.running, allocateImpl: func(int) (*fleet.Allocation, error) {
+				return &fleet.Allocation{BackendRef: "ref", Address: "127.0.0.1:1"}, nil
+			}}
+			mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(tc.stored), backend, fleet.ManagerOptions{Clock: zeroClock})
+
+			_, err := mgr.Allocate(context.Background(), sampleReq())
+
+			if tc.wantErr {
+				assert.ErrorIs(t, err, fleet.ErrFleetBackendMismatch)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}

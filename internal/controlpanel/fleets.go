@@ -53,7 +53,7 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 				ID:             f.ID,
 				Name:           f.Name,
 				Backend:        f.Backend,
-				BackendMatches: f.Backend == view.BackendConfigured,
+				BackendMatches: fleet.BackendMatches(f.Backend, view.BackendConfigured),
 				Summary:        summarizeFleetConfig(f.Backend, f.Config),
 			})
 		}

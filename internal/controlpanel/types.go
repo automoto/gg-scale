@@ -1013,6 +1013,15 @@ func fleetBackendKind(backend string) string {
 	return "agones"
 }
 
+// fleetPluginOption is the backend value the plugin choice stores: the
+// configured plugin:<name>, or the bare "plugin" when none is configured.
+func fleetPluginOption(configured string) string {
+	if strings.HasPrefix(configured, "plugin:") {
+		return configured
+	}
+	return "plugin"
+}
+
 // editToNewFleetView projects an EditFleetView onto the NewFleetView shape
 // so EditFleetPage can reuse FleetBackendFieldsFragment. templ struggles
 // with multi-line struct literals inside @-calls; the named helper keeps

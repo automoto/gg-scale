@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
-	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -96,13 +96,28 @@ func validateName(name string) error {
 	return nil
 }
 
-// validateBackend accepts the backends that rbac.BackendFeature knows:
-// agones, or a plugin backend, at most MaxConfigKeyOrVal bytes.
+// PluginNamePattern is the set of plugin names: lowercase letters, digits,
+// "_" and "-", at most 64 characters, starting with a letter or digit. It
+// matches the plugin binary name ggscale-fleet-<name> in FLEET_PLUGIN_DIR.
+var PluginNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// validateBackend accepts agones, the bare name plugin (kept for older
+// fleets) and plugin:<name> with a name that PluginNamePattern allows.
 func validateBackend(backend string) error {
-	if _, ok := rbac.BackendFeature(backend); !ok || !validateText(backend) {
-		return InvalidError("Backend must be agones or plugin:<name>.")
+	if backend == "agones" || backend == "plugin" {
+		return nil
 	}
-	return nil
+	if name, ok := strings.CutPrefix(backend, "plugin:"); ok && PluginNamePattern.MatchString(name) {
+		return nil
+	}
+	return InvalidError("Backend must be agones or plugin:<name> (name: lowercase letters, digits, _ and -, at most 64 characters).")
+}
+
+// BackendMatches reports whether a fleet stored with backend stored can run on
+// a manager whose backend is named running. A stored bare "plugin" matches any
+// "plugin:<name>" manager.
+func BackendMatches(stored, running string) bool {
+	return stored == running || (stored == "plugin" && strings.HasPrefix(running, "plugin:"))
 }
 
 func translateName(err error) error {

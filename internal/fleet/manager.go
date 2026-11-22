@@ -114,7 +114,7 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 	if f.DeletedAt != nil {
 		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, ErrFleetNotFound)
 	}
-	if f.Backend != m.backend.Name() {
+	if !BackendMatches(f.Backend, m.backend.Name()) {
 		return nil, fmt.Errorf("%w: fleet %q wants %q, manager runs %q",
 			ErrFleetBackendMismatch, f.Name, f.Backend, m.backend.Name())
 	}
