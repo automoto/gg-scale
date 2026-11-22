@@ -590,7 +590,8 @@ func TestManagementTokens_page_should_show_the_pii_box_with_its_dependency(t *te
 
 	_, body := tfGet(t, c, p.tokensURL())
 
-	assert.Contains(t, body, "See player email and display name. They go into agent logs.")
+	pii, _ := managementtoken.Scope(managementtoken.ScopePlayersPII)
+	assert.Contains(t, body, pii.Label)
 	assert.Contains(t, body, "Needs read access to Players")
 }
 
