@@ -477,3 +477,12 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - The invite limit `domain_per_day` counts invites for the whole Game Project
   in a day, not for each email domain. The text now says so.
 - The **Server settings** page shows `FLEET_ALLOCATION_MAX_CAPACITY`.
+- Validation errors no longer include the refused value (`errors[].value`).
+  This is for every API operation and MCP tool. Only the 409
+  `ticket_already_active` keeps the active ticket id in `errors[].value`.
+- A request body that is not valid JSON now gives the fixed message
+  `request body is not valid JSON` (400). Before, the message quoted the
+  first bad byte.
+- `POST /v1/auth/delete/cancel` with a bad email now answers 422 with the
+  detail `email invalid` and no `errors` entry. Before, the message quoted
+  part of the address.

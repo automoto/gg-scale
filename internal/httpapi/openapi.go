@@ -12,19 +12,29 @@ import (
 // into one shared doc. It needs no live dependencies: the handler closures are
 // registered but never invoked, so a zero Deps suffices.
 //
-// The register* list below MUST mirror NewRouter's registrations. NewRouter
+// The register* list in registerDocOperations MUST mirror NewRouter's registrations. NewRouter
 // spreads them across middleware-scoped chi groups (for auth/scope binding);
 // here they collapse onto one adapter because the document only needs the
 // operation metadata, not the middleware. TestOpenAPIDoc_covers_expected_paths
 // guards against drift.
 func OpenAPIDoc(version string) *huma.OpenAPI {
 	cfg := newHumaConfig(version)
-	api := groupAPI(chi.NewRouter(), cfg)
 	var d Deps
 	// The reference lists the fleet operations, which a server registers
 	// only when its fleet switch is on.
 	d.ControlPanel.FleetEnabled = true
+	registerDocOperations(groupAPI(chi.NewRouter(), cfg), d)
 
+	doc := cfg.OpenAPI
+	enrichVerifyOp(doc)
+	addWebSocketStub(doc)
+	noteSecretKeyOperations(doc)
+	return doc
+}
+
+// registerDocOperations registers every operation of the OpenAPI document on
+// api.
+func registerDocOperations(api huma.API, d Deps) {
 	registerHealthz(api, d)
 	registerAuthPasswordRoutes(api, d)
 	registerAuthTokenRoutes(api, d)
@@ -56,12 +66,6 @@ func OpenAPIDoc(version string) *huma.OpenAPI {
 	registerRealtimeTicket(api, d)
 	registerAdminRelayNodes(api, d)
 	registerProjectManagementRoutes(api, d)
-
-	doc := cfg.OpenAPI
-	enrichVerifyOp(doc)
-	addWebSocketStub(doc)
-	noteSecretKeyOperations(doc)
-	return doc
 }
 
 // enrichVerifyOp fills in the request/response schemas for the verify

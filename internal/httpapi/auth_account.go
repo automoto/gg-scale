@@ -38,7 +38,9 @@ type deleteRequestOutput struct {
 
 type deleteCancelInput struct {
 	Body struct {
-		Email    string `json:"email" format:"email" example:"player@example.com"`
+		// No format:"email": huma's message for that format quotes the
+		// address. The handler checks it.
+		Email    string `json:"email" example:"player@example.com"`
 		Password string `json:"password" example:"correct-horse-battery-staple"`
 	}
 }
@@ -267,6 +269,9 @@ func requestPlayerDelete(d Deps) func(context.Context, *disableInput) (*deleteRe
 // confirms which emails have a pending deletion.
 func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct{}, error) {
 	return func(ctx context.Context, in *deleteCancelInput) (*struct{}, error) {
+		if !validateEmail(in.Body.Email) {
+			return nil, huma.Error422UnprocessableEntity("email invalid")
+		}
 		projectID, _, err := pinnedProject(ctx)
 		if err != nil {
 			return nil, err

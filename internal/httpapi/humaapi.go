@@ -55,7 +55,8 @@ func newHumaConfig(version string) huma.Config {
 	}
 	cfg := huma.DefaultConfig("ggscale API", version)
 	cfg.CreateHooks = nil
-	cfg.Transformers = append(cfg.Transformers, redactSecretBodyErrors)
+	cfg.Transformers = append(cfg.Transformers, dropErrorValues)
+	cfg.Formats = map[string]huma.Format{"application/json": jsonFormat, "json": jsonFormat}
 	cfg.OpenAPIPath = ""
 	cfg.DocsPath = ""
 	cfg.SchemasPath = ""
@@ -188,23 +189,48 @@ func serverError(ctx context.Context, msg string, err error) error {
 	return huma.Error500InternalServerError("internal error")
 }
 
-// secretBodyOperations are the operations whose request body holds a secret:
-// the Steam key, or a plugin fleet config. huma copies the refused value, or
-// the whole body, into the "value" of a validation error, so these answers
-// drop it.
-var secretBodyOperations = map[string]bool{
-	"setProjectSteamAuth": true,
-	"createProjectFleet":  true,
-	"updateProjectFleet":  true,
+// keptErrorValues are the error details that keep their value. Each is data
+// the server makes, never request input: request validation puts a location
+// that starts with body, path, query, header or cookie, so input cannot make
+// these. The SDKs read the active ticket id (Go Error.ActiveTicketID, C#
+// GGScaleException.ActiveTicketId).
+var keptErrorValues = map[errorValueKey]bool{
+	{status: http.StatusConflict, location: "active_ticket_id"}: true,
 }
 
-func redactSecretBodyErrors(ctx huma.Context, _ string, v any) (any, error) {
+type errorValueKey struct {
+	status   int
+	location string
+}
+
+// dropErrorValues removes the value from every error detail. huma copies the
+// refused value, or the whole body, into it, so an answer could send back a
+// password or a key.
+func dropErrorValues(_ huma.Context, _ string, v any) (any, error) {
 	model, ok := v.(*huma.ErrorModel)
-	if !ok || !secretBodyOperations[ctx.Operation().OperationID] {
+	if !ok {
 		return v, nil
 	}
 	for _, detail := range model.Errors {
+		if detail == nil || keptErrorValues[errorValueKey{status: model.Status, location: detail.Location}] {
+			continue
+		}
 		detail.Value = nil
 	}
 	return v, nil
+}
+
+// errInvalidJSONBody is the message of every request body that does not
+// parse. The decoder error quotes the first bad byte of the body.
+var errInvalidJSONBody = errors.New("request body is not valid JSON")
+
+// jsonFormat is huma's JSON format with a fixed parse error message.
+var jsonFormat = huma.Format{
+	Marshal: huma.DefaultJSONFormat.Marshal,
+	Unmarshal: func(data []byte, v any) error {
+		if huma.DefaultJSONFormat.Unmarshal(data, v) != nil {
+			return errInvalidJSONBody
+		}
+		return nil
+	},
 }

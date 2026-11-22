@@ -160,7 +160,6 @@ components:
         email:
           examples:
             - player@example.com
-          format: email
           type: string
         password:
           examples:

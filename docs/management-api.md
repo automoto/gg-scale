@@ -389,6 +389,9 @@ security scheme `ManagementToken`.
 
 - An operation error is a problem+json body
   (`application/problem+json`). In MCP, the tool result text is that body.
+- An error never holds the value you sent. Each `errors[]` entry has
+  `message` and `location` only. A body that is not valid JSON gives the
+  message `request body is not valid JSON`.
 - The token checks (401, the 403 for access ended, 429, and the `Origin`
   check) answer plain text, before the operation runs.
 - `list_revisions` for a leaderboard of a different Game Project answers 200
