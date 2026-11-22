@@ -119,7 +119,9 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 			ErrFleetBackendMismatch, f.Name, f.Backend, m.backend.Name())
 	}
 	req.Backend = f.Backend
-	req.Config = f.Config
+	if req.Config, err = f.OpenedConfig(ctx); err != nil {
+		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, err)
+	}
 
 	id, err := m.store.InsertPending(ctx, req, m.backend.Name())
 	if err != nil {
@@ -209,7 +211,11 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 			f, err := m.fleets.GetByID(ctx, a.FleetID)
 			switch {
 			case err == nil:
-				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
+				cfg, cfgErr := f.OpenedConfig(ctx)
+				if cfgErr != nil {
+					return cfgErr
+				}
+				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], cfg)
 			case errors.Is(err, ErrFleetNotFound) && a.BackendRef != "":
 				// A deleted template must not strand a known backend resource.
 				cleanupErr = ErrUnsupported
@@ -284,6 +290,14 @@ func (m *Manager) Backend() Backend {
 // handler to resolve a fleet name to an id, and by the control panel fleets
 // CRUD pages. Tenant scoping happens inside the store via RLS.
 func (m *Manager) Fleets() FleetStore { return m.fleets }
+
+// FleetAdmin returns the Postgres fleet store, which runs the fleet writes
+// with the cipher it holds. It is nil when the manager runs on another
+// FleetStore (tests); its writes then answer an error.
+func (m *Manager) FleetAdmin() *PostgresFleetStore {
+	s, _ := m.fleets.(*PostgresFleetStore)
+	return s
+}
 
 func defaultBackoff(attempt int) time.Duration {
 	d := 100 * time.Millisecond

@@ -2477,6 +2477,7 @@ templ agonesFleetFields(vm NewFleetView) {
 	<label>
 		Selector labels
 		<small class="muted">Optional key=value selectors that narrow which GameServers Agones returns. Add one per row.</small>
+		@fieldError(vm.FieldErrors, "selector_key")
 	</label>
 	for k, v := range fleetSelectorLabels(vm.Config) {
 		<div class="kv-row">
@@ -2496,11 +2497,13 @@ templ pluginFleetFields(vm NewFleetView) {
 	<label>
 		Plugin config
 		<small class="muted">Free-form key/value pairs passed through to the plugin RPC.</small>
-		if vm.Saved {
-			<small class="muted">Values are saved and not shown. An empty value keeps the saved value. Clear a key to remove it.</small>
-		} else if len(vm.Config) > 0 {
+		if vm.Retry && len(vm.Config) > 0 {
 			<small class="muted">Values are not shown again. Enter each value again.</small>
 		}
+		if vm.Saved && len(vm.Config) > 0 {
+			<small class="muted">Values are saved and not shown. An empty value keeps the saved value. Clear a key to remove it.</small>
+		}
+		@fieldError(vm.FieldErrors, "config_key")
 	</label>
 	for _, k := range sortedConfigKeys(vm.Config) {
 		<div class="kv-row">

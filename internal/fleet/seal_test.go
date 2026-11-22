@@ -3,6 +3,7 @@ package fleet_test
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,41 +54,73 @@ func TestEncodeFleetConfig_should_store_plain_when_no_cipher(t *testing.T) {
 	assert.JSONEq(t, `{"api_token":"`+sealMarker+`"}`, string(raw))
 }
 
-func TestFleetRowToModel_reads_config(t *testing.T) {
-	c := testCipher(t)
-	sealed, err := fleet.EncodeFleetConfigForTest(c, "plugin:x", map[string]string{"api_token": sealMarker})
+// sealedValue returns a value as the store writes it for a plugin config.
+func sealedValue(t *testing.T, c *secretseal.Cipher, plain string) string {
+	t.Helper()
+	raw, err := fleet.EncodeFleetConfigForTest(c, "plugin:x", map[string]string{"v": plain})
 	require.NoError(t, err)
-	other, err := fleet.EncodeFleetConfigForTest(testCipher(t), "plugin:x", map[string]string{"api_token": sealMarker})
-	require.NoError(t, err)
-	otherValue := decodeRaw(t, other)["api_token"]
+	var m map[string]string
+	require.NoError(t, json.Unmarshal(raw, &m))
+	return m["v"]
+}
 
+func configJSON(t *testing.T, key, value string) []byte {
+	t.Helper()
+	b, err := json.Marshal(map[string]string{key: value})
+	require.NoError(t, err)
+	return b
+}
+
+func TestFleetRowToModel_reads_a_plugin_config(t *testing.T) {
+	c := testCipher(t)
 	tests := []struct {
 		name   string
 		cipher *secretseal.Cipher
-		config string
-		want   string
+		value  string
 	}{
-		{"should_open_a_sealed_value", c, string(sealed), sealMarker},
-		{"should_read_an_old_plain_value", c, `{"api_token":"` + sealMarker + `"}`, sealMarker},
-		{"should_read_a_plain_value_with_no_cipher", nil, `{"api_token":"` + sealMarker + `"}`, sealMarker},
-		{"should_return_a_value_that_does_not_open_unchanged", c, `{"api_token":"` + otherValue + `"}`, otherValue},
-		{"should_return_a_bad_sealed_frame_unchanged", c, `{"api_token":"ggseal1:%%%"}`, "ggseal1:%%%"},
+		{"should_open_a_sealed_value", c, sealedValue(t, c, sealMarker)},
+		{"should_read_an_old_plain_value", c, sealMarker},
+		{"should_read_a_plain_value_with_no_cipher", nil, sealMarker},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f, err := fleet.FleetRowToModelForTest(tt.cipher, sqlcgen.Fleet{Backend: "plugin:x", Config: []byte(tt.config)})
+			f, err := fleet.FleetRowToModelForTest(tt.cipher, sqlcgen.Fleet{Backend: "plugin:x", Config: configJSON(t, "api_token", tt.value)})
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.want, f.Config["api_token"])
+			assert.Equal(t, sealMarker, f.Config["api_token"])
 		})
 	}
 }
 
-func decodeRaw(t *testing.T, raw []byte) map[string]string {
-	t.Helper()
-	f, err := fleet.FleetRowToModelForTest(nil, sqlcgen.Fleet{Backend: "plugin:x", Config: raw})
+func TestFleetRowToModel_should_not_open_an_agones_value(t *testing.T) {
+	c := testCipher(t)
+	frame := sealedValue(t, c, sealMarker)
+
+	f, err := fleet.FleetRowToModelForTest(c, sqlcgen.Fleet{Backend: "agones", Config: configJSON(t, "fleet_name", frame)})
+
 	require.NoError(t, err)
-	return f.Config
+	assert.Equal(t, frame, f.Config["fleet_name"])
+}
+
+func TestFleetRowToModel_should_not_return_a_plugin_value_that_does_not_open(t *testing.T) {
+	c := testCipher(t)
+	tests := []struct {
+		name   string
+		cipher *secretseal.Cipher
+		value  string
+	}{
+		{"sealed_with_another_key", c, sealedValue(t, testCipher(t), sealMarker)},
+		{"bad_frame", c, "ggseal1:%%%"},
+		{"no_cipher", nil, sealedValue(t, c, sealMarker)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := fleet.FleetRowToModelForTest(tt.cipher, sqlcgen.Fleet{Backend: "plugin:x", Config: configJSON(t, "api_token", tt.value)})
+
+			require.NoError(t, err)
+			assert.Empty(t, f.Config["api_token"])
+		})
+	}
 }
 
 // rowFleetStore serves one stored row through the real row decode, so the
@@ -135,4 +168,31 @@ func TestManagerAllocate_should_give_the_plugin_the_plain_value_of_a_sealed_row(
 
 	require.NoError(t, err)
 	assert.Equal(t, sealMarker, backend.got["api_token"])
+}
+
+func TestManagerAllocate_should_refuse_a_plugin_value_that_does_not_open(t *testing.T) {
+	c := testCipher(t)
+	backend := &recordingBackend{fakeBackend: &fakeBackend{name: "plugin:x"}}
+	row := sqlcgen.Fleet{ID: 1, ProjectID: 2, Backend: "plugin:x", Config: configJSON(t, "api_token", sealedValue(t, testCipher(t), sealMarker))}
+	mgr := fleet.NewManager(newFakeStore(), rowFleetStore{cipher: c, row: row}, backend, fleet.ManagerOptions{Clock: zeroClock})
+
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+
+	assert.ErrorIs(t, err, fleet.ErrConfigNotOpened)
+	assert.Nil(t, backend.got)
+}
+
+func TestManagerAllocate_should_give_the_plugin_a_frame_typed_as_a_value_unchanged(t *testing.T) {
+	c := testCipher(t)
+	frame := sealedValue(t, c, sealMarker)
+	stored, err := fleet.EncodeFleetConfigForTest(c, "plugin:x", map[string]string{"api_token": frame})
+	require.NoError(t, err)
+	backend := &recordingBackend{fakeBackend: &fakeBackend{name: "plugin:x"}}
+	row := sqlcgen.Fleet{ID: 1, ProjectID: 2, Backend: "plugin:x", Config: stored}
+	mgr := fleet.NewManager(newFakeStore(), rowFleetStore{cipher: c, row: row}, backend, fleet.ManagerOptions{Clock: zeroClock})
+
+	_, err = mgr.Allocate(context.Background(), sampleReq())
+
+	require.NoError(t, err)
+	assert.Equal(t, frame, backend.got["api_token"])
 }

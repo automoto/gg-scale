@@ -185,7 +185,7 @@ func createFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	if err := requireBackendFeature(ctx, d, p, in.Body.Backend); err != nil {
 		return projectFleet{}, err
 	}
-	f, err := fleet.CreateFleet(ctx, d.Pool, d.CredentialCipher, p.TenantID, fleet.FleetCreate{
+	f, err := d.Fleet.FleetAdmin().CreateFleet(ctx, p.TenantID, fleet.FleetCreate{
 		ProjectID: p.ProjectID, Name: in.Body.Name, Backend: in.Body.Backend, Config: in.Body.Config,
 	}, projectActor(p))
 	if err != nil {
@@ -208,7 +208,7 @@ func updateFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
 		return projectFleet{}, err
 	}
-	f, err := fleet.UpdateFleet(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.FleetID, in.Body.Name, in.Body.Config, projectActor(p))
+	f, err := d.Fleet.FleetAdmin().UpdateFleet(ctx, p.TenantID, p.ProjectID, in.FleetID, in.Body.Name, in.Body.Config, projectActor(p))
 	if err != nil {
 		return projectFleet{}, fleetWriteError(err)
 	}
@@ -219,7 +219,7 @@ func deleteFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
 		return projectDeletedResult{}, err
 	}
-	if err := fleet.DeleteFleet(ctx, d.Pool, p.TenantID, p.ProjectID, in.FleetID, projectActor(p)); err != nil {
+	if err := d.Fleet.FleetAdmin().DeleteFleet(ctx, p.TenantID, p.ProjectID, in.FleetID, projectActor(p)); err != nil {
 		return projectDeletedResult{}, fleetWriteError(err)
 	}
 	return projectDeletedResult{Deleted: true, Note: "Allocations are kept. Use restore_fleet to undo."}, nil
@@ -229,7 +229,7 @@ func restoreFleet(ctx context.Context, d Deps, p managementtoken.Principal, in *
 	if _, err := ownFleet(ctx, d, p, in.FleetID); err != nil {
 		return projectFleet{}, err
 	}
-	f, err := fleet.RestoreFleet(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.FleetID, projectActor(p))
+	f, err := d.Fleet.FleetAdmin().RestoreFleet(ctx, p.TenantID, p.ProjectID, in.FleetID, projectActor(p))
 	if err != nil {
 		return projectFleet{}, fleetWriteError(err)
 	}

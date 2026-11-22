@@ -41,7 +41,7 @@ func storedConfig(t *testing.T, ctx context.Context, pool *db.Pool, id int64) st
 
 func createPluginFleet(t *testing.T, ctx context.Context, pool *db.Pool, c *secretseal.Cipher, tenantID, projectID int64, token string) *fleet.Fleet {
 	t.Helper()
-	f, err := fleet.CreateFleet(ctx, pool, c, tenantID, fleet.FleetCreate{
+	f, err := fleet.NewPostgresFleetStore(pool, c).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "sealed", Backend: "plugin:x",
 		Config: map[string]string{"api_token": token, "region": "GRA9"},
 	}, actor)
@@ -81,7 +81,7 @@ func TestUpdateFleet_should_not_store_a_plain_plugin_value(t *testing.T) {
 	f := createPluginFleet(t, ctx, pool, c, tenantID, projectID, "old-token")
 	next := sealMarker + "-new"
 
-	updated, err := fleet.UpdateFleet(ctx, pool, c, tenantID, projectID, f.ID, nil, map[string]string{"api_token": next}, actor)
+	updated, err := fleet.NewPostgresFleetStore(pool, c).UpdateFleet(ctx, tenantID, projectID, f.ID, nil, map[string]string{"api_token": next}, actor)
 
 	require.NoError(t, err)
 	assert.NotContains(t, storedConfig(t, ctx, pool, f.ID), next)
@@ -93,9 +93,9 @@ func TestRestoreFleet_should_keep_the_value_sealed(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 	c := testCipher(t)
 	f := createPluginFleet(t, ctx, pool, c, tenantID, projectID, sealMarker)
-	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, f.ID, actor))
+	require.NoError(t, fleet.NewPostgresFleetStore(pool, nil).DeleteFleet(ctx, tenantID, projectID, f.ID, actor))
 
-	restored, err := fleet.RestoreFleet(ctx, pool, c, tenantID, projectID, f.ID, actor)
+	restored, err := fleet.NewPostgresFleetStore(pool, c).RestoreFleet(ctx, tenantID, projectID, f.ID, actor)
 
 	require.NoError(t, err)
 	assert.NotContains(t, storedConfig(t, ctx, pool, f.ID), sealMarker)
@@ -166,9 +166,22 @@ func TestUpdateFleet_should_seal_an_old_plain_row_on_a_name_change(t *testing.T)
 	id := insertPlainPluginFleet(t, ctx, pool, tenantID, projectID)
 	name := "renamed"
 
-	updated, err := fleet.UpdateFleet(ctx, pool, c, tenantID, projectID, id, &name, nil, actor)
+	updated, err := fleet.NewPostgresFleetStore(pool, c).UpdateFleet(ctx, tenantID, projectID, id, &name, nil, actor)
 
 	require.NoError(t, err)
 	assert.NotContains(t, storedConfig(t, ctx, pool, id), sealMarker)
 	assert.Equal(t, sealMarker, updated.Config["api_token"])
+}
+
+func TestUpdateFleet_should_refuse_a_name_change_when_a_plugin_value_does_not_open(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	f := createPluginFleet(t, ctx, pool, testCipher(t), tenantID, projectID, sealMarker)
+	before := storedConfig(t, ctx, pool, f.ID)
+	name := "renamed"
+
+	_, err := fleet.NewPostgresFleetStore(pool, testCipher(t)).UpdateFleet(ctx, tenantID, projectID, f.ID, &name, nil, actor)
+
+	assert.ErrorIs(t, err, fleet.ErrConfigNotOpened)
+	assert.Equal(t, before, storedConfig(t, ctx, pool, f.ID))
 }

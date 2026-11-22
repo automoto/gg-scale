@@ -69,7 +69,7 @@ func TestPostgresFleetStore_Create_then_GetByID_and_GetByName(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool, nil)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	created, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	created, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "primary",
 		Backend:   "plugin:docker",
@@ -110,18 +110,18 @@ func TestPostgresFleetStore_ListForProject_skips_deleted(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool, nil)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	a, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	a, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "a", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
-	_, err = fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	_, err = fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "b", Backend: "plugin:docker",
 		Config: map[string]string{"image": "y:1", "port": "81"},
 	}, actor)
 	require.NoError(t, err)
 
-	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, a.ID, actor))
+	require.NoError(t, fleet.NewPostgresFleetStore(pool, nil).DeleteFleet(ctx, tenantID, projectID, a.ID, actor))
 
 	out, err := store.ListForProject(ctx, projectID)
 	require.NoError(t, err)
@@ -134,14 +134,14 @@ func TestUpdateFleet_changes_config_but_not_backend(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool, nil)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	f, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	f, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
 
 	name := "primary"
-	_, err = fleet.UpdateFleet(ctx, pool, nil, tenantID, projectID, f.ID, &name, map[string]string{"image": "x:2", "port": "8080"}, actor)
+	_, err = fleet.NewPostgresFleetStore(pool, nil).UpdateFleet(ctx, tenantID, projectID, f.ID, &name, map[string]string{"image": "x:2", "port": "8080"}, actor)
 	require.NoError(t, err)
 
 	got, err := store.GetByID(ctx, f.ID)
@@ -155,16 +155,16 @@ func TestPostgresFleetStore_SoftDelete_lets_same_name_recreate(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool, nil)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	first, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	first, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
-	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, first.ID, actor))
+	require.NoError(t, fleet.NewPostgresFleetStore(pool, nil).DeleteFleet(ctx, tenantID, projectID, first.ID, actor))
 
 	// Same name should be re-usable because the unique index is partial
 	// on deleted_at IS NULL.
-	second, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	second, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:2", "port": "80"},
 	}, actor)
@@ -181,13 +181,13 @@ func TestCreateFleet_rejects_duplicate_active_name(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	_, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	_, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
 
-	_, err = fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	_, err = fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
@@ -199,7 +199,7 @@ func TestPostgresFleetStore_isolated_per_tenant(t *testing.T) {
 
 	store := fleet.NewPostgresFleetStore(pool, nil)
 	ctxA := db.WithTenant(context.Background(), tenantA)
-	_, err := fleet.CreateFleet(ctxA, pool, nil, tenantA, fleet.FleetCreate{
+	_, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctxA, tenantA, fleet.FleetCreate{
 		ProjectID: projectA, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x", "port": "80"},
 	}, actor)

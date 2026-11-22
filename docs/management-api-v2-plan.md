@@ -453,10 +453,14 @@ This text is for the CHANGELOG section that is written when the release is tagge
   (the key that seals the Steam Web API key). The keys stay plain. An older
   row is sealed on its next update. After a rollback to an older release,
   enter the plugin config again: the older release cannot read sealed values.
+  When a sealed value does not open (the credential key was lost or
+  changed), allocation, plugin cleanup, and an update that keeps the value
+  are refused (422 on update) until the plugin config is entered again.
 - The dashboard does not show plugin fleet config values. The fleet list
   shows the keys only. The edit page shows each key with an empty value: an
   empty value keeps the saved value, a new value replaces it, and a cleared
-  key removes it. Clear all keys to clear the config.
+  key removes it. Clear all keys to clear the config. The same key in two
+  rows is refused.
 - The dashboard allocation form is limited by `FLEET_ALLOCATION_MAX_CAPACITY`.
 - A fleet name and backend are at most 256 bytes, valid UTF-8, and no NUL, in
   the dashboard and in the management API (over the API, invalid UTF-8 in the

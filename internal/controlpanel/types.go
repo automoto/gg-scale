@@ -915,7 +915,10 @@ type NewFleetView struct {
 	Config            map[string]string
 	// Saved marks the edit form: a plugin config key has a saved value that
 	// the form does not show.
-	Saved       bool
+	Saved bool
+	// Retry marks a form shown again after a failed save: the typed plugin
+	// values are not shown, so they must be entered again.
+	Retry       bool
 	Error       string
 	FieldErrors map[string]string
 }
@@ -931,8 +934,10 @@ type EditFleetView struct {
 	Backend           string
 	Config            map[string]string
 	BackendConfigured string
-	Error             string
-	FieldErrors       map[string]string
+	// Retry marks the form shown again after a failed save.
+	Retry       bool
+	Error       string
+	FieldErrors map[string]string
 }
 
 // DeallocateConfirmView is the data rendered by the type-the-ID confirm page.
@@ -1040,6 +1045,7 @@ func editToNewFleetView(vm EditFleetView) NewFleetView {
 		Backend:     vm.Backend,
 		Config:      vm.Config,
 		Saved:       true,
+		Retry:       vm.Retry,
 		FieldErrors: vm.FieldErrors,
 	}
 }

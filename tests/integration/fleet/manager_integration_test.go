@@ -60,7 +60,7 @@ func TestManager_resolves_fleet_then_allocates(t *testing.T) {
 		Clock: func(int) time.Duration { return 0 },
 	})
 
-	tmpl, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "doomerang",
 		Backend:   "agones",
@@ -104,7 +104,7 @@ func TestManager_refuses_fleet_with_mismatched_backend(t *testing.T) {
 		Clock: func(int) time.Duration { return 0 },
 	})
 
-	tmpl, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "wrong-backend",
 		Backend:   "plugin:ovh",
@@ -169,7 +169,7 @@ func TestManager_Allocate_should_free_server_when_row_was_released_during_backen
 	fleetStore := fleet.NewPostgresFleetStore(pool, nil)
 	backend := &gatedBackend{fakeBackend: fakeBackend{name: "agones"}, gate: make(chan struct{})}
 	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleetStore, backend, fleet.ManagerOptions{})
-	tmpl, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "doomerang",
 		Backend:   "agones",
@@ -211,11 +211,11 @@ func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
 	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, nil), fakeBackend{name: "agones"}, fleet.ManagerOptions{
 		Clock: func(int) time.Duration { return 0 },
 	})
-	tmpl, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "doomerang", Backend: "agones", Config: map[string]string{"fleet_name": "doomerang"},
 	}, actor)
 	require.NoError(t, err)
-	require.NoError(t, fleet.DeleteFleet(ctx, pool, tenantID, projectID, tmpl.ID, actor))
+	require.NoError(t, fleet.NewPostgresFleetStore(pool, nil).DeleteFleet(ctx, tenantID, projectID, tmpl.ID, actor))
 
 	_, err = mgr.Allocate(ctx, fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local", Capacity: 1})
 
@@ -228,7 +228,7 @@ func TestManager_should_roll_back_the_ready_change_when_the_commit_hook_fails(t 
 	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, nil), fakeBackend{name: "agones"}, fleet.ManagerOptions{
 		Clock: func(int) time.Duration { return 0 },
 	})
-	tmpl, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID, Name: "hooked", Backend: "agones", Config: map[string]string{"fleet_name": "hooked"},
 	}, actor)
 	require.NoError(t, err)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -36,6 +37,22 @@ type Fleet struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
+
+	// configErr is ErrConfigNotOpened when a sealed plugin config value did
+	// not open; Config then has an empty value for that key.
+	configErr error
+}
+
+// OpenedConfig returns the config for a use that needs the values: an
+// allocation, a plugin cleanup, or a write that keeps a stored value. It
+// returns ErrConfigNotOpened, and logs the fleet id, when a sealed value did
+// not open.
+func (f *Fleet) OpenedConfig(ctx context.Context) (map[string]string, error) {
+	if f.configErr != nil {
+		slog.ErrorContext(ctx, "fleet: a sealed plugin config value does not open; check CREDENTIAL_ENC_KEY", "fleet_id", f.ID)
+		return nil, f.configErr
+	}
+	return f.Config, nil
 }
 
 // FleetCreate is the input shape for CreateFleet. Tenant id is read
@@ -175,9 +192,6 @@ func fleetRowToModel(cipher *secretseal.Cipher, row sqlcgen.Fleet) (*Fleet, erro
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range cfg {
-		cfg[k] = openConfigValue(cipher, v)
-	}
 	f := &Fleet{
 		ID:        row.ID,
 		TenantID:  row.TenantID,
@@ -191,6 +205,9 @@ func fleetRowToModel(cipher *secretseal.Cipher, row sqlcgen.Fleet) (*Fleet, erro
 	if row.DeletedAt.Valid {
 		t := row.DeletedAt.Time
 		f.DeletedAt = &t
+	}
+	if ConfigIsSecret(row.Backend) {
+		f.configErr = openConfig(cipher, cfg)
 	}
 	return f, nil
 }
@@ -230,23 +247,41 @@ func encodeFleetConfig(cipher *secretseal.Cipher, backend string, m map[string]s
 	return b, nil
 }
 
-// openConfigValue returns the plain value of a sealed config value. A plain
-// value (a row written before sealing, or with no cipher) and a value that
-// does not open are returned unchanged, as secretseal.DecryptOrPlain does.
-func openConfigValue(cipher *secretseal.Cipher, v string) string {
-	encoded, ok := strings.CutPrefix(v, sealedValuePrefix)
-	if !ok || cipher == nil {
-		return v
+// openConfig opens the sealed values of a plugin config in place. A value
+// without the prefix is plain (a row written before sealing, or with no
+// cipher). A sealed value that does not open is set to empty, so its sealed
+// text never reaches a caller, and ErrConfigNotOpened is returned. Only a
+// plugin config is opened: an agones config is returned by the API, so
+// opening it would decrypt any frame that a caller puts in it.
+func openConfig(cipher *secretseal.Cipher, cfg map[string]string) error {
+	var err error
+	for k, v := range cfg {
+		encoded, ok := strings.CutPrefix(v, sealedValuePrefix)
+		if !ok {
+			continue
+		}
+		plain, ok := openSealed(cipher, encoded)
+		if !ok {
+			err = ErrConfigNotOpened
+		}
+		cfg[k] = plain
+	}
+	return err
+}
+
+func openSealed(cipher *secretseal.Cipher, encoded string) (string, bool) {
+	if cipher == nil {
+		return "", false
 	}
 	frame, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
-		return v
+		return "", false
 	}
 	plain, err := cipher.Decrypt(frame)
 	if err != nil {
-		return v
+		return "", false
 	}
-	return string(plain)
+	return string(plain), true
 }
 
 func decodeFleetConfig(b []byte) (map[string]string, error) {

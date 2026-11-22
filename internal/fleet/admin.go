@@ -15,7 +15,6 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
-	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -38,6 +37,9 @@ const (
 )
 
 var (
+	// errNoFleetStore means the manager has no Postgres fleet store, so the
+	// fleet writes cannot run.
+	errNoFleetStore = errors.New("fleet: no fleet store for writes")
 	// ErrFleetNameTaken means a live fleet of the project has the name.
 	ErrFleetNameTaken = errors.New("fleet: a fleet with that name already exists in this Game Project")
 )
@@ -48,6 +50,12 @@ var (
 type InvalidError string
 
 func (e InvalidError) Error() string { return string(e) }
+
+// ErrConfigNotOpened means a sealed value of a plugin config does not open
+// with the credential key (the key was lost or changed). The value is not
+// used: a write that keeps it, an allocation, and a plugin cleanup are
+// refused until the config is entered again.
+const ErrConfigNotOpened = InvalidError("A saved plugin config value cannot be opened. Enter the plugin config again.")
 
 // ValidateConfig checks a fleet config. Its messages never carry a value.
 // An agones config needs fleet_name and may have namespace and selector.*
@@ -140,10 +148,13 @@ func configKeys(cfg map[string]string) []string {
 }
 
 // CreateFleet inserts a fleet and its audit row in one transaction. It does
-// no authorization. The values of a plugin config are sealed with cipher;
-// with a nil cipher they are stored plain. The audit payload has config
-// keys, never values.
-func CreateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, tenantID int64, in FleetCreate, actor projectadmin.Actor) (*Fleet, error) {
+// no authorization. The values of a plugin config are sealed with the
+// cipher of the store; with a nil cipher they are stored plain. The audit
+// payload has config keys, never values.
+func (s *PostgresFleetStore) CreateFleet(ctx context.Context, tenantID int64, in FleetCreate, actor projectadmin.Actor) (*Fleet, error) {
+	if s == nil {
+		return nil, errNoFleetStore
+	}
 	if err := validateName(in.Name); err != nil {
 		return nil, err
 	}
@@ -153,19 +164,19 @@ func CreateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, 
 	if err := ValidateConfig(in.Backend, in.Config); err != nil {
 		return nil, err
 	}
-	cfg, err := encodeFleetConfig(cipher, in.Backend, in.Config)
+	cfg, err := encodeFleetConfig(s.cipher, in.Backend, in.Config)
 	if err != nil {
 		return nil, err
 	}
 	var out *Fleet
-	err = pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
+	err = s.pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).CreateFleet(ctx, sqlcgen.CreateFleetParams{
 			ProjectID: in.ProjectID, Name: in.Name, Backend: in.Backend, Config: cfg,
 		})
 		if qerr != nil {
 			return translateName(qerr)
 		}
-		f, ferr := fleetRowToModel(cipher, row)
+		f, ferr := fleetRowToModel(s.cipher, row)
 		if ferr != nil {
 			return ferr
 		}
@@ -182,17 +193,20 @@ func CreateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, 
 
 // UpdateFleet changes the name and config of a live fleet of the project. A
 // nil name or config keeps the stored value. The config is written again on
-// every update, so the values of a plugin config are sealed with cipher. The
+// every update, so the values of a plugin config are sealed. The
 // backend is fixed. It returns ErrFleetNotFound for a deleted fleet or a
 // fleet of another project.
-func UpdateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, tenantID, projectID, id int64, name *string, config map[string]string, actor projectadmin.Actor) (*Fleet, error) {
+func (s *PostgresFleetStore) UpdateFleet(ctx context.Context, tenantID, projectID, id int64, name *string, config map[string]string, actor projectadmin.Actor) (*Fleet, error) {
+	if s == nil {
+		return nil, errNoFleetStore
+	}
 	if name != nil {
 		if err := validateName(*name); err != nil {
 			return nil, err
 		}
 	}
 	var out *Fleet
-	err := pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
+	err := s.pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		cur, qerr := q.GetProjectFleet(ctx, sqlcgen.GetProjectFleetParams{ProjectID: projectID, ID: id})
 		if errors.Is(qerr, pgx.ErrNoRows) || (qerr == nil && cur.DeletedAt.Valid) {
@@ -209,16 +223,20 @@ func UpdateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, 
 			if err := ValidateConfig(cur.Backend, config); err != nil {
 				return err
 			}
-		} else {
+		}
+		if config == nil {
 			// Write the stored config again, so a row stored before
-			// sealing is sealed now.
-			stored, err := fleetRowToModel(cipher, cur)
+			// sealing is sealed now. A value that does not open is never
+			// sealed again.
+			stored, err := fleetRowToModel(s.cipher, cur)
 			if err != nil {
 				return err
 			}
-			config = stored.Config
+			if config, err = stored.OpenedConfig(ctx); err != nil {
+				return err
+			}
 		}
-		newCfg, qerr := encodeFleetConfig(cipher, cur.Backend, config)
+		newCfg, qerr := encodeFleetConfig(s.cipher, cur.Backend, config)
 		if qerr != nil {
 			return qerr
 		}
@@ -229,7 +247,7 @@ func UpdateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, 
 		if qerr != nil {
 			return translateName(qerr)
 		}
-		f, ferr := fleetRowToModel(cipher, row)
+		f, ferr := fleetRowToModel(s.cipher, row)
 		if ferr != nil {
 			return ferr
 		}
@@ -246,8 +264,11 @@ func UpdateFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, 
 
 // DeleteFleet soft-deletes a live fleet of the project. Live allocations do
 // not stop the delete. It returns ErrFleetNotFound when no live fleet matched.
-func DeleteFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id int64, actor projectadmin.Actor) error {
-	err := pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
+func (s *PostgresFleetStore) DeleteFleet(ctx context.Context, tenantID, projectID, id int64, actor projectadmin.Actor) error {
+	if s == nil {
+		return errNoFleetStore
+	}
+	err := s.pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).SoftDeleteProjectFleet(ctx, sqlcgen.SoftDeleteProjectFleetParams{ProjectID: projectID, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrFleetNotFound
@@ -268,9 +289,12 @@ func DeleteFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id int
 // RestoreFleet undoes a delete: same id, name, backend, and config. It
 // returns ErrFleetNotFound when no deleted fleet of the project matched, and
 // ErrFleetNameTaken when a live fleet has the name now.
-func RestoreFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, tenantID, projectID, id int64, actor projectadmin.Actor) (*Fleet, error) {
+func (s *PostgresFleetStore) RestoreFleet(ctx context.Context, tenantID, projectID, id int64, actor projectadmin.Actor) (*Fleet, error) {
+	if s == nil {
+		return nil, errNoFleetStore
+	}
 	var out *Fleet
-	err := pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
+	err := s.pool.Q(db.WithTenant(ctx, tenantID), func(tx pgx.Tx) error {
 		row, err := sqlcgen.New(tx).RestoreProjectFleet(ctx, sqlcgen.RestoreProjectFleetParams{ProjectID: projectID, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrFleetNotFound
@@ -278,7 +302,7 @@ func RestoreFleet(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher,
 		if err != nil {
 			return translateName(err)
 		}
-		f, ferr := fleetRowToModel(cipher, row)
+		f, ferr := fleetRowToModel(s.cipher, row)
 		if ferr != nil {
 			return ferr
 		}

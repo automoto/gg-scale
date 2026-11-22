@@ -51,7 +51,7 @@ func TestManager_allocates_on_the_example_plugin_for_stored_backend_names(t *tes
 	}
 	for _, tc := range cases {
 		t.Run(tc.backend, func(t *testing.T) {
-			f, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
+			f, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 				ProjectID: projectID, Name: "f-" + tc.backend, Backend: tc.backend,
 			}, actor)
 			require.NoError(t, err)

@@ -7,10 +7,12 @@ package httpapi_test
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -182,4 +184,60 @@ func TestControlPanelFleet_failed_create_should_not_show_a_plugin_value(t *testi
 
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
 	assert.NotContains(t, string(body), typed)
+}
+
+// breakStoredToken replaces the stored api_token with a value sealed by
+// another key, as after a lost or changed credential key.
+func (p sealedFleetPanel) breakStoredToken(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	require.NoError(t, err)
+	other, err := secretseal.NewCipherKeyring(key)
+	require.NoError(t, err)
+	frame, err := other.Encrypt([]byte(fleetSealMarker))
+	require.NoError(t, err)
+	_, err = p.c.bootstrapPool.Exec(context.Background(),
+		`UPDATE fleets SET config = jsonb_set(config, '{api_token}', to_jsonb($2::text)) WHERE id = $1`,
+		p.fleetID, "ggseal1:"+base64.StdEncoding.EncodeToString(frame))
+	require.NoError(t, err)
+}
+
+func TestControlPanelFleet_update_should_refuse_to_keep_a_value_that_does_not_open(t *testing.T) {
+	p := newSealedFleetPanel(t)
+	p.breakStoredToken(t)
+	before := p.storedConfig(t)
+
+	status, body := p.update(t, "sealed", []string{"api_token", "region"}, []string{"", "SBG5"})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, before},
+		[]any{status, strings.Contains(body, "cannot be opened"), p.storedConfig(t)})
+}
+
+func TestControlPanelFleet_update_should_accept_new_values_when_a_value_does_not_open(t *testing.T) {
+	p := newSealedFleetPanel(t)
+	p.breakStoredToken(t)
+
+	status, _ := p.update(t, "sealed", []string{"api_token", "region"}, []string{"fresh", "SBG5"})
+
+	require.Equal(t, http.StatusSeeOther, status)
+	assert.Equal(t, map[string]string{"api_token": "fresh", "region": "SBG5"}, p.config(t))
+}
+
+func TestControlPanelFleet_list_should_render_when_a_value_does_not_open(t *testing.T) {
+	p := newSealedFleetPanel(t)
+	p.breakStoredToken(t)
+
+	status := getStatusWithCookie(t, p.base, p.cookie)
+	body := getWithCookie(t, p.base, p.cookie)
+
+	assert.Equal(t, []any{http.StatusOK, true}, []any{status, strings.Contains(body, "api_token")})
+}
+
+func TestControlPanelFleet_update_should_refuse_a_key_in_two_rows(t *testing.T) {
+	p := newSealedFleetPanel(t)
+
+	status, _ := p.update(t, "sealed", []string{"api_token", "api_token"}, []string{"next", ""})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, fleetSealMarker}, []any{status, p.config(t)["api_token"]})
 }

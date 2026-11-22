@@ -1,10 +1,13 @@
 package controlpanel
 
 import (
+	"context"
 	"net/url"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 func TestFleetsListPage_renders_empty_state_when_no_fleets(t *testing.T) {
@@ -201,15 +204,14 @@ func TestKeepStoredPluginValues(t *testing.T) {
 		{"should_clear_the_config_when_no_key_is_left", []string{"", "", ""}, []string{"", "", ""}, map[string]string{}},
 		{"should_add_a_new_key_with_an_empty_value", []string{"api_token", "region", "zone"}, []string{"", "", ""}, map[string]string{"api_token": "saved", "region": "GRA9", "zone": ""}},
 		{"should_lose_the_value_of_a_renamed_key_with_an_empty_value", []string{"token", "region"}, []string{"", ""}, map[string]string{"token": "", "region": "GRA9"}},
-		{"should_use_the_last_row_of_a_key_in_two_rows", []string{"api_token", "api_token"}, []string{"next", ""}, map[string]string{"api_token": "saved"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg, _ := parseFleetConfigForm("plugin:x", url.Values{"config_key[]": tt.keys, "config_value[]": tt.values})
 
-			keepStoredPluginValues(cfg, stored)
+			err := keepStoredPluginValues(context.Background(), cfg, &fleet.Fleet{Config: stored})
 
-			assert.Equal(t, tt.want, cfg)
+			assert.Equal(t, []any{nil, tt.want}, []any{err, cfg})
 		})
 	}
 }
@@ -288,4 +290,39 @@ func TestNewFleetPage_plugin_option_is_selected_for_the_configured_plugin(t *tes
 		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:ovh", Backend: "plugin:ovh",
 	}))
 	assert.Contains(t, html, `<option value="plugin:ovh" selected`)
+}
+
+func TestParseFleetConfigForm_should_refuse_a_key_in_two_rows(t *testing.T) {
+	tests := []struct {
+		name    string
+		backend string
+		form    url.Values
+		field   string
+	}{
+		{"plugin", "plugin:x", url.Values{"config_key[]": {"api_token", " api_token"}, "config_value[]": {"next", ""}}, "config_key"},
+		{"agones_selector", "agones", url.Values{"fleet_name": {"gs"}, "selector_key[]": {"zone", "zone"}, "selector_value[]": {"eu", "us"}}, "selector_key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, errs := parseFleetConfigForm(tt.backend, tt.form)
+
+			assert.Contains(t, errs, tt.field)
+		})
+	}
+}
+
+func TestEditFleetPage_should_not_show_the_keep_hint_without_keys(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{},
+	}))
+	assert.NotContains(t, html, "An empty value keeps the saved value")
+}
+
+func TestEditFleetPage_should_ask_for_the_values_again_after_a_failed_save(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": ""}, Retry: true,
+	}))
+	assert.Contains(t, html, "Enter each value again")
 }

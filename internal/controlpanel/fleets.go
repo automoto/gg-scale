@@ -1,6 +1,7 @@
 package controlpanel
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"maps"
@@ -140,6 +141,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		Name:              name,
 		Backend:           backend,
 		Config:            fleetFormConfig(backend, cfg),
+		Retry:             true,
 		FieldErrors:       fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
@@ -151,7 +153,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := fleet.CreateFleet(r.Context(), h.pool, h.credentialCipher, tenantID, fleet.FleetCreate{
+	f, err := h.fleet.FleetAdmin().CreateFleet(r.Context(), tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      name,
 		Backend:   backend,
@@ -206,7 +208,9 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.Form.Get("name"))
 	cfg, fieldErrors := parseFleetConfigForm(existing.Backend, r.Form)
 	if fleet.ConfigIsSecret(existing.Backend) {
-		keepStoredPluginValues(cfg, existing.Config)
+		if err := keepStoredPluginValues(r.Context(), cfg, existing); err != nil {
+			fieldErrors["config_key"] = err.Error()
+		}
 	}
 	if name == "" {
 		fieldErrors["name"] = "Name is required."
@@ -221,6 +225,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		Backend:           existing.Backend,
 		Config:            fleetFormConfig(existing.Backend, cfg),
 		BackendConfigured: h.fleetBackendName(),
+		Retry:             true,
 		FieldErrors:       fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
@@ -231,7 +236,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
-	if _, err := fleet.UpdateFleet(r.Context(), h.pool, h.credentialCipher, tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+	if _, err := h.fleet.FleetAdmin().UpdateFleet(r.Context(), tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		if errors.Is(err, fleet.ErrFleetNotFound) {
 			http.NotFound(w, r)
 			return
@@ -258,7 +263,7 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	if err := fleet.DeleteFleet(r.Context(), h.pool, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+	if err := h.fleet.FleetAdmin().DeleteFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		if errors.Is(err, fleet.ErrFleetNotFound) {
 			http.NotFound(w, r)
 			return
@@ -281,7 +286,7 @@ func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	f, err := fleet.RestoreFleet(r.Context(), h.pool, h.credentialCipher, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
+	f, err := h.fleet.FleetAdmin().RestoreFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
 	base := fleetsBasePath(tenantID, projectID)
 	switch {
 	case errors.Is(err, fleet.ErrFleetNotFound):
@@ -369,9 +374,12 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 		cfg["namespace"] = ns
 	}
 	errs := map[string]string{}
-	pairs, overCap := boundedKeyValuePairs(form["selector_key[]"], form["selector_value[]"])
+	pairs, overCap, duplicate := boundedKeyValuePairs(form["selector_key[]"], form["selector_value[]"])
 	if overCap {
 		errs["selector_key"] = "Too many selector keys."
+	}
+	if duplicate {
+		errs["selector_key"] = "A selector key is in two rows. Keep one row for each key."
 	}
 	for k, v := range pairs {
 		cfg["selector."+k] = v
@@ -383,10 +391,13 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 }
 
 func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]string) {
-	cfg, overCap := boundedKeyValuePairs(form["config_key[]"], form["config_value[]"])
+	cfg, overCap, duplicate := boundedKeyValuePairs(form["config_key[]"], form["config_value[]"])
 	errs := map[string]string{}
 	if overCap {
 		errs["config_key"] = "Too many config keys."
+	}
+	if duplicate {
+		errs["config_key"] = "A config key is in two rows. Keep one row for each key."
 	}
 	return cfg, errs
 }
@@ -394,8 +405,9 @@ func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]stri
 // boundedKeyValuePairs zips a key[] / value[] form pair into a map, enforcing
 // the per-form count and per-entry length caps. Blank keys and entries past
 // the value slice are skipped. overCap reports whether the key count was
-// truncated so callers can surface a field error.
-func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overCap bool) {
+// truncated so callers can surface a field error. duplicate reports a key in
+// two rows, so no typed value is dropped without a word.
+func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overCap, duplicate bool) {
 	pairs = map[string]string{}
 	if len(keys) > fleet.MaxConfigKeys {
 		overCap = true
@@ -410,9 +422,12 @@ func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overC
 		if len(v) > fleet.MaxConfigKeyOrVal {
 			continue
 		}
+		if _, ok := pairs[k]; ok {
+			duplicate = true
+		}
 		pairs[k] = v
 	}
-	return pairs, overCap
+	return pairs, overCap, duplicate
 }
 
 // summarizeFleetConfig returns a one-line preview for the list page, so
@@ -438,13 +453,21 @@ func fleetFormConfig(backend string, cfg map[string]string) map[string]string {
 	return out
 }
 
-// keepStoredPluginValues gives each key of cfg that has an empty value its
-// stored value. The edit page never shows a stored value, so an empty value
-// means "keep it". A key that is not in cfg is removed by the update.
-func keepStoredPluginValues(cfg, stored map[string]string) {
+// keepStoredPluginValues gives each key of cfg that has an empty value the
+// stored value of existing. The edit page never shows a stored value, so an
+// empty value means "keep it". A key that is not in cfg is removed by the
+// update. It returns fleet.ErrConfigNotOpened when a value must be kept and
+// the stored config does not open.
+func keepStoredPluginValues(ctx context.Context, cfg map[string]string, existing *fleet.Fleet) error {
 	for k, v := range cfg {
-		if old, ok := stored[k]; ok && v == "" {
-			cfg[k] = old
+		if _, ok := existing.Config[k]; !ok || v != "" {
+			continue
 		}
+		stored, err := existing.OpenedConfig(ctx)
+		if err != nil {
+			return err
+		}
+		cfg[k] = stored[k]
 	}
+	return nil
 }
