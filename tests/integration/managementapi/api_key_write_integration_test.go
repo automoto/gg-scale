@@ -150,3 +150,15 @@ func TestAPIKeyWrite_should_return_404_for_a_revoked_key(t *testing.T) {
 	assert.Equal(t, []int{http.StatusNotFound, http.StatusNotFound, 0},
 		[]int{label.status, features.status, f.count(`SELECT count(*) FROM api_keys WHERE label = 'new' OR scopes = '{matchmaker}'`)})
 }
+
+func TestAPIKeyWrite_features_should_return_422_and_keep_scopes_when_scopes_is_null(t *testing.T) {
+	f := newFixture(t)
+	id := f.key(f.tenantA, f.projectA, "publishable", "k", "matchmaker", "fleet")
+	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, []string{"keys:write"}, time.Hour)
+
+	got := f.do(tok, http.MethodPut, keyPath(id, "/features"), `{"scopes":null}`)
+
+	var scopes []string
+	require.NoError(t, f.owner.QueryRow(context.Background(), `SELECT scopes FROM api_keys WHERE id = $1`, id).Scan(&scopes))
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, 2}, []any{got.status, len(scopes)})
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const projectAPIKeyLabelMax = 64
@@ -229,8 +230,8 @@ func checkProjectAPIKeyLabel(label string) error {
 	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
 		return huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
 	}
-	if strings.ContainsFunc(label, unicode.IsControl) {
-		return huma.Error422UnprocessableEntity("label must not contain control characters")
+	if strings.ContainsFunc(label, func(r rune) bool { return unicode.IsControl(r) || webutil.IsBidiControl(r) }) {
+		return huma.Error422UnprocessableEntity("label must not contain control or text direction characters")
 	}
 	return nil
 }
@@ -292,6 +293,9 @@ type projectAllowedOrigins struct {
 }
 
 func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetAllowedOriginsInput) (projectAllowedOrigins, error) {
+	if in.Body.Origins == nil {
+		return projectAllowedOrigins{}, huma.Error422UnprocessableEntity("origins must be a list; send [] to remove all origins")
+	}
 	old, err := projectadmin.SetAllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID, in.Body.Origins, d.CORSMaxProjectOrigins, projectActor(p))
 	if err != nil {
 		return projectAllowedOrigins{}, projectWriteError(err)
@@ -347,6 +351,9 @@ type projectUpdateAPIKeyFeaturesInput struct {
 }
 
 func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyFeaturesInput) (projectAPIKeyUpdated, error) {
+	if in.Body.Scopes == nil {
+		return projectAPIKeyUpdated{}, huma.Error422UnprocessableEntity("scopes must be a list; send [] to remove all features")
+	}
 	sw := projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled}
 	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, d.Cache, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)

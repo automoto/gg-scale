@@ -496,7 +496,7 @@ func validManagementTokenLabel(label string) bool {
 		return false
 	}
 	for _, r := range label {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || webutil.IsBidiControl(r) {
 			return false
 		}
 	}
@@ -529,7 +529,7 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 	daysRaw := strings.TrimSpace(r.Form.Get("days"))
 	fieldErrs := map[string]string{}
 	if !validManagementTokenLabel(label) {
-		fieldErrs["label"] = fmt.Sprintf("Label must be 1–%d characters and cannot contain control characters.", managementTokenLabelMax)
+		fieldErrs["label"] = fmt.Sprintf("Label must be 1–%d characters and cannot contain control or text direction characters.", managementTokenLabelMax)
 	}
 	days := managementTokenDefaultDays
 	if daysRaw != "" {

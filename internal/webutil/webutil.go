@@ -123,6 +123,24 @@ func ValidText(s string) bool {
 	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 
+// Unicode bidirectional format characters. They change the display order of
+// the text around them, so a label that holds one can spoof its neighbors.
+const (
+	leftToRightMark     = '\u200E'
+	rightToLeftMark     = '\u200F'
+	leftToRightEmbed    = '\u202A' // through rightToLeftOverride
+	rightToLeftOverride = '\u202E'
+	leftToRightIsolate  = '\u2066' // through popDirectionalIsolate
+	popDirIsolate       = '\u2069'
+)
+
+// IsBidiControl reports whether r is a Unicode bidirectional format character.
+func IsBidiControl(r rune) bool {
+	return r == leftToRightMark || r == rightToLeftMark ||
+		(r >= leftToRightEmbed && r <= rightToLeftOverride) ||
+		(r >= leftToRightIsolate && r <= popDirIsolate)
+}
+
 // IsUniqueViolation reports whether err is (or wraps) a Postgres 23505
 // unique-violation. The substring fallback covers errors wrapped via
 // %w by code paths that don't preserve the *pgconn.PgError type.

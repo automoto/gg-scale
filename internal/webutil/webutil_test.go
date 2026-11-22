@@ -79,3 +79,26 @@ func TestRandomHex_returns_distinct_values(t *testing.T) {
 	}
 	assert.Len(t, seen, 20)
 }
+
+func TestIsBidiControl(t *testing.T) {
+	cases := []struct {
+		name string
+		r    rune
+		want bool
+	}{
+		{"should_flag_left_to_right_mark", '\u200E', true},
+		{"should_flag_right_to_left_mark", '\u200F', true},
+		{"should_flag_left_to_right_embedding", '\u202A', true},
+		{"should_flag_right_to_left_override", '\u202E', true},
+		{"should_flag_left_to_right_isolate", '\u2066', true},
+		{"should_flag_pop_directional_isolate", '\u2069', true},
+		{"should_keep_zero_width_space", '\u200B', false},
+		{"should_keep_letter", 'a', false},
+		{"should_keep_emoji", '\U0001F600', false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, IsBidiControl(tc.r))
+		})
+	}
+}

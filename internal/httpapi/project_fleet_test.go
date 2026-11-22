@@ -3,8 +3,10 @@ package httpapi
 import (
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -146,4 +148,25 @@ func TestNewProjectFleet_should_show_only_the_agones_config(t *testing.T) {
 	}
 
 	assert.Equal(t, []map[string]string{cfg, nil, nil}, got)
+}
+
+func TestAllocateServer_should_return_422_for_bad_fleet_text_before_the_lookup(t *testing.T) {
+	cases := []struct {
+		name  string
+		fleet string
+	}{
+		{"should_refuse_a_nul", "a\x00b"},
+		{"should_refuse_an_oversized_name", strings.Repeat("x", fleet.MaxConfigKeyOrVal+1)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &projectAllocateInput{Body: projectAllocateBody{Fleet: tc.fleet, Region: "eu"}}
+
+			_, err := allocateServer(t.Context(), Deps{Fleet: &fleet.Manager{}}, managementtoken.Principal{}, in)
+
+			var se huma.StatusError
+			require.ErrorAs(t, err, &se)
+			assert.Equal(t, http.StatusUnprocessableEntity, se.GetStatus())
+		})
+	}
 }

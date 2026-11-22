@@ -71,6 +71,9 @@ func ValidateConfig(backend string, cfg map[string]string) error {
 		} else {
 			keys++
 		}
+		if !webutil.ValidText(k) || !webutil.ValidText(v) {
+			return InvalidError("A config key or value is not valid text.")
+		}
 		if len(v) > MaxConfigKeyOrVal || len(name) > MaxConfigKeyOrVal || (!fixed && name == "") {
 			return InvalidError("A config key or value is empty or too long.")
 		}
@@ -90,7 +93,7 @@ func validateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return InvalidError("Name is required.")
 	}
-	if !validateText(name) {
+	if !ValidText(name) {
 		return InvalidError("Name is not valid or too long.")
 	}
 	return nil
@@ -285,9 +288,9 @@ type ServerAllocate struct {
 	Capacity int
 }
 
-// validateText reports whether s is a valid name, backend, region, or game
+// ValidText reports whether s is a valid name, backend, region, or game
 // mode: valid UTF-8 with no NUL byte, at most MaxConfigKeyOrVal bytes.
-func validateText(s string) bool {
+func ValidText(s string) bool {
 	return len(s) <= MaxConfigKeyOrVal && webutil.ValidText(s)
 }
 
@@ -295,9 +298,9 @@ func validateText(s string) bool {
 // name the field and never carry the value.
 func validateAllocate(in ServerAllocate, maxCapacity int) error {
 	switch {
-	case !validateText(in.Region):
+	case !ValidText(in.Region):
 		return InvalidError("Region is not valid or too long.")
-	case !validateText(in.GameMode):
+	case !ValidText(in.GameMode):
 		return InvalidError("Game mode is not valid or too long.")
 	case in.Capacity < 0:
 		return InvalidError("Capacity must be at least 1.")

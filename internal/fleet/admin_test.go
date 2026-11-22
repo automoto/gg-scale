@@ -32,6 +32,9 @@ func TestValidateConfig(t *testing.T) {
 		{"should_refuse_a_long_value", "plugin:demo", map[string]string{"k": long}, true},
 		{"should_refuse_too_many_keys", "plugin:demo", manyKeys, true},
 		{"should_refuse_too_many_selector_keys", "agones", manySelectors, true},
+		{"should_refuse_a_nul_in_a_value", "plugin:demo", map[string]string{"k": "a\x00b"}, true},
+		{"should_refuse_a_nul_in_a_key", "plugin:demo", map[string]string{"k\x00": "v"}, true},
+		{"should_refuse_invalid_utf8_in_a_value", "plugin:demo", map[string]string{"k": "\xff"}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

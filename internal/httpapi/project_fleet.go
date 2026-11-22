@@ -349,14 +349,17 @@ type projectAllocateInput struct {
 // allocateServer starts a server as the dashboard does. A deleted fleet
 // answers 404 like a missing one. The caller cannot set labels or join data.
 func allocateServer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectAllocateInput) (projectAllocation, error) {
-	m, err := fleetManager(d)
-	if err != nil {
-		return projectAllocation{}, err
-	}
 	region := strings.TrimSpace(in.Body.Region)
 	name := strings.TrimSpace(in.Body.Fleet)
 	if region == "" || name == "" {
 		return projectAllocation{}, huma.Error422UnprocessableEntity("fleet and region are required")
+	}
+	if !fleet.ValidText(name) {
+		return projectAllocation{}, huma.Error422UnprocessableEntity("fleet is not valid or too long")
+	}
+	m, err := fleetManager(d)
+	if err != nil {
+		return projectAllocation{}, err
 	}
 	f, err := m.Fleets().GetByName(db.WithTenant(ctx, p.TenantID), p.ProjectID, name)
 	if errors.Is(err, fleet.ErrFleetNotFound) {

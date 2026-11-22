@@ -558,3 +558,48 @@ func TestActiveScopes_should_return_an_empty_list_for_a_token_with_no_scopes(t *
 	require.NoError(t, err)
 	assert.Equal(t, []string{}, got)
 }
+
+func statusOf(t *testing.T, err error) int {
+	t.Helper()
+	var se huma.StatusError
+	require.ErrorAs(t, err, &se)
+	return se.GetStatus()
+}
+
+func TestUpdateAPIKeyFeatures_should_return_422_when_scopes_is_null(t *testing.T) {
+	in := &projectUpdateAPIKeyFeaturesInput{ProjectAPIKeyPath: ProjectAPIKeyPath{APIKeyID: 1}}
+
+	_, err := updateAPIKeyFeatures(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestSetAllowedOrigins_should_return_422_when_origins_is_null(t *testing.T) {
+	in := &projectSetAllowedOriginsInput{}
+
+	_, err := setAllowedOrigins(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestCheckProjectAPIKeyLabel_should_refuse_bidi_controls(t *testing.T) {
+	for _, label := range []string{"a\u202eb", "a\u200fb", "a\u2067b"} {
+		assert.Equal(t, 422, statusOf(t, checkProjectAPIKeyLabel(label)), "%q", label)
+	}
+}
+
+func TestListPlayers_should_return_422_for_a_nul_external_id(t *testing.T) {
+	in := &projectListPlayersInput{ExternalID: "a\x00b"}
+
+	_, err := listPlayers(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestListLeaderboards_should_return_422_for_a_nul_cursor(t *testing.T) {
+	in := &projectListLeaderboardsInput{ProjectPageInput: ProjectPageInput{Cursor: "a\x00b"}}
+
+	_, err := listLeaderboards(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}

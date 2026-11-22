@@ -155,6 +155,9 @@ type projectListLeaderboardsInput struct {
 }
 
 func listLeaderboards(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListLeaderboardsInput) (projectLeaderboardList, error) {
+	if !webutil.ValidText(in.Cursor) {
+		return projectLeaderboardList{}, errBadCursor()
+	}
 	limit := in.limit()
 	var rows []sqlcgen.ListLeaderboardsPageForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
@@ -348,6 +351,9 @@ func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *p
 	before, ok := decodeIDCursor(in.Cursor)
 	if !ok {
 		return projectPlayerList{}, errBadCursor()
+	}
+	if !webutil.ValidText(in.ExternalID) {
+		return projectPlayerList{}, huma.Error422UnprocessableEntity("external_id is not valid text")
 	}
 	limit := in.limit()
 	var rows []sqlcgen.ListPlayersPageForProjectRow

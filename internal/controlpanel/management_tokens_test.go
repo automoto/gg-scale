@@ -392,3 +392,22 @@ func TestAccessOptions_should_give_each_reason_on_the_fleets_row(t *testing.T) {
 		})
 	}
 }
+
+func TestValidManagementTokenLabel(t *testing.T) {
+	cases := []struct {
+		name  string
+		label string
+		want  bool
+	}{
+		{"should_accept_plain_text", "ci build", true},
+		{"should_refuse_a_right_to_left_override", "abc\u202edef", false},
+		{"should_refuse_a_left_to_right_mark", "abc\u200edef", false},
+		{"should_refuse_an_isolate", "abc\u2066def", false},
+		{"should_refuse_a_control_character", "abc\tdef", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, validManagementTokenLabel(tc.label))
+		})
+	}
+}
