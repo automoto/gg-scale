@@ -319,9 +319,10 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   characters. This holds for the dashboard, the token API, and sign-up too.
 - `null` for `scopes` in `update_api_key_features` or for `origins` in
   `set_allowed_origins` answers 422. An empty list `[]` still clears the list.
-- NUL and invalid UTF-8 in a fleet config, in the `fleet` and `external_id`
-  of `allocate_server`, and in the `cursor` of the leaderboard lists answer
-  422. An `allocate_server` `fleet` that is too long also answers 422.
+- NUL in a fleet config, in the `fleet` and `external_id` of
+  `allocate_server`, and in the `cursor` of the leaderboard lists answers
+  422. Invalid UTF-8 in a JSON body answers 400 (see Errors). An
+  `allocate_server` `fleet` that is too long also answers 422.
 - Allocation works on a plugin backend. A fleet stored as bare `plugin` runs
   on any plugin backend. A fleet with another `plugin*` backend value that has
   no `plugin:` prefix (for example `pluginx`) answers 422 on the token fleet
@@ -392,6 +393,11 @@ security scheme `ManagementToken`.
 - An error never holds the value you sent. Each `errors[]` entry has
   `message` and `location` only. A body that cannot be decoded gives the
   message `request body could not be decoded`.
+- A JSON body with bytes that are not valid UTF-8, or with a `\u` escape of
+  a surrogate that is not one half of a pair (for example `"\ud800"`),
+  answers 400 with the message `request body is not valid UTF-8 text`. This
+  is for every API operation and MCP tool. A pair such as `"\ud83d\ude00"`
+  and the character U+FFFD sent as UTF-8 are accepted.
 - The token checks (401, the 403 for access ended, 429, and the `Origin`
   check) answer plain text, before the operation runs.
 - `list_revisions` for a leaderboard of a different Game Project answers 200

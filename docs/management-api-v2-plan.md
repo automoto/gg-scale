@@ -469,9 +469,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - Token labels and API key labels (dashboard, token API, and sign-up) refuse
   control and text-direction characters. The API key label is at most 200
   characters.
-- NUL and invalid UTF-8 in a fleet config, in `fleet` and `external_id` of
-  `allocate_server`, and in the leaderboard `cursor` give 422. A `fleet` that
-  is too long also gives 422.
+- NUL in a fleet config, in `fleet` and `external_id` of `allocate_server`,
+  and in the leaderboard `cursor` gives 422. A `fleet` that is too long also
+  gives 422.
 - The token page, the token list, and the Deleted fleets list fit on a narrow
   screen.
 - The invite limit `domain_per_day` counts invites for the whole Game Project
@@ -487,3 +487,7 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - `POST /v1/auth/delete/cancel` with a bad email still answers 422 at
   `body.email`, but the message is now `expected a valid email address`.
   Before, the message quoted part of the address.
+- A JSON request body with invalid UTF-8, or with a lone surrogate escape
+  such as `"\ud800"`, now answers 400 with the message `request body is not
+  valid UTF-8 text`, for every API operation and MCP tool. Before, the text
+  was accepted and stored with U+FFFD in its place.

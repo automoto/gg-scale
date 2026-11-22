@@ -5,7 +5,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -225,13 +229,62 @@ func dropErrorValues(_ huma.Context, _ string, v any) (any, error) {
 // The decoder error quotes the first bad byte or the number.
 var errBodyDecode = errors.New("request body could not be decoded")
 
-// jsonFormat is huma's JSON format with a fixed decode error message.
+// errBodyText is the message of a body that is not valid UTF-8 text.
+var errBodyText = errors.New("request body is not valid UTF-8 text")
+
+// jsonFormat is huma's JSON format with fixed error messages. It decodes
+// every JSON request body, and the body of every MCP tool call, so it is the
+// one place that refuses text the decoder would change to U+FFFD.
 var jsonFormat = huma.Format{
 	Marshal: huma.DefaultJSONFormat.Marshal,
 	Unmarshal: func(data []byte, v any) error {
+		if !validText(data) {
+			return errBodyText
+		}
 		if huma.DefaultJSONFormat.Unmarshal(data, v) != nil {
 			return errBodyDecode
 		}
 		return nil
 	},
+}
+
+// validText reports whether data is valid UTF-8 and every \u escape of a
+// surrogate is the first half of a pair followed by the second half.
+func validText(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		r := unicodeEscape(data[i:])
+		if r < 0 {
+			// Another escape: skip the escaped byte.
+			i++
+			continue
+		}
+		i += 5
+		if !utf16.IsSurrogate(r) {
+			continue
+		}
+		if utf16.DecodeRune(r, unicodeEscape(data[i+1:])) == unicode.ReplacementChar {
+			return false
+		}
+		i += 6
+	}
+	return true
+}
+
+// unicodeEscape returns the rune of the \uXXXX escape at the start of b, or
+// -1 when b does not start with one.
+func unicodeEscape(b []byte) rune {
+	if len(b) < 6 || b[0] != '\\' || b[1] != 'u' {
+		return -1
+	}
+	n, err := strconv.ParseUint(string(b[2:6]), 16, 16)
+	if err != nil {
+		return -1
+	}
+	return rune(n)
 }
