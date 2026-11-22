@@ -265,6 +265,8 @@ func TestAccessOptions_should_build_the_key_risky_boxes_from_the_scope_table(t *
 			Label: "Revoke API keys. Cannot be undone; a game that uses the key stops.", Needs: "Needs read access to API keys"},
 		managementtoken.ScopeKeysSecret: {Scope: managementtoken.ScopeKeysSecret,
 			Label: "Create secret API keys. The key value is returned to the token user."},
+		managementtoken.ScopeSteamWrite: {Scope: managementtoken.ScopeSteamWrite,
+			Label: "Change the Steam Web API key. The old key is lost."},
 	}
 	_, risky := accessOptions(allScopes(), nil)
 	for scope, want := range cases {

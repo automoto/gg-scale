@@ -139,6 +139,8 @@ token that needs it.
 |---|---|---|---|
 | `keys:revoke` | `revoke_api_key` | `POST /v1/project/api-keys/{api_key_id}/revoke` | Cannot be undone. Each game client or server that uses the key stops at once. Needs `keys:read`. A key of another Game Project, a key with no Game Project, or a revoked key is 404. A secret key needs permission to manage secret keys for the person who made the token. |
 | `keys:secret` | `create_secret_api_key` | `POST /v1/project/secret-api-keys` | Returns a secret. The `ggs_` key value is in the result one time only. It is never in `list_api_keys`, `get_token`, the audit log, or the server log. Needs permission to manage secret keys for the person who made the token. Same label, scope, and `MANAGEMENT_MAX_PROJECT_API_KEYS` rules as `create_api_key`. |
+| `steam:write` | `set_steam_auth` | `PUT /v1/project/steam-auth` | Cannot be undone: the old Web API key is lost. Takes `app_id` and `web_api_key` (input only; same checks as the dashboard). Leave `web_api_key` out to keep the stored key and change the App ID; this is refused when no key is stored. The key is sealed as in the dashboard and is never in a result, the audit log, or the server log. Returns the `get_steam_auth` shape. |
+| `steam:write` | `clear_steam_auth` | `DELETE /v1/project/steam-auth` | Cannot be undone: removes the App ID and the Web API key, and Steam sign-in stops. Returns the `get_steam_auth` shape. |
 
 Each risky tool description starts with its risk ("Cannot be undone." or
 "Returns a secret."), so the agent sees the risk in its tool list.

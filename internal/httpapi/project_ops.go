@@ -222,6 +222,9 @@ func projectWriteError(err error) error {
 	case errors.As(err, &limitErr),
 		errors.Is(err, projectadmin.ErrInvalidLeaderboard),
 		errors.Is(err, projectadmin.ErrInvalidOrigins),
+		errors.Is(err, projectadmin.ErrInvalidSteamAppID),
+		errors.Is(err, projectadmin.ErrInvalidSteamKey),
+		errors.Is(err, projectadmin.ErrSteamKeyMissing),
 		errors.Is(err, projectadmin.ErrScopeNotGrantable),
 		errors.Is(err, projectadmin.ErrInvalidKeyScope):
 		return huma.Error422UnprocessableEntity(err.Error())
@@ -636,6 +639,34 @@ var projectOps = []projectOp{
 				"number of active keys; publishable and secret keys count against the same limit.",
 		},
 		handler: projectHandler(createSecretAPIKey),
+	},
+	{
+		tool: "set_steam_auth",
+		description: "Cannot be undone. Set the Steam sign-in App ID and Web API key of this Game Project. The old key is lost. " +
+			"The key is input only and is never shown again. Leave web_api_key out to keep the stored key and change the App ID only. " +
+			"Returns the same result as get_steam_auth.",
+		scope: managementtoken.ScopeSteamWrite,
+		op: huma.Operation{
+			Method: http.MethodPut, Path: "/v1/project/steam-auth", OperationID: "setProjectSteamAuth",
+			Summary: "Set the Steam sign-in settings",
+			Description: "Sets the Steam App ID and, when web_api_key is given, replaces the Web API key. This cannot be undone: " +
+				"the old key is lost. The key is stored sealed and is never returned. Without web_api_key the stored key is kept; " +
+				"answers 422 when no key is stored. Returns the same body as the Steam sign-in read.",
+		},
+		handler: projectHandler(setSteamAuth),
+	},
+	{
+		tool: "clear_steam_auth",
+		description: "Cannot be undone. Remove the Steam sign-in App ID and Web API key of this Game Project. The old key is lost " +
+			"and Steam sign-in stops. Returns the same result as get_steam_auth.",
+		scope: managementtoken.ScopeSteamWrite,
+		op: huma.Operation{
+			Method: http.MethodDelete, Path: "/v1/project/steam-auth", OperationID: "clearProjectSteamAuth",
+			Summary: "Clear the Steam sign-in settings",
+			Description: "Removes the Steam App ID and the Web API key. This cannot be undone: the old key is lost and " +
+				"Steam sign-in stops. Returns the same body as the Steam sign-in read.",
+		},
+		handler: projectHandler(clearSteamAuth),
 	},
 	{
 		tool: "list_players",

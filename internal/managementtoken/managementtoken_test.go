@@ -59,6 +59,14 @@ func TestScopes_players_pii_should_need_players_read(t *testing.T) {
 	assert.Equal(t, []any{ClassRisky, ScopePlayersRead}, []any{got.Class, got.Needs})
 }
 
+func TestScopes_steam_write_should_be_risky_with_the_config_update_pair(t *testing.T) {
+	got, ok := Scope(ScopeSteamWrite)
+
+	require.True(t, ok)
+	assert.Equal(t, []any{ClassRisky, rbac.ProjectConfigObject(42), rbac.ActionUpdate, "", "Change the Steam Web API key. The old key is lost."},
+		[]any{got.Class, got.Pair(42), got.Action, got.Needs, got.Label})
+}
+
 func TestScopes_key_risky_scopes(t *testing.T) {
 	cases := map[string]ScopePair{
 		ScopeKeysRevoke: {Class: ClassRisky, Action: rbac.ActionManage, Resource: "keys", Needs: ScopeKeysRead,

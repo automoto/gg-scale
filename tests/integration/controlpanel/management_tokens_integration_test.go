@@ -645,3 +645,12 @@ func TestManagementTokens_should_refuse_keys_secret_when_the_creator_lacks_the_s
 	assert.Equal(t, []any{http.StatusForbidden, true, 0},
 		[]any{resp.StatusCode, strings.Contains(body, `"keys:secret"`), p.tokenCount(t)})
 }
+
+func TestManagementTokens_should_give_steam_write_only_when_checked(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopeSteamWrite}})
+
+	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeSteamWrite}}, []any{resp.StatusCode, p.onlyTokenScopes(t)})
+}

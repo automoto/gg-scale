@@ -26,6 +26,7 @@ const (
 	ScopeKeysWrite         = "keys:write"
 	ScopeKeysRevoke        = "keys:revoke"
 	ScopeKeysSecret        = "keys:secret"
+	ScopeSteamWrite        = "steam:write"
 	ScopeMatchmakingRead   = "matchmaking:read"
 	ScopePlayersRead       = "players:read"
 	ScopePlayersPII        = "players:pii"
@@ -92,6 +93,10 @@ var Scopes = []ScopePair{
 	{
 		Scope: ScopeKeysSecret, Class: ClassRisky, Pair: func(int64) string { return rbac.ObjectAPIKeySecret }, Action: rbac.ActionManage, Resource: "keys",
 		Label: "Create secret API keys. The key value is returned to the token user.",
+	},
+	{
+		Scope: ScopeSteamWrite, Class: ClassRisky, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config",
+		Label: "Change the Steam Web API key. The old key is lost.",
 	},
 	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead, Resource: "matchmaking"},
 	{Scope: ScopePlayersRead, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},

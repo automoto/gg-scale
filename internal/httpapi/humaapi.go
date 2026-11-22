@@ -55,6 +55,7 @@ func newHumaConfig(version string) huma.Config {
 	}
 	cfg := huma.DefaultConfig("ggscale API", version)
 	cfg.CreateHooks = nil
+	cfg.Transformers = append(cfg.Transformers, redactSecretBodyErrors)
 	cfg.OpenAPIPath = ""
 	cfg.DocsPath = ""
 	cfg.SchemasPath = ""
@@ -185,4 +186,20 @@ func serverError(ctx context.Context, msg string, err error) error {
 	}
 	slog.ErrorContext(ctx, msg, "error", err)
 	return huma.Error500InternalServerError("internal error")
+}
+
+// secretBodyOperations are the operations whose request body holds a secret.
+// huma copies the refused value, or the whole body, into the "value" of a
+// validation error, so these answers drop it.
+var secretBodyOperations = map[string]bool{"setProjectSteamAuth": true}
+
+func redactSecretBodyErrors(ctx huma.Context, _ string, v any) (any, error) {
+	model, ok := v.(*huma.ErrorModel)
+	if !ok || !secretBodyOperations[ctx.Operation().OperationID] {
+		return v, nil
+	}
+	for _, detail := range model.Errors {
+		detail.Value = nil
+	}
+	return v, nil
 }

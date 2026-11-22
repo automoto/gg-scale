@@ -2594,6 +2594,20 @@ components:
         - config
         - expected_revision
       type: object
+    ProjectSetSteamAuthBody:
+      additionalProperties: false
+      properties:
+        app_id:
+          description: The Steam App ID, a decimal number.
+          examples:
+            - "480"
+          type: string
+        web_api_key:
+          description: "The 32-character publisher Web API key. Input only: it is never returned. Leave it out to keep the stored key."
+          type: string
+      required:
+        - app_id
+      type: object
     ProjectSetStorageLimitInputBody:
       additionalProperties: false
       properties:
@@ -7228,6 +7242,27 @@ paths:
       tags:
         - Project Management
   /v1/project/steam-auth:
+    delete:
+      description: "Removes the Steam App ID and the Web API key. This cannot be undone: the old key is lost and Steam sign-in stops. Returns the same body as the Steam sign-in read."
+      operationId: clearProjectSteamAuth
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSteamAuth"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Clear the Steam sign-in settings
+      tags:
+        - Project Management
     get:
       description: Returns the Steam App ID (null when not set) and whether a Web API key is stored. The key is never returned.
       operationId: getProjectSteamAuth
@@ -7247,6 +7282,33 @@ paths:
       security:
         - ManagementToken: []
       summary: Get the Steam sign-in settings
+      tags:
+        - Project Management
+    put:
+      description: "Sets the Steam App ID and, when web_api_key is given, replaces the Web API key. This cannot be undone: the old key is lost. The key is stored sealed and is never returned. Without web_api_key the stored key is kept; answers 422 when no key is stored. Returns the same body as the Steam sign-in read."
+      operationId: setProjectSteamAuth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectSetSteamAuthBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectSteamAuth"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Set the Steam sign-in settings
       tags:
         - Project Management
   /v1/project/token:

@@ -398,3 +398,27 @@ func cancelProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Pr
 	err := projectadmin.CancelPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, projectActor(p))
 	return playerWriteResult(ctx, d, p, in.PlayerID, err)
 }
+
+type projectSetSteamAuthBody struct {
+	AppID     string `json:"app_id" doc:"The Steam App ID, a decimal number." example:"480"`
+	WebAPIKey string `json:"web_api_key,omitempty" doc:"The 32-character publisher Web API key. Input only: it is never returned. Leave it out to keep the stored key."`
+}
+
+type projectSetSteamAuthInput struct {
+	Body projectSetSteamAuthBody
+}
+
+func setSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetSteamAuthInput) (projectSteamAuth, error) {
+	_, err := projectadmin.SetSteamAuth(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.Body.AppID, in.Body.WebAPIKey, projectActor(p))
+	if err != nil {
+		return projectSteamAuth{}, projectWriteError(err)
+	}
+	return getSteamAuth(ctx, d, p, nil)
+}
+
+func clearSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectSteamAuth, error) {
+	if err := projectadmin.ClearSteamAuth(ctx, d.Pool, p.TenantID, p.ProjectID, projectActor(p)); err != nil {
+		return projectSteamAuth{}, projectWriteError(err)
+	}
+	return getSteamAuth(ctx, d, p, nil)
+}

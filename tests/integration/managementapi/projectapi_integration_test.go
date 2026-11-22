@@ -50,6 +50,8 @@ func (f *fixture) writeCalls() map[string]writeCall {
 		"set_allowed_origins":     {"origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":["http://localhost:5173"]}`},
 		"revoke_api_key":          {"keys:revoke", http.MethodPost, keyPath(revoked, "/revoke"), ""},
 		"create_secret_api_key":   {"keys:secret", http.MethodPost, "/v1/project/secret-api-keys", `{"label":"ci"}`},
+		"set_steam_auth":          {"steam:write", http.MethodPut, "/v1/project/steam-auth", `{"app_id":"480","web_api_key":"0123456789abcdef0123456789abcdef"}`},
+		"clear_steam_auth":        {"steam:write", http.MethodDelete, "/v1/project/steam-auth", ""},
 	}
 }
 

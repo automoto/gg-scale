@@ -55,6 +55,8 @@ func (f *fixture) writeToolCalls() map[string]struct {
 		"set_allowed_origins":     {"origins:write", map[string]any{"origins": []string{"http://localhost:5173"}}},
 		"revoke_api_key":          {"keys:revoke", map[string]any{"api_key_id": revoked}},
 		"create_secret_api_key":   {"keys:secret", map[string]any{"label": "ci"}},
+		"set_steam_auth":          {"steam:write", map[string]any{"app_id": "480", "web_api_key": "0123456789abcdef0123456789abcdef"}},
+		"clear_steam_auth":        {"steam:write", map[string]any{}},
 	}
 }
 
