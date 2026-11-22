@@ -21,6 +21,7 @@ import (
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/tenant"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -830,9 +831,30 @@ type queueCursor struct {
 	Mode, Region, GameMode, Status string
 }
 
-func decodeQueueCursor(s string) (queueCursor, bool) {
+// encodeQueueCursor seals the key with the credential cipher, so the cursor
+// does not carry player text a client could read.
+func encodeQueueCursor(cipher *secretseal.Cipher, c queueCursor) (string, error) {
+	if cipher == nil {
+		return "", errors.New("queue cursor: credential cipher is not configured")
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := cipher.Encrypt(raw)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func decodeQueueCursor(cipher *secretseal.Cipher, s string) (queueCursor, bool) {
 	var c queueCursor
-	raw, err := base64.RawURLEncoding.DecodeString(s)
+	sealed, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || cipher == nil {
+		return queueCursor{}, false
+	}
+	raw, err := cipher.Decrypt(sealed)
 	if err != nil || json.Unmarshal(raw, &c) != nil {
 		return queueCursor{}, false
 	}
@@ -846,13 +868,13 @@ func decodeQueueCursor(s string) (queueCursor, bool) {
 }
 
 // getMatchmakingQueue lists the buckets of the dashboard queue page, ordered
-// by bucket key. The cursor is that key of the last bucket of the page. Text
+// by bucket key. The cursor is that key of the last bucket of the page, sealed so a client cannot read it. Text
 // that a game client sent is shown as the trace shows it.
 func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectQueue, error) {
 	limit := in.limit()
 	params := sqlcgen.ListMatchmakerBucketsPageForProjectParams{ProjectID: p.ProjectID, RowLimit: limit + 1}
 	if in.Cursor != "" {
-		c, ok := decodeQueueCursor(in.Cursor)
+		c, ok := decodeQueueCursor(d.CredentialCipher, in.Cursor)
 		if !ok {
 			return projectQueue{}, errBadCursor()
 		}
@@ -878,11 +900,10 @@ func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principa
 	}
 	if more {
 		last := rows[len(rows)-1]
-		raw, err := json.Marshal(queueCursor{Mode: last.Mode, Region: last.Region, GameMode: last.GameMode, Status: last.Status})
+		out.NextCursor, err = encodeQueueCursor(d.CredentialCipher, queueCursor{Mode: last.Mode, Region: last.Region, GameMode: last.GameMode, Status: last.Status})
 		if err != nil {
 			return projectQueue{}, err
 		}
-		out.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
 	}
 	return out, nil
 }

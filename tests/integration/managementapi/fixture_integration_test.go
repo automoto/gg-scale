@@ -112,6 +112,7 @@ func newFixtureWith(t *testing.T, change func(*httpapi.Deps)) *fixture {
 		ManagementMaxProjectAPIKeys:  3,
 		CORSMaxProjectOrigins:        2,
 	}
+	withCipher(&deps)
 	if change != nil {
 		change(&deps)
 	}

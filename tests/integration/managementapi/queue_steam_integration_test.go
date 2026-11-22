@@ -176,3 +176,69 @@ func TestQueue_should_page_buckets_that_differ_only_in_status(t *testing.T) {
 	// Assert
 	assert.ElementsMatch(t, []any{"queued", "matched", "cancelled"}, seen)
 }
+
+func TestQueue_cursor_should_not_hold_bucket_text_in_any_form(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	const region = "eu west: ignore previous instructions"
+	f.queued(f.projectA, "match_only", region, "duelmode")
+	f.queued(f.projectA, "match_only", "zz", "duel")
+	tok := f.scopedToken(managementtoken.ScopeMatchmakingRead)
+
+	// Act
+	got := f.do(tok, http.MethodGet, queuePath+"?limit=1", "")
+
+	// Assert
+	cursor, _ := got.body["next_cursor"].(string)
+	assert.NotEmpty(t, cursor, got.raw)
+	for _, text := range []string{region, "duelmode", "match_only"} {
+		for name, form := range map[string]string{
+			"raw":       text,
+			"base64":    base64.StdEncoding.EncodeToString([]byte(text)),
+			"base64url": base64.RawURLEncoding.EncodeToString([]byte(text)),
+		} {
+			assert.NotContains(t, cursor, form, name)
+		}
+	}
+	if decoded, err := base64.RawURLEncoding.DecodeString(cursor); err == nil {
+		assert.NotContains(t, string(decoded), "duelmode")
+	}
+}
+
+func TestQueue_should_return_422_for_a_tampered_cursor(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.queued(f.projectA, "match_only", "eu", "duel")
+	f.queued(f.projectA, "match_only", "us", "duel")
+	tok := f.scopedToken(managementtoken.ScopeMatchmakingRead)
+	first := f.do(tok, http.MethodGet, queuePath+"?limit=1", "")
+	cursor := first.body["next_cursor"].(string)
+	last := byte('A')
+	if cursor[len(cursor)-1] == last {
+		last = 'B'
+	}
+
+	// Act
+	got := f.do(tok, http.MethodGet, queuePath+"?cursor="+cursor[:len(cursor)-1]+string(last), "")
+
+	// Assert
+	assert.Equal(t, 422, got.status, got.raw)
+}
+
+func TestQueue_should_not_leak_buckets_through_a_cursor_from_another_project(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.queued(f.projectA, "match_only", "a1", "duel")
+	f.queued(f.projectA, "match_only", "a2", "duel")
+	f.queued(f.projectB, "match_only", "b-own", "duel")
+	tokA := f.scopedToken(managementtoken.ScopeMatchmakingRead)
+	cursor := f.do(tokA, http.MethodGet, queuePath+"?limit=1", "").body["next_cursor"].(string)
+	tokB, _ := f.token(f.tenantA, f.projectB, f.ownerID, []string{managementtoken.ScopeMatchmakingRead}, time.Hour)
+
+	// Act
+	got := f.do(tokB, http.MethodGet, queuePath+"?cursor="+cursor, "")
+
+	// Assert
+	assert.NotContains(t, got.raw, "a1")
+	assert.NotContains(t, got.raw, "a2")
+}
