@@ -13,6 +13,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// esc returns a backslash followed by u: esc("ud83d") is the escape text of
+// U+D83D. The tests build every escape with it, so the source holds the
+// escape text and not a character.
+func esc(u string) string { return `\` + u }
+
 func TestJSONFormat_should_check_the_text_of_the_body(t *testing.T) {
 	cases := []struct {
 		name string
@@ -21,21 +26,21 @@ func TestJSONFormat_should_check_the_text_of_the_body(t *testing.T) {
 	}{
 		{"invalid byte", "\"a\xffb\"", errBodyText},
 		{"utf-8 encoded surrogate", "\"\xed\xa0\x80\"", errBodyText},
-		{"high surrogate alone", `"\ud800"`, errBodyText},
-		{"low surrogate alone", `"\udc00"`, errBodyText},
-		{"upper-case high surrogate alone", `"\uD800"`, errBodyText},
-		{"high surrogate then text", `"\ud800x"`, errBodyText},
-		{"high surrogate then other escape", `"\ud800\n"`, errBodyText},
-		{"high high low", `"\ud800𐀀"`, errBodyText},
-		{"low then high", `"\udc00\ud800"`, errBodyText},
-		{"surrogate in a key", `{"\ud800":1}`, errBodyText},
-		{"high surrogate at the end of the body", `\ud800`, errBodyText},
-		{"surrogate pair", `"😀"`, nil},
-		{"upper-case surrogate pair", `"😀"`, nil},
+		{"high surrogate alone", `"` + esc("ud800") + `"`, errBodyText},
+		{"low surrogate alone", `"` + esc("udc00") + `"`, errBodyText},
+		{"upper-case high surrogate alone", `"` + esc("uD800") + `"`, errBodyText},
+		{"high surrogate then text", `"` + esc("ud800") + `x"`, errBodyText},
+		{"high surrogate then other escape", `"` + esc("ud800") + `\n"`, errBodyText},
+		{"high high low", `"` + esc("ud800") + esc("ud800") + esc("udc00") + `"`, errBodyText},
+		{"low then high", `"` + esc("udc00") + esc("ud800") + `"`, errBodyText},
+		{"surrogate in a key", `{"` + esc("ud800") + `":1}`, errBodyText},
+		{"high surrogate at the end of the body", esc("ud800"), errBodyText},
+		{"surrogate pair", `"` + esc("ud83d") + esc("ude00") + `"`, nil},
+		{"upper-case surrogate pair", `"` + esc("uD83D") + esc("uDE00") + `"`, nil},
 		{"literal replacement character", "\"\xef\xbf\xbd\"", nil},
-		{"escaped replacement character", `"�"`, nil},
-		{"escaped backslash before u", `"\\ud800"`, nil},
-		{"four-byte character", `"😀"`, nil},
+		{"escaped replacement character", `"` + esc("ufffd") + `"`, nil},
+		{"escaped backslash before u", `"\\` + "ud800" + `"`, nil},
+		{"four-byte character", "\"\xf0\x9f\x98\x80\"", nil},
 		{"invalid json", `{"a":^`, errBodyDecode},
 	}
 	for _, c := range cases {
@@ -59,8 +64,8 @@ var badTextProbes = []struct {
 	{"fleet name byte", "create_fleet", http.MethodPost, "/v1/project/fleets", "{\"name\":\"a\xffb\",\"backend\":\"agones\",\"config\":{\"fleet_name\":\"f\"}}"},
 	{"region byte", "allocate_server", http.MethodPost, "/v1/project/allocations", "{\"fleet\":\"f\",\"region\":\"e\xffu\"}"},
 	{"key label byte", "create_api_key", http.MethodPost, "/v1/project/api-keys", "{\"label\":\"a\xffb\"}"},
-	{"key label high surrogate", "create_api_key", http.MethodPost, "/v1/project/api-keys", `{"label":"\ud800"}`},
-	{"key label low surrogate", "create_api_key", http.MethodPost, "/v1/project/api-keys", `{"label":"\udc00"}`},
+	{"key label high surrogate", "create_api_key", http.MethodPost, "/v1/project/api-keys", `{"label":"` + esc("ud800") + `"}`},
+	{"key label low surrogate", "create_api_key", http.MethodPost, "/v1/project/api-keys", `{"label":"` + esc("udc00") + `"}`},
 }
 
 // The probe server has no store, so a refused call shows that no handler ran
@@ -78,25 +83,65 @@ func TestBadText_should_be_refused_over_http(t *testing.T) {
 	}
 }
 
+// mcpBadText is the JSON-RPC error that strictToolArguments answers for a
+// tools/call with bad text.
+const mcpBadText = `"error":{"code":-32602,"message":"request body is not valid UTF-8 text"}`
+
 func TestBadText_should_be_refused_over_mcp(t *testing.T) {
 	s := newProbeServer(t)
 	for _, p := range badTextProbes {
 		t.Run(p.name, func(t *testing.T) {
 			got := s.mcp(p.tool, p.args)
 
-			assert.Equal(t, []any{true, true, false},
-				[]any{strings.Contains(got, `\"status\":400`), strings.Contains(got, `request body is not valid UTF-8 text`), strings.Contains(got, `\"value\"`)},
-				got)
+			assert.Contains(t, got, mcpBadText)
 		})
 	}
 }
+
+// Path and query arguments are decoded by huma mcp before the inner request,
+// so the check on the raw call is the one that sees them.
+func TestBadText_should_be_refused_in_an_mcp_query_or_path_argument(t *testing.T) {
+	cases := []struct{ name, tool, args string }{
+		{"query lone surrogate", "list_players", `{"external_id":"` + esc("ud800") + `"}`},
+		{"query invalid byte", "list_players", "{\"external_id\":\"a\xffb\"}"},
+		{"path lone surrogate", "get_leaderboard", `{"leaderboard_id":"` + esc("udc00") + `"}`},
+	}
+	s := newProbeServer(t)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := s.mcp(c.tool, c.args)
+
+			assert.Contains(t, got, mcpBadText)
+		})
+	}
+}
+
+// A json.RawMessage body is copied without a decode of its strings, so the
+// bytes would reach the store unchanged.
+func TestBadText_should_be_refused_in_a_raw_json_body(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"invalid byte", "{\"a\":\"x\xffy\"}"},
+		{"lone surrogate", `{"a":"` + esc("ud800") + `"}`},
+	}
+	s := newProbeServer(t)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := s.do(http.MethodPut, "/v1/storage/objects/slot", c.body)
+
+			assert.Equal(t, []any{http.StatusBadRequest, true}, []any{rec.Code, strings.Contains(rec.Body.String(), errBodyTextJSON)}, rec.Body.String())
+		})
+	}
+}
+
+// pairEsc is the escape text of U+1F600 as a surrogate pair.
+var pairEsc = esc("ud83d") + esc("ude00")
 
 // The probe server cannot answer 200: the call passes the text check and is
 // refused later by the handler.
 func TestGoodText_should_pass_the_text_check_over_mcp(t *testing.T) {
 	s := newProbeServer(t)
 
-	got := s.mcp("create_api_key", `{"label":"😀"}`)
+	got := s.mcp("create_api_key", `{"label":"`+pairEsc+`"}`)
 
 	assert.Equal(t, []any{true, false},
 		[]any{strings.Contains(got, `\"status\":401`), strings.Contains(got, `request body is not valid UTF-8 text`)}, got)
@@ -134,9 +179,12 @@ func TestGoodText_should_be_accepted(t *testing.T) {
 	cases := []struct {
 		name, body, want string
 	}{
-		{"surrogate pair", `{"name":"😀"}`, "😀"},
-		{"literal replacement character", "{\"name\":\"a\xef\xbf\xbdb\"}", "a�b"},
-		{"large body", `{"name":"` + strings.Repeat(`é😀`, 70000) + `"}`, strings.Repeat("é😀", 70000)},
+		{"surrogate pair", `{"name":"` + pairEsc + `"}`, "\U0001F600"},
+		{"upper-case surrogate pair", `{"name":"` + esc("uD83D") + esc("uDE00") + `"}`, "\U0001F600"},
+		{"escaped replacement character", `{"name":"` + esc("ufffd") + `"}`, "\uFFFD"},
+		{"literal replacement character", "{\"name\":\"a\xef\xbf\xbdb\"}", "a\uFFFDb"},
+		// 87000 pairs of 12 bytes: about 1 MB, under the 1048576 default limit.
+		{"large body", `{"name":"` + strings.Repeat(pairEsc, 87000) + `"}`, strings.Repeat("\U0001F600", 87000)},
 	}
 	h := newEchoServer()
 	for _, c := range cases {

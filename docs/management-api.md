@@ -221,7 +221,8 @@ the Game Project, as the dashboard pages do.
   also accepted: a fleet stored that way runs on any plugin backend. An agones
   config needs `fleet_name` and may have `namespace` and `selector.<label>`
   keys. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
-  dashboard form has the same rule). `delete_fleet` hides the fleet
+  dashboard form has the same rule). Over the API, invalid UTF-8 in the JSON
+  body answers 400 before this check (see Errors). `delete_fleet` hides the fleet
   from new allocations; live allocations and their history stay.
   `restore_fleet` brings the fleet back with the same ID, name, backend, and
   config (409 when a live fleet has the name now). The backend of a fleet
@@ -268,7 +269,7 @@ in Scopes).
 | `steam:write` | `clear_steam_auth` | `DELETE /v1/project/steam-auth` | Cannot be undone: removes the App ID and the Web API key, and Steam sign-in stops. Returns the `get_steam_auth` shape. |
 | `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, the whole Game Project in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id` and `expires_at`, and `email` only with `players:pii`. The audit row has no address. Needs `players:read`. |
 | `players:invite` | `link_player` | `POST /v1/project/players/{player_id}/link` | Sends an email. Same as `invite_player`, for one existing player: when the invite is accepted, the address and its account are bound to that player, and an open invite for the player is replaced. The accept fails when the player is linked to another account or has a different verified email. 404 for a player of another Game Project, 409 when another player has the address. |
-| `allocations:write` | `allocate_server` | `POST /v1/project/allocations` | Costs money: starts a billable game server. Takes `fleet` (the name of a live fleet), `region`, and optional `game_mode` and `capacity` (default 1). It cannot set labels or join data. `region` and `game_mode` are at most 256 bytes, valid UTF-8, no NUL; `capacity` is at most `FLEET_ALLOCATION_MAX_CAPACITY` (default 100); otherwise 422. 409 when the fleet backend is not the backend of the server. Returns the allocation (no labels or join data). 404 for a deleted, unknown, or other-project fleet; 403 when the backend of the fleet is not enabled. Needs `fleet:read`, the allocate permission for the person who made the token, and the `dedicated_servers` feature. The audit row `fleet.allocate.manual` is written in the same transaction that marks the allocation ready. |
+| `allocations:write` | `allocate_server` | `POST /v1/project/allocations` | Costs money: starts a billable game server. Takes `fleet` (the name of a live fleet), `region`, and optional `game_mode` and `capacity` (default 1). It cannot set labels or join data. `region` and `game_mode` are at most 256 bytes, no NUL; `capacity` is at most `FLEET_ALLOCATION_MAX_CAPACITY` (default 100); otherwise 422. Invalid UTF-8 in the body answers 400 (see Errors). 409 when the fleet backend is not the backend of the server. Returns the allocation (no labels or join data). 404 for a deleted, unknown, or other-project fleet; 403 when the backend of the fleet is not enabled. Needs `fleet:read`, the allocate permission for the person who made the token, and the `dedicated_servers` feature. The audit row `fleet.allocate.manual` is written in the same transaction that marks the allocation ready. |
 | `allocations:write` | `deallocate_server` | `POST /v1/project/allocations/{allocation_id}/deallocate` | Cannot be undone: stops the server and ends a live match. The request also needs the deallocate permission for the person who made the token. 404 for an allocation of another Game Project. An allocation that is already released is returned as it is, with no new audit row. The backend stops the server first, then the row and the audit row `fleet.deallocate.manual` commit together. Returns the allocation. |
 
 Each risky tool description starts with its risk ("Cannot be undone.", "Sends an email.",
@@ -319,10 +320,11 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   characters. This holds for the dashboard, the token API, and sign-up too.
 - `null` for `scopes` in `update_api_key_features` or for `origins` in
   `set_allowed_origins` answers 422. An empty list `[]` still clears the list.
-- NUL and invalid UTF-8 in a fleet config, in the `fleet` and `external_id`
-  of `allocate_server`, and in the `cursor` of the leaderboard lists answer
-  422. An `allocate_server` `fleet` that is too long also answers 422. In a
-  JSON body, invalid UTF-8 answers 400 first (see Errors).
+- NUL in a fleet config and in the `fleet` and `external_id` of
+  `allocate_server` answers 422. NUL and invalid UTF-8 in the `cursor` of the
+  leaderboard lists answer 422 over HTTP. An `allocate_server` `fleet` that
+  is too long also answers 422. Invalid UTF-8 in a JSON body, and in any MCP
+  tool argument, is refused first (see Errors).
 - Allocation works on a plugin backend. A fleet stored as bare `plugin` runs
   on any plugin backend. A fleet with another `plugin*` backend value that has
   no `plugin:` prefix (for example `pluginx`) answers 422 on the token fleet
@@ -396,8 +398,10 @@ security scheme `ManagementToken`.
 - A JSON body with bytes that are not valid UTF-8, or with a `\u` escape of
   a surrogate that is not one half of a pair (for example `"\ud800"`),
   answers 400 with the message `request body is not valid UTF-8 text`. This
-  is for every API operation and MCP tool. A pair such as `"\ud83d\ude00"`
-  and the character U+FFFD sent as UTF-8 are accepted.
+  is for every API operation and MCP tool. In MCP, a tool call with such text
+  in any argument (body, path, or query) gets a JSON-RPC invalid-params error
+  with the same message. A pair such as `"\ud83d\ude00"` and the character
+  U+FFFD (as UTF-8 or as `\ufffd`) are accepted.
 - The token checks (401, the 403 for access ended, 429, and the `Origin`
   check) answer plain text, before the operation runs.
 - `list_revisions` for a leaderboard of a different Game Project answers 200

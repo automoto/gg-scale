@@ -264,6 +264,7 @@ func validText(data []byte) bool {
 			i++
 			continue
 		}
+		// Skip the rest of this escape: u and four hex digits.
 		i += 5
 		if !utf16.IsSurrogate(r) {
 			continue
@@ -271,6 +272,7 @@ func validText(data []byte) bool {
 		if utf16.DecodeRune(r, unicodeEscape(data[i+1:])) == unicode.ReplacementChar {
 			return false
 		}
+		// Skip the second escape of the pair: six bytes.
 		i += 6
 	}
 	return true

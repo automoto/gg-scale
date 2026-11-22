@@ -125,6 +125,8 @@ type mcpToolCallParams struct {
 // argument, so a misspelled or old setting name would remove that setting.
 // The answer is a JSON-RPC invalid-params error, as for an unknown tool. A
 // tool the token cannot see is passed on, so it still answers unknown tool.
+// A tools/call that is not valid UTF-8 text (see validText) is refused with
+// the same error form, before the tool is looked up.
 func strictToolArguments(doc *huma.OpenAPI) func(http.Handler) http.Handler {
 	tools := managementToolArguments(doc)
 	return func(next http.Handler) http.Handler {
@@ -146,6 +148,13 @@ func strictToolArguments(doc *huma.OpenAPI) func(http.Handler) http.Handler {
 			var req mcpRequest
 			if json.Unmarshal(bytes.TrimSpace(body), &req) != nil || req.Method != "tools/call" || len(req.ID) == 0 {
 				next.ServeHTTP(w, r)
+				return
+			}
+			// huma mcp decodes path, query, and header arguments to Go
+			// strings, which turns bad text into U+FFFD before the inner
+			// request reaches jsonFormat. Check the raw call here.
+			if !validText(body) {
+				writeInvalidParams(w, req.ID, errBodyText.Error())
 				return
 			}
 			var call mcpToolCallParams
