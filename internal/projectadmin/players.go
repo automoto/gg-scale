@@ -334,7 +334,7 @@ func checkLinkTarget(ctx context.Context, q *sqlcgen.Queries, tenantID, projectI
 // logged and does not undo the invite. An unsubscribed address gets no mail.
 func (i *PlayerInviter) send(ctx context.Context, res PlayerInvite, m inviteMail, projectID int64) {
 	if i.Mailer == nil || i.MailFrom == "" {
-		slog.WarnContext(ctx, "player invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
+		slog.WarnContext(ctx, "player invite: no mailer configured", "invite_id", res.ID, "domain", emailDomain(res.Email))
 		return
 	}
 	if EmailSuppressed(ctx, i.Pool, res.Email) {
@@ -390,7 +390,14 @@ func EmailSuppressed(ctx context.Context, pool *db.Pool, email string) bool {
 		return true
 	}
 	if suppressed {
-		slog.InfoContext(ctx, "invite email dropped: address unsubscribed", "email", email)
+		slog.InfoContext(ctx, "invite email dropped: address unsubscribed", "domain", emailDomain(email))
 	}
 	return suppressed
+}
+
+// emailDomain returns the part after the last "@", for logs that must not
+// hold the full address.
+func emailDomain(email string) string {
+	_, domain, _ := strings.Cut(email, "@")
+	return domain
 }

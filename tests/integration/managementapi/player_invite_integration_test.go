@@ -165,3 +165,12 @@ func TestPlayerInvite_tools_should_send_and_link(t *testing.T) {
 
 	assert.Equal(t, []any{true, float64(id), 2}, []any{invited["invite_id"] != nil, linked["player_id"], len(rec.Snapshot())})
 }
+
+func TestPlayerInvite_should_return_422_for_an_ip_literal_domain(t *testing.T) {
+	f, rec := newInviteFixture(t)
+	tok := f.scopedToken(managementtoken.ScopePlayersInvite)
+
+	got := f.do(tok, http.MethodPost, invitePath, `{"email":"a@[127.0.0.1]"}`)
+
+	assert.Equal(t, []any{422, 0}, []any{got.status, len(rec.Snapshot())}, got.raw)
+}

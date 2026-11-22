@@ -419,6 +419,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
 
 #### Changed
 
+- An email address with an IP address as its domain (`a@[127.0.0.1]`) is not
+  valid for signup, invites, and the other address checks. Login does not
+  check the address form.
 - Risky operations have their own opt-in scopes. No preset includes them, and
   the token page shows them in a separate group with a warning:
   `keys:revoke`, `keys:secret`, `steam:write`, `players:pii`,
