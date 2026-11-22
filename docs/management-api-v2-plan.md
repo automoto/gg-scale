@@ -483,6 +483,6 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - A request body that is not valid JSON now gives the fixed message
   `request body is not valid JSON` (400). Before, the message quoted the
   first bad byte.
-- `POST /v1/auth/delete/cancel` with a bad email now answers 422 with the
-  detail `email invalid` and no `errors` entry. Before, the message quoted
-  part of the address.
+- `POST /v1/auth/delete/cancel` with a bad email still answers 422 at
+  `body.email`, but the message is now `expected a valid email address`.
+  Before, the message quoted part of the address.

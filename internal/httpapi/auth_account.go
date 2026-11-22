@@ -270,7 +270,8 @@ func requestPlayerDelete(d Deps) func(context.Context, *disableInput) (*deleteRe
 func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct{}, error) {
 	return func(ctx context.Context, in *deleteCancelInput) (*struct{}, error) {
 		if !validateEmail(in.Body.Email) {
-			return nil, huma.Error422UnprocessableEntity("email invalid")
+			return nil, huma.Error422UnprocessableEntity("validation failed",
+				&huma.ErrorDetail{Message: "expected a valid email address", Location: "body.email"})
 		}
 		projectID, _, err := pinnedProject(ctx)
 		if err != nil {

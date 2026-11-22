@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/managementtoken"
 )
 
@@ -151,8 +153,8 @@ func TestValidationError_should_not_return_a_secret_field_value(t *testing.T) {
 			t.Run(f.op.OperationID+"/"+f.field+"/"+name, func(t *testing.T) {
 				rec := s.do(f.op.Method, path, body(f.field))
 
-				assert.Equal(t, []any{true, false, false},
-					[]any{rec.Code >= 400 && rec.Code < 500, strings.Contains(rec.Body.String(), probeMarker), strings.Contains(rec.Body.String(), `"value"`)},
+				assert.Equal(t, []any{http.StatusUnprocessableEntity, false, false},
+					[]any{rec.Code, strings.Contains(rec.Body.String(), probeMarker), strings.Contains(rec.Body.String(), `"value"`)},
 					rec.Body.String())
 			})
 		}
@@ -236,6 +238,39 @@ func TestBodyParseError_should_not_return_body_text_over_mcp(t *testing.T) {
 	got := s.mcpRaw(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"create_api_key","arguments":{"label":^` + probeMarker + `}}}`)
 
 	assert.Equal(t, []any{false, false}, []any{strings.Contains(got, "^"), strings.Contains(got, probeMarker)}, got)
+}
+
+func TestBodyParseError_should_not_return_a_duplicate_key_body_over_mcp(t *testing.T) {
+	s := newProbeServer(t)
+
+	got := s.mcp("create_fleet", `{"name":"a","backend":"plugin:x","config":{"api_token":"`+probeMarker+`","api_token":"b"}}`)
+
+	assert.Equal(t, []any{true, false}, []any{strings.Contains(got, "request body is not valid JSON"), strings.Contains(got, probeMarker)}, got)
+}
+
+// The session verify route decodes its own body and answers one opaque 401
+// for every failure.
+func TestVerifyPlayerSession_should_not_return_the_session_token(t *testing.T) {
+	signer, err := auth.NewSignerRandom()
+	require.NoError(t, err)
+	d := Deps{Signer: signer}
+	ctx := db.WithProject(db.WithTenant(context.Background(), 1), 1)
+	bodies := map[string]string{
+		"wrong_type":   `{"session_token":["` + probeMarker + `"]}`,
+		"empty_string": `{"session_token":"","probe_extra":"` + probeMarker + `"}`,
+		"bad_token":    `{"session_token":"` + probeMarker + `"}`,
+		"not_json":     `{"session_token":^` + probeMarker + `}`,
+	}
+	for name, body := range bodies {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/v1/server/player-sessions/verify", strings.NewReader(body)).WithContext(ctx)
+			rec := httptest.NewRecorder()
+
+			verifyPlayerSession(d, rec, req)
+
+			assert.Equal(t, []any{http.StatusUnauthorized, `{"error":"invalid session"}`}, []any{rec.Code, rec.Body.String()})
+		})
+	}
 }
 
 func TestErrorValues_should_be_dropped_for_every_operation(t *testing.T) {
@@ -350,7 +385,8 @@ func TestDeleteCancel_should_refuse_a_bad_email_without_returning_it(t *testing.
 
 	rec := s.do(http.MethodPost, "/v1/auth/delete/cancel", `{"email":"a@b `+probeMarker+`","password":"correct-horse"}`)
 
-	assert.Equal(t, []any{http.StatusUnprocessableEntity, false}, []any{rec.Code, strings.Contains(rec.Body.String(), probeMarker)}, rec.Body.String())
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, false, true},
+		[]any{rec.Code, strings.Contains(rec.Body.String(), probeMarker), strings.Contains(rec.Body.String(), `"location":"body.email"`)}, rec.Body.String())
 }
 
 func TestErrorValues_should_keep_the_json_shape(t *testing.T) {
