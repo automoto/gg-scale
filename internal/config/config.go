@@ -250,7 +250,8 @@ type Config struct {
 	// restored as a decrypt fallback.
 	TwoFactorEncKey string `env:"TWO_FACTOR_ENC_KEY" envFile:"true"`
 	// CredentialEncKey is an optional 32-byte hex AES key that encrypts stored
-	// provider credentials (e.g. the Steam Web API key) at rest. When empty
+	// provider credentials (the Steam Web API key and plugin fleet config
+	// values) at rest. When empty
 	// the server auto-generates and persists a key (zero-config self-host);
 	// set this to keep key material out of database backups. A removed key
 	// falls back to treating stored values as opaque, so restore the prior

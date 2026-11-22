@@ -139,6 +139,15 @@ func TestControlPanelFleet_update_with_a_new_value_should_seal_it(t *testing.T) 
 	assert.Equal(t, next, p.config(t)["api_token"])
 }
 
+func TestControlPanelFleet_update_without_a_key_row_should_remove_the_key(t *testing.T) {
+	p := newSealedFleetPanel(t)
+
+	status, _ := p.update(t, "sealed", []string{"region"}, []string{""})
+
+	require.Equal(t, http.StatusSeeOther, status)
+	assert.Equal(t, map[string]string{"region": "GRA9"}, p.config(t))
+}
+
 func TestControlPanelFleet_update_with_no_key_should_clear_the_config(t *testing.T) {
 	p := newSealedFleetPanel(t)
 
