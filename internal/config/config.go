@@ -100,6 +100,9 @@ type Config struct {
 	// binaries. Default "/etc/ggscale/plugins". Only consulted when
 	// FleetBackend starts with "plugin:".
 	FleetPluginDir string `env:"FLEET_PLUGIN_DIR" envDefault:"/etc/ggscale/plugins"`
+	// FleetAllocationMaxCapacity is the largest capacity that one manual
+	// allocation (dashboard or management token) may ask for.
+	FleetAllocationMaxCapacity int `env:"FLEET_ALLOCATION_MAX_CAPACITY" envDefault:"100"`
 
 	// Agones fleet-backend host-wide tunables. Per-template values (fleet
 	// name, selector labels) live on the fleet template, not in env vars.

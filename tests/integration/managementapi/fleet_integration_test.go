@@ -27,7 +27,7 @@ func newFleetFixture(t *testing.T) *fixture {
 	f := newFixtureWith(t, func(d *httpapi.Deps) {
 		d.ControlPanel.FleetEnabled = true
 		pool = d.Pool
-		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), fakeBackend{}, fleet.ManagerOptions{})
+		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), fakeBackend{}, fleet.ManagerOptions{MaxCapacity: 5})
 	})
 	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES
 		($1, 'dedicated_servers', true), ($1, 'fleet_agones_backend', true), ($1, 'fleet_plugin_backend', true)`, f.tenantA)

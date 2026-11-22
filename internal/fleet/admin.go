@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -247,7 +248,7 @@ func RestoreFleet(ctx context.Context, pool *db.Pool, tenantID, projectID, id in
 }
 
 // ServerAllocate is the input of AllocateServer. The fleet is a live fleet
-// of the project. A Capacity below 1 means 1.
+// of the project. A Capacity of 0 means 1.
 type ServerAllocate struct {
 	Fleet    *Fleet
 	Region   string
@@ -255,12 +256,37 @@ type ServerAllocate struct {
 	Capacity int
 }
 
+// validateText reports whether s is a valid region or game mode: valid UTF-8
+// with no NUL byte, at most MaxConfigKeyOrVal bytes.
+func validateText(s string) bool {
+	return len(s) <= MaxConfigKeyOrVal && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
+}
+
+// validateAllocate checks the client input of AllocateServer. The messages
+// name the field and never carry the value.
+func validateAllocate(in ServerAllocate, maxCapacity int) error {
+	switch {
+	case !validateText(in.Region):
+		return InvalidError("Region is not valid or too long.")
+	case !validateText(in.GameMode):
+		return InvalidError("Game mode is not valid or too long.")
+	case in.Capacity < 0:
+		return InvalidError("Capacity must be at least 1.")
+	case maxCapacity > 0 && in.Capacity > maxCapacity:
+		return InvalidError("Capacity is above the limit of this server.")
+	}
+	return nil
+}
+
 // AllocateServer starts a game server through the manager, with no
 // authorization. The audit row is written in the transaction that marks the
 // allocation ready: it commits with that change, and a failed audit write
 // frees the server again. A failed backend call leaves no audit row.
 func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAllocate, actor projectadmin.Actor) (*Allocation, error) {
-	if in.Capacity < 1 {
+	if err := validateAllocate(in, m.MaxCapacity()); err != nil {
+		return nil, err
+	}
+	if in.Capacity == 0 {
 		in.Capacity = 1
 	}
 	ctx = WithCommitHook(db.WithTenant(ctx, tenantID), func(ctx context.Context, tx pgx.Tx, id AllocationID) error {

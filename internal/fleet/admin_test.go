@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 func TestValidateConfig(t *testing.T) {
@@ -60,4 +61,29 @@ func TestValidateConfig_should_refuse_too_many_selector_keys(t *testing.T) {
 	}
 
 	assert.Error(t, fleet.ValidateConfig("agones", cfg))
+}
+
+func TestAllocateServer_should_refuse_bad_input_before_any_backend_call(t *testing.T) {
+	backend := &fakeBackend{name: "fake"}
+	mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock, MaxCapacity: 10})
+	f := &fleet.Fleet{ID: 1, ProjectID: 2, Name: "default", Backend: backend.name}
+	cases := []struct {
+		name string
+		in   fleet.ServerAllocate
+	}{
+		{"should_refuse_a_long_region", fleet.ServerAllocate{Fleet: f, Region: strings.Repeat("x", fleet.MaxConfigKeyOrVal+1)}},
+		{"should_refuse_a_long_game_mode", fleet.ServerAllocate{Fleet: f, Region: "eu", GameMode: strings.Repeat("x", fleet.MaxConfigKeyOrVal+1)}},
+		{"should_refuse_a_nul_in_region", fleet.ServerAllocate{Fleet: f, Region: "e\x00u"}},
+		{"should_refuse_invalid_utf8_in_game_mode", fleet.ServerAllocate{Fleet: f, Region: "eu", GameMode: "\xff"}},
+		{"should_refuse_capacity_above_the_limit", fleet.ServerAllocate{Fleet: f, Region: "eu", Capacity: 11}},
+		{"should_refuse_a_negative_capacity", fleet.ServerAllocate{Fleet: f, Region: "eu", Capacity: -1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := fleet.AllocateServer(t.Context(), mgr, 1, tc.in, projectadmin.Actor{UserID: 1})
+
+			var invalid fleet.InvalidError
+			assert.True(t, errors.As(err, &invalid), "err=%v", err)
+		})
+	}
 }

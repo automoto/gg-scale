@@ -399,6 +399,7 @@ func (c *Config) checkFields() error {
 		{"MANAGEMENT_MAX_PROJECT_API_KEYS", int64(c.ManagementMaxProjectAPIKeys)},
 		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},
 		{"LEADERBOARD_MAX_PER_PROJECT", int64(c.LeaderboardMaxPerProject)},
+		{"FLEET_ALLOCATION_MAX_CAPACITY", int64(c.FleetAllocationMaxCapacity)},
 	} {
 		// The message has no value: the name tells the operator what to fix,
 		// and a value read from a field such as ...APIKeys is reported by

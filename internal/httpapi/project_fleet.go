@@ -384,10 +384,15 @@ func allocateServer(ctx context.Context, d Deps, p managementtoken.Principal, in
 	a, err := fleet.AllocateServer(ctx, m, p.TenantID, fleet.ServerAllocate{
 		Fleet: f, Region: region, GameMode: strings.TrimSpace(in.Body.GameMode), Capacity: in.Body.Capacity,
 	}, projectActor(p))
-	if errors.Is(err, fleet.ErrFleetNotFound) {
+	var invalid fleet.InvalidError
+	switch {
+	case errors.Is(err, fleet.ErrFleetNotFound):
 		return projectAllocation{}, errProjectNotFound()
-	}
-	if err != nil {
+	case errors.As(err, &invalid):
+		return projectAllocation{}, huma.Error422UnprocessableEntity(invalid.Error())
+	case errors.Is(err, fleet.ErrFleetBackendMismatch):
+		return projectAllocation{}, huma.Error409Conflict("the fleet backend is not the backend of this server")
+	case err != nil:
 		return projectAllocation{}, err
 	}
 	return newProjectAllocation(a), nil

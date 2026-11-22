@@ -118,7 +118,7 @@ func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend,
 		fleet.NewPostgresStore(pool),
 		fleet.NewPostgresFleetStore(pool),
 		backend,
-		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }},
+		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10},
 	)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
@@ -190,6 +190,25 @@ func TestControlPanelFleet_list_then_allocate_then_appears_in_table(t *testing.T
 		   AND (payload->>'tenant_id')::bigint = $1`,
 		tenantID).Scan(&auditCount))
 	assert.Equal(t, 1, auditCount)
+}
+
+func TestControlPanelFleet_allocate_should_refuse_a_capacity_above_the_limit_with_a_form_error(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-cap")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	backend := newStubBackend("stub")
+	srv, _ := newControlPanelFleetServer(t, c, backend, nil)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+
+	resp := postFormWithCookie(t, base, url.Values{"_csrf": {csrf}, "fleet": {fleetName}, "region": {"eu"}, "capacity": {"11"}}, cookie)
+	defer resp.Body.Close()
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, int64(0)}, []any{resp.StatusCode, backend.allocateN.Load()})
 }
 
 func TestControlPanelFleet_detail_shows_pending_and_ready_events(t *testing.T) {

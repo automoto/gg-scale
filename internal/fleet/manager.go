@@ -16,6 +16,8 @@ type Store interface {
 	InsertPending(ctx context.Context, req AllocationRequest, backend string) (AllocationID, error)
 	MarkReady(ctx context.Context, id AllocationID, backendRef, address string) error
 	MarkFailed(ctx context.Context, id AllocationID) error
+	// MarkReady and Release must run the commit hook of ctx (see
+	// WithCommitHook) in the transaction of the row change.
 	Release(ctx context.Context, id AllocationID) error
 	Get(ctx context.Context, id AllocationID) (*Allocation, error)
 
@@ -59,6 +61,9 @@ type ManagerOptions struct {
 	// Clock returns the backoff duration before retry attempt n (1-indexed).
 	// nil falls back to 100ms * 2^(n-1).
 	Clock func(attempt int) time.Duration
+	// MaxCapacity is the largest capacity that AllocateServer accepts. Zero
+	// means no limit.
+	MaxCapacity int
 }
 
 // Manager is the matchmaker-facing entry point to the fleet subsystem. One
@@ -279,6 +284,10 @@ func (m *Manager) Backend() Backend {
 // handler to resolve a fleet name to an id, and by the control panel fleets
 // CRUD pages. Tenant scoping happens inside the store via RLS.
 func (m *Manager) Fleets() FleetStore { return m.fleets }
+
+// MaxCapacity returns the largest capacity of one manual allocation. Zero
+// means no limit.
+func (m *Manager) MaxCapacity() int { return m.opts.MaxCapacity }
 
 func defaultBackoff(attempt int) time.Duration {
 	d := 100 * time.Millisecond

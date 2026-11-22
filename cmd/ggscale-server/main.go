@@ -1042,7 +1042,7 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 		fleet.NewPostgresStore(pool),
 		fleet.NewPostgresFleetStore(pool),
 		backend,
-		fleet.ManagerOptions{Retries: 3},
+		fleet.ManagerOptions{Retries: 3, MaxCapacity: cfg.FleetAllocationMaxCapacity},
 	), closer, nil
 }
 

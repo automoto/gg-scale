@@ -230,8 +230,13 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "manual allocate failed", "err", err, "tenant", tenantID, "project", projectID)
+		var invalid fleet.InvalidError
+		status := http.StatusInternalServerError
+		if errors.As(err, &invalid) {
+			status = http.StatusUnprocessableEntity
+		}
 		view.Error = "Allocate failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}

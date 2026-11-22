@@ -142,3 +142,37 @@ func (f *fixture) text(sql string, args ...any) string {
 	assert.NoError(f.t, f.owner.QueryRow(f.t.Context(), sql, args...).Scan(&s))
 	return s
 }
+
+func TestAllocationWrite_should_return_422_for_input_over_the_limits(t *testing.T) {
+	f := newFleetFixture(t)
+	f.fleet(f.projectA, "alpha")
+	tok := f.scopedToken(managementtoken.ScopeAllocationsWrite)
+	long := strings.Repeat("x", 257)
+	cases := map[string]string{
+		"long_region":    `{"fleet":"alpha","region":"` + long + `"}`,
+		"long_game_mode": `{"fleet":"alpha","region":"eu","game_mode":"` + long + `"}`,
+		"nul_region":     `{"fleet":"alpha","region":"e\u0000u"}`,
+		"big_capacity":   `{"fleet":"alpha","region":"eu","capacity":6}`,
+		"zero_capacity":  `{"fleet":"alpha","region":"eu","capacity":0}`,
+		"neg_capacity":   `{"fleet":"alpha","region":"eu","capacity":-1}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := f.do(tok, http.MethodPost, allocationsPath, body)
+
+			assert.Equal(t, http.StatusUnprocessableEntity, got.status, got.raw)
+		})
+	}
+	assert.Equal(t, 0, f.count(`SELECT count(*) FROM game_server_allocations`))
+}
+
+func TestAllocationWrite_should_return_409_when_the_fleet_backend_does_not_match(t *testing.T) {
+	f := newFleetFixture(t)
+	f.fleet(f.projectA, "alpha")
+	f.exec(`UPDATE fleets SET backend = 'plugin:demo'`)
+	tok := f.scopedToken(managementtoken.ScopeAllocationsWrite)
+
+	got := f.do(tok, http.MethodPost, allocationsPath, `{"fleet":"alpha","region":"eu"}`)
+
+	assert.Equal(t, http.StatusConflict, got.status, got.raw)
+}

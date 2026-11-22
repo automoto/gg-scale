@@ -164,7 +164,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+f.Name+"\" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 }
 
 // fleetsEditPage renders the edit form prefilled with the fleet's current
@@ -282,7 +282,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+name+"\" updated.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 }
 
 // fleetsDeleteHandler soft-deletes the template. Historical allocations
@@ -329,7 +329,7 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet deleted.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and a constant message
 }
 
 // fleetsRestoreHandler brings back a deleted template. A live template with
@@ -371,12 +371,12 @@ func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, fleet.ErrFleetNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, fleet.ErrFleetNameTaken):
-		http.Redirect(w, r, base+url.QueryEscape("Cannot restore: a fleet with that name exists. Rename or delete it first."), http.StatusSeeOther)
+		http.Redirect(w, r, base+url.QueryEscape("Cannot restore: a fleet with that name exists. Rename or delete it first."), http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 	case err != nil:
 		slog.ErrorContext(r.Context(), "restore fleet failed", "err", err)
 		http.Error(w, "restore failed", http.StatusInternalServerError)
 	default:
-		http.Redirect(w, r, base+url.QueryEscape("Fleet \""+f.Name+"\" restored."), http.StatusSeeOther)
+		http.Redirect(w, r, base+url.QueryEscape("Fleet \""+f.Name+"\" restored."), http.StatusSeeOther) //nolint:gosec // the target is built from parsed integer IDs and an escaped message
 	}
 }
 
