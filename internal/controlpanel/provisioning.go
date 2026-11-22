@@ -41,6 +41,9 @@ func (h *Handler) createTenant(ctx context.Context, in signupInput) (signupResul
 	if in.ActorUserID <= 0 || in.TenantName == "" || in.ProjectName == "" {
 		return signupResult{}, errInvalidSignup
 	}
+	if err := projectadmin.ValidateAPIKeyLabel(in.KeyLabel); err != nil {
+		return signupResult{}, err
+	}
 	if h.pool == nil {
 		return signupResult{}, errors.New(msgControlPanelPoolNeeded)
 	}

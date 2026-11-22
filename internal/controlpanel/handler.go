@@ -566,6 +566,9 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInvalidSignup):
 			status = http.StatusUnprocessableEntity
 			msg = "Account Tenant name and Game Project name are required"
+		case errors.Is(err, projectadmin.ErrInvalidKeyLabel):
+			status = http.StatusUnprocessableEntity
+			msg = err.Error()
 		case errors.Is(err, errDuplicateTenantName):
 			status = http.StatusConflict
 			msg = "An Account Tenant with that name already exists"

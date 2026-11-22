@@ -685,3 +685,19 @@ func TestAPIKeys_dashboard_should_return_422_for_a_bidi_label(t *testing.T) {
 	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT count(*) FROM api_keys WHERE label LIKE '%' || chr(8238) || '%'`).Scan(&bidi))
 	assert.Equal(t, []any{422, 422, "old", 0}, []any{relabel.StatusCode, create.StatusCode, label, bidi})
 }
+
+func TestTenantCreate_should_refuse_a_bidi_key_label_and_accept_a_normal_one(t *testing.T) {
+	p := newTokenPanel(t, true)
+	adminID := createPlatformAdminUser(t, p.raw, "root@example.com")
+	c, csrf := loginAsAdmin(t, p.srv, p.raw, adminID, "root@example.com")
+	form := func(name, label string) url.Values {
+		return url.Values{"_csrf": {csrf}, "tenant_name": {name}, "project_name": {"game"}, "label": {label}}
+	}
+
+	bad, _ := tfPostForm(t, c, p.srv.URL+pathControlPanel+"/tenants", form("bidi-co", "a\u202eb"))
+	good, _ := tfPostForm(t, c, p.srv.URL+pathControlPanel+"/tenants", form("good-co", "bootstrap"))
+
+	var tenants int
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT count(*) FROM tenants WHERE name IN ('bidi-co', 'good-co')`).Scan(&tenants))
+	assert.Equal(t, []int{http.StatusUnprocessableEntity, http.StatusOK, 1}, []int{bad.StatusCode, good.StatusCode, tenants})
+}
