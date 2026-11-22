@@ -37,7 +37,7 @@ func TestManager_allocates_on_the_example_plugin_for_stored_backend_names(t *tes
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sup.Close() })
 
-	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool), sup, fleet.ManagerOptions{
+	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, nil), sup, fleet.ManagerOptions{
 		Clock: func(int) time.Duration { return 0 },
 	})
 
@@ -51,7 +51,7 @@ func TestManager_allocates_on_the_example_plugin_for_stored_backend_names(t *tes
 	}
 	for _, tc := range cases {
 		t.Run(tc.backend, func(t *testing.T) {
-			f, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
+			f, err := fleet.CreateFleet(ctx, pool, nil, tenantID, fleet.FleetCreate{
 				ProjectID: projectID, Name: "f-" + tc.backend, Backend: tc.backend,
 			}, actor)
 			require.NoError(t, err)

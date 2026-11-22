@@ -526,7 +526,7 @@ func run() error {
 		}
 	}
 
-	fleetMgr, fleetCloser, err := buildFleet(cfg, appPool, logger)
+	fleetMgr, fleetCloser, err := buildFleet(cfg, appPool, credCipher, logger)
 	if err != nil {
 		return err
 	}
@@ -1011,7 +1011,7 @@ func newDBPool(ctx context.Context, url string, maxConns, minConns int, cfg *con
 // The optional io.Closer is non-nil for plugin backends; the caller defers
 // Close() so the subprocess is reaped on shutdown. In-process backends
 // (agones) return a nil closer.
-func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
+func buildFleet(cfg *config.Config, pool *db.Pool, cipher *secretseal.Cipher, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
 	if !cfg.FeatureFleetEnabled {
 		logger.Warn("fleet disabled: FEATURE_FLEET_ENABLED=false; matchmaker will reject Allocate")
 		return nil, nil, nil
@@ -1041,7 +1041,7 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 	}
 	return fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool),
+		fleet.NewPostgresFleetStore(pool, cipher),
 		backend,
 		fleet.ManagerOptions{Retries: 3, MaxCapacity: cfg.FleetAllocationMaxCapacity},
 	), closer, nil

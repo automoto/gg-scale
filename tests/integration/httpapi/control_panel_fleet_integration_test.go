@@ -28,6 +28,7 @@ import (
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -108,6 +109,13 @@ func seedFeatureGrant(t *testing.T, c *cluster, tenantID, projectID int64, featu
 // fleet.Manager pointed at the cluster, and the given backend stub.
 func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *controlpanel.PluginSnapshot) (*httptest.Server, *fleet.Manager) {
 	t.Helper()
+	return newControlPanelFleetServerWithCipher(t, c, backend, pluginInfo, nil)
+}
+
+// newControlPanelFleetServerWithCipher is newControlPanelFleetServer with a
+// credential cipher for the fleet store and the dashboard.
+func newControlPanelFleetServerWithCipher(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *controlpanel.PluginSnapshot, cipher *secretseal.Cipher) (*httptest.Server, *fleet.Manager) {
+	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
@@ -116,7 +124,7 @@ func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend,
 	t.Cleanup(authorizer.Close)
 	mgr := fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool),
+		fleet.NewPostgresFleetStore(pool, cipher),
 		backend,
 		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10},
 	)
@@ -130,6 +138,7 @@ func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend,
 		Cache:                 c.cache,
 		Fleet:                 mgr,
 		RBAC:                  authorizer,
+		CredentialCipher:      cipher,
 		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
 		ControlPanel: controlpanel.Config{
 			Mount:        true,

@@ -2,15 +2,18 @@ package fleet
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/secretseal"
 )
 
 // Fleet is an operator-defined template that allocations are drawn from. It
@@ -64,14 +67,18 @@ type FleetStore interface {
 // an active row.
 var ErrFleetNotFound = errors.New("fleet: fleet template not found")
 
-// PostgresFleetStore is the production FleetStore.
+// PostgresFleetStore is the production FleetStore. It opens sealed plugin
+// config values with cipher, so callers get plain values.
 type PostgresFleetStore struct {
-	pool *db.Pool
+	pool   *db.Pool
+	cipher *secretseal.Cipher
 }
 
-// NewPostgresFleetStore returns a FleetStore bound to the given pool.
-func NewPostgresFleetStore(pool *db.Pool) *PostgresFleetStore {
-	return &PostgresFleetStore{pool: pool}
+// NewPostgresFleetStore returns a FleetStore bound to the given pool. cipher
+// is the credential cipher that CreateFleet and UpdateFleet seal with; nil
+// reads values as they are stored.
+func NewPostgresFleetStore(pool *db.Pool, cipher *secretseal.Cipher) *PostgresFleetStore {
+	return &PostgresFleetStore{pool: pool, cipher: cipher}
 }
 
 // GetByID looks up a fleet by primary key. Returns ErrFleetNotFound when the
@@ -86,7 +93,7 @@ func (s *PostgresFleetStore) GetByID(ctx context.Context, id int64) (*Fleet, err
 			}
 			return qerr
 		}
-		f, ferr := fleetRowToModel(row)
+		f, ferr := fleetRowToModel(s.cipher, row)
 		if ferr != nil {
 			return ferr
 		}
@@ -111,7 +118,7 @@ func (s *PostgresFleetStore) GetByName(ctx context.Context, projectID int64, nam
 			}
 			return qerr
 		}
-		f, ferr := fleetRowToModel(row)
+		f, ferr := fleetRowToModel(s.cipher, row)
 		if ferr != nil {
 			return ferr
 		}
@@ -131,7 +138,7 @@ func (s *PostgresFleetStore) ListForProject(ctx context.Context, projectID int64
 			return qerr
 		}
 		for _, row := range rows {
-			f, ferr := fleetRowToModel(row)
+			f, ferr := fleetRowToModel(s.cipher, row)
 			if ferr != nil {
 				return ferr
 			}
@@ -152,7 +159,7 @@ func (s *PostgresFleetStore) ListDeletedForProject(ctx context.Context, projectI
 			return qerr
 		}
 		for _, row := range rows {
-			f, ferr := fleetRowToModel(row)
+			f, ferr := fleetRowToModel(s.cipher, row)
 			if ferr != nil {
 				return ferr
 			}
@@ -163,10 +170,13 @@ func (s *PostgresFleetStore) ListDeletedForProject(ctx context.Context, projectI
 	return out, err
 }
 
-func fleetRowToModel(row sqlcgen.Fleet) (*Fleet, error) {
+func fleetRowToModel(cipher *secretseal.Cipher, row sqlcgen.Fleet) (*Fleet, error) {
 	cfg, err := decodeFleetConfig(row.Config)
 	if err != nil {
 		return nil, err
+	}
+	for k, v := range cfg {
+		cfg[k] = openConfigValue(cipher, v)
 	}
 	f := &Fleet{
 		ID:        row.ID,
@@ -185,15 +195,58 @@ func fleetRowToModel(row sqlcgen.Fleet) (*Fleet, error) {
 	return f, nil
 }
 
-func encodeFleetConfig(m map[string]string) ([]byte, error) {
+// sealedValuePrefix marks a sealed config value. The secretseal frame is
+// binary, so a stored value is this prefix and the base64 of the frame.
+const sealedValuePrefix = "ggseal1:"
+
+// ConfigIsSecret reports whether the config values of a backend are sealed
+// at rest and kept out of the dashboard. Only agones config is known and has
+// no secret; a plugin config is free-form.
+func ConfigIsSecret(backend string) bool {
+	return backend != "agones"
+}
+
+// encodeFleetConfig returns the stored JSON of a config. With a cipher, each
+// value of a secret config is sealed; keys stay plain.
+func encodeFleetConfig(cipher *secretseal.Cipher, backend string, m map[string]string) ([]byte, error) {
 	if len(m) == 0 {
 		return []byte("{}"), nil
+	}
+	if cipher != nil && ConfigIsSecret(backend) {
+		sealed := make(map[string]string, len(m))
+		for k, v := range m {
+			frame, err := cipher.Encrypt([]byte(v))
+			if err != nil {
+				return nil, fmt.Errorf("fleet: seal config: %w", err)
+			}
+			sealed[k] = sealedValuePrefix + base64.StdEncoding.EncodeToString(frame)
+		}
+		m = sealed
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("fleet: encode config: %w", err)
 	}
 	return b, nil
+}
+
+// openConfigValue returns the plain value of a sealed config value. A plain
+// value (a row written before sealing, or with no cipher) and a value that
+// does not open are returned unchanged, as secretseal.DecryptOrPlain does.
+func openConfigValue(cipher *secretseal.Cipher, v string) string {
+	encoded, ok := strings.CutPrefix(v, sealedValuePrefix)
+	if !ok || cipher == nil {
+		return v
+	}
+	frame, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return v
+	}
+	plain, err := cipher.Decrypt(frame)
+	if err != nil {
+		return v
+	}
+	return string(plain)
 }
 
 func decodeFleetConfig(b []byte) (map[string]string, error) {

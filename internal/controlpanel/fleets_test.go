@@ -140,9 +140,78 @@ func TestSummarizeFleetConfig_per_backend(t *testing.T) {
 		summarizeFleetConfig("agones", map[string]string{"fleet_name": "doomerang"}),
 	)
 	assert.Equal(t,
-		"flavor=b2-7",
-		summarizeFleetConfig("plugin:ovh", map[string]string{"flavor": "b2-7"}),
+		"api_token flavor",
+		summarizeFleetConfig("plugin:ovh", map[string]string{"flavor": "b2-7", "api_token": pluginSecretMarker}),
 	)
+}
+
+const pluginSecretMarker = "tok-SEALMARKER-7f3a"
+
+func TestFleetsListPage_should_not_show_a_plugin_config_value(t *testing.T) {
+	cfg := map[string]string{"api_token": pluginSecretMarker}
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:x", Enabled: true,
+		Fleets: []FleetRowView{{ID: 1, Name: "p", Backend: "plugin:x", BackendMatches: true, Summary: summarizeFleetConfig("plugin:x", cfg)}},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestEditFleetPage_should_not_show_a_plugin_config_value(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestEditFleetPage_should_show_each_plugin_key_with_a_keep_hint(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.Contains(t, html, `name="config_key[]" value="api_token"`)
+	assert.Contains(t, html, "An empty value keeps the saved value")
+}
+
+func TestNewFleetPage_should_not_show_a_typed_plugin_value_again(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:x", Backend: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestFleetFormConfig_should_hide_plugin_values_only(t *testing.T) {
+	assert.Equal(t, map[string]string{"api_token": ""}, fleetFormConfig("plugin:x", map[string]string{"api_token": pluginSecretMarker}))
+	assert.Equal(t, map[string]string{"fleet_name": "gs"}, fleetFormConfig("agones", map[string]string{"fleet_name": "gs"}))
+}
+
+func TestKeepStoredPluginValues(t *testing.T) {
+	stored := map[string]string{"api_token": "saved", "region": "GRA9"}
+	tests := []struct {
+		name   string
+		keys   []string
+		values []string
+		want   map[string]string
+	}{
+		{"should_keep_the_stored_value_when_the_value_is_empty", []string{"api_token", "region"}, []string{"", ""}, map[string]string{"api_token": "saved", "region": "GRA9"}},
+		{"should_replace_the_stored_value_with_a_new_value", []string{"api_token", "region"}, []string{"next", ""}, map[string]string{"api_token": "next", "region": "GRA9"}},
+		{"should_remove_a_key_whose_key_field_is_empty", []string{"", "region"}, []string{"", ""}, map[string]string{"region": "GRA9"}},
+		{"should_remove_a_key_with_no_row", []string{"region"}, []string{""}, map[string]string{"region": "GRA9"}},
+		{"should_clear_the_config_when_no_key_is_left", []string{"", "", ""}, []string{"", "", ""}, map[string]string{}},
+		{"should_add_a_new_key_with_an_empty_value", []string{"api_token", "region", "zone"}, []string{"", "", ""}, map[string]string{"api_token": "saved", "region": "GRA9", "zone": ""}},
+		{"should_lose_the_value_of_a_renamed_key_with_an_empty_value", []string{"token", "region"}, []string{"", ""}, map[string]string{"token": "", "region": "GRA9"}},
+		{"should_use_the_last_row_of_a_key_in_two_rows", []string{"api_token", "api_token"}, []string{"next", ""}, map[string]string{"api_token": "saved"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _ := parseFleetConfigForm("plugin:x", url.Values{"config_key[]": tt.keys, "config_value[]": tt.values})
+
+			keepStoredPluginValues(cfg, stored)
+
+			assert.Equal(t, tt.want, cfg)
+		})
+	}
 }
 
 func TestFleetBackendKind_buckets_plugin_variants(t *testing.T) {

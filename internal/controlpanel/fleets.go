@@ -3,8 +3,10 @@ package controlpanel
 import (
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/automoto/gg-scale/internal/db"
@@ -137,7 +139,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		BackendConfigured: h.fleetBackendName(),
 		Name:              name,
 		Backend:           backend,
-		Config:            cfg,
+		Config:            fleetFormConfig(backend, cfg),
 		FieldErrors:       fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
@@ -149,7 +151,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := fleet.CreateFleet(r.Context(), h.pool, tenantID, fleet.FleetCreate{
+	f, err := fleet.CreateFleet(r.Context(), h.pool, h.credentialCipher, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      name,
 		Backend:   backend,
@@ -187,7 +189,7 @@ func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
 		FleetID:           f.ID,
 		Name:              f.Name,
 		Backend:           f.Backend,
-		Config:            f.Config,
+		Config:            fleetFormConfig(f.Backend, f.Config),
 		BackendConfigured: h.fleetBackendName(),
 	}))
 }
@@ -203,6 +205,9 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	name := strings.TrimSpace(r.Form.Get("name"))
 	cfg, fieldErrors := parseFleetConfigForm(existing.Backend, r.Form)
+	if fleet.ConfigIsSecret(existing.Backend) {
+		keepStoredPluginValues(cfg, existing.Config)
+	}
 	if name == "" {
 		fieldErrors["name"] = "Name is required."
 	}
@@ -214,7 +219,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		FleetID:           fleetID,
 		Name:              name,
 		Backend:           existing.Backend,
-		Config:            cfg,
+		Config:            fleetFormConfig(existing.Backend, cfg),
 		BackendConfigured: h.fleetBackendName(),
 		FieldErrors:       fieldErrors,
 	}
@@ -226,7 +231,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
-	if _, err := fleet.UpdateFleet(r.Context(), h.pool, tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+	if _, err := fleet.UpdateFleet(r.Context(), h.pool, h.credentialCipher, tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		if errors.Is(err, fleet.ErrFleetNotFound) {
 			http.NotFound(w, r)
 			return
@@ -276,7 +281,7 @@ func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	f, err := fleet.RestoreFleet(r.Context(), h.pool, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
+	f, err := fleet.RestoreFleet(r.Context(), h.pool, h.credentialCipher, tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
 	base := fleetsBasePath(tenantID, projectID)
 	switch {
 	case errors.Is(err, fleet.ErrFleetNotFound):
@@ -411,17 +416,35 @@ func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overC
 }
 
 // summarizeFleetConfig returns a one-line preview for the list page, so
-// operators can scan templates without opening each one.
+// operators can scan templates without opening each one. A plugin config
+// shows its keys only, because a value can be a secret.
 func summarizeFleetConfig(backend string, cfg map[string]string) string {
-	switch backend {
-	case "agones":
+	if !fleet.ConfigIsSecret(backend) {
 		return cfg["fleet_name"]
-	default:
-		// plugin: render the first few keys joined.
-		var keys []string
-		for k := range cfg {
-			keys = append(keys, k+"="+cfg[k])
+	}
+	return strings.Join(slices.Sorted(maps.Keys(cfg)), " ")
+}
+
+// fleetFormConfig returns the config that a fleet form shows: an agones
+// config as it is, and the keys of a plugin config with empty values.
+func fleetFormConfig(backend string, cfg map[string]string) map[string]string {
+	if !fleet.ConfigIsSecret(backend) {
+		return cfg
+	}
+	out := make(map[string]string, len(cfg))
+	for k := range cfg {
+		out[k] = ""
+	}
+	return out
+}
+
+// keepStoredPluginValues gives each key of cfg that has an empty value its
+// stored value. The edit page never shows a stored value, so an empty value
+// means "keep it". A key that is not in cfg is removed by the update.
+func keepStoredPluginValues(cfg, stored map[string]string) {
+	for k, v := range cfg {
+		if old, ok := stored[k]; ok && v == "" {
+			cfg[k] = old
 		}
-		return strings.Join(keys, " ")
 	}
 }

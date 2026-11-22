@@ -314,7 +314,8 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
 - `external_id` of a player is set by the game. It is not checked by ggscale.
   Treat it as untrusted text.
 - A plugin fleet config is never returned. `get_fleet` and the fleet writes
-  show the config of an agones fleet only.
+  show the config of an agones fleet only. Its values are sealed at rest; the
+  dashboard shows its keys only.
 - A token label and an API key label refuse control characters and
   text-direction characters (422). The API key label is at most 200
   characters. This holds for the dashboard, the token API, and sign-up too.

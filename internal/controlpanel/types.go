@@ -4,6 +4,8 @@ package controlpanel
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -911,8 +913,11 @@ type NewFleetView struct {
 	Name              string
 	Backend           string
 	Config            map[string]string
-	Error             string
-	FieldErrors       map[string]string
+	// Saved marks the edit form: a plugin config key has a saved value that
+	// the form does not show.
+	Saved       bool
+	Error       string
+	FieldErrors map[string]string
 }
 
 // EditFleetView is the data rendered by /fleets/{id}.
@@ -1034,8 +1039,15 @@ func editToNewFleetView(vm EditFleetView) NewFleetView {
 		ProjectID:   vm.ProjectID,
 		Backend:     vm.Backend,
 		Config:      vm.Config,
+		Saved:       true,
 		FieldErrors: vm.FieldErrors,
 	}
+}
+
+// sortedConfigKeys returns the keys of a fleet config in order, so a form
+// shows its rows in the same order each time.
+func sortedConfigKeys(cfg map[string]string) []string {
+	return slices.Sorted(maps.Keys(cfg))
 }
 
 // fleetSelectorLabels strips the "selector." prefix from a fleet's config

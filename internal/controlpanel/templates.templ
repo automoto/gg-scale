@@ -2490,15 +2490,26 @@ templ agonesFleetFields(vm NewFleetView) {
 	</div>
 }
 
+// pluginFleetFields never shows a config value: a plugin value can be a
+// secret. The edit form shows each saved key with an empty value input.
 templ pluginFleetFields(vm NewFleetView) {
 	<label>
 		Plugin config
 		<small class="muted">Free-form key/value pairs passed through to the plugin RPC.</small>
+		if vm.Saved {
+			<small class="muted">Values are saved and not shown. An empty value keeps the saved value. Clear a key to remove it.</small>
+		} else if len(vm.Config) > 0 {
+			<small class="muted">Values are not shown again. Enter each value again.</small>
+		}
 	</label>
-	for k, v := range vm.Config {
+	for _, k := range sortedConfigKeys(vm.Config) {
 		<div class="kv-row">
 			<input name="config_key[]" value={ k } placeholder="key"/>
-			<input name="config_value[]" value={ v } placeholder="value"/>
+			if vm.Saved {
+				<input name="config_value[]" placeholder="saved value"/>
+			} else {
+				<input name="config_value[]" placeholder="value"/>
+			}
 		</div>
 	}
 	<div class="kv-row">

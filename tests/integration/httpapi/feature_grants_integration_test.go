@@ -230,7 +230,7 @@ func newFleetMatchmakerServerForCluster(t *testing.T, c *cluster, backend fleet.
 	t.Cleanup(authorizer.Close)
 	mgr := fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool),
+		fleet.NewPostgresFleetStore(pool, nil),
 		backend,
 		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }},
 	)

@@ -449,6 +449,14 @@ This text is for the CHANGELOG section that is written when the release is tagge
   player disable (new row), invite, link, limits, and fleet changes. If the
   audit row fails, the action now fails too.
 - The dashboard fleet list has a **Restore** button for a deleted fleet.
+- Plugin fleet config values are now sealed at rest with the credential key
+  (the key that seals the Steam Web API key). The keys stay plain. An older
+  row is sealed on its next update. After a rollback to an older release,
+  enter the plugin config again: the older release cannot read sealed values.
+- The dashboard does not show plugin fleet config values. The fleet list
+  shows the keys only. The edit page shows each key with an empty value: an
+  empty value keeps the saved value, a new value replaces it, and a cleared
+  key removes it. Clear all keys to clear the config.
 - The dashboard allocation form is limited by `FLEET_ALLOCATION_MAX_CAPACITY`.
 - A fleet name and backend are at most 256 bytes, valid UTF-8, and no NUL, in
   the dashboard and in the management API (over the API, invalid UTF-8 in the
