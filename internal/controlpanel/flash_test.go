@@ -54,8 +54,8 @@ func TestLimitFlash_should_keep_the_limit_error_text(t *testing.T) {
 	}
 }
 
-// Only flash.go may read a page message from the URL, so a new page cannot
-// show free text from a link.
+// Only flash.go may read a page message from the URL or a url.Values, so a
+// new page cannot show free text from a link.
 func TestPackage_should_read_url_messages_only_in_flash_go(t *testing.T) {
 	files, err := os.ReadDir(".")
 	assert.NoError(t, err)
@@ -68,7 +68,7 @@ func TestPackage_should_read_url_messages_only_in_flash_go(t *testing.T) {
 		src, err := os.ReadFile(name)
 		assert.NoError(t, err)
 		for _, param := range []string{`"flash"`, `"created"`, `"error"`, `"notice"`, `"message"`} {
-			if strings.Contains(string(src), "Query().Get("+param+")") {
+			if strings.Contains(string(src), ".Get("+param+")") {
 				readers = append(readers, name+" "+param)
 			}
 		}

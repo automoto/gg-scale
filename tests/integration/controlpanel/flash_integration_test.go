@@ -58,6 +58,24 @@ func TestFlash_should_not_show_free_text_from_the_url(t *testing.T) {
 	}
 }
 
+// The fleet and management token pages need their server switches.
+func TestFlash_fleet_and_token_pages_should_not_show_free_text_from_the_url(t *testing.T) {
+	p := newFleetTokenPanel(t)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+	project := p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) +
+		"/projects/" + strconv.FormatInt(p.project, 10)
+	query := "?" + url.Values{"flash": {flashMarker}}.Encode()
+
+	for _, page := range []string{"/management-tokens", "/fleets", "/allocations"} {
+		t.Run(page, func(t *testing.T) {
+			resp, body := tfGet(t, c, project+page+query)
+
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.NotContains(t, body, "FLASHMARKER")
+		})
+	}
+}
+
 func TestFlash_should_show_the_text_of_a_known_code(t *testing.T) {
 	srv, raw, userID, tenantID, projectID, _ := newLeaderboardServer(t)
 	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
