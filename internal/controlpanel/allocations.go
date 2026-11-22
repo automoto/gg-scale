@@ -223,6 +223,9 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
+	if !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, f.Backend) {
+		return
+	}
 
 	alloc, err := fleet.AllocateServer(r.Context(), h.fleet, tenantID, fleet.ServerAllocate{
 		Fleet: f, Region: region, GameMode: gameMode, Capacity: capacity,

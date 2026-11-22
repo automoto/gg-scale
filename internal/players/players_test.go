@@ -4,10 +4,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
@@ -179,4 +181,42 @@ func TestPlayerSite_should_set_retry_after_on_throttled_credential_post(t *testi
 	rec := signupBurst(t)
 
 	assert.NotEmpty(t, rec.Header().Get("Retry-After"))
+}
+
+// TestPlayerSite_should_refuse_a_cross_site_write_on_every_route walks every
+// state-changing route, so a new route cannot miss the cross-origin check.
+func TestPlayerSite_should_refuse_a_cross_site_write_on_every_route(t *testing.T) {
+	h := New(Deps{Config: Config{Mount: true}, VerifySigningKey: playerTestVerifySigningKey})
+	routes, ok := h.(chi.Routes)
+	require.True(t, ok)
+	param := regexp.MustCompile(`\{[^}]+\}`)
+
+	refused := map[string]bool{}
+	want := map[string]bool{}
+	require.NoError(t, chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			return nil
+		}
+		req := httptest.NewRequest(method, param.ReplaceAllString(route, "1"), nil)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Origin", "https://evil.example")
+		refused[route] = refusedAsCrossOrigin(h, req)
+		want[route] = true
+		return nil
+	}))
+
+	assert.Equal(t, want, refused)
+}
+
+// refusedAsCrossOrigin reports whether the cross-origin check answered the
+// request. A handler that panics (it ran with no database) did not.
+func refusedAsCrossOrigin(h http.Handler, req *http.Request) (refused bool) {
+	defer func() {
+		if recover() != nil {
+			refused = false
+		}
+	}()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "cross-origin request detected")
 }

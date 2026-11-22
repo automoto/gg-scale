@@ -102,10 +102,18 @@ func (h *Handler) requireControlPanelFleetMutation(w http.ResponseWriter, r *htt
 	if !h.requireControlPanelFeature(w, r, tenantID, projectID, rbac.FeatureDedicatedServers) {
 		return false
 	}
-	if backendFeature, ok := rbac.BackendFeature(backend); ok {
-		return h.requireControlPanelFeature(w, r, tenantID, projectID, backendFeature)
+	return h.requireControlPanelBackendFeature(w, r, tenantID, projectID, backend)
+}
+
+// requireControlPanelBackendFeature checks the feature grant of a fleet
+// backend. A backend name with no grant passes here; the fleet writes refuse
+// it when they check the name.
+func (h *Handler) requireControlPanelBackendFeature(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
+	feature, ok := rbac.BackendFeature(backend)
+	if !ok {
+		return true
 	}
-	return true
+	return h.requireControlPanelFeature(w, r, tenantID, projectID, feature)
 }
 
 func (h *Handler) requireControlPanelAllocationMutation(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, action string) bool {

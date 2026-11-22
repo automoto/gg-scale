@@ -513,3 +513,10 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - The `create_secret_api_key` tool description and the docs now say that the
   MCP result holds the key value two times (in the text and in
   `structuredContent`).
+- The dashboard allocate form now also needs the feature grant of the fleet
+  backend (`fleet_agones_backend` or `fleet_plugin_backend`), as fleet create
+  and edit and the management API do. Without it, the form answers 403.
+- The dashboard and the player account pages refuse a form post from another
+  origin with 403 (`net/http.CrossOriginProtection`), in addition to the CSRF
+  value. A request with no `Origin` and no `Sec-Fetch-Site` header still
+  passes. A reverse proxy must keep the `Host` header.

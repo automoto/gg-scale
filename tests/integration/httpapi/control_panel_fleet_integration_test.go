@@ -220,6 +220,43 @@ func TestControlPanelFleet_allocate_should_refuse_a_capacity_above_the_limit_wit
 	assert.Equal(t, []any{http.StatusUnprocessableEntity, int64(0)}, []any{resp.StatusCode, backend.allocateN.Load()})
 }
 
+func TestControlPanelFleet_allocate_should_need_the_backend_grant(t *testing.T) {
+	cases := []struct {
+		name       string
+		grants     []rbac.Feature
+		wantStatus int
+		wantRows   int
+	}{
+		{"refused_without_backend_grant", []rbac.Feature{rbac.FeatureDedicatedServers}, http.StatusForbidden, 0},
+		{"works_with_backend_grant", []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend}, http.StatusSeeOther, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startCluster(t)
+			tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-grant")
+			ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+			seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+			for _, g := range tc.grants {
+				seedFeatureGrant(t, c, tenantID, projectID, g)
+			}
+			backend := newStubBackend("agones")
+			srv, _ := newControlPanelFleetServer(t, c, backend, nil)
+			cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+			fleetName := seedFleetTemplate(t, c, tenantID, projectID, "agones")
+			base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+				"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+
+			resp := postFormWithCookie(t, base, url.Values{"_csrf": {csrf}, "fleet": {fleetName}, "region": {"eu"}}, cookie)
+			defer resp.Body.Close()
+
+			var rows int
+			require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+				`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, projectID).Scan(&rows))
+			assert.Equal(t, []any{tc.wantStatus, int64(tc.wantRows), tc.wantRows}, []any{resp.StatusCode, backend.allocateN.Load(), rows})
+		})
+	}
+}
+
 func TestControlPanelFleet_detail_shows_pending_and_ready_events(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-events")

@@ -140,6 +140,10 @@ func New(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(webutil.SecurityHeadersWithFormActions(h.sso.Origins()...))
+	// Refuse a state-changing browser request from another origin, in
+	// addition to the CSRF value. Requests with no Origin or Sec-Fetch-Site
+	// header pass.
+	r.Use(http.NewCrossOriginProtection().Handler)
 	r.Get("/assets/*", h.assetHandler)
 	r.Get("/setup", h.setupTokenPage)
 	r.Get("/login", h.loginPage)
