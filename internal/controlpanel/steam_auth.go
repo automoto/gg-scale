@@ -39,7 +39,7 @@ func (h *Handler) updateSteamAuthHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	appID := r.Form.Get("steam_app_id")
-	_, err := projectadmin.SetSteamAuth(r.Context(), h.pool, h.credentialCipher, tenantID, projectID,
+	err := projectadmin.SetSteamAuth(r.Context(), h.pool, h.credentialCipher, tenantID, projectID,
 		appID, r.Form.Get("steam_web_api_key"), actor)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

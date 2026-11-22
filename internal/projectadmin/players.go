@@ -101,7 +101,7 @@ func SetPlayerDisabled(ctx context.Context, pool *db.Pool, tenantID, projectID, 
 			// The guarded UPDATE skips players with a pending deletion.
 			return playerGone(ctx, q, tenantID, projectID, playerID, ErrPlayerDeletePending)
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(playerID, 10), nil)
+		return actor.Audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(playerID, 10), nil)
 	})
 }
 
@@ -127,7 +127,7 @@ func RequestPlayerDelete(ctx context.Context, pool *db.Pool, tenantID, projectID
 		}); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "control_panel.player.delete_request",
+		return actor.Audit(ctx, tx, tenantID, projectID, "control_panel.player.delete_request",
 			strconv.FormatInt(playerID, 10), map[string]any{"scheduled_purge_at": purgeAt})
 	})
 	return purgeAt, err
@@ -147,7 +147,7 @@ func CancelPlayerDelete(ctx context.Context, pool *db.Pool, tenantID, projectID,
 		if cancelled == 0 {
 			return ErrNoPendingDelete
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "control_panel.player.delete_cancel", strconv.FormatInt(playerID, 10), nil)
+		return actor.Audit(ctx, tx, tenantID, projectID, "control_panel.player.delete_cancel", strconv.FormatInt(playerID, 10), nil)
 	})
 }
 
@@ -299,7 +299,7 @@ func (i *PlayerInviter) create(ctx context.Context, tenantID, projectID int64, e
 		if targetPlayer != nil {
 			action, target = actionPlayerLink, strconv.FormatInt(*targetPlayer, 10)
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, action, target, map[string]any{"invite_id": row.ID})
+		return actor.Audit(ctx, tx, tenantID, projectID, action, target, map[string]any{"invite_id": row.ID})
 	})
 	if err != nil {
 		return PlayerInvite{}, inviteMail{}, err

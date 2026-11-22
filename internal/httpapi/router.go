@@ -58,9 +58,9 @@ import (
 // /v1/healthz + /metrics routes are mounted — useful for unit tests that
 // don't need authenticated paths.
 type Deps struct {
-	// PlayerInviter (may be nil) sends player invites for management
-	// tokens. NewRouter builds it from the other Deps when it is nil.
-	PlayerInviter *projectadmin.PlayerInviter
+	// playerInviter sends player invites for management tokens. NewRouter
+	// builds it from the other Deps.
+	playerInviter *projectadmin.PlayerInviter
 	// PartyEnqueueEnabled lets party leaders queue and rematch. When false,
 	// both return 503 party_enqueue_disabled.
 	PartyEnqueueEnabled bool
@@ -269,8 +269,8 @@ func NewRouter(d Deps) http.Handler {
 		reg.MustRegister(collectors.NewGoCollector())
 		reg.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}
-	if d.PlayerInviter == nil && d.Pool != nil {
-		d.PlayerInviter = newPlayerInviter(d, reg)
+	if d.Pool != nil {
+		d.playerInviter = newPlayerInviter(d, reg)
 	}
 	// The session service is a stateless pool wrapper; default it so
 	// callers (and test fixtures) only override when sharing an instance

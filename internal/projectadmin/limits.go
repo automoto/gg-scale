@@ -46,6 +46,9 @@ func StorageBytesFromMB(mb float64) (int64, error) {
 	return int64(math.Round(mb * bytesPerMiB)), nil
 }
 
+// StorageMBFromBytes returns a byte count in MiB.
+func StorageMBFromBytes(n int64) float64 { return float64(n) / bytesPerMiB }
+
 // Limits are the limit settings of one Game Project. A zero value means that
 // the project has no override and the default applies.
 type Limits struct {
@@ -134,7 +137,7 @@ func SetInviteLimits(ctx context.Context, pool *db.Pool, overrides ratelimit.Ove
 		if err := setInviteOverride(ctx, q, actor, tenantID, projectID, ratelimit.OverrideKindInviteDomain, domainPerDay, secondsPerDay); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, actionInviteLimitSet, strconv.FormatInt(projectID, 10),
+		return actor.Audit(ctx, tx, tenantID, projectID, actionInviteLimitSet, strconv.FormatInt(projectID, 10),
 			map[string]any{"inviter_per_hour": inviterPerHour, "domain_per_day": domainPerDay})
 	})
 	if err != nil {
@@ -207,7 +210,7 @@ func SetStorageLimit(ctx context.Context, pool *db.Pool, store storagelimit.Limi
 		if err := storagelimit.SetTx(ctx, tx, actor.UserID, tenantID, &projectID, bytes); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, actionStorageLimitSet, strconv.FormatInt(projectID, 10),
+		return actor.Audit(ctx, tx, tenantID, projectID, actionStorageLimitSet, strconv.FormatInt(projectID, 10),
 			map[string]any{"max_value_bytes": bytes})
 	})
 	if err != nil {

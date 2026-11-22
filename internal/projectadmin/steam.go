@@ -26,49 +26,50 @@ var (
 
 const steamAuthAuditAction = "control_panel.steam_auth.update"
 
-// ValidateSteamAppID checks that the App ID is a decimal number.
-func ValidateSteamAppID(s string) error {
+// validateSteamAppID checks that the App ID is a decimal number.
+func validateSteamAppID(s string) error {
 	if _, err := strconv.ParseUint(s, 10, 32); err != nil {
 		return ErrInvalidSteamAppID
 	}
 	return nil
 }
 
-// ValidateSteamWebAPIKey checks the 32-hex-character publisher key format and
-// returns the key as the exact bytes Valve expects in the key= parameter.
-func ValidateSteamWebAPIKey(s string) ([]byte, error) {
+// validateSteamKey checks the 32-hex-character publisher key format. The
+// key is stored as the exact bytes Valve expects in the key= parameter.
+func validateSteamKey(s string) error {
 	if len(s) != steamWebAPIKeyHexLen {
-		return nil, ErrInvalidSteamKey
+		return ErrInvalidSteamKey
 	}
 	if _, err := hex.DecodeString(s); err != nil {
-		return nil, ErrInvalidSteamKey
+		return ErrInvalidSteamKey
 	}
-	return []byte(s), nil
+	return nil
 }
 
 // SetSteamAuth saves the Steam App ID and, when rawKey is not empty, replaces
 // the stored Web API key. The key is sealed with cipher when cipher is set.
 // An empty rawKey keeps the stored key, and is refused when none is stored.
-// The audit row never holds the key. It returns whether the key changed, and
-// pgx.ErrNoRows when the project does not exist.
-func SetSteamAuth(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, tenantID, projectID int64, appID, rawKey string, actor Actor) (bool, error) {
-	if err := ValidateSteamAppID(appID); err != nil {
-		return false, err
+// The audit row never holds the key. It returns pgx.ErrNoRows when the
+// project does not exist.
+func SetSteamAuth(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher, tenantID, projectID int64, appID, rawKey string, actor Actor) error {
+	if err := validateSteamAppID(appID); err != nil {
+		return err
 	}
 	var key []byte
 	if rawKey != "" {
-		var err error
-		if key, err = ValidateSteamWebAPIKey(rawKey); err != nil {
-			return false, err
+		if err := validateSteamKey(rawKey); err != nil {
+			return err
 		}
+		key = []byte(rawKey)
 		if cipher != nil {
+			var err error
 			if key, err = cipher.Encrypt(key); err != nil {
-				return false, err
+				return err
 			}
 		}
 	}
 	ctx = db.WithTenant(ctx, tenantID)
-	err := pool.Q(ctx, func(tx pgx.Tx) error {
+	return pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		if key == nil {
 			cfg, err := q.GetProjectSteamAuthConfig(ctx, projectID)
@@ -88,12 +89,11 @@ func SetSteamAuth(ctx context.Context, pool *db.Pool, cipher *secretseal.Cipher,
 		if rows == 0 {
 			return pgx.ErrNoRows
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, steamAuthAuditAction, strconv.FormatInt(projectID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, steamAuthAuditAction, strconv.FormatInt(projectID, 10), map[string]any{
 			"app_id":      appID,
 			"key_changed": key != nil,
 		})
 	})
-	return key != nil, err
 }
 
 // ClearSteamAuth removes the Steam App ID and the stored Web API key. The key
@@ -108,7 +108,7 @@ func ClearSteamAuth(ctx context.Context, pool *db.Pool, tenantID, projectID int6
 		if rows == 0 {
 			return pgx.ErrNoRows
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, steamAuthAuditAction, strconv.FormatInt(projectID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, steamAuthAuditAction, strconv.FormatInt(projectID, 10), map[string]any{
 			"cleared": true,
 		})
 	})

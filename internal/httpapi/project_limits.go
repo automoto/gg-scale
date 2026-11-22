@@ -10,8 +10,6 @@ import (
 	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
-const bytesPerMiB = 1048576
-
 type projectInviteLimits struct {
 	InviterPerHour        float64 `json:"inviter_per_hour" doc:"Invites that one inviter may send each hour in this Game Project. 0 means the default."`
 	DomainPerDay          float64 `json:"domain_per_day" doc:"Invites that one email domain may get each day in this Game Project. 0 means the default."`
@@ -25,7 +23,10 @@ type projectStorageLimits struct {
 	TenantMaxValueMB    float64 `json:"tenant_max_value_mb" doc:"The limit of the Account Tenant. The limit of this Game Project cannot be higher."`
 }
 
-type projectLimitUsage struct {
+// ProjectLimitUsage is the use of the project quotas: open sessions and
+// leaderboards. It is exported because huma reads an embedded struct only
+// when its type is exported.
+type ProjectLimitUsage struct {
 	OpenSessions projectQuotaCount `json:"open_sessions"`
 	Leaderboards projectQuotaCount `json:"leaderboards"`
 }
@@ -34,22 +35,18 @@ type projectLimitUsage struct {
 type projectLimits struct {
 	Invites projectInviteLimits  `json:"invites"`
 	Storage projectStorageLimits `json:"storage"`
-	Usage   projectLimitUsage    `json:"usage"`
+	Usage   ProjectLimitUsage    `json:"usage"`
 }
 
-func mib(bytes int64) float64 { return float64(bytes) / bytesPerMiB }
-
-func readProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal) (projectLimits, error) {
-	limits, err := projectadmin.GetLimits(ctx, d.Pool, p.TenantID, p.ProjectID, storageLimit(d))
-	if err != nil {
-		return projectLimits{}, err
-	}
+// projectUsage reads the quota context of the tenant, its tier limits, and
+// the use of the project quotas.
+func projectUsage(ctx context.Context, d Deps, p managementtoken.Principal) (sqlcgen.GetTenantQuotaContextRow, quota.Limits, ProjectLimitUsage, error) {
 	var (
 		qc           sqlcgen.GetTenantQuotaContextRow
 		openSessions int64
 		boards       int64
 	)
-	err = projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
 		if qc, err = q.GetTenantQuotaContext(ctx); err != nil {
 			return err
@@ -61,9 +58,24 @@ func readProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal)
 		return err
 	})
 	if err != nil {
-		return projectLimits{}, err
+		return qc, quota.Limits{}, ProjectLimitUsage{}, err
 	}
 	tier, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
+	if err != nil {
+		return qc, quota.Limits{}, ProjectLimitUsage{}, err
+	}
+	return qc, tier, ProjectLimitUsage{
+		OpenSessions: projectQuotaCount{Current: openSessions, Limit: tier.OpenSessionsPerProject},
+		Leaderboards: projectQuotaCount{Current: boards, Limit: tier.LeaderboardsPerProject},
+	}, nil
+}
+
+func getProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectLimits, error) {
+	limits, err := projectadmin.GetLimits(ctx, d.Pool, p.TenantID, p.ProjectID, storageLimit(d))
+	if err != nil {
+		return projectLimits{}, err
+	}
+	_, _, usage, err := projectUsage(ctx, d, p)
 	if err != nil {
 		return projectLimits{}, err
 	}
@@ -74,19 +86,12 @@ func readProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal)
 			DefaultInviterPerHour: defaults.InviterPerHour, DefaultDomainPerDay: defaults.DomainPerDay,
 		},
 		Storage: projectStorageLimits{
-			MaxValueMB:          mib(limits.StorageBytes),
-			EffectiveMaxValueMB: mib(limits.EffectiveStorageBytes()),
-			TenantMaxValueMB:    mib(limits.TenantStorageBytes),
+			MaxValueMB:          projectadmin.StorageMBFromBytes(limits.StorageBytes),
+			EffectiveMaxValueMB: projectadmin.StorageMBFromBytes(limits.EffectiveStorageBytes()),
+			TenantMaxValueMB:    projectadmin.StorageMBFromBytes(limits.TenantStorageBytes),
 		},
-		Usage: projectLimitUsage{
-			OpenSessions: projectQuotaCount{Current: openSessions, Limit: tier.OpenSessionsPerProject},
-			Leaderboards: projectQuotaCount{Current: boards, Limit: tier.LeaderboardsPerProject},
-		},
+		Usage: usage,
 	}, nil
-}
-
-func getProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectLimits, error) {
-	return readProjectLimits(ctx, d, p)
 }
 
 type projectSetInviteLimitsInput struct {
@@ -102,7 +107,7 @@ func setProjectInviteLimits(ctx context.Context, d Deps, p managementtoken.Princ
 	if err != nil {
 		return projectLimits{}, projectWriteError(err)
 	}
-	return readProjectLimits(ctx, d, p)
+	return getProjectLimits(ctx, d, p, nil)
 }
 
 type projectSetStorageLimitInput struct {
@@ -120,5 +125,5 @@ func setProjectStorageLimit(ctx context.Context, d Deps, p managementtoken.Princ
 	if err != nil {
 		return projectLimits{}, projectWriteError(err)
 	}
-	return readProjectLimits(ctx, d, p)
+	return getProjectLimits(ctx, d, p, nil)
 }

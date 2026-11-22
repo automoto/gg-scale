@@ -618,10 +618,9 @@ type projectHealthQuotas struct {
 	Projects string `json:"projects,omitempty" enum:"ok,near_limit,at_limit"`
 	Players  string `json:"players,omitempty" enum:"ok,near_limit,at_limit"`
 	// open_sessions is a project quota, so its counts are returned.
-	OpenSessions projectQuotaCount `json:"open_sessions"`
-	// leaderboards is a project limit that applies also when quotas are
-	// not enforced.
-	Leaderboards projectQuotaCount `json:"leaderboards"`
+	// leaderboards is a project limit that applies also when quotas are not
+	// enforced.
+	ProjectLimitUsage
 }
 
 type projectQuotaCount struct {
@@ -686,26 +685,18 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		problems = append(problems, "Dedicated servers are granted, but FEATURE_FLEET_ENABLED is off on the server.")
 	}
 
+	qc, limits, usage, err := projectUsage(ctx, d, p)
+	if err != nil {
+		return projectHealth{}, err
+	}
 	var (
-		qc           sqlcgen.GetTenantQuotaContextRow
-		projects     int64
-		openSessions int64
-		boards       int64
-		configBytes  int
-		steam        sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
+		projects    int64
+		configBytes int
+		steam       sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
 	)
-	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+	err = projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
-		if qc, err = q.GetTenantQuotaContext(ctx); err != nil {
-			return err
-		}
 		if projects, err = q.CountProjectsForTenant(ctx); err != nil {
-			return err
-		}
-		if openSessions, err = q.CountOpenGameSessionsForProject(ctx, p.ProjectID); err != nil {
-			return err
-		}
-		if boards, err = q.CountLiveLeaderboardsForProject(ctx, p.ProjectID); err != nil {
 			return err
 		}
 		if !showConfig {
@@ -724,16 +715,8 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 	if err != nil {
 		return projectHealth{}, err
 	}
-	limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
-	if err != nil {
-		return projectHealth{}, err
-	}
-	quotas := projectHealthQuotas{
-		Enforced:     qc.EnforceQuotas,
-		OpenSessions: projectQuotaCount{Current: openSessions, Limit: limits.OpenSessionsPerProject},
-		Leaderboards: projectQuotaCount{Current: boards, Limit: limits.LeaderboardsPerProject},
-	}
-	if showBoardLimit && quotaState(limits.LeaderboardsPerProject, boards) == "at_limit" {
+	quotas := projectHealthQuotas{Enforced: qc.EnforceQuotas, ProjectLimitUsage: usage}
+	if showBoardLimit && quotaState(limits.LeaderboardsPerProject, usage.Leaderboards.Current) == "at_limit" {
 		problems = append(problems, fmt.Sprintf("The Game Project is at its leaderboard limit (%d). New leaderboards are refused.", limits.LeaderboardsPerProject))
 	}
 	if showQuotas && qc.EnforceQuotas {

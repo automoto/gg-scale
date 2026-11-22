@@ -348,11 +348,8 @@ type projectUpdateAPIKeyFeaturesInput struct {
 
 func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyFeaturesInput) (projectAPIKeyUpdated, error) {
 	sw := projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled}
-	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, d.Cache, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)
-	}
-	if d.Cache != nil {
-		_ = d.Cache.Delete(ctx, ratelimit.APIKeyBucketKey(in.APIKeyID))
 	}
 	return projectAPIKeyUpdated{Updated: true}, nil
 }
@@ -410,8 +407,7 @@ type projectSetSteamAuthInput struct {
 }
 
 func setSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetSteamAuthInput) (projectSteamAuth, error) {
-	_, err := projectadmin.SetSteamAuth(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.Body.AppID, in.Body.WebAPIKey, projectActor(p))
-	if err != nil {
+	if err := projectadmin.SetSteamAuth(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.Body.AppID, in.Body.WebAPIKey, projectActor(p)); err != nil {
 		return projectSteamAuth{}, projectWriteError(err)
 	}
 	return getSteamAuth(ctx, d, p, nil)
@@ -460,26 +456,23 @@ type projectPlayerInvite struct {
 	Email     *string   `json:"email,omitempty" doc:"Text that was given as input. Only with the players:pii scope."`
 }
 
-func playerInviteResult(p managementtoken.Principal, res projectadmin.PlayerInvite, playerID *int64) projectPlayerInvite {
+// invite sends an invite, or a link invite when playerID is set.
+func invite(ctx context.Context, d Deps, p managementtoken.Principal, email string, playerID *int64) (projectPlayerInvite, error) {
+	res, err := d.playerInviter.Invite(ctx, p.TenantID, p.ProjectID, email, playerID, time.Now(), projectActor(p))
+	if err != nil {
+		return projectPlayerInvite{}, projectWriteError(err)
+	}
 	out := projectPlayerInvite{InviteID: res.ID, PlayerID: playerID, ExpiresAt: res.ExpiresAt}
 	if p.HasScope(managementtoken.ScopePlayersPII) {
 		out.Email = &res.Email
 	}
-	return out
+	return out, nil
 }
 
 func invitePlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectInvitePlayerInput) (projectPlayerInvite, error) {
-	res, err := d.PlayerInviter.Invite(ctx, p.TenantID, p.ProjectID, in.Body.Email, nil, time.Now(), projectActor(p))
-	if err != nil {
-		return projectPlayerInvite{}, projectWriteError(err)
-	}
-	return playerInviteResult(p, res, nil), nil
+	return invite(ctx, d, p, in.Body.Email, nil)
 }
 
 func linkPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectLinkPlayerInput) (projectPlayerInvite, error) {
-	res, err := d.PlayerInviter.Invite(ctx, p.TenantID, p.ProjectID, in.Body.Email, &in.PlayerID, time.Now(), projectActor(p))
-	if err != nil {
-		return projectPlayerInvite{}, projectWriteError(err)
-	}
-	return playerInviteResult(p, res, &in.PlayerID), nil
+	return invite(ctx, d, p, in.Body.Email, &in.PlayerID)
 }

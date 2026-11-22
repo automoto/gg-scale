@@ -115,10 +115,10 @@ type KeyScope struct {
 	LiveOnly bool
 }
 
-// AuthorizeAPIKey checks that the key is in the tenant and in scope, and that the actor may manage keys of its type. A key of
+// authorizeAPIKey checks that the key is in the tenant and in scope, and that the actor may manage keys of its type. A key of
 // another project answers ErrAPIKeyNotFound before any permission check, so
 // a caller learns nothing about it. It returns the key's scopes and project.
-func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) (sqlcgen.GetAPIKeyScopesRow, error) {
+func authorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) (sqlcgen.GetAPIKeyScopesRow, error) {
 	if scope.ProjectID == nil && !scope.TenantWide {
 		return sqlcgen.GetAPIKeyScopesRow{}, ErrAPIKeyNotFound
 	}
@@ -152,21 +152,21 @@ func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Author
 	return row, nil
 }
 
-// keyProjectID is the key's project, or 0 for a tenant-wide key.
-func keyProjectID(row sqlcgen.GetAPIKeyScopesRow) int64 {
-	if row.ProjectID == nil {
+// derefID returns the ID, or 0 for nil (a tenant-wide key).
+func derefID(id *int64) int64 {
+	if id == nil {
 		return 0
 	}
-	return *row.ProjectID
+	return *id
 }
 
 // UpdateAPIKeyLabel renames a key. scope limits the keys it may touch.
-// Authorization is as in AuthorizeAPIKey.
+// Authorization is as in authorizeAPIKey.
 func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, label string, actor Actor) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	return pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
+		row, err := authorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
 		if err != nil {
 			return err
 		}
@@ -174,22 +174,22 @@ func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorize
 		if err := q.UpdateAPIKeyLabel(ctx, sqlcgen.UpdateAPIKeyLabelParams{ID: apiKeyID, Label: label}); err != nil {
 			return err
 		}
-		keyProject := keyProjectID(row)
-		return actor.audit(ctx, tx, tenantID, keyProject, "control_panel.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label})
+		return actor.Audit(ctx, tx, tenantID, derefID(row.ProjectID), "control_panel.api_key.relabel", strconv.FormatInt(apiKeyID, 10), map[string]any{"label": label})
 	})
 }
 
 // UpdateAPIKeyFeatures sets the managed feature scopes of a key to desired.
 // A scope that is new on the key must be grantable. scope limits the keys it
-// may touch.
-func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, sw KeySwitches, tenantID int64, scope KeyScope, apiKeyID int64, desired []string, actor Actor) error {
+// may touch. Then it clears the key's rate limit bucket in store (nil for
+// none), so the next request uses the new scopes.
+func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, store cache.Store, sw KeySwitches, tenantID int64, scope KeyScope, apiKeyID int64, desired []string, actor Actor) error {
 	if slices.ContainsFunc(desired, func(s string) bool { return !IsManagedKeyScope(s) }) {
 		return ErrInvalidKeyScope
 	}
 	ctx = db.WithTenant(ctx, tenantID)
-	return pool.Q(ctx, func(tx pgx.Tx) error {
+	err := pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
+		row, err := authorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
 		if err != nil {
 			return err
 		}
@@ -205,29 +205,35 @@ func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Author
 		if err := q.SetAPIKeyScopes(ctx, sqlcgen.SetAPIKeyScopesParams{ID: apiKeyID, Scopes: applyManagedScopes(row.Scopes, desired)}); err != nil {
 			return fmt.Errorf("set api key scopes: %w", err)
 		}
-		keyProject := keyProjectID(row)
 		for _, change := range changes {
 			action := "control_panel.api_key.scope_revoke"
 			if change.Grant {
 				action = "control_panel.api_key.scope_grant"
 			}
-			if err := actor.audit(ctx, tx, tenantID, keyProject, action, strconv.FormatInt(apiKeyID, 10), map[string]any{"scope": change.Scope}); err != nil {
+			if err := actor.Audit(ctx, tx, tenantID, derefID(row.ProjectID), action, strconv.FormatInt(apiKeyID, 10), map[string]any{"scope": change.Scope}); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if store != nil {
+		_ = store.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
+	}
+	return nil
 }
 
 // RevokeAPIKey revokes a key, removes its Casbin role, and writes the audit
 // row in one transaction. Then it reloads the policy and clears the key's
 // rate limit bucket in store (nil for none). scope limits the keys it may
-// touch. Authorization is as in AuthorizeAPIKey.
+// touch. Authorization is as in authorizeAPIKey.
 func RevokeAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, store cache.Store, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	err := pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
+		row, err := authorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
 		if err != nil {
 			return err
 		}
@@ -237,7 +243,7 @@ func RevokeAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, st
 		if err := authz.RemoveAPIKeyRolesTx(ctx, tx, apiKeyID); err != nil {
 			return fmt.Errorf("rbac api key revoke: %w", err)
 		}
-		return actor.audit(ctx, tx, tenantID, keyProjectID(row), "control_panel.api_key.revoke", strconv.FormatInt(apiKeyID, 10), nil)
+		return actor.Audit(ctx, tx, tenantID, derefID(row.ProjectID), "control_panel.api_key.revoke", strconv.FormatInt(apiKeyID, 10), nil)
 	})
 	if err != nil {
 		return err
@@ -282,11 +288,7 @@ func ScopeGrantable(ctx context.Context, authz *rbac.Authorizer, sw KeySwitches,
 	if (scope == tenant.ScopeFleet && !sw.FleetEnabled) || (scope == tenant.ScopeP2PRelay && !sw.RelayEnabled) {
 		return false
 	}
-	var pid int64
-	if projectID != nil {
-		pid = *projectID
-	}
-	enabled, err := authz.FeatureEnabled(ctx, tenantID, pid, feature)
+	enabled, err := authz.FeatureEnabled(ctx, tenantID, derefID(projectID), feature)
 	return err == nil && enabled
 }
 
@@ -328,9 +330,7 @@ func CreateAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, te
 	err = pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		if in.MaxActive > 0 && in.ProjectID != nil {
-			if _, err := q.LockLiveProject(ctx, *in.ProjectID); errors.Is(err, pgx.ErrNoRows) {
-				return ErrProjectNotInTenant
-			} else if err != nil {
+			if err := lockProject(ctx, q, *in.ProjectID); err != nil {
 				return err
 			}
 			n, err := q.CountActiveAPIKeysForProject(ctx, in.ProjectID)
@@ -360,11 +360,7 @@ func CreateAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, te
 				return fmt.Errorf("rbac api key create: %w", err)
 			}
 		}
-		var projectID int64
-		if in.ProjectID != nil {
-			projectID = *in.ProjectID
-		}
-		return actor.audit(ctx, tx, tenantID, projectID, "control_panel.api_key.create", strconv.FormatInt(id, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, derefID(in.ProjectID), "control_panel.api_key.create", strconv.FormatInt(id, 10), map[string]any{
 			"label":    in.Label,
 			"key_type": string(in.Type),
 			"scopes":   scopes,

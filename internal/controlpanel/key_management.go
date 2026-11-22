@@ -14,7 +14,6 @@ import (
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
-	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -120,13 +119,7 @@ func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenant
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
-		return err
-	}
-	if h.cache != nil {
-		_ = h.cache.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
-	}
-	return nil
+	return projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.cache, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID})
 }
 
 func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOption, error) {

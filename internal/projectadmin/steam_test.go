@@ -23,7 +23,7 @@ func TestValidateSteamAppID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateSteamAppID(tt.in)
+			err := validateSteamAppID(tt.in)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
@@ -33,7 +33,7 @@ func TestValidateSteamAppID(t *testing.T) {
 	}
 }
 
-func TestValidateSteamWebAPIKey(t *testing.T) {
+func TestValidateSteamKey(t *testing.T) {
 	tests := []struct {
 		name    string
 		in      string
@@ -49,13 +49,9 @@ func TestValidateSteamWebAPIKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key, err := ValidateSteamWebAPIKey(tt.in)
-			if tt.wantErr {
-				assert.Error(t, err)
-				return
-			}
-			assert.NoError(t, err)
-			assert.Len(t, key, 32)
+			err := validateSteamKey(tt.in)
+
+			assert.Equal(t, tt.wantErr, err != nil)
 		})
 	}
 }

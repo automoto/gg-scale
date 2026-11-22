@@ -14,6 +14,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/gamesession"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
@@ -353,14 +354,11 @@ func countNum(n int64) string {
 	return s
 }
 
-const (
-	bytesPerMiB = int64(1048576)
-	bytesPerGiB = int64(1073741824)
-)
+const bytesPerGiB = int64(1073741824)
 
 // storageMB renders a byte count as megabytes (MiB) without trailing zeros.
 func storageMB(n int64) string {
-	return strconv.FormatFloat(float64(n)/float64(bytesPerMiB), 'f', -1, 64)
+	return strconv.FormatFloat(projectadmin.StorageMBFromBytes(n), 'f', -1, 64)
 }
 
 // storageGB renders a byte count as gigabytes (GiB) without trailing zeros.

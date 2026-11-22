@@ -70,9 +70,10 @@ func (a Actor) source() string {
 	return sourceDashboard
 }
 
-// audit writes the platform audit row inside tx, so it commits or rolls back
-// with the change.
-func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
+// Audit writes the platform audit row inside tx, so it commits or rolls back
+// with the change. Other packages call it inside their own tenant-scoped
+// transaction.
+func (a Actor) Audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -85,12 +86,6 @@ func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, 
 	}
 	payload["created_by_user_id"] = a.TokenCreatorID
 	return auditlog.WritePlatformService(ctx, tx, "management_token:"+strconv.FormatInt(a.TokenID, 10), action, target, payload)
-}
-
-// Audit writes the audit row of a change made outside this package, inside
-// the caller's tenant-scoped transaction tx.
-func (a Actor) Audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
-	return a.audit(ctx, tx, tenantID, projectID, action, target, payload)
 }
 
 // Revision is one kept settings revision.
@@ -248,7 +243,7 @@ func writeRemoteConfig(ctx context.Context, pool *db.Pool, tenantID, projectID i
 			return err
 		}
 		hash := sha256.Sum256(w.after)
-		return actor.audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(projectID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(projectID, 10), map[string]any{
 			"config_bytes": len(w.after),
 			"config_hash":  hex.EncodeToString(hash[:]),
 			"revision":     rev,
