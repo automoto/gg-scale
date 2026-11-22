@@ -171,7 +171,7 @@ func (h *Handler) leaderboardsListPage(w http.ResponseWriter, r *http.Request) {
 		ProjectID:    projectID,
 		Leaderboards: boards,
 		Deleted:      deleted,
-		Message:      r.URL.Query().Get("flash"),
+		Message:      flashMessage(r),
 	}))
 }
 
@@ -218,9 +218,9 @@ func (h *Handler) leaderboardFormHandler(w http.ResponseWriter, r *http.Request,
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	page, action, verb := NewLeaderboardPage, "leaderboard.create", "created"
+	page, action, code := NewLeaderboardPage, "leaderboard.create", flashLeaderboardCreated
 	if edit {
-		page, action, verb = EditLeaderboardPage, "leaderboard.update", "updated"
+		page, action, code = EditLeaderboardPage, "leaderboard.update", flashLeaderboardUpdated
 	}
 	session, _ := sessionFromContext(r.Context())
 	fields, fieldErrs := parseLeaderboardForm(r.Form, edit)
@@ -299,7 +299,7 @@ func (h *Handler) leaderboardFormHandler(w http.ResponseWriter, r *http.Request,
 		webutil.Render(r, w, page(view))
 		return
 	}
-	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+queryFlash+url.QueryEscape("Leaderboard \""+fields.Name+"\" "+verb+"."), http.StatusSeeOther)
+	redirectFlash(w, r, leaderboardsBasePath(tenantID, projectID), code)
 }
 
 func (h *Handler) leaderboardsEditPage(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +345,7 @@ func (h *Handler) leaderboardsEditPage(w http.ResponseWriter, r *http.Request) {
 		Metadata:          formatLeaderboardMetadata(row.Metadata),
 		CurrentPeriod:     row.CurrentPeriod,
 		Revisions:         revisionViews(revs),
-		Message:           r.URL.Query().Get("flash"),
+		Message:           flashMessage(r),
 	}))
 }
 
@@ -395,7 +395,7 @@ func (h *Handler) leaderboardsDeleteHandler(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+queryFlash+url.QueryEscape("Leaderboard deleted."), http.StatusSeeOther)
+	redirectFlash(w, r, leaderboardsBasePath(tenantID, projectID), flashLeaderboardDeleted)
 }
 
 // ── store helpers (inline sqlc, tenant-scoped) ──────────────────────────────

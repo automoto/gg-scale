@@ -3,7 +3,6 @@ package controlpanel
 import (
 	"errors"
 	"net/http"
-	"net/url"
 
 	"github.com/jackc/pgx/v5"
 
@@ -51,8 +50,7 @@ func (h *Handler) updateSteamAuthHandler(w http.ResponseWriter, r *http.Request)
 	case err != nil:
 		webutil.InternalError(w, "steam auth: update", err)
 	default:
-		http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
-			url.QueryEscape("Steam sign-in settings saved."), http.StatusSeeOther)
+		redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashSteamSaved)
 	}
 }
 
@@ -66,8 +64,7 @@ func (h *Handler) clearSteamAuth(w http.ResponseWriter, r *http.Request, tenantI
 		webutil.InternalError(w, "steam auth: clear", err)
 		return
 	}
-	http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
-		url.QueryEscape("Steam sign-in disabled."), http.StatusSeeOther)
+	redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashSteamDisabled)
 }
 
 func (h *Handler) renderSteamAuthError(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, appID, field, msg string) {

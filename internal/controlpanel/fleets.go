@@ -32,7 +32,7 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectID,
 		BackendConfigured: h.fleetBackendName(),
 		Enabled:           h.fleetEnabled(),
-		Message:           r.URL.Query().Get("flash"),
+		Message:           flashMessage(r),
 	}
 	if h.fleetEnabled() {
 		tenantCtx := db.WithTenant(r.Context(), tenantID)
@@ -153,7 +153,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := h.fleet.FleetAdmin().CreateFleet(r.Context(), tenantID, fleet.FleetCreate{
+	_, err := h.fleet.FleetAdmin().CreateFleet(r.Context(), tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      name,
 		Backend:   backend,
@@ -167,7 +167,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet \""+f.Name+"\" created.")
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetCreated)
 }
 
 // fleetsEditPage renders the edit form prefilled with the fleet's current
@@ -248,7 +248,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet \""+name+"\" updated.")
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetUpdated)
 }
 
 // fleetsDeleteHandler soft-deletes the template. Historical allocations
@@ -272,7 +272,7 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), "Fleet deleted.")
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetDeleted)
 }
 
 // fleetsRestoreHandler brings back a deleted template. A live template with
@@ -286,18 +286,18 @@ func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	f, err := h.fleet.FleetAdmin().RestoreFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
+	_, err := h.fleet.FleetAdmin().RestoreFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
 	base := fleetsBasePath(tenantID, projectID)
 	switch {
 	case errors.Is(err, fleet.ErrFleetNotFound):
 		http.NotFound(w, r)
 	case errors.Is(err, fleet.ErrFleetNameTaken):
-		redirectFlash(w, r, base, "Cannot restore: a fleet with that name exists. Rename or delete it first.")
+		redirectFlash(w, r, base, flashFleetNameTaken)
 	case err != nil:
 		slog.ErrorContext(r.Context(), "restore fleet failed", "err", err)
 		http.Error(w, "restore failed", http.StatusInternalServerError)
 	default:
-		redirectFlash(w, r, base, "Fleet \""+f.Name+"\" restored.")
+		redirectFlash(w, r, base, flashFleetRestored)
 	}
 }
 
@@ -334,11 +334,6 @@ func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, parseForm
 		return 0, 0, nil, false
 	}
 	return tenantID, projectID, f, true
-}
-
-// redirectFlash redirects to base with a flash message.
-func redirectFlash(w http.ResponseWriter, r *http.Request, base, msg string) {
-	http.Redirect(w, r, base+queryFlash+url.QueryEscape(msg), http.StatusSeeOther) //nolint:gosec // base is built from parsed integer IDs and msg is escaped
 }
 
 // fleetFormError returns the text and HTTP status for a failed fleet write.

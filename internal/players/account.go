@@ -107,13 +107,14 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account home: two-factor lookup", err)
 		return
 	}
+	flash, flashErr := flashFromRequest(r)
 	view := AccountHomeView{
 		Email:            sess.Email,
 		DisplayName:      sess.DisplayName,
 		Projects:         projects,
 		CSRFToken:        h.csrf(r),
-		Flash:            r.URL.Query().Get("flash"),
-		FlashError:       r.URL.Query().Get("error"),
+		Flash:            flash,
+		FlashError:       flashErr,
 		RemoteAddrCount:  remoteAddrCount(addrs),
 		HasPassword:      sess.HasPassword,
 		TwoFactorEnabled: totpFound && totp.ConfirmedAt.Valid,
@@ -300,11 +301,12 @@ func (h *Handler) accountRemoteAddrListPage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	rows := connectionAddressRows(addrs)
+	flash, flashErr := flashFromRequest(r)
 	webutil.Render(r, w, ConnectionAddressesPage(ConnectionAddressesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
-		Flash:        r.URL.Query().Get("flash"),
-		FlashError:   r.URL.Query().Get("error"),
+		Flash:        flash,
+		FlashError:   flashErr,
 		Addresses:    rows,
 		CanAdd:       len(rows) < remoteAddrFormRows,
 	}))
@@ -369,7 +371,7 @@ func (h *Handler) accountRemoteAddrCreate(w http.ResponseWriter, r *http.Request
 		webutil.InternalError(w, "account remote-addr create", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address added.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrAdded)
 }
 
 func (h *Handler) accountRemoteAddrEditPage(w http.ResponseWriter, r *http.Request) {
@@ -464,7 +466,7 @@ func (h *Handler) accountRemoteAddrUpdateSlot(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account remote-addr update", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address updated.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrUpdated)
 }
 
 // accountRemoteAddrDeletePage renders a confirmation step before deletion. The
@@ -518,7 +520,7 @@ func (h *Handler) accountRemoteAddrDelete(w http.ResponseWriter, r *http.Request
 		webutil.InternalError(w, "account remote-addr delete", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address removed.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrRemoved)
 }
 
 func remoteAddrScopeLabel(a remoteaddr.Address) string {
@@ -531,17 +533,6 @@ func remoteAddrScopeLabel(a remoteaddr.Address) string {
 		return "LAN"
 	}
 	return ""
-}
-
-func (h *Handler) redirectRemoteAddrs(w http.ResponseWriter, r *http.Request, flash, flashErr string) {
-	target := accountBasePath + "/remote-addrs"
-	switch {
-	case flash != "":
-		target += "?flash=" + url.QueryEscape(flash)
-	case flashErr != "":
-		target += "?error=" + url.QueryEscape(flashErr)
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // --- mutating handlers -----------------------------------------------------
@@ -1006,7 +997,7 @@ func (h *Handler) issueAccountSession(ctx context.Context, w http.ResponseWriter
 		return err
 	}
 	h.metrics.PlayerSessionOpened()
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountSessionCookieName,
 		Value:    refreshToken,
 		Path:     "/v1/players",
@@ -1187,9 +1178,7 @@ func (h *Handler) accountProjectUnlinkPage(w http.ResponseWriter, r *http.Reques
 // cancellation path while the purge stays scheduled. The update query carries
 // the same guard, so a stale form races safely too.
 func (h *Handler) redirectUnlinkBlockedByDelete(w http.ResponseWriter, r *http.Request, lp LinkedProject) {
-	http.Redirect(w, r, accountBasePath+"/?error="+url.QueryEscape(
-		"A data deletion is scheduled for "+lp.ProjectName+". Cancel the deletion before unlinking."),
-		http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashUnlinkBlocked)
 }
 
 func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
@@ -1215,9 +1204,7 @@ func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account unlink", err)
 		return
 	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(
-		"Unlinked from "+lp.ProjectName+". Your game data is kept; accepting a new invite restores it."),
-		http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashProjectUnlinked)
 }
 
 // --- project data deletion ---------------------------------------------------
@@ -1265,17 +1252,11 @@ func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	purgeAt, err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp)
-	if err != nil {
+	if _, err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp); err != nil {
 		webutil.InternalError(w, "account delete", err)
 		return
 	}
-	flash := "Deletion of your " + lp.ProjectName + " data is scheduled. You can cancel until the purge runs."
-	if !purgeAt.IsZero() {
-		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeTimeLabel(purgeAt) +
-			". You can cancel until then."
-	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashDeleteScheduled)
 }
 
 func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Request) {
@@ -1298,15 +1279,15 @@ func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Requ
 		webutil.InternalError(w, "account delete cancel", err)
 		return
 	}
-	flash := "Deletion cancelled. Your " + lp.ProjectName + " data is kept."
+	code := flashDeleteCancelled
 	switch {
 	case lp.DeleteRequestedByAdmin:
-		flash = "The " + lp.ProjectName + " team requested this deletion. Contact them to cancel it."
+		code = flashDeleteByTeam
 	case !cancelled:
 		// The purge won the race, or the request was already cancelled.
-		flash = "No pending deletion for " + lp.ProjectName + "."
+		code = flashDeleteNone
 	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", code)
 }
 
 // requestProjectPlayerDelete disables the player, stamps the delete request,

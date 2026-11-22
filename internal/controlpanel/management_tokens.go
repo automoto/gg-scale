@@ -423,7 +423,7 @@ func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "management tokens: load", err)
 		return
 	}
-	view.Message = r.URL.Query().Get("flash")
+	view.Message = flashMessage(r)
 	view.RiskyNotice = riskyNotice(view.Risky)
 	webutil.Render(r, w, ManagementTokensPage(view))
 }
@@ -699,5 +699,5 @@ func (h *Handler) managementTokenRevokeHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, managementTokensPath(tenantID, projectID)+queryFlash+url.QueryEscape("Management token revoked."), http.StatusSeeOther)
+	redirectFlash(w, r, managementTokensPath(tenantID, projectID), flashManagementTokenRevoked)
 }

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -282,7 +281,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, pathControlPanelLogin, http.StatusSeeOther)
 		return
 	}
-	webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Message: r.URL.Query().Get("flash")}))
+	webutil.Render(r, w, VerifyPage(VerifyView{Email: p.Email, Message: flashMessage(r)}))
 }
 
 func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +314,7 @@ func (h *Handler) verifyHandler(w http.ResponseWriter, r *http.Request) {
 		// path. Send the user to login instead so they re-authenticate with
 		// a password.
 		h.clearVerifyPendingCookie(w)
-		http.Redirect(w, r, "/v1/control-panel/login?flash="+url.QueryEscape("Your email is already verified. Please sign in."), http.StatusSeeOther)
+		http.Redirect(w, r, "/v1/control-panel/login", http.StatusSeeOther)
 		return
 	case errors.Is(err, errBadVerifyCode):
 		w.WriteHeader(http.StatusUnauthorized)
@@ -373,5 +372,5 @@ func (h *Handler) verifyResendHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "resend error", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/v1/control-panel/verify?flash="+url.QueryEscape("A new code was sent."), http.StatusSeeOther)
+	redirectFlash(w, r, "/v1/control-panel/verify", flashVerifyCodeSent)
 }

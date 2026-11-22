@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -279,38 +278,36 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 		tierStr := r.Form.Get("requested_tier")
 		tierNum, perr := parseRequestedTier(tierStr)
 		if perr != nil {
-			h.redirectTenantSettings(w, r, tenantID, "Choose a valid target class to upgrade to.")
+			h.redirectTenantSettings(w, r, tenantID, flashRequestClassInvalid)
 			return
 		}
 		params.RequestedTier = &tierNum
 	case changeKindFeature:
 		feature := r.Form.Get("feature")
 		if !h.isRequestableFeature(feature) {
-			h.redirectTenantSettings(w, r, tenantID, "Choose a feature that's available to request.")
+			h.redirectTenantSettings(w, r, tenantID, flashRequestFeatureInvalid)
 			return
 		}
 		params.Feature = &feature
 	case changeKindQuotaOverride:
 		axis := r.Form.Get("axis")
 		if !isQuotaAxis(axis) {
-			h.redirectTenantSettings(w, r, tenantID, "Choose a valid quota to request a change for.")
+			h.redirectTenantSettings(w, r, tenantID, flashRequestQuotaInvalid)
 			return
 		}
 		limit, perr := parseRequestedLimit(r.Form.Get("requested_limit"))
 		if perr != nil {
-			h.redirectTenantSettings(w, r, tenantID, "Enter a limit of 0 or more (or -1 for unlimited).")
+			h.redirectTenantSettings(w, r, tenantID, flashRequestLimitInvalid)
 			return
 		}
 		if verr := validateOverrideLimit(axis, limit); verr != nil {
-			h.redirectTenantSettings(w, r, tenantID, fmt.Sprintf(
-				"Open game sessions per Game Project can't exceed %d (the platform-wide cap) and can't be unlimited.",
-				gamesession.SessionsHardCap))
+			h.redirectTenantSettings(w, r, tenantID, flashSessionsAboveCap)
 			return
 		}
 		params.Feature = &axis
 		params.RequestedLimit = &limit
 	default:
-		h.redirectTenantSettings(w, r, tenantID, "Unknown request type.")
+		h.redirectTenantSettings(w, r, tenantID, flashRequestTypeUnknown)
 		return
 	}
 
@@ -341,22 +338,22 @@ func (h *Handler) submitChangeRequestHandler(w http.ResponseWriter, r *http.Requ
 		return cerr
 	})
 	if errors.Is(err, errNotAnUpgrade) {
-		h.redirectTenantSettings(w, r, tenantID, "Choose a target class above your current class.")
+		h.redirectTenantSettings(w, r, tenantID, flashRequestClassNotAbove)
 		return
 	}
 	if errors.Is(err, errFeatureAlreadyEnabled) {
-		h.redirectTenantSettings(w, r, tenantID, "That feature is already enabled for this Account Tenant.")
+		h.redirectTenantSettings(w, r, tenantID, flashRequestFeatureEnabled)
 		return
 	}
 	if isUniqueViolation(err) {
-		h.redirectTenantSettings(w, r, tenantID, "You already have a pending request of this type.")
+		h.redirectTenantSettings(w, r, tenantID, flashRequestPending)
 		return
 	}
 	if err != nil {
 		webutil.InternalError(w, "change request: create", err)
 		return
 	}
-	h.redirectTenantSettings(w, r, tenantID, "Request submitted. A platform admin will review it.")
+	h.redirectTenantSettings(w, r, tenantID, flashRequestSubmitted)
 }
 
 func (h *Handler) isRequestableFeature(feature string) bool {
@@ -376,8 +373,8 @@ func parseRequestedTier(s string) (int16, error) {
 	return int16(n), nil //nolint:gosec // bounded to 0..3 by the check above
 }
 
-func (h *Handler) redirectTenantSettings(w http.ResponseWriter, r *http.Request, tenantID int64, msg string) {
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/settings"+queryFlash+url.QueryEscape(msg))
+func (h *Handler) redirectTenantSettings(w http.ResponseWriter, r *http.Request, tenantID int64, code flashCode) {
+	htmxRedirect(w, r, withFlash(pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/settings", code))
 }
 
 // --- platform-admin side ---------------------------------------------------
@@ -401,7 +398,7 @@ func (h *Handler) changeRequestsPage(w http.ResponseWriter, r *http.Request) {
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
 		Requests:  reqs,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 }
 
@@ -462,7 +459,7 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if !handled {
-		h.redirectChangeAdmin(w, r, "That request was already handled.")
+		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
 
@@ -494,23 +491,23 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 	})
 	if err != nil {
 		if errors.Is(err, errNotAnUpgrade) {
-			h.redirectChangeAdmin(w, r, "The Account Tenant is already at or above the requested class; the request was not approved.")
+			h.redirectChangeAdmin(w, r, flashRequestClassNotApproved)
 			return
 		}
 		if errors.Is(err, errOverrideAboveHardCap) {
-			h.redirectChangeAdmin(w, r, "The requested limit exceeds the platform-wide session cap; the request was not approved. Deny it with a reason instead.")
+			h.redirectChangeAdmin(w, r, flashRequestCapNotApproved)
 			return
 		}
 		webutil.InternalError(w, "change request: approve", err)
 		return
 	}
 	if !handled {
-		h.redirectChangeAdmin(w, r, "That request was already handled.")
+		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
 	h.sendChangeRequestDecisionEmail(r.Context(), applied, true, "")
 	h.reloadRBACPolicy(r.Context())
-	h.redirectChangeAdmin(w, r, "Request approved and applied.")
+	h.redirectChangeAdmin(w, r, flashRequestApproved)
 }
 
 func (h *Handler) applyChangeRequest(ctx context.Context, q *sqlcgen.Queries, req sqlcgen.GetTenantChangeRequestByIDRow, actorID int64) error {
@@ -598,15 +595,15 @@ func (h *Handler) denyChangeRequestHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if affected == 0 {
-		h.redirectChangeAdmin(w, r, "That request was already handled.")
+		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
 	h.sendChangeRequestDecisionEmail(r.Context(), req, false, reason)
-	h.redirectChangeAdmin(w, r, "Request denied.")
+	h.redirectChangeAdmin(w, r, flashRequestDenied)
 }
 
-func (h *Handler) redirectChangeAdmin(w http.ResponseWriter, r *http.Request, msg string) {
-	htmxRedirect(w, r, pathAdminChangeRequests+queryFlash+url.QueryEscape(msg))
+func (h *Handler) redirectChangeAdmin(w http.ResponseWriter, r *http.Request, code flashCode) {
+	htmxRedirect(w, r, withFlash(pathAdminChangeRequests, code))
 }
 
 // sendChangeRequestDecisionEmail notifies the tenant's owner/admins of an

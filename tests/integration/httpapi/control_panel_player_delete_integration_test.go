@@ -46,9 +46,10 @@ func TestControlPanelPlayerDelete_admin_request_and_cancel(t *testing.T) {
 	resp := postForm(t, noRedirectClient(), base+"/request-delete", url.Values{"_csrf": {csrf}}, cookie)
 	resp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	flash, err := url.QueryUnescape(resp.Header.Get("Location"))
-	require.NoError(t, err)
-	assert.Contains(t, flash, " UTC.", "the flash shows the purge time, not only the date")
+	location := resp.Header.Get("Location")
+	assert.Equal(t, "/v1/control-panel"+playerDeleteBase(tenantID, projectID, playerID)+"?flash=player_delete_scheduled", location)
+	assert.Contains(t, getWithCookie(t, srv.URL+location, cookie), " UTC</strong>",
+		"the page shows the purge time, not only the date")
 
 	var disabledMatches, pending, byAdmin bool
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,

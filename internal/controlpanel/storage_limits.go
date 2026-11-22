@@ -42,14 +42,14 @@ func (h *Handler) updateTenantStorageLimitHandler(w http.ResponseWriter, r *http
 	}
 	bytes, err := parseStorageMB(r.Form.Get("max_value_mb"))
 	if err != nil {
-		h.redirectRateLimits(w, r, tenantID, "Storage limit must be a non-negative number (MB).")
+		h.redirectRateLimits(w, r, tenantID, flashStorageMBInvalid)
 		return
 	}
 	if err := h.setStorageLimit(r.Context(), session.User.ID, tenantID, nil, bytes); err != nil {
 		http.Error(w, "storage limit update failed", http.StatusInternalServerError)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Account Tenant storage limit updated.")
+	h.redirectRateLimits(w, r, tenantID, flashTenantStorageUpdated)
 }
 
 // updateProjectStorageLimitHandler sets a per-project storage value cap
@@ -69,7 +69,7 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 	session, _ := sessionFromContext(r.Context())
 	bytes, err := parseStorageMB(r.Form.Get("max_value_mb"))
 	if err != nil {
-		h.redirectRateLimits(w, r, tenantID, err.Error())
+		h.redirectRateLimits(w, r, tenantID, limitFlash(err))
 		return
 	}
 	err = projectadmin.SetStorageLimit(r.Context(), h.pool, h.storageLimits, tenantID, projectID, bytes,
@@ -77,9 +77,9 @@ func (h *Handler) updateProjectStorageLimitHandler(w http.ResponseWriter, r *htt
 	var limitErr projectadmin.LimitError
 	switch {
 	case err == nil:
-		h.redirectRateLimits(w, r, tenantID, "Game Project storage limit updated.")
+		h.redirectRateLimits(w, r, tenantID, flashProjectStorageUpdated)
 	case errors.As(err, &limitErr):
-		h.redirectRateLimits(w, r, tenantID, limitErr.Error())
+		h.redirectRateLimits(w, r, tenantID, limitFlash(limitErr))
 	case errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		http.Error(w, "Game Project not found", http.StatusNotFound)
 	default:

@@ -58,7 +58,7 @@ func (h *Handler) allocationsListPage(w http.ResponseWriter, r *http.Request) {
 		Page:            page,
 		HasPrev:         page > 1,
 		HasNext:         int64(page*fleetPageSize) < total,
-		Message:         r.URL.Query().Get("flash"),
+		Message:         flashMessage(r),
 	}))
 }
 
@@ -115,7 +115,7 @@ func (h *Handler) allocationsDetailPage(w http.ResponseWriter, r *http.Request) 
 		ProjectID:  projectID,
 		Allocation: allocToView(alloc),
 		Events:     events,
-		Message:    r.URL.Query().Get("flash"),
+		Message:    flashMessage(r),
 	}))
 }
 
@@ -243,7 +243,7 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	id := strconv.FormatInt(int64(alloc.ID), 10)
-	redirectFlash(w, r, allocationsBasePath(tenantID, projectID)+"/"+id, "Allocation #"+id+" created.")
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID)+"/"+id, flashAllocationCreated)
 }
 
 // loadFleetOptions fetches active fleet templates for the project so the
@@ -342,7 +342,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)
 		return
 	}
-	redirectFlash(w, r, allocationsBasePath(tenantID, projectID), "Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID), flashAllocationDeallocated)
 }
 
 // renderDeallocateError shows the confirm page again with msg and a 422.

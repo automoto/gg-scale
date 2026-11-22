@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -476,16 +474,12 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	message := r.URL.Query().Get("created")
-	if flash := r.URL.Query().Get("flash"); flash != "" {
-		message = flash
-	}
 	webutil.Render(r, w, ProjectsPage(ProjectsView{
 		UserEmail:    session.User.Email,
 		TenantID:     tenantID,
 		CSRFToken:    session.CSRFToken,
 		Projects:     projects,
-		Message:      message,
+		Message:      flashMessage(r),
 		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
@@ -544,8 +538,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewProjectPage(view))
 		return
 	}
-	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Game Project \""+strings.TrimSpace(name)+"\" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects", flashProjectCreated)
 }
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
@@ -607,7 +600,6 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Keys:      keys,
-		Message:   r.URL.Query().Get("created"),
 	}))
 
 }
@@ -915,7 +907,7 @@ func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and an escaped message
+	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {

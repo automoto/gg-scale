@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -177,7 +176,7 @@ func (h *Handler) playersListPage(w http.ResponseWriter, r *http.Request) {
 		Page:      page,
 		HasPrev:   page > 1,
 		HasNext:   hasNext,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 
 }
@@ -225,7 +224,7 @@ func (h *Handler) playerDetailPage(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Player:    pv,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 
 }
@@ -279,7 +278,7 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	res, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, nil, h.now(), projectadmin.Actor{UserID: session.User.ID})
+	_, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, nil, h.now(), projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		view := InvitePlayerView{
 			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
@@ -307,8 +306,8 @@ func (h *Handler) invitePlayerHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players?flash=" + url.QueryEscape("Invite sent to "+res.Email)
-	http.Redirect(w, r, target, http.StatusSeeOther)
+		"/players"
+	redirectFlash(w, r, target, flashInviteSent)
 }
 
 // LinkPlayerView is the data rendered by the "link player" dialog.
@@ -405,7 +404,7 @@ func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		h.renderLinkDialogError(w, r, vm, http.StatusUnprocessableEntity, "Enter a valid email.")
 		return
 	}
-	res, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, &playerID, h.now(), projectadmin.Actor{UserID: session.User.ID})
+	_, err := h.playerInvites.Invite(r.Context(), tenantID, projectID, email, &playerID, h.now(), projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		var throttled *projectadmin.InviteThrottledError
 		switch {
@@ -425,9 +424,8 @@ func (h *Handler) linkPlayerHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+
-		"/projects/"+strconv.FormatInt(projectID, 10)+
-		"/players?flash="+url.QueryEscape("Invite sent to "+res.Email))
+	htmxRedirect(w, r, withFlash(pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+
+		"/projects/"+strconv.FormatInt(projectID, 10)+"/players", flashInviteSent))
 }
 
 // renderLinkDialogError re-renders the Link dialog fragment with an inline
@@ -480,14 +478,14 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
 	}
-	flash := "Player disabled."
+	code := flashPlayerDisabled
 	if enable {
-		flash = "Player re-enabled."
+		code = flashPlayerReenabled
 	}
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash + url.QueryEscape(flash)
-	htmxRedirect(w, r, target)
+		"/players/" + strconv.FormatInt(playerID, 10)
+	htmxRedirect(w, r, withFlash(target, code))
 }
 
 func (h *Handler) deleteGrace() time.Duration {
@@ -514,7 +512,7 @@ func (h *Handler) playerRequestDeleteHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	scheduledPurgeAt, err := projectadmin.RequestPlayerDelete(r.Context(), h.pool, tenantID, projectID, playerID, h.deleteGrace(), projectadmin.Actor{UserID: session.User.ID})
+	_, err := projectadmin.RequestPlayerDelete(r.Context(), h.pool, tenantID, projectID, playerID, h.deleteGrace(), projectadmin.Actor{UserID: session.User.ID})
 	if errors.Is(err, projectadmin.ErrPlayerDeleteRequested) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -529,9 +527,8 @@ func (h *Handler) playerRequestDeleteHandler(w http.ResponseWriter, r *http.Requ
 	}
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash +
-		url.QueryEscape("Deletion scheduled for "+timeString(scheduledPurgeAt)+". Cancel until then to keep the data.")
-	htmxRedirect(w, r, target)
+		"/players/" + strconv.FormatInt(playerID, 10)
+	htmxRedirect(w, r, withFlash(target, flashPlayerDeleteScheduled))
 }
 
 func (h *Handler) playerCancelDeleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -565,9 +562,8 @@ func (h *Handler) playerCancelDeleteHandler(w http.ResponseWriter, r *http.Reque
 	}
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash +
-		url.QueryEscape("Deletion cancelled. The player's data is kept.")
-	htmxRedirect(w, r, target)
+		"/players/" + strconv.FormatInt(playerID, 10)
+	htmxRedirect(w, r, withFlash(target, flashPlayerDeleteCancelled))
 }
 
 func playerViewFromDetail(row sqlcgen.GetPlayerForProjectRow) PlayerView {
@@ -703,14 +699,14 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 	if ban {
 		h.metrics.BanIssued(observability.BanScopeTenant)
 	}
-	flash := "Player banned across the Account Tenant."
+	code := flashPlayerBanned
 	if !ban {
-		flash = "Player unbanned."
+		code = flashPlayerUnbanned
 	}
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
-		"/players/" + strconv.FormatInt(playerID, 10) + queryFlash + url.QueryEscape(flash)
-	htmxRedirect(w, r, target)
+		"/players/" + strconv.FormatInt(playerID, 10)
+	htmxRedirect(w, r, withFlash(target, code))
 }
 
 var errPlayerNotLinked = errors.New("control panel: player has no linked account")

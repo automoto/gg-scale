@@ -322,7 +322,7 @@ func (h *Handler) tenantSignupRequestsPage(w http.ResponseWriter, r *http.Reques
 		CSRFToken:     session.CSRFToken,
 		SignupEnabled: enabled,
 		Requests:      reqs,
-		Message:       r.URL.Query().Get("flash"),
+		Message:       flashMessage(r),
 	}))
 }
 
@@ -349,11 +349,11 @@ func (h *Handler) setPublicSignupEnabledHandler(w http.ResponseWriter, r *http.R
 		webutil.InternalError(w, "tenant signup: toggle", err)
 		return
 	}
-	msg := "Public Account Tenant sign-up disabled."
+	code := flashSignupDisabled
 	if enabled {
-		msg = "Public Account Tenant sign-up enabled."
+		code = flashSignupEnabled
 	}
-	h.redirectSignupAdmin(w, r, msg)
+	h.redirectSignupAdmin(w, r, code)
 }
 
 func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Request) {
@@ -367,7 +367,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 	session, _ := sessionFromContext(r.Context())
 	finalName := strings.TrimSpace(r.Form.Get("tenant_name"))
 	if !validTenantName(finalName) {
-		h.redirectSignupAdmin(w, r, fmt.Sprintf("Enter a valid Account Tenant name (%d–%d characters).", tenantNameMin, tenantNameMax))
+		h.redirectSignupAdmin(w, r, flashTenantNameInvalid)
 		return
 	}
 	taken, err := h.tenantNameTaken(r.Context(), finalName, id)
@@ -376,7 +376,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if taken {
-		h.redirectSignupAdmin(w, r, "That Account Tenant name is taken; edit it and try again.")
+		h.redirectSignupAdmin(w, r, flashTenantNameTaken)
 		return
 	}
 
@@ -420,7 +420,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 			strconv.FormatInt(id, 10), map[string]any{"tenant_name": finalName, "email": req.Email})
 	})
 	if errors.Is(err, errSignupNameTaken) {
-		h.redirectSignupAdmin(w, r, "That Account Tenant name is taken; edit it and try again.")
+		h.redirectSignupAdmin(w, r, flashTenantNameTaken)
 		return
 	}
 	if err != nil {
@@ -428,11 +428,11 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if affected == 0 {
-		h.redirectSignupAdmin(w, r, "That request was already handled.")
+		h.redirectSignupAdmin(w, r, flashRequestHandled)
 		return
 	}
 	h.sendSignupApprovalEmail(r.Context(), reqEmail, finalName, code, expires)
-	h.redirectSignupAdmin(w, r, "Approved "+finalName+" — invite emailed to "+reqEmail+".")
+	h.redirectSignupAdmin(w, r, flashSignupApproved)
 }
 
 func (h *Handler) denyTenantSignupHandler(w http.ResponseWriter, r *http.Request) {
@@ -481,15 +481,15 @@ func (h *Handler) denyTenantSignupHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if affected == 0 {
-		h.redirectSignupAdmin(w, r, "That request was already handled.")
+		h.redirectSignupAdmin(w, r, flashRequestHandled)
 		return
 	}
 	h.sendSignupDenialEmail(r.Context(), reqEmail, reason)
-	h.redirectSignupAdmin(w, r, "Request denied.")
+	h.redirectSignupAdmin(w, r, flashRequestDenied)
 }
 
-func (h *Handler) redirectSignupAdmin(w http.ResponseWriter, r *http.Request, msg string) {
-	htmxRedirect(w, r, pathAdminTenantSignups+queryFlash+url.QueryEscape(msg))
+func (h *Handler) redirectSignupAdmin(w http.ResponseWriter, r *http.Request, code flashCode) {
+	htmxRedirect(w, r, withFlash(pathAdminTenantSignups, code))
 }
 
 // --- invite acceptance → create tenant -------------------------------------

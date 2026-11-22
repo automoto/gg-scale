@@ -7,11 +7,10 @@ const (
 	pathControlPanel      = "/v1/control-panel"
 	pathControlPanelLogin = "/v1/control-panel/login"
 	pathTenantsPrefix     = "/v1/control-panel/tenants/"
-	pathAdminUsersFlash   = "/v1/control-panel/admin/users?flash="
 	pathAdminAccounts     = "/v1/control-panel/admin/player-accounts"
+	pathAdminUsers        = "/v1/control-panel/admin/users"
 	segAPIKeys            = "/api-keys"
 	segTeamInvite         = "/team/invite"
-	queryFlash            = "?flash="
 
 	// Operator-facing error messages reused across handlers.
 	msgFleetDetailFailed      = "fleet detail failed"

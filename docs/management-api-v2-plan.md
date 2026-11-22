@@ -524,3 +524,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
   passes. The origin of `CONTROL_PANEL_BASE_URL` is trusted, so the forms work
   behind a proxy that changes the `Host` header when it is set; otherwise the
   proxy must keep the `Host` header.
+- The dashboard and the player account pages show a message only from a
+  fixed code in `?flash=<code>`. Free text in `?flash=`, `?created=` or
+  `?error=` shows nothing, so a link cannot show a false message. Some
+  messages no longer name the item or the address (for example "Invite sent."
+  and "Fleet created."), and the player account pages say "provider" in place
+  of the provider name in link and unlink messages.

@@ -43,7 +43,7 @@ func (h *Handler) teamPage(w http.ResponseWriter, r *http.Request) {
 		IsOwnerID:    session.User.ID,
 		Members:      members,
 		Pending:      pending,
-		Message:      r.URL.Query().Get("flash"),
+		Message:      flashMessage(r),
 		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
@@ -106,8 +106,7 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 		subject = fmt.Sprintf("You've been invited to %s on ggscale", tenantName)
 	}
 	h.sendInviteEmail(r.Context(), res, subject, tenantName, h.roleExplanation(role))
-	target := tenantTeamPath(tenantID) + queryFlash + url.QueryEscape("Invite sent to "+res.Email)
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, tenantTeamPath(tenantID), flashInviteSent)
 }
 
 func (h *Handler) renderInviteTeamError(w http.ResponseWriter, r *http.Request, tenantID int64, email, role string, err error) {
@@ -175,7 +174,7 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Invite revoked."))
+	htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashInviteRevoked))
 }
 
 func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +197,7 @@ func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request
 	session, _ := sessionFromContext(r.Context())
 	switch err := h.setTeamMemberRole(r.Context(), session.User.ID, tenantID, targetUserID, role, grant); {
 	case err == nil:
-		htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Roles updated."))
+		htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashRolesUpdated))
 	case errors.Is(err, errInvalidGrantRole):
 		http.Error(w, "role not grantable", http.StatusForbidden)
 	case errors.Is(err, errMemberNotInTenant):
@@ -226,14 +225,14 @@ func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	err := h.removeMember(r.Context(), session.User.ID, tenantID, membershipID)
 	if errors.Is(err, errCannotRemoveSelf) {
-		http.Redirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("You can't remove yourself; ask another admin."), http.StatusSeeOther)
+		redirectFlash(w, r, tenantTeamPath(tenantID), flashRemoveSelf)
 		return
 	}
 	if err != nil {
 		http.Error(w, "remove failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Member removed."))
+	htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashMemberRemoved))
 }
 
 func (h *Handler) platformTeamPage(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +251,7 @@ func (h *Handler) platformTeamPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: session.CSRFToken,
 		Admins:    admins,
 		Pending:   pending,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 
 }
@@ -308,7 +307,7 @@ func (h *Handler) invitePlatformAdminHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectPlatform, "", "")
-	http.Redirect(w, r, "/v1/control-panel/admin/team?flash="+url.QueryEscape("Invite sent to "+res.Email), http.StatusSeeOther)
+	redirectFlash(w, r, "/v1/control-panel/admin/team", flashInviteSent)
 }
 
 func (h *Handler) acceptInvitePage(w http.ResponseWriter, r *http.Request) {

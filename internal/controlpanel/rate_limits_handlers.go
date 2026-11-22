@@ -2,12 +2,9 @@ package controlpanel
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 
-	"github.com/automoto/gg-scale/internal/gamesession"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -26,7 +23,7 @@ func (h *Handler) rateLimitsPage(w http.ResponseWriter, r *http.Request) {
 	view.UserEmail = session.User.Email
 	view.CSRFToken = session.CSRFToken
 	view.IsPlatformAdmin = session.User.IsPlatformAdmin
-	view.Message = r.URL.Query().Get("flash")
+	view.Message = flashMessage(r)
 	webutil.Render(r, w, RateLimitsPage(view))
 }
 
@@ -48,14 +45,14 @@ func (h *Handler) updateTenantAPILimitHandler(w http.ResponseWriter, r *http.Req
 	rate, rerr := parseLimitField(r.Form.Get("rate"))
 	burst, berr := parseLimitField(r.Form.Get("burst"))
 	if rerr != nil || berr != nil {
-		h.redirectRateLimits(w, r, tenantID, "Rate and burst must be non-negative numbers.")
+		h.redirectRateLimits(w, r, tenantID, flashRateBurstInvalid)
 		return
 	}
 	if err := h.setTenantAPIOverride(r.Context(), session.User.ID, tenantID, rate, burst); err != nil {
 		h.rateLimitError(w, r, tenantID, err)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "API limit updated.")
+	h.redirectRateLimits(w, r, tenantID, flashAPILimitUpdated)
 }
 
 // updateTenantConnectionLimitHandler sets the tenant-wide regional realtime
@@ -77,14 +74,14 @@ func (h *Handler) updateTenantConnectionLimitHandler(w http.ResponseWriter, r *h
 	sustained, serr := parseConnectionLimitField(r.Form.Get("sustained"))
 	ceiling, cerr := parseConnectionLimitField(r.Form.Get("ceiling"))
 	if serr != nil || cerr != nil {
-		h.redirectRateLimits(w, r, tenantID, "Connection limits must be non-negative whole numbers.")
+		h.redirectRateLimits(w, r, tenantID, flashConnectionLimitsInvalid)
 		return
 	}
 	if err := h.setTenantConnectionOverride(r.Context(), session.User.ID, tenantID, sustained, ceiling); err != nil {
 		h.rateLimitError(w, r, tenantID, err)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Connection limit updated.")
+	h.redirectRateLimits(w, r, tenantID, flashConnectionLimitUpdated)
 }
 
 // updateTenantRecipientInviteLimitHandler sets the tenant-wide per-recipient
@@ -106,14 +103,14 @@ func (h *Handler) updateTenantRecipientInviteLimitHandler(w http.ResponseWriter,
 	burst, berr := parseLimitField(r.Form.Get("recipient_burst"))
 	cooldown, cerr := parseLimitField(r.Form.Get("recipient_cooldown_secs"))
 	if berr != nil || cerr != nil {
-		h.redirectRateLimits(w, r, tenantID, "Recipient burst and cooldown must be non-negative numbers.")
+		h.redirectRateLimits(w, r, tenantID, flashRecipientBurstInvalid)
 		return
 	}
 	if err := h.setTenantRecipientInviteOverride(r.Context(), session.User.ID, tenantID, burst, cooldown); err != nil {
 		h.rateLimitError(w, r, tenantID, err)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Recipient burst updated.")
+	h.redirectRateLimits(w, r, tenantID, flashRecipientBurstUpdated)
 }
 
 // updateQuotaOverrideHandler sets or clears one per-tenant quota-axis
@@ -136,19 +133,17 @@ func (h *Handler) updateQuotaOverrideHandler(w http.ResponseWriter, r *http.Requ
 	if err := h.setQuotaOverride(r.Context(), session.User.ID, tenantID, axis, r.Form.Get("limit")); err != nil {
 		switch {
 		case errors.Is(err, errInvalidLimit):
-			h.redirectRateLimits(w, r, tenantID, "Enter a limit of 0 or more (-1 for unlimited), or leave blank to restore the tier default.")
+			h.redirectRateLimits(w, r, tenantID, flashQuotaLimitInvalid)
 		case errors.Is(err, errOverrideAboveHardCap):
-			h.redirectRateLimits(w, r, tenantID, fmt.Sprintf(
-				"Open game sessions per Game Project can't exceed %d (the platform-wide cap) and can't be unlimited.",
-				gamesession.SessionsHardCap))
+			h.redirectRateLimits(w, r, tenantID, flashSessionsAboveCap)
 		case errors.Is(err, errLeaderboardsUnlimited):
-			h.redirectRateLimits(w, r, tenantID, "Leaderboards per Game Project can't be unlimited. Enter a number.")
+			h.redirectRateLimits(w, r, tenantID, flashLeaderboardsUnlimited)
 		default:
 			http.Error(w, "quota override update failed", http.StatusInternalServerError)
 		}
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Quota override updated.")
+	h.redirectRateLimits(w, r, tenantID, flashQuotaOverrideUpdated)
 }
 
 // updateProjectInviteLimitHandler sets per-project invite quotas (tenant admin).
@@ -167,7 +162,7 @@ func (h *Handler) updateProjectInviteLimitHandler(w http.ResponseWriter, r *http
 	inviterPerHour, ierr := parseLimitField(r.Form.Get("inviter_per_hour"))
 	domainPerDay, derr := parseLimitField(r.Form.Get("domain_per_day"))
 	if ierr != nil || derr != nil {
-		h.redirectRateLimits(w, r, tenantID, "Invite quotas must be non-negative numbers.")
+		h.redirectRateLimits(w, r, tenantID, flashInviteQuotasInvalid)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -176,26 +171,26 @@ func (h *Handler) updateProjectInviteLimitHandler(w http.ResponseWriter, r *http
 		h.rateLimitError(w, r, tenantID, err)
 		return
 	}
-	h.redirectRateLimits(w, r, tenantID, "Invite quotas updated.")
+	h.redirectRateLimits(w, r, tenantID, flashInviteQuotasUpdated)
 }
 
 func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantID int64, err error) {
 	var limitErr projectadmin.LimitError
 	switch {
 	case errors.As(err, &limitErr):
-		h.redirectRateLimits(w, r, tenantID, limitErr.Error())
+		h.redirectRateLimits(w, r, tenantID, limitFlash(limitErr))
 	case errors.Is(err, errInvalidLimit):
-		h.redirectRateLimits(w, r, tenantID, "Values must be finite non-negative numbers.")
+		h.redirectRateLimits(w, r, tenantID, flashLimitValuesInvalid)
 	case errors.Is(err, errIncompleteLimit):
-		h.redirectRateLimits(w, r, tenantID, "Enter both values, or clear both to restore the default.")
+		h.redirectRateLimits(w, r, tenantID, flashLimitIncomplete)
 	case errors.Is(err, errConnectionCeiling):
-		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum must be at least the sustained limit.")
+		h.redirectRateLimits(w, r, tenantID, flashConnectionCeiling)
 	case errors.Is(err, errConnectionBurstRatio):
-		h.redirectRateLimits(w, r, tenantID, "Temporary connection maximum cannot exceed twice the sustained limit.")
+		h.redirectRateLimits(w, r, tenantID, flashConnectionBurstRatio)
 	case errors.Is(err, errConnectionAbsoluteMax):
-		h.redirectRateLimits(w, r, tenantID, "Connection limits cannot exceed 500,000 without a capacity-reviewed release.")
+		h.redirectRateLimits(w, r, tenantID, flashConnectionAbsoluteMax)
 	case errors.Is(err, errConnectionEnvOverride):
-		h.redirectRateLimits(w, r, tenantID, "REALTIME_MAX_PER_TENANT is active; unset it before editing tenant connection limits.")
+		h.redirectRateLimits(w, r, tenantID, flashConnectionEnvOverride)
 	case errors.Is(err, projectadmin.ErrProjectNotInTenant):
 		http.Error(w, "Game Project not found", http.StatusNotFound)
 	default:
@@ -203,7 +198,7 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 	}
 }
 
-func (h *Handler) redirectRateLimits(w http.ResponseWriter, r *http.Request, tenantID int64, flash string) {
+func (h *Handler) redirectRateLimits(w http.ResponseWriter, r *http.Request, tenantID int64, code flashCode) {
 	base := safeReturnPath(r.Form.Get("redirect_to"), pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/rate-limits")
-	htmxRedirect(w, r, base+queryFlash+url.QueryEscape(flash))
+	htmxRedirect(w, r, withFlash(base, code))
 }

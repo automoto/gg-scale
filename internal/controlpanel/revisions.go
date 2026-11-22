@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 
@@ -104,8 +103,7 @@ func (h *Handler) remoteConfigRollbackHandler(w http.ResponseWriter, r *http.Req
 	if !writeRollbackError(w, r, "remote config rollback", err) {
 		return
 	}
-	http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
-		url.QueryEscape("Remote config rolled back to revision "+strconv.FormatInt(revision, 10)+"."), http.StatusSeeOther)
+	redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashRemoteConfigRolledBack)
 }
 
 func (h *Handler) leaderboardRollbackHandler(w http.ResponseWriter, r *http.Request) {
@@ -130,8 +128,7 @@ func (h *Handler) leaderboardRollbackHandler(w http.ResponseWriter, r *http.Requ
 	if !writeRollbackError(w, r, "leaderboard rollback", err) {
 		return
 	}
-	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+"/"+strconv.FormatInt(id, 10)+queryFlash+
-		url.QueryEscape("Settings rolled back to revision "+strconv.FormatInt(revision, 10)+". Scores did not change."), http.StatusSeeOther)
+	redirectFlash(w, r, leaderboardsBasePath(tenantID, projectID)+"/"+strconv.FormatInt(id, 10), flashLeaderboardRolledBack)
 }
 
 func (h *Handler) leaderboardRestoreHandler(w http.ResponseWriter, r *http.Request) {
@@ -151,5 +148,5 @@ func (h *Handler) leaderboardRestoreHandler(w http.ResponseWriter, r *http.Reque
 	if !writeRollbackError(w, r, "leaderboard restore", err) {
 		return
 	}
-	http.Redirect(w, r, leaderboardsBasePath(tenantID, projectID)+queryFlash+url.QueryEscape("Leaderboard restored."), http.StatusSeeOther)
+	redirectFlash(w, r, leaderboardsBasePath(tenantID, projectID), flashLeaderboardRestored)
 }
