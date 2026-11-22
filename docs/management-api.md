@@ -207,14 +207,14 @@ the Game Project, as the dashboard pages do.
   person who made the token. A feature can be added only when the Game Project
   has it (422). The feature list replaces the old one.
 - `set_project_invite_limit` takes the invites for each inviter in an hour and
-  for each email domain in a day. `set_project_storage_limit` takes the size
+  for the whole Game Project in a day (not for each email domain). `set_project_storage_limit` takes the size
   of one storage value in MiB (`max_value_mb`). For both, 0 clears the limit,
   so the default applies. A limit cannot be higher than the default or than
   the limit of the Account Tenant (422). Both return the limits as
   `get_project_limits` does.
 - The fleet writes need `FEATURE_FLEET_ENABLED` and the `dedicated_servers`
   feature grant. `create_fleet` takes a `backend` (`agones` or
-  `plugin:<name>`) and a config. `<name>` is the name in
+  `plugin:<name>`; use `plugin:<name>` for a new fleet) and a config. `<name>` is the name in
   `FLEET_BACKEND=plugin:<name>`: lowercase letters, digits, `_` and `-`, at
   most 64 characters, starting with a letter or digit. A bare `plugin` is
   also accepted: a fleet stored that way runs on any plugin backend. An agones
@@ -265,7 +265,7 @@ in Scopes).
 | `keys:secret` | `create_secret_api_key` | `POST /v1/project/secret-api-keys` | Returns a secret. The `ggs_` key value is in the result one time only. It is never in `list_api_keys`, `get_token`, the audit log, or the server log. Needs permission to manage secret keys for the person who made the token. Same label, scope, and `MANAGEMENT_MAX_PROJECT_API_KEYS` rules as `create_api_key`. |
 | `steam:write` | `set_steam_auth` | `PUT /v1/project/steam-auth` | Cannot be undone: the old Web API key is lost. Takes `app_id` and `web_api_key` (input only; same checks as the dashboard). Leave `web_api_key` out to keep the stored key and change the App ID; this is refused when no key is stored. The key is sealed as in the dashboard and is never in a result, the audit log, or the server log. Returns the `get_steam_auth` shape. |
 | `steam:write` | `clear_steam_auth` | `DELETE /v1/project/steam-auth` | Cannot be undone: removes the App ID and the Web API key, and Steam sign-in stops. Returns the `get_steam_auth` shape. |
-| `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, each email domain in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id` and `expires_at`, and `email` only with `players:pii`. The audit row has no address. Needs `players:read`. |
+| `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, the whole Game Project in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id` and `expires_at`, and `email` only with `players:pii`. The audit row has no address. Needs `players:read`. |
 | `players:invite` | `link_player` | `POST /v1/project/players/{player_id}/link` | Sends an email. Same as `invite_player`, for one existing player: when the invite is accepted, the address and its account are bound to that player, and an open invite for the player is replaced. The accept fails when the player is linked to another account or has a different verified email. 404 for a player of another Game Project, 409 when another player has the address. |
 | `allocations:write` | `allocate_server` | `POST /v1/project/allocations` | Costs money: starts a billable game server. Takes `fleet` (the name of a live fleet), `region`, and optional `game_mode` and `capacity` (default 1). It cannot set labels or join data. `region` and `game_mode` are at most 256 bytes, valid UTF-8, no NUL; `capacity` is at most `FLEET_ALLOCATION_MAX_CAPACITY` (default 100); otherwise 422. 409 when the fleet backend is not the backend of the server. Returns the allocation (no labels or join data). 404 for a deleted, unknown, or other-project fleet; 403 when the backend of the fleet is not enabled. Needs `fleet:read`, the allocate permission for the person who made the token, and the `dedicated_servers` feature. The audit row `fleet.allocate.manual` is written in the same transaction that marks the allocation ready. |
 | `allocations:write` | `deallocate_server` | `POST /v1/project/allocations/{allocation_id}/deallocate` | Cannot be undone: stops the server and ends a live match. The request also needs the deallocate permission for the person who made the token. 404 for an allocation of another Game Project. An allocation that is already released is returned as it is, with no new audit row. The backend stops the server first, then the row and the audit row `fleet.deallocate.manual` commit together. Returns the allocation. |
@@ -313,6 +313,17 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   Treat it as untrusted text.
 - A plugin fleet config is never returned. `get_fleet` and the fleet writes
   show the config of an agones fleet only.
+- A token label and an API key label refuse control characters and
+  text-direction characters (422). The API key label is at most 200
+  characters. This holds for the dashboard, the token API, and sign-up too.
+- `null` for `scopes` in `update_api_key_features` or for `origins` in
+  `set_allowed_origins` answers 422. An empty list `[]` still clears the list.
+- NUL and invalid UTF-8 in a fleet config, in the `fleet` and `external_id`
+  of `allocate_server`, and in the `cursor` of the leaderboard lists answer
+  422. An `allocate_server` `fleet` that is too long also answers 422.
+- Allocation works on a plugin backend. A fleet stored as bare `plugin` runs
+  on any plugin backend. A fleet with another `plugin*` backend value (for
+  example `pluginx` or `plugin:`) answers 422 on the token fleet operations.
 - The Steam Web API key is input only. `get_steam_auth` says only whether a
   key is set.
 - Fleet operations exist only when the server has `FEATURE_FLEET_ENABLED` on.

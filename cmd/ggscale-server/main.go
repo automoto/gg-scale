@@ -771,6 +771,7 @@ func run() error {
 				CORSMaxProjectOrigins:          cfg.CORSMaxProjectOrigins,
 				LeaderboardMaxPerProject:       cfg.LeaderboardMaxPerProject,
 				FleetBackend:                   cfg.FleetBackend,
+				FleetAllocationMaxCapacity:     cfg.FleetAllocationMaxCapacity,
 				FleetRegion:                    cfg.FleetRegion,
 			},
 		},

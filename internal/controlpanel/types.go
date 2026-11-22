@@ -105,6 +105,8 @@ type ServerSettingsSnapshot struct {
 
 	FleetBackend string
 	FleetRegion  string
+
+	FleetAllocationMaxCapacity int
 }
 
 // Enabled reports whether the control panel should be mounted.

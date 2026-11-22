@@ -12,7 +12,7 @@ import (
 
 type projectInviteLimits struct {
 	InviterPerHour        float64 `json:"inviter_per_hour" doc:"Invites that one inviter may send each hour in this Game Project. 0 means the default."`
-	DomainPerDay          float64 `json:"domain_per_day" doc:"Invites that one email domain may get each day in this Game Project. 0 means the default."`
+	DomainPerDay          float64 `json:"domain_per_day" doc:"Invites that the Game Project may send each day. 0 means the default."`
 	DefaultInviterPerHour float64 `json:"default_inviter_per_hour" doc:"The default, and the highest value that can be set."`
 	DefaultDomainPerDay   float64 `json:"default_domain_per_day" doc:"The default, and the highest value that can be set."`
 }
@@ -97,7 +97,7 @@ func getProjectLimits(ctx context.Context, d Deps, p managementtoken.Principal, 
 type projectSetInviteLimitsInput struct {
 	Body struct {
 		InviterPerHour float64 `json:"inviter_per_hour" doc:"Invites that one inviter may send each hour. 0 clears the limit, so the default applies." example:"20"`
-		DomainPerDay   float64 `json:"domain_per_day" doc:"Invites that one email domain may get each day. 0 clears the limit, so the default applies." example:"100"`
+		DomainPerDay   float64 `json:"domain_per_day" doc:"Invites that the Game Project may send each day. 0 clears the limit, so the default applies." example:"100"`
 	}
 }
 

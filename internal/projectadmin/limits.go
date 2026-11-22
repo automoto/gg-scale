@@ -112,7 +112,7 @@ func GetLimits(ctx context.Context, pool *db.Pool, tenantID, projectID, platform
 }
 
 // SetInviteLimits sets the invite quotas of one project: invites for each
-// inviter in an hour, and for each email domain in a day. 0 clears a quota,
+// inviter in an hour, and for the project in a day. 0 clears a quota,
 // so the default applies. The limits may not exceed the tenant cap. It
 // returns ErrProjectNotInTenant when the project is not in the tenant.
 // overrides, when it caches, is told to drop the tenant after the commit.

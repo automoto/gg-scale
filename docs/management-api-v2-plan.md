@@ -453,3 +453,23 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - A list operation answers 422 for a cursor that it did not return. Before,
   `list_api_keys`, `list_players`, and `list_allocation_events` started again
   at the first page.
+- The cursor of `get_matchmaking_queue` is now sealed. It does not show
+  bucket text.
+- A fleet backend for a plugin is now named `plugin:<name>`. A fleet stored as
+  bare `plugin` keeps working. Allocation on plugin backends now works (it
+  answered 409 before). A legacy fleet with another `plugin*` backend value
+  (for example `pluginx` or `plugin:`) now gets a 422 from management token
+  fleet operations.
+- `null` for `scopes` in `update_api_key_features` and for `origins` in
+  `set_allowed_origins` now gives 422. `[]` still clears the list.
+- Token labels and API key labels (dashboard, token API, and sign-up) refuse
+  control and text-direction characters. The API key label is at most 200
+  characters.
+- NUL and invalid UTF-8 in a fleet config, in `fleet` and `external_id` of
+  `allocate_server`, and in the leaderboard `cursor` give 422. A `fleet` that
+  is too long also gives 422.
+- The token page, the token list, and the Deleted fleets list fit on a narrow
+  screen.
+- The invite limit `domain_per_day` counts invites for the whole Game Project
+  in a day, not for each email domain. The text now says so.
+- The **Server settings** page shows `FLEET_ALLOCATION_MAX_CAPACITY`.

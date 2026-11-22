@@ -2178,7 +2178,7 @@ components:
           format: double
           type: number
         domain_per_day:
-          description: Invites that one email domain may get each day in this Game Project. 0 means the default.
+          description: Invites that the Game Project may send each day. 0 means the default.
           format: double
           type: number
         inviter_per_hour:
@@ -2622,7 +2622,7 @@ components:
       additionalProperties: false
       properties:
         domain_per_day:
-          description: Invites that one email domain may get each day. 0 clears the limit, so the default applies.
+          description: Invites that the Game Project may send each day. 0 clears the limit, so the default applies.
           examples:
             - 100
           format: double

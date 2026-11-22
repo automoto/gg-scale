@@ -764,7 +764,7 @@ var projectOps = []projectOp{
 	{
 		tool: "invite_player",
 		description: "Sends an email. Invite a player to this Game Project by email address. The address gets a link to accept the invite " +
-			"and set up a player account. The invite is limited in the same way as in the dashboard (each inviter and each email domain), " +
+			"and set up a player account. The invite is limited in the same way as in the dashboard (each inviter in an hour, and the whole Game Project in a day), " +
 			"and answers 429 with Retry-After when the limit is used. The result has no address unless the token has players:pii.",
 		scope: managementtoken.ScopePlayersInvite,
 		op: huma.Operation{
@@ -863,7 +863,7 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "set_project_invite_limit",
-		description: "Set the invite limits of this Game Project: invites for each inviter in an hour, and for each email domain in a day. " +
+		description: "Set the invite limits of this Game Project: invites for each inviter in an hour, and for the whole Game Project in a day. " +
 			"0 clears a limit, so the default applies. A limit cannot be higher than the default. Returns the limits.",
 		scope: managementtoken.ScopeLimitsWrite,
 		op: huma.Operation{

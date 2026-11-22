@@ -3199,6 +3199,8 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ orDash(vm.Snapshot.FleetBackend) }</dd>
 				<dt>Region</dt>
 				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
+				<dt>Allocation maximum capacity</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.FleetAllocationMaxCapacity)) }</dd>
 			</dl>
 		</section>
 	}
