@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -195,4 +196,30 @@ func TestManagerAllocate_should_give_the_plugin_a_frame_typed_as_a_value_unchang
 
 	require.NoError(t, err)
 	assert.Equal(t, frame, backend.got["api_token"])
+}
+
+type recordingCleaner struct {
+	*fakeBackend
+	called bool
+}
+
+func (b *recordingCleaner) CleanupResolution(context.Context, string, map[string]string) error {
+	b.called = true
+	return nil
+}
+
+func TestManagerDeallocate_should_not_clean_up_with_a_plugin_value_that_does_not_open(t *testing.T) {
+	c := testCipher(t)
+	store := newFakeStore()
+	backend := &recordingCleaner{fakeBackend: &fakeBackend{name: "plugin:x"}}
+	row := sqlcgen.Fleet{ID: 1, ProjectID: 2, Backend: "plugin:x", Config: configJSON(t, "api_token", sealedValue(t, testCipher(t), sealMarker))}
+	mgr := fleet.NewManager(store, rowFleetStore{cipher: c, row: row}, backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_sealed"}
+	id, err := store.InsertPending(t.Context(), req, backend.name)
+	require.NoError(t, err)
+
+	err = mgr.Deallocate(t.Context(), id)
+
+	assert.Equal(t, []any{true, false}, []any{errors.Is(err, fleet.ErrConfigNotOpened), backend.called})
 }

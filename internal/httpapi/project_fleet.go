@@ -395,7 +395,7 @@ func deallocateServer(ctx context.Context, d Deps, p managementtoken.Principal, 
 		return projectAllocation{}, errProjectNotFound()
 	}
 	if err != nil {
-		return projectAllocation{}, err
+		return projectAllocation{}, fleetWriteError(err)
 	}
 	return newProjectAllocation(a), nil
 }

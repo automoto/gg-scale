@@ -29,16 +29,22 @@ const fleetSealMarker = "tok-SEALMARKER-7f3a"
 // sealedFleetPanel is a control panel with a credential cipher and one
 // plugin fleet created through the dashboard form.
 type sealedFleetPanel struct {
-	c        *cluster
-	mgr      *fleet.Manager
-	cookie   *http.Cookie
-	csrf     string
-	tenantID int64
-	base     string
-	fleetID  int64
+	c         *cluster
+	mgr       *fleet.Manager
+	cookie    *http.Cookie
+	csrf      string
+	tenantID  int64
+	projectID int64
+	base      string
+	fleetID   int64
 }
 
 func newSealedFleetPanel(t *testing.T) sealedFleetPanel {
+	t.Helper()
+	return newSealedFleetPanelWith(t, newStubBackend("plugin:x"))
+}
+
+func newSealedFleetPanelWith(t *testing.T, backend fleet.Backend) sealedFleetPanel {
 	t.Helper()
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-seal")
@@ -51,10 +57,10 @@ func newSealedFleetPanel(t *testing.T) sealedFleetPanel {
 	require.NoError(t, err)
 	cipher, err := secretseal.NewCipherKeyring(key)
 	require.NoError(t, err)
-	srv, mgr := newControlPanelFleetServerWithCipher(t, c, newStubBackend("plugin:x"), nil, cipher)
+	srv, mgr := newControlPanelFleetServerWithCipher(t, c, backend, nil, cipher)
 	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
 	p := sealedFleetPanel{
-		c: c, mgr: mgr, cookie: cookie, csrf: csrf, tenantID: tenantID,
+		c: c, mgr: mgr, cookie: cookie, csrf: csrf, tenantID: tenantID, projectID: projectID,
 		base: srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
 			"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets",
 	}
@@ -240,4 +246,44 @@ func TestControlPanelFleet_update_should_refuse_a_key_in_two_rows(t *testing.T) 
 	status, _ := p.update(t, "sealed", []string{"api_token", "api_token"}, []string{"next", ""})
 
 	assert.Equal(t, []any{http.StatusUnprocessableEntity, fleetSealMarker}, []any{status, p.config(t)["api_token"]})
+}
+
+func TestControlPanelFleet_failed_update_should_ask_for_the_values_again(t *testing.T) {
+	p := newSealedFleetPanel(t)
+
+	status, body := p.update(t, "", []string{"api_token", "region"}, []string{"typed", ""})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true}, []any{status, strings.Contains(body, "Enter each value again")})
+}
+
+// cleanerStub is stubBackend with resolution cleanup, so a deallocate reads
+// the fleet config.
+type cleanerStub struct {
+	*stubBackend
+	called bool
+}
+
+func (b *cleanerStub) CleanupResolution(context.Context, string, map[string]string) error {
+	b.called = true
+	return nil
+}
+
+func TestControlPanelFleet_deallocate_should_answer_422_when_a_plugin_value_does_not_open(t *testing.T) {
+	backend := &cleanerStub{stubBackend: newStubBackend("plugin:x")}
+	p := newSealedFleetPanelWith(t, backend)
+	p.breakStoredToken(t)
+	var allocID int64
+	require.NoError(t, p.c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, backend_ref, region, address, status, metadata)
+		 VALUES ($1, $2, $3, 'plugin:x', 'gs-1', 'eu', '203.0.113.5:7777', 'ready', '{"ggscale.dev/resolution-id":"mm_sealed"}')
+		 RETURNING id`, p.tenantID, p.projectID, p.fleetID).Scan(&allocID))
+	deallocURL := strings.TrimSuffix(p.base, "/fleets") + "/allocations/" + strconv.FormatInt(allocID, 10) + "/deallocate"
+
+	resp := postFormWithCookie(t, deallocURL, url.Values{"_csrf": {p.csrf}, "confirm_id": {strconv.FormatInt(allocID, 10)}}, p.cookie)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, false},
+		[]any{resp.StatusCode, strings.Contains(string(body), "cannot be opened"), backend.called})
 }

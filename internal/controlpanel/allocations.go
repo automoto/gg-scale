@@ -316,18 +316,7 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 	}
 	typed := strings.TrimSpace(r.Form.Get("confirm_id"))
 	if typed != strconv.FormatInt(allocID, 10) {
-		session, _ := sessionFromContext(r.Context())
-		alloc, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID)
-		if err != nil {
-			http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		webutil.Render(r, w, DeallocateConfirmPage(DeallocateConfirmView{
-			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
-			TenantID: tenantID, ProjectID: projectID, Allocation: allocToView(alloc),
-			Error: "Typed ID did not match. Type the allocation ID exactly to confirm.",
-		}))
+		h.renderDeallocateError(w, r, tenantID, projectID, allocID, "Typed ID did not match. Type the allocation ID exactly to confirm.")
 		return
 	}
 
@@ -340,12 +329,33 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 		http.NotFound(w, r)
 		return
 	}
+	var invalid fleet.InvalidError
+	if errors.As(err, &invalid) {
+		h.renderDeallocateError(w, r, tenantID, projectID, allocID, "Deallocate failed: "+invalid.Error())
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "manual deallocate failed", "err", err, "alloc", allocID)
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)
 		return
 	}
 	redirectFlash(w, r, allocationsBasePath(tenantID, projectID), "Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
+}
+
+// renderDeallocateError shows the confirm page again with msg and a 422.
+func (h *Handler) renderDeallocateError(w http.ResponseWriter, r *http.Request, tenantID, projectID, allocID int64, msg string) {
+	session, _ := sessionFromContext(r.Context())
+	alloc, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID)
+	if err != nil {
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	webutil.Render(r, w, DeallocateConfirmPage(DeallocateConfirmView{
+		UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
+		TenantID: tenantID, ProjectID: projectID, Allocation: allocToView(alloc),
+		Error: msg,
+	}))
 }
 
 // fleetBackendsPage shows the backends seen across this tenant's allocations

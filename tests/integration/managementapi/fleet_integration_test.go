@@ -25,19 +25,19 @@ import (
 // manager that reads the real tables. Tenant A has the dedicated_servers grant.
 func newFleetFixture(t *testing.T) *fixture {
 	t.Helper()
-	return newFleetFixtureWithCipher(t, nil)
+	return newFleetFixtureWithCipher(t, nil, fakeBackend{})
 }
 
 // newFleetFixtureWithCipher is newFleetFixture with a credential cipher in
-// the fleet store, as the server has.
-func newFleetFixtureWithCipher(t *testing.T, cipher *secretseal.Cipher) *fixture {
+// the fleet store, as the server has, and the given backend.
+func newFleetFixtureWithCipher(t *testing.T, cipher *secretseal.Cipher, backend fleet.Backend) *fixture {
 	t.Helper()
 	var pool *db.Pool
 	f := newFixtureWith(t, func(d *httpapi.Deps) {
 		d.ControlPanel.FleetEnabled = true
 		pool = d.Pool
 		d.CredentialCipher = cipher
-		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, cipher), fakeBackend{}, fleet.ManagerOptions{MaxCapacity: 5})
+		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, cipher), backend, fleet.ManagerOptions{MaxCapacity: 5})
 	})
 	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES
 		($1, 'dedicated_servers', true), ($1, 'fleet_agones_backend', true), ($1, 'fleet_plugin_backend', true)`, f.tenantA)
