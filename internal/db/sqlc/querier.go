@@ -495,8 +495,6 @@ type Querier interface {
 	// may a game server act for them? The tenants/projects JOINs mirror
 	// GetPlayerForVerify so a wound-down project can't keep taking writes.
 	GetPlayerModerationState(ctx context.Context, arg GetPlayerModerationStateParams) (GetPlayerModerationStateRow, error)
-	// One live player of a project, with the same columns as the list page.
-	GetPlayerPageRowForProject(ctx context.Context, arg GetPlayerPageRowForProjectParams) (GetPlayerPageRowForProjectRow, error)
 	// Reset-request/confirm state read, keyed like login. Filters mirror
 	// GetPlayerByEmail: disabled/unlinked players read as unknown.
 	GetPlayerPasswordResetState(ctx context.Context, arg GetPlayerPasswordResetStateParams) (GetPlayerPasswordResetStateRow, error)

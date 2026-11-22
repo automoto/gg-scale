@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -37,21 +38,34 @@ func TestProjectOps_should_use_only_project_level_casbin_objects(t *testing.T) {
 	}
 }
 
-// A class 2 tool says its risk first, because MCP clients have no other
-// mark for a risky tool.
-func TestProjectOps_risky_key_tools_should_start_with_the_risk_sentence(t *testing.T) {
-	want := map[string]string{
-		"revoke_api_key":        "Cannot be undone.",
-		"create_secret_api_key": "Returns a secret.",
-	}
-	got := map[string]string{}
+// A risky tool says its risk first, because MCP clients have no other mark
+// for a risky tool.
+func TestProjectOps_risky_tools_should_start_with_a_risk_sentence(t *testing.T) {
+	sentences := []string{"Cannot be undone.", "Sends an email.", "Returns a secret.", "Costs money."}
+	var missing []string
 	for _, row := range projectOps {
-		if prefix, ok := want[row.tool]; ok && strings.HasPrefix(row.description, prefix) {
-			got[row.tool] = prefix
+		s, _ := managementtoken.Scope(row.scope)
+		if s.Class != managementtoken.ClassRisky {
+			continue
+		}
+		if !slices.ContainsFunc(sentences, func(p string) bool { return strings.HasPrefix(row.description, p) }) {
+			missing = append(missing, row.tool)
 		}
 	}
 
-	assert.Equal(t, want, got)
+	assert.Empty(t, missing)
+}
+
+// A row with no scope is open to every token, so only these two may have none.
+func TestProjectOps_only_the_open_rows_should_have_no_scope(t *testing.T) {
+	var open []string
+	for _, row := range projectOps {
+		if row.scope == "" && len(row.anyScope) == 0 {
+			open = append(open, row.tool)
+		}
+	}
+
+	assert.Equal(t, []string{"project_health_check", "get_token"}, open)
 }
 
 func TestProjectOps_should_use_only_known_scopes(t *testing.T) {

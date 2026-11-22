@@ -15,6 +15,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
+	"github.com/automoto/gg-scale/internal/rbac"
 )
 
 // Limits on a fleet config, for the dashboard form and the management API.
@@ -89,6 +90,18 @@ func validateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return InvalidError("Name is required.")
 	}
+	if !validateText(name) {
+		return InvalidError("Name is not valid or too long.")
+	}
+	return nil
+}
+
+// validateBackend accepts the backends that rbac.BackendFeature knows:
+// agones, or a plugin backend, at most MaxConfigKeyOrVal bytes.
+func validateBackend(backend string) error {
+	if _, ok := rbac.BackendFeature(backend); !ok || !validateText(backend) {
+		return InvalidError("Backend must be agones or plugin:<name>.")
+	}
 	return nil
 }
 
@@ -113,6 +126,9 @@ func configKeys(cfg map[string]string) []string {
 // no authorization. The audit payload has config keys, never values.
 func CreateFleet(ctx context.Context, pool *db.Pool, tenantID int64, in FleetCreate, actor projectadmin.Actor) (*Fleet, error) {
 	if err := validateName(in.Name); err != nil {
+		return nil, err
+	}
+	if err := validateBackend(in.Backend); err != nil {
 		return nil, err
 	}
 	if err := ValidateConfig(in.Backend, in.Config); err != nil {
@@ -256,8 +272,8 @@ type ServerAllocate struct {
 	Capacity int
 }
 
-// validateText reports whether s is a valid region or game mode: valid UTF-8
-// with no NUL byte, at most MaxConfigKeyOrVal bytes.
+// validateText reports whether s is a valid name, backend, region, or game
+// mode: valid UTF-8 with no NUL byte, at most MaxConfigKeyOrVal bytes.
 func validateText(s string) bool {
 	return len(s) <= MaxConfigKeyOrVal && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }

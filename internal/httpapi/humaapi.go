@@ -188,10 +188,15 @@ func serverError(ctx context.Context, msg string, err error) error {
 	return huma.Error500InternalServerError("internal error")
 }
 
-// secretBodyOperations are the operations whose request body holds a secret.
-// huma copies the refused value, or the whole body, into the "value" of a
-// validation error, so these answers drop it.
-var secretBodyOperations = map[string]bool{"setProjectSteamAuth": true}
+// secretBodyOperations are the operations whose request body holds a secret:
+// the Steam key, or a plugin fleet config. huma copies the refused value, or
+// the whole body, into the "value" of a validation error, so these answers
+// drop it.
+var secretBodyOperations = map[string]bool{
+	"setProjectSteamAuth": true,
+	"createProjectFleet":  true,
+	"updateProjectFleet":  true,
+}
 
 func redactSecretBodyErrors(ctx huma.Context, _ string, v any) (any, error) {
 	model, ok := v.(*huma.ErrorModel)

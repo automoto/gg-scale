@@ -16,6 +16,7 @@ import (
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/tenant"
 )
 
 const projectManagementTag = "Project Management"
@@ -404,7 +405,7 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "allocate_server",
-		description: "Starts a game server and costs money while it runs. Takes fleet (the name of a live fleet), region, " +
+		description: "Costs money. Starts a game server, which costs money while it runs. Takes fleet (the name of a live fleet), region, " +
 			"and optional game_mode and capacity (default 1). Returns the allocation. A deleted or unknown fleet answers 404.",
 		scope:  managementtoken.ScopeAllocationsWrite,
 		pair:   rbac.ProjectAllocationObject,
@@ -656,13 +657,15 @@ var projectOps = []projectOp{
 	{
 		tool: "revoke_api_key",
 		description: "Cannot be undone. Revoke an API key of this Game Project: each game client or server that uses the key " +
-			"stops working at once. Use list_api_keys to find the key, and make a new key first if the game still needs one. " +
+			"stops working within " + tenant.APIKeyCacheTTL.String() + " on each server. " +
+			"Use list_api_keys to find the key, and make a new key first if the game still needs one. " +
 			"A secret key can be revoked only when the person who created the token may manage secret keys.",
 		scope: managementtoken.ScopeKeysRevoke,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/api-keys/{api_key_id}/revoke", OperationID: "revokeProjectAPIKey",
 			Summary: "Revoke an API key",
-			Description: "Revokes an API key of the Game Project. This cannot be undone. Answers 404 for a key of another " +
+			Description: "Revokes an API key of the Game Project. This cannot be undone. The key stops working within " +
+				tenant.APIKeyCacheTTL.String() + " on each server. Answers 404 for a key of another " +
 				"Game Project, a key with no Game Project, or a key that is already revoked. " +
 				"Answers 403 when the person who created the token may not manage keys of that type.",
 		},
@@ -774,14 +777,17 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "link_player",
-		description: "Sends an email. Send a link invite to one player of this Game Project that has no email yet. When the invite is " +
-			"accepted, the address and its account are bound to that player. An open invite for the player is replaced. " +
+		description: "Sends an email. Send a link invite to one player of this Game Project. When the invite is accepted, " +
+			"the address and its account are bound to the player. The accept fails when the player is linked to another account " +
+			"or has a different verified email. An open invite for the player is replaced. " +
 			"Limited in the same way as invite_player. The result has no address unless the token has players:pii.",
 		scope: managementtoken.ScopePlayersInvite,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/players/{player_id}/link", OperationID: "linkProjectPlayer",
 			Summary: "Link a player to an email address",
-			Description: "Sends a link invite email for one player of the Game Project and returns the invite. Answers 404 for a player of " +
+			Description: "Sends a link invite email for one player of the Game Project and returns the invite. When the invite is accepted, " +
+				"the address and its account are bound to the player; the accept fails when the player is linked to another account " +
+				"or has a different verified email. Answers 404 for a player of " +
 				"another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, " +
 				"and 429 with Retry-After when the invite limit is used.",
 		},

@@ -106,7 +106,7 @@ var Scopes = []ScopePair{
 	{Scope: ScopePlayersRead, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 	{
 		Scope: ScopePlayersPII, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
-		Label: "See player email and display name. They go into agent logs.", Needs: ScopePlayersRead,
+		Label: "See player email and display name. They go into agent logs and to the AI model provider.", Needs: ScopePlayersRead,
 	},
 	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 	{

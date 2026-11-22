@@ -72,7 +72,7 @@ func TestPostgresFleetStore_Create_then_GetByID_and_GetByName(t *testing.T) {
 	created, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "primary",
-		Backend:   "docker",
+		Backend:   "plugin:docker",
 		Config: map[string]string{
 			"image": "traefik/whoami:latest",
 			"port":  "80",
@@ -82,7 +82,7 @@ func TestPostgresFleetStore_Create_then_GetByID_and_GetByName(t *testing.T) {
 	require.NotZero(t, created.ID)
 	assert.Equal(t, tenantID, created.TenantID)
 	assert.Equal(t, projectID, created.ProjectID)
-	assert.Equal(t, "docker", created.Backend)
+	assert.Equal(t, "plugin:docker", created.Backend)
 	assert.Equal(t, "traefik/whoami:latest", created.Config["image"])
 
 	got, err := store.GetByID(ctx, created.ID)
@@ -111,12 +111,12 @@ func TestPostgresFleetStore_ListForProject_skips_deleted(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 
 	a, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "a", Backend: "docker",
+		ProjectID: projectID, Name: "a", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
 	_, err = fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "b", Backend: "docker",
+		ProjectID: projectID, Name: "b", Backend: "plugin:docker",
 		Config: map[string]string{"image": "y:1", "port": "81"},
 	}, actor)
 	require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestUpdateFleet_changes_config_but_not_backend(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 
 	f, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "primary", Backend: "docker",
+		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
@@ -156,7 +156,7 @@ func TestPostgresFleetStore_SoftDelete_lets_same_name_recreate(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 
 	first, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "primary", Backend: "docker",
+		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestPostgresFleetStore_SoftDelete_lets_same_name_recreate(t *testing.T) {
 	// Same name should be re-usable because the unique index is partial
 	// on deleted_at IS NULL.
 	second, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "primary", Backend: "docker",
+		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:2", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
@@ -182,13 +182,13 @@ func TestCreateFleet_rejects_duplicate_active_name(t *testing.T) {
 	ctx := db.WithTenant(context.Background(), tenantID)
 
 	_, err := fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "primary", Backend: "docker",
+		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.NoError(t, err)
 
 	_, err = fleet.CreateFleet(ctx, pool, tenantID, fleet.FleetCreate{
-		ProjectID: projectID, Name: "primary", Backend: "docker",
+		ProjectID: projectID, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x:1", "port": "80"},
 	}, actor)
 	require.Error(t, err, "active duplicate-name insert must violate the unique index")
@@ -200,7 +200,7 @@ func TestPostgresFleetStore_isolated_per_tenant(t *testing.T) {
 	store := fleet.NewPostgresFleetStore(pool)
 	ctxA := db.WithTenant(context.Background(), tenantA)
 	_, err := fleet.CreateFleet(ctxA, pool, tenantA, fleet.FleetCreate{
-		ProjectID: projectA, Name: "primary", Backend: "docker",
+		ProjectID: projectA, Name: "primary", Backend: "plugin:docker",
 		Config: map[string]string{"image": "x", "port": "80"},
 	}, actor)
 	require.NoError(t, err)

@@ -133,6 +133,13 @@ func (f *fixture) exec(sql string, args ...any) {
 	require.NoError(f.t, err)
 }
 
+// dropPair removes one Casbin policy row and reloads the policy.
+func (f *fixture) dropPair(role, object, action string) {
+	f.t.Helper()
+	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = $1 AND v2 = $2 AND v3 = $3`, role, object, action)
+	require.NoError(f.t, f.authz.ReloadPolicy())
+}
+
 func (f *fixture) count(sql string, args ...any) int {
 	f.t.Helper()
 	var n int

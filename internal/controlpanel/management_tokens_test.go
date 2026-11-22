@@ -81,7 +81,7 @@ func TestAccessOptions_should_build_the_pii_box_from_the_scope_table(t *testing.
 	got := riskyBox(t, risky, managementtoken.ScopePlayersPII)
 
 	assert.Equal(t, RiskyBoxView{
-		Scope: managementtoken.ScopePlayersPII, Label: "See player email and display name. They go into agent logs.",
+		Scope: managementtoken.ScopePlayersPII, Label: "See player email and display name. They go into agent logs and to the AI model provider.",
 		Needs: "Needs read access to Players",
 	}, got)
 }
@@ -147,7 +147,7 @@ func TestRiskyNotice_should_name_each_box_checked_from_the_link(t *testing.T) {
 
 	got := riskyNotice(risky)
 
-	assert.Equal(t, "See player email and display name. They go into agent logs.", got)
+	assert.Equal(t, "See player email and display name. They go into agent logs and to the AI model provider.", got)
 }
 
 func TestRiskyNotice_should_be_empty_when_no_box_is_checked(t *testing.T) {

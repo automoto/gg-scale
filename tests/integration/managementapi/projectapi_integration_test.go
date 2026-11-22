@@ -168,6 +168,7 @@ func TestProjectAPI_should_be_refused_when_the_creator_lacks_the_pair(t *testing
 		"leaderboard manage":  {"project:*:leaderboard", "manage", "leaderboards:write", http.MethodPost, "/v1/project/leaderboards", `{"name":"x"}`},
 		"publishable key":     {"api_key:publishable", "manage", "keys:create", http.MethodPost, "/v1/project/api-keys", `{"label":"x"}`},
 		"matchmaker read":     {"project:*:matchmaker", "read", "matchmaking:read", http.MethodGet, "/v1/project/matchmaking/ticket-trace?ticket_id=1", ""},
+		"matchmaking queue":   {"project:*:matchmaker", "read", "matchmaking:read", http.MethodGet, "/v1/project/matchmaking/queue", ""},
 		"origins with config": {"project:*:config", "update", "origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":[]}`},
 	}
 	for name, c := range cases {

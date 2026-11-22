@@ -146,57 +146,6 @@ func (q *Queries) GetPlayerForProject(ctx context.Context, arg GetPlayerForProje
 	return i, err
 }
 
-const getPlayerPageRowForProject = `-- name: GetPlayerPageRowForProject :one
-SELECT
-    u.id,
-    u.external_id,
-    coalesce(u.email, '')::text AS email,
-    coalesce(a.display_name, '')::text AS display_name,
-    u.email_verified_at,
-    u.disabled_at,
-    u.delete_requested_at,
-    u.created_at
-FROM project_players u
-LEFT JOIN player_accounts a ON a.id = u.player_account_id
-WHERE u.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND u.project_id = $1
-  AND u.id = $2
-  AND u.deleted_at IS NULL
-`
-
-type GetPlayerPageRowForProjectParams struct {
-	ProjectID int64
-	ID        int64
-}
-
-type GetPlayerPageRowForProjectRow struct {
-	ID                int64
-	ExternalID        string
-	Email             string
-	DisplayName       string
-	EmailVerifiedAt   pgtype.Timestamptz
-	DisabledAt        pgtype.Timestamptz
-	DeleteRequestedAt pgtype.Timestamptz
-	CreatedAt         pgtype.Timestamptz
-}
-
-// One live player of a project, with the same columns as the list page.
-func (q *Queries) GetPlayerPageRowForProject(ctx context.Context, arg GetPlayerPageRowForProjectParams) (GetPlayerPageRowForProjectRow, error) {
-	row := q.db.QueryRow(ctx, getPlayerPageRowForProject, arg.ProjectID, arg.ID)
-	var i GetPlayerPageRowForProjectRow
-	err := row.Scan(
-		&i.ID,
-		&i.ExternalID,
-		&i.Email,
-		&i.DisplayName,
-		&i.EmailVerifiedAt,
-		&i.DisabledAt,
-		&i.DeleteRequestedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const listPlayersForProject = `-- name: ListPlayersForProject :many
 
 SELECT

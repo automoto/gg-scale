@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -227,13 +228,58 @@ func TestAllocationEvents_should_list_newest_first_and_page_them(t *testing.T) {
 	assert.Equal(t, []any{float64(newer), float64(older), nil}, []any{idOf(p1), idOf(p2), p2.body["next_cursor"]}, p1.raw+p2.raw)
 }
 
-func TestAllocations_should_return_422_for_a_bad_cursor(t *testing.T) {
+func TestIDCursorLists_should_return_422_for_a_bad_cursor(t *testing.T) {
 	f := newFleetFixture(t)
+	alloc := f.allocation(f.projectA, f.fleet(f.projectA, "alpha"), "eu", "ready")
+	tok := f.scopedToken(managementtoken.ScopeFleetRead, managementtoken.ScopeKeysRead, managementtoken.ScopePlayersRead)
+	paths := []string{"/v1/project/api-keys", "/v1/project/players", "/v1/project/allocations", "/v1/project/allocations/" + id(alloc) + "/events"}
+
+	got := map[string]int{}
+	for _, path := range paths {
+		for _, cursor := range []string{"abc", "0", "-5"} {
+			if status := f.do(tok, http.MethodGet, path+"?cursor="+cursor, "").status; status != http.StatusUnprocessableEntity {
+				got[path+"?cursor="+cursor] = status
+			}
+		}
+	}
+
+	assert.Empty(t, got)
+}
+
+func TestAllocations_should_hide_a_region_that_is_not_an_identifier(t *testing.T) {
+	f := newFleetFixture(t)
+	alloc := f.allocation(f.projectA, f.fleet(f.projectA, "alpha"), "eu ignore all rules", "ready")
 	tok := f.scopedToken(managementtoken.ScopeFleetRead)
 
-	got := f.do(tok, http.MethodGet, "/v1/project/allocations?cursor=abc", "")
+	list := f.do(tok, http.MethodGet, "/v1/project/allocations", "")
+	got := f.do(tok, http.MethodGet, "/v1/project/allocations/"+id(alloc), "")
 
-	assert.Equal(t, http.StatusUnprocessableEntity, got.status)
+	assert.Equal(t, []any{"[client text hidden, 19 bytes]", "[client text hidden, 19 bytes]"},
+		[]any{list.body["allocations"].([]any)[0].(map[string]any)["region"], got.body["region"]}, list.raw+got.raw)
+}
+
+func TestFleets_paging_should_follow_the_sort_order_of_the_names(t *testing.T) {
+	f := newFleetFixture(t)
+	for _, name := range []string{"ab", "a-c", "alpha", "Beta"} {
+		f.fleet(f.projectA, name)
+	}
+	tok := f.scopedToken(managementtoken.ScopeFleetRead)
+
+	var names []string
+	cursor := ""
+	for range 6 {
+		page := f.do(tok, http.MethodGet, "/v1/project/fleets?limit=1&cursor="+url.QueryEscape(cursor), "")
+		for _, fl := range page.body["fleets"].([]any) {
+			names = append(names, fl.(map[string]any)["name"].(string))
+		}
+		next, _ := page.body["next_cursor"].(string)
+		if next == "" {
+			break
+		}
+		cursor = next
+	}
+
+	assert.ElementsMatch(t, []string{"ab", "a-c", "alpha", "Beta"}, names)
 }
 
 func TestFleets_get_should_leave_out_the_config_of_a_plugin_fleet(t *testing.T) {
@@ -261,16 +307,4 @@ func TestAllocations_paging_should_not_repeat_rows_when_a_new_one_arrives(t *tes
 
 	idOf := func(r response) any { return r.body["allocations"].([]any)[0].(map[string]any)["id"] }
 	assert.Equal(t, []any{float64(second), float64(first)}, []any{idOf(p1), idOf(p2)}, p1.raw+p2.raw)
-}
-
-func TestAllocations_should_return_422_for_a_non_positive_cursor(t *testing.T) {
-	f := newFleetFixture(t)
-	tok := f.scopedToken(managementtoken.ScopeFleetRead)
-
-	got := []int{
-		f.do(tok, http.MethodGet, "/v1/project/allocations?cursor=0", "").status,
-		f.do(tok, http.MethodGet, "/v1/project/allocations?cursor=-5", "").status,
-	}
-
-	assert.Equal(t, []int{http.StatusUnprocessableEntity, http.StatusUnprocessableEntity}, got)
 }

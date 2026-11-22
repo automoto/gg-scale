@@ -52,6 +52,20 @@ func trimPage[T any](rows []T, limit int32) (page []T, more bool) {
 	return rows[:limit], true
 }
 
+// decodeIDCursor reads a cursor that is a row ID: empty, or a positive number.
+func decodeIDCursor(s string) (int64, bool) {
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func errBadCursor() error { return huma.Error422UnprocessableEntity("cursor is not valid") }
+
 // projectQ runs fn in a transaction scoped to the token's tenant. It uses the
 // primary, not the read replica: a stale revision number from a replica
 // would make the next write fail with 409.
@@ -259,12 +273,16 @@ type projectAPIKeyList struct {
 // listAPIKeys pages by key ID, newest first: the cursor is the ID of the
 // last key of the page.
 func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectAPIKeyList, error) {
+	before, ok := decodeIDCursor(in.Cursor)
+	if !ok {
+		return projectAPIKeyList{}, errBadCursor()
+	}
 	limit := in.limit()
 	var rows []sqlcgen.ListActiveAPIKeysPageForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
 		rows, err = q.ListActiveAPIKeysPageForProject(ctx, sqlcgen.ListActiveAPIKeysPageForProjectParams{
-			ProjectID: &p.ProjectID, BeforeID: parseCursor(in.Cursor), RowLimit: limit + 1,
+			ProjectID: &p.ProjectID, BeforeID: before, RowLimit: limit + 1,
 		})
 		return err
 	})
@@ -327,13 +345,17 @@ type projectPlayerList struct {
 // last player of the page. The pair of players:pii is the pair of
 // players:read, so the scope test alone decides the personal fields.
 func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListPlayersInput) (projectPlayerList, error) {
+	before, ok := decodeIDCursor(in.Cursor)
+	if !ok {
+		return projectPlayerList{}, errBadCursor()
+	}
 	limit := in.limit()
 	var rows []sqlcgen.ListPlayersPageForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
 		rows, err = q.ListPlayersPageForProject(ctx, sqlcgen.ListPlayersPageForProjectParams{
 			ProjectID: p.ProjectID, PlayerID: in.PlayerID, ExternalID: in.ExternalID,
-			BeforeID: parseCursor(in.Cursor), RowLimit: limit + 1,
+			BeforeID: before, RowLimit: limit + 1,
 		})
 		return err
 	})
@@ -361,21 +383,25 @@ func getPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *Pro
 	return readPlayer(ctx, d, p, in.PlayerID)
 }
 
-// readPlayer returns one live player of the token's project.
+// readPlayer returns one live player of the token's project. In the list
+// query a player_id of 0 means no filter, so a non-positive ID is a 404 here.
 func readPlayer(ctx context.Context, d Deps, p managementtoken.Principal, playerID int64) (projectPlayer, error) {
-	var r sqlcgen.GetPlayerPageRowForProjectRow
-	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
-		var err error
-		r, err = q.GetPlayerPageRowForProject(ctx, sqlcgen.GetPlayerPageRowForProjectParams{ProjectID: p.ProjectID, ID: playerID})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
+	if playerID <= 0 {
 		return projectPlayer{}, errProjectNotFound()
 	}
+	var rows []sqlcgen.ListPlayersPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListPlayersPageForProject(ctx, sqlcgen.ListPlayersPageForProjectParams{ProjectID: p.ProjectID, PlayerID: playerID, RowLimit: 1})
+		return err
+	})
 	if err != nil {
 		return projectPlayer{}, err
 	}
-	return playerView(p.HasScope(managementtoken.ScopePlayersPII), sqlcgen.ListPlayersPageForProjectRow(r)), nil
+	if len(rows) == 0 {
+		return projectPlayer{}, errProjectNotFound()
+	}
+	return playerView(p.HasScope(managementtoken.ScopePlayersPII), rows[0]), nil
 }
 
 type projectListRevisionsInput struct {
@@ -846,7 +872,7 @@ func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principa
 	if in.Cursor != "" {
 		c, ok := decodeQueueCursor(in.Cursor)
 		if !ok {
-			return projectQueue{}, huma.Error422UnprocessableEntity("cursor is not valid")
+			return projectQueue{}, errBadCursor()
 		}
 		params.HasAfter, params.AfterMode, params.AfterRegion, params.AfterGameMode, params.AfterStatus =
 			true, c.Mode, c.Region, c.GameMode, c.Status

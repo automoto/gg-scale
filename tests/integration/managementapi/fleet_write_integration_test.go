@@ -150,3 +150,49 @@ func TestFleetWrite_should_return_403_without_the_backend_grant(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, got.status, got.raw)
 }
+
+func TestFleetWrite_should_return_422_for_a_long_name_or_backend(t *testing.T) {
+	f := newFleetFixture(t)
+	fid := f.fleet(f.projectA, "alpha")
+	tok := f.scopedToken(managementtoken.ScopeFleetWrite)
+	long := strings.Repeat("n", 300)
+
+	got := []int{
+		f.do(tok, http.MethodPost, fleetsPath, `{"name":"`+long+`","backend":"agones","config":{"fleet_name":"gs"}}`).status,
+		f.do(tok, http.MethodPost, fleetsPath, `{"name":"x","backend":"plugin`+long+`","config":{}}`).status,
+		f.do(tok, http.MethodPut, fleetsPath+"/"+id(fid), `{"name":"`+long+`"}`).status,
+	}
+
+	assert.Equal(t, []int{422, 422, 422}, got)
+}
+
+// huma copies a refused value, or the whole body, into a 422. A plugin
+// config may hold a secret, so no fleet write error may carry it.
+func TestFleetWrite_should_keep_the_plugin_config_out_of_a_validation_error(t *testing.T) {
+	f := newFleetFixture(t)
+	fid := f.scalar(`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		SELECT tenant_id, id, 'plug', 'plugin:demo', '{}' FROM projects WHERE id = $1 RETURNING id`, f.projectA)
+	tok := f.scopedToken(managementtoken.ScopeFleetWrite)
+	path := fleetsPath + "/" + id(fid)
+	cfg := map[string]any{"api_key": "TOPSECRET"}
+
+	create := f.do(tok, http.MethodPost, fleetsPath, `{"name":"p","backend":"plugin:demo","config":{"api_key":"TOPSECRET"},"extra":1}`)
+	update := f.do(tok, http.MethodPut, path, `{"config":{"api_key":"TOPSECRET"},"extra":1}`)
+	outputs := []string{
+		create.raw, update.raw,
+		f.do(tok, http.MethodPost, fleetsPath, `{"name":5,"backend":"plugin:demo","config":{"api_key":"TOPSECRET"}}`).raw,
+		f.do(tok, http.MethodPut, path, `{"config":{"api_key":"TOPSECRET"}`).raw,
+		f.rpcError(tok, "create_fleet", map[string]any{"name": "p", "backend": "plugin:demo", "config": cfg, "extra": 1}),
+		f.rpcError(tok, "update_fleet", map[string]any{"fleet_id": fid, "config": cfg, "extra": 1}),
+		resultText(f.call(tok, "create_fleet", map[string]any{"name": 5, "backend": "plugin:demo", "config": cfg})),
+		resultText(f.call(tok, "update_fleet", map[string]any{"fleet_id": fid, "name": 5, "config": cfg})),
+	}
+
+	leaked := []int{}
+	for i, out := range outputs {
+		if strings.Contains(out, "TOPSECRET") {
+			leaked = append(leaked, i)
+		}
+	}
+	assert.Equal(t, []any{422, 422, []int{}}, []any{create.status, update.status, leaked}, strings.Join(outputs, "\n"))
+}

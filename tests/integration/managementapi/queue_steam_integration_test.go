@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -74,6 +75,21 @@ func TestSteamAuth_should_return_403_without_config_read(t *testing.T) {
 
 	// Assert
 	assert.Equal(t, 403, got.status)
+}
+
+// The pair of config:read is the base creator check (project, manage).
+func TestSteamAuth_should_return_403_when_the_creator_lacks_the_project_pair(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	admin := f.user("admin@example.com", f.tenantA, "admin")
+	tok, _ := f.token(f.tenantA, f.projectA, admin, []string{managementtoken.ScopeConfigRead}, time.Hour)
+	f.dropPair("role:tenant_admin", "project", "manage")
+
+	// Act
+	got := f.do(tok, http.MethodGet, steamPath, "")
+
+	// Assert
+	assert.Equal(t, http.StatusForbidden, got.status, got.raw)
 }
 
 func TestSteamAuth_should_report_unset_config(t *testing.T) {

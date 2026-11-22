@@ -132,16 +132,19 @@ func TestPlayers_should_not_find_players_of_other_projects(t *testing.T) {
 	otherTenant := f.player(f.projectC)
 	deleted := f.player(f.projectA)
 	f.exec(`UPDATE project_players SET deleted_at = now() WHERE id = $1`, deleted)
+	f.player(f.projectA)
 
 	// Act
 	got := map[string]int{
 		"other project": f.get(tok, playerPath(otherProject)),
 		"other tenant":  f.get(tok, playerPath(otherTenant)),
 		"deleted":       f.get(tok, playerPath(deleted)),
+		"id zero":       f.get(tok, playerPath(0)),
 	}
 
 	// Assert
-	assert.Equal(t, map[string]int{"other project": http.StatusNotFound, "other tenant": http.StatusNotFound, "deleted": http.StatusNotFound}, got)
+	assert.Equal(t, map[string]int{"other project": http.StatusNotFound, "other tenant": http.StatusNotFound, "deleted": http.StatusNotFound,
+		"id zero": http.StatusNotFound}, got)
 }
 
 func TestPlayers_list_should_return_only_players_of_the_token_project(t *testing.T) {

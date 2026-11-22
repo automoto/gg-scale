@@ -159,7 +159,7 @@ each resource and one radio group in each row:
   [ ] Revoke API keys. Cannot be undone; a game that uses the key stops.
   [ ] Create secret API keys. The key value is returned to the token user.
   [ ] Change the Steam Web API key. The old key is lost.
-  [ ] See player email and display name. They go into agent logs.
+  [ ] See player email and display name. They go into agent logs and to the AI model provider.
   [ ] Invite and link players. Sends email.
   [ ] Start and stop game servers. Stopping ends a live match.
 ```
@@ -317,7 +317,7 @@ Do the stages in order. Write failing tests first. After each stage:
 - [x] `get_project_limits`, `set_project_invite_limit`, `set_project_storage_limit` (`limits:read`, `limits:write`) in `projectadmin/limits.go`. Same bounds as the dashboard. Make the storage limit write and its audit row one transaction.
 - [x] `get_matchmaking_queue` (`matchmaking:read`), the bucket view of the dashboard queue page. `matchmaking_ticket_trace` already uses `matchmaking:read`.
 - [x] `get_steam_auth` (`config:read`): App ID and whether a key is set. Never the key.
-- [ ] Tests for each operation: scope refusal, creator pair refusal, another project's resource is 404, audit row.
+- [x] Tests for each operation: scope refusal, creator pair refusal, another project's resource is 404, audit row.
 
 ### Stage 3: fleets (class 1)
 
@@ -447,3 +447,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
   audit row fails, the action now fails too.
 - The dashboard fleet list has a **Restore** button for a deleted fleet.
 - The dashboard allocation form is limited by `FLEET_ALLOCATION_MAX_CAPACITY`.
+- A fleet name and backend are at most 256 bytes, valid UTF-8, and no NUL, in
+  the dashboard and in the management API. The backend must be `agones` or a
+  plugin backend. Before, a long name gave an error 500.
+- A list operation answers 422 for a cursor that it did not return. Before,
+  `list_api_keys`, `list_players`, and `list_allocation_events` started again
+  at the first page.

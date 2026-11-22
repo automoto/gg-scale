@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,9 @@ func fleetManager(d Deps) (*fleet.Manager, error) {
 }
 
 // listFleets pages by name: the cursor is the name of the last fleet of the
-// page. A project has few fleets, so one read gets all of them.
+// page. A project has few fleets, so one read gets all of them. The database
+// sorts by its collation, so the list is sorted again in byte order, the
+// order of the cursor compare.
 func listFleets(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectFleetList, error) {
 	m, err := fleetManager(d)
 	if err != nil {
@@ -75,6 +78,7 @@ func listFleets(ctx context.Context, d Deps, p managementtoken.Principal, in *Pr
 	if err != nil {
 		return projectFleetList{}, err
 	}
+	slices.SortFunc(all, func(a, b *fleet.Fleet) int { return strings.Compare(a.Name, b.Name) })
 	limit := int(in.limit())
 	out := projectFleetList{Fleets: []projectFleet{}}
 	for _, f := range all {
@@ -245,7 +249,7 @@ type projectAllocation struct {
 	FleetID    int64  `json:"fleet_id" example:"3"`
 	Backend    string `json:"backend" example:"agones"`
 	BackendRef string `json:"backend_ref" doc:"The backend name of the server, for example the Agones GameServer name."`
-	Region     string `json:"region" example:"eu"`
+	Region     string `json:"region" example:"eu" doc:"Shown only when it is a short identifier; other text is replaced by a marker with its length."`
 	Address    string `json:"address" example:"203.0.113.5:7777"`
 	Status     string `json:"status" example:"ready"`
 }
@@ -253,7 +257,7 @@ type projectAllocation struct {
 func newProjectAllocation(a *fleet.Allocation) projectAllocation {
 	return projectAllocation{
 		ID: int64(a.ID), FleetID: a.FleetID, Backend: a.Backend, BackendRef: a.BackendRef,
-		Region: a.Region, Address: a.Address, Status: a.Status.String(),
+		Region: clientText(a.Region), Address: a.Address, Status: a.Status.String(),
 	}
 }
 
@@ -267,18 +271,6 @@ type projectListAllocationsInput struct {
 	IncludeTerminal bool `query:"include_terminal" doc:"Also list finished allocations (shutdown and failed). The default is live ones only."`
 }
 
-// decodeIDCursor reads a cursor that is a row ID: empty, or a positive number.
-func decodeIDCursor(s string) (int64, bool) {
-	if s == "" {
-		return 0, true
-	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil || n <= 0 {
-		return 0, false
-	}
-	return n, true
-}
-
 // listAllocations pages newest first by allocation ID: the cursor is the ID
 // of the last allocation of the page.
 func listAllocations(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListAllocationsInput) (projectAllocationList, error) {
@@ -287,7 +279,7 @@ func listAllocations(ctx context.Context, d Deps, p managementtoken.Principal, i
 	}
 	before, ok := decodeIDCursor(in.Cursor)
 	if !ok {
-		return projectAllocationList{}, huma.Error422UnprocessableEntity("cursor is not valid")
+		return projectAllocationList{}, errBadCursor()
 	}
 	limit := in.limit()
 	var rows []sqlcgen.ListAllocationsPageForProjectRow
@@ -306,7 +298,7 @@ func listAllocations(ctx context.Context, d Deps, p managementtoken.Principal, i
 	for _, r := range rows {
 		out.Allocations = append(out.Allocations, projectAllocation{
 			ID: r.ID, FleetID: derefInt64(r.FleetID), Backend: r.Backend, BackendRef: r.BackendRef,
-			Region: r.Region, Address: r.Address, Status: r.Status,
+			Region: clientText(r.Region), Address: r.Address, Status: r.Status,
 		})
 	}
 	if more {
@@ -441,7 +433,10 @@ func listAllocationEvents(ctx context.Context, d Deps, p managementtoken.Princip
 	if err != nil {
 		return projectAllocationEventList{}, err
 	}
-	before := parseCursor(in.Cursor)
+	before, ok := decodeIDCursor(in.Cursor)
+	if !ok {
+		return projectAllocationEventList{}, errBadCursor()
+	}
 	all, err := m.ListEvents(ctx, fleet.AllocationID(in.AllocationID), allocationEventRing)
 	if err != nil {
 		return projectAllocationEventList{}, err

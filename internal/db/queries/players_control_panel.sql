@@ -135,20 +135,3 @@ WHERE u.tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY u.id DESC
 LIMIT sqlc.arg(row_limit);
 
--- name: GetPlayerPageRowForProject :one
--- One live player of a project, with the same columns as the list page.
-SELECT
-    u.id,
-    u.external_id,
-    coalesce(u.email, '')::text AS email,
-    coalesce(a.display_name, '')::text AS display_name,
-    u.email_verified_at,
-    u.disabled_at,
-    u.delete_requested_at,
-    u.created_at
-FROM project_players u
-LEFT JOIN player_accounts a ON a.id = u.player_account_id
-WHERE u.tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND u.project_id = sqlc.arg(project_id)
-  AND u.id = sqlc.arg(id)
-  AND u.deleted_at IS NULL;
