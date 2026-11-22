@@ -24,6 +24,8 @@ const (
 	ScopeKeysRead          = "keys:read"
 	ScopeKeysCreate        = "keys:create"
 	ScopeKeysWrite         = "keys:write"
+	ScopeKeysRevoke        = "keys:revoke"
+	ScopeKeysSecret        = "keys:secret"
 	ScopeMatchmakingRead   = "matchmaking:read"
 	ScopePlayersRead       = "players:read"
 	ScopePlayersPII        = "players:pii"
@@ -71,7 +73,9 @@ func projectObject(int64) string { return rbac.ObjectProject }
 // (players, read), so the player scopes use (players, manage): a pair that
 // is not weaker than the pages and that each such role passes. The fleet
 // pages check (fleet, read), so fleet:read uses it. The allocation reads
-// also check their own pair, (allocation, read), on each request.
+// also check their own pair, (allocation, read), on each request. The key
+// write scopes use the publishable key pair; each request also checks the
+// pair of the target key's type, so a secret key needs the secret key pair.
 var Scopes = []ScopePair{
 	{Scope: ScopeConfigRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "config"},
 	{Scope: ScopeConfigWrite, Class: ClassNormal, Pair: rbac.ProjectConfigObject, Action: rbac.ActionUpdate, Resource: "config"},
@@ -81,6 +85,14 @@ var Scopes = []ScopePair{
 	{Scope: ScopeKeysRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeKeysCreate, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
 	{Scope: ScopeKeysWrite, Class: ClassNormal, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys"},
+	{
+		Scope: ScopeKeysRevoke, Class: ClassRisky, Pair: func(int64) string { return rbac.ObjectAPIKeyPublic }, Action: rbac.ActionManage, Resource: "keys",
+		Label: "Revoke API keys. Cannot be undone; a game that uses the key stops.", Needs: ScopeKeysRead,
+	},
+	{
+		Scope: ScopeKeysSecret, Class: ClassRisky, Pair: func(int64) string { return rbac.ObjectAPIKeySecret }, Action: rbac.ActionManage, Resource: "keys",
+		Label: "Create secret API keys. The key value is returned to the token user.",
+	},
 	{Scope: ScopeMatchmakingRead, Class: ClassNormal, Pair: rbac.ProjectMatchmakerObject, Action: rbac.ActionRead, Resource: "matchmaking"},
 	{Scope: ScopePlayersRead, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 	{

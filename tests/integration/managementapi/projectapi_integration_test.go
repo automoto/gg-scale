@@ -44,6 +44,8 @@ func (f *fixture) writeCalls() map[string]writeCall {
 		"update_api_key_label":    {"keys:write", http.MethodPut, keyPath(key, "/label"), `{"label":"renamed"}`},
 		"update_api_key_features": {"keys:write", http.MethodPut, keyPath(key, "/features"), `{"scopes":["matchmaker"]}`},
 		"set_allowed_origins":     {"origins:write", http.MethodPut, "/v1/project/allowed-origins", `{"origins":["http://localhost:5173"]}`},
+		"revoke_api_key":          {"keys:revoke", http.MethodPost, keyPath(key, "/revoke"), ""},
+		"create_secret_api_key":   {"keys:secret", http.MethodPost, "/v1/project/secret-api-keys", `{"label":"ci"}`},
 	}
 }
 
@@ -140,7 +142,8 @@ func TestProjectAPI_writes_should_answer_200_with_a_json_object(t *testing.T) {
 	calls := f.writeCalls()
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
-		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins"} {
+		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins",
+		"create_secret_api_key", "revoke_api_key"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 

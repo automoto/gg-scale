@@ -37,6 +37,23 @@ func TestProjectOps_should_use_only_project_level_casbin_objects(t *testing.T) {
 	}
 }
 
+// A class 2 tool says its risk first, because MCP clients have no other
+// mark for a risky tool.
+func TestProjectOps_risky_key_tools_should_start_with_the_risk_sentence(t *testing.T) {
+	want := map[string]string{
+		"revoke_api_key":        "Cannot be undone.",
+		"create_secret_api_key": "Returns a secret.",
+	}
+	got := map[string]string{}
+	for _, row := range projectOps {
+		if prefix, ok := want[row.tool]; ok && strings.HasPrefix(row.description, prefix) {
+			got[row.tool] = prefix
+		}
+	}
+
+	assert.Equal(t, want, got)
+}
+
 func TestProjectOps_should_use_only_known_scopes(t *testing.T) {
 	known := map[string]bool{"": true}
 	for _, s := range managementtoken.Scopes {

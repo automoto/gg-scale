@@ -1690,6 +1690,14 @@ components:
       required:
         - api_keys
       type: object
+    ProjectAPIKeyRevoked:
+      additionalProperties: false
+      properties:
+        revoked:
+          type: boolean
+      required:
+        - revoked
+      type: object
     ProjectAPIKeyUpdated:
       additionalProperties: false
       properties:
@@ -6119,7 +6127,7 @@ paths:
       tags:
         - Project Management
     post:
-      description: Creates a publishable (ggp_) API key for the Game Project. Secret keys cannot be made here. The key value is returned only in this response. Scopes are limited to the features of the Game Project. Answers 409 when the Game Project has the maximum number of active keys.
+      description: Creates a publishable (ggp_) API key for the Game Project. For a secret key use createProjectSecretAPIKey. The key value is returned only in this response. Scopes are limited to the features of the Game Project. Answers 409 when the Game Project has the maximum number of active keys.
       operationId: createProjectAPIKey
       requestBody:
         content:
@@ -6221,6 +6229,39 @@ paths:
       security:
         - ManagementToken: []
       summary: Change an API key label
+      tags:
+        - Project Management
+  /v1/project/api-keys/{api_key_id}/revoke:
+    post:
+      description: Revokes an API key of the Game Project. This cannot be undone. Answers 404 for a key of another Game Project, a key with no Game Project, or a key that is already revoked. Answers 403 when the person who created the token may not manage keys of that type.
+      operationId: revokeProjectAPIKey
+      parameters:
+        - description: API key ID.
+          in: path
+          name: api_key_id
+          required: true
+          schema:
+            description: API key ID.
+            examples:
+              - 12
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectAPIKeyRevoked"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Revoke an API key
       tags:
         - Project Management
   /v1/project/fleets:
@@ -7156,6 +7197,34 @@ paths:
       security:
         - ManagementToken: []
       summary: List kept revisions
+      tags:
+        - Project Management
+  /v1/project/secret-api-keys:
+    post:
+      description: Creates a secret (ggs_) API key for the Game Project. The key value is returned only in this response. Scopes are limited to the features of the Game Project. Answers 409 when the Game Project has the maximum number of active keys; publishable and secret keys count against the same limit.
+      operationId: createProjectSecretAPIKey
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreateAPIKeyBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectCreatedAPIKey"
+          description: OK
+        default:
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ErrorModel"
+          description: Error
+      security:
+        - ManagementToken: []
+      summary: Create a secret API key
       tags:
         - Project Management
   /v1/project/steam-auth:

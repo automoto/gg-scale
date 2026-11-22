@@ -207,13 +207,85 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write", "fleets": "write"}, selections(rows))
 }
 
+// riskyScopes returns every class 2 scope of the table.
+func riskyScopes() []string {
+	var out []string
+	for _, s := range managementtoken.Scopes {
+		if s.Class == managementtoken.ClassRisky {
+			out = append(out, s.Scope)
+		}
+	}
+	return out
+}
+
+func checkedBoxes(risky []RiskyBoxView) []string {
+	out := []string{}
+	for _, b := range risky {
+		if b.Checked {
+			out = append(out, b.Scope)
+		}
+	}
+	return out
+}
+
 func TestFillAccess_quick_fill_should_never_check_a_risky_box(t *testing.T) {
-	scope := managementtoken.ScopePlayersPII
+	for _, fill := range []string{fillReadOnly, fillReadWrite} {
+		t.Run(fill, func(t *testing.T) {
+			rows, risky := accessOptions(allScopes(), nil)
+
+			fillAccess(url.Values{"fill": {fill}, "risky": riskyScopes()}, rows, risky)
+
+			assert.Empty(t, checkedBoxes(risky))
+		})
+	}
+}
+
+func TestFillAccess_default_form_should_check_no_risky_box(t *testing.T) {
 	rows, risky := accessOptions(allScopes(), nil)
 
-	fillAccess(url.Values{"fill": {"read_write"}, "risky": {scope}}, rows, risky)
+	fillAccess(url.Values{}, rows, risky)
 
-	assert.False(t, riskyBox(t, risky, scope).Checked)
+	assert.Empty(t, checkedBoxes(risky))
+}
+
+func TestAccessRows_read_and_write_should_give_no_risky_scope(t *testing.T) {
+	var got []string
+	for _, res := range managementtoken.Resources {
+		got = append(got, res.WriteScopes()...)
+	}
+
+	for _, scope := range riskyScopes() {
+		assert.NotContains(t, got, scope)
+	}
+}
+
+func TestAccessOptions_should_build_the_key_risky_boxes_from_the_scope_table(t *testing.T) {
+	cases := map[string]RiskyBoxView{
+		managementtoken.ScopeKeysRevoke: {Scope: managementtoken.ScopeKeysRevoke,
+			Label: "Revoke API keys. Cannot be undone; a game that uses the key stops.", Needs: "Needs read access to API keys"},
+		managementtoken.ScopeKeysSecret: {Scope: managementtoken.ScopeKeysSecret,
+			Label: "Create secret API keys. The key value is returned to the token user."},
+	}
+	_, risky := accessOptions(allScopes(), nil)
+	for scope, want := range cases {
+		t.Run(scope, func(t *testing.T) {
+			assert.Equal(t, want, riskyBox(t, risky, scope))
+		})
+	}
+}
+
+func TestAccessOptions_should_disable_the_secret_box_when_the_creator_lacks_the_pair(t *testing.T) {
+	_, risky := accessOptions([]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke}, nil)
+
+	got := riskyBox(t, risky, managementtoken.ScopeKeysSecret)
+
+	assert.Equal(t, reasonRole, got.Reason)
+}
+
+func TestMissingDependency_should_name_keys_read_for_revoke(t *testing.T) {
+	got := missingDependency([]string{managementtoken.ScopeKeysRevoke})
+
+	assert.Contains(t, got, "Needs read access to API keys")
 }
 
 func TestTokenAccessValues_should_round_trip_through_the_form(t *testing.T) {

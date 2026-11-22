@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/automoto/gg-scale/internal/cache/memory"
 	"github.com/automoto/gg-scale/internal/ratelimit"
@@ -18,7 +19,7 @@ import (
 func TestScopes_should_use_only_project_level_casbin_objects(t *testing.T) {
 	for _, s := range Scopes {
 		obj := s.Pair(42)
-		assert.True(t, strings.HasPrefix(obj, "project:42:") || obj == rbac.ObjectProject || obj == rbac.ObjectAPIKeyPublic,
+		assert.True(t, strings.HasPrefix(obj, "project:42:") || obj == rbac.ObjectProject || obj == rbac.ObjectAPIKeyPublic || obj == rbac.ObjectAPIKeySecret,
 			"scope %s uses %s", s.Scope, obj)
 	}
 }
@@ -56,6 +57,25 @@ func TestScopes_players_pii_should_need_players_read(t *testing.T) {
 	got, _ := Scope(ScopePlayersPII)
 
 	assert.Equal(t, []any{ClassRisky, ScopePlayersRead}, []any{got.Class, got.Needs})
+}
+
+func TestScopes_key_risky_scopes(t *testing.T) {
+	cases := map[string]ScopePair{
+		ScopeKeysRevoke: {Class: ClassRisky, Action: rbac.ActionManage, Resource: "keys", Needs: ScopeKeysRead,
+			Label: "Revoke API keys. Cannot be undone; a game that uses the key stops."},
+		ScopeKeysSecret: {Class: ClassRisky, Action: rbac.ActionManage, Resource: "keys",
+			Label: "Create secret API keys. The key value is returned to the token user."},
+	}
+	pairs := map[string]string{ScopeKeysRevoke: rbac.ObjectAPIKeyPublic, ScopeKeysSecret: rbac.ObjectAPIKeySecret}
+	for scope, want := range cases {
+		t.Run(scope, func(t *testing.T) {
+			got, ok := Scope(scope)
+			require.True(t, ok)
+
+			assert.Equal(t, []any{want.Class, pairs[scope], want.Action, want.Resource, want.Needs, want.Label},
+				[]any{got.Class, got.Pair(42), got.Action, got.Resource, got.Needs, got.Label})
+		})
+	}
 }
 
 func TestScope_should_return_the_pair_of_the_scope(t *testing.T) {

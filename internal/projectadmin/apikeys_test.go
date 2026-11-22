@@ -94,3 +94,11 @@ func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
 
 	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
 }
+
+// The zero KeyScope must fail closed: a caller that forgets to set a scope
+// reaches no key. It answers before any query, so no database is needed.
+func TestAuthorizeAPIKey_zero_scope_should_match_no_key(t *testing.T) {
+	_, err := AuthorizeAPIKey(t.Context(), nil, nil, 7, KeyScope{}, 1, Actor{UserID: 1})
+
+	assert.ErrorIs(t, err, ErrAPIKeyNotFound)
+}

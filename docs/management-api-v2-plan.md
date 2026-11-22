@@ -329,8 +329,8 @@ Do the stages in order. Write failing tests first. After each stage:
 
 ### Stage 4: risky operations (class 2)
 
-- [ ] `revoke_api_key` (`keys:revoke`). Move `revokeAPIKey`, the RBAC role removal, and the cache bust into `projectadmin/apikeys.go`.
-- [ ] `create_secret_api_key` (`keys:secret`): returns the value one time. Same key limit as `create_api_key`.
+- [x] `revoke_api_key` (`keys:revoke`). Move `revokeAPIKey`, the RBAC role removal, and the cache bust into `projectadmin/apikeys.go`.
+- [x] `create_secret_api_key` (`keys:secret`): returns the value one time. Same key limit as `create_api_key`.
 - [ ] `set_steam_auth`, `clear_steam_auth` (`steam:write`): the key is input only and is sealed as today.
 - [ ] `invite_player`, `link_player` (`players:invite`): same throttle as the dashboard, plus an audit row.
 - [ ] `allocate_server`, `deallocate_server` (`allocations:write`).

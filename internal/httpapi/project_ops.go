@@ -215,7 +215,7 @@ func projectWriteError(err error) error {
 	case errors.Is(err, projectadmin.ErrLeaderboardLimit):
 		return huma.Error409Conflict("this Game Project already has the maximum number of leaderboards. Delete one, or ask a platform admin to raise the limit.")
 	case errors.Is(err, projectadmin.ErrAPIKeyLimit):
-		return huma.Error409Conflict("this Game Project already has the maximum number of active API keys. Revoke one in the dashboard.")
+		return huma.Error409Conflict("this Game Project already has the maximum number of active API keys. Revoke one in the dashboard or with revoke_api_key.")
 	case errors.Is(err, projectadmin.ErrOriginLimit):
 		// Before ErrInvalidOrigins, which it wraps.
 		return huma.Error409Conflict(err.Error())
@@ -567,13 +567,13 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "create_api_key",
-		description: "Create a publishable (ggp_) API key for this Game Project, to ship in a game client. Secret keys " +
-			"cannot be made here. The value is returned once. Scopes are limited to the features this Game Project has.",
+		description: "Create a publishable (ggp_) API key for this Game Project, to ship in a game client. For a secret " +
+			"key use create_secret_api_key. The value is returned once. Scopes are limited to the features this Game Project has.",
 		scope: managementtoken.ScopeKeysCreate,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/api-keys", OperationID: "createProjectAPIKey",
 			Summary: "Create a publishable API key",
-			Description: "Creates a publishable (ggp_) API key for the Game Project. Secret keys cannot be made here. " +
+			Description: "Creates a publishable (ggp_) API key for the Game Project. For a secret key use createProjectSecretAPIKey. " +
 				"The key value is returned only in this response. Scopes are limited to the features of the Game Project. " +
 				"Answers 409 when the Game Project has the maximum number of active keys.",
 		},
@@ -606,6 +606,36 @@ var projectOps = []projectOp{
 				"Answers 403 when the person who created the token may not manage keys of that type.",
 		},
 		handler: projectHandler(updateAPIKeyFeatures),
+	},
+	{
+		tool: "revoke_api_key",
+		description: "Cannot be undone. Revoke an API key of this Game Project: each game client or server that uses the key " +
+			"stops working at once. Use list_api_keys to find the key, and make a new key first if the game still needs one. " +
+			"A secret key can be revoked only when the person who created the token may manage secret keys.",
+		scope: managementtoken.ScopeKeysRevoke,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/api-keys/{api_key_id}/revoke", OperationID: "revokeProjectAPIKey",
+			Summary: "Revoke an API key",
+			Description: "Revokes an API key of the Game Project. This cannot be undone. Answers 404 for a key of another " +
+				"Game Project, a key with no Game Project, or a key that is already revoked. " +
+				"Answers 403 when the person who created the token may not manage keys of that type.",
+		},
+		handler: projectHandler(revokeAPIKey),
+	},
+	{
+		tool: "create_secret_api_key",
+		description: "Returns a secret. Create a secret (ggs_) API key for this Game Project, for game servers and back-end " +
+			"tools only; never put it in a game client. The value is returned once: store it in a secret store and do not " +
+			"write it in logs or chat. Scopes are limited to the features this Game Project has.",
+		scope: managementtoken.ScopeKeysSecret,
+		op: huma.Operation{
+			Method: http.MethodPost, Path: "/v1/project/secret-api-keys", OperationID: "createProjectSecretAPIKey",
+			Summary: "Create a secret API key",
+			Description: "Creates a secret (ggs_) API key for the Game Project. The key value is returned only in this response. " +
+				"Scopes are limited to the features of the Game Project. Answers 409 when the Game Project has the maximum " +
+				"number of active keys; publishable and secret keys count against the same limit.",
+		},
+		handler: projectHandler(createSecretAPIKey),
 	},
 	{
 		tool: "list_players",

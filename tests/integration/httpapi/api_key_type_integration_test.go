@@ -117,7 +117,9 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 			if op == nil || len(op.Security) == 0 || path == "/v1/ws" || path == "/v1/healthz" {
 				continue
 			}
-			url := srv.URL + pathParam.ReplaceAllString(path, "1")
+			// An API key ID of 1 can be a key of this test, and the token
+			// has keys:revoke, so no key path uses a real key ID.
+			url := srv.URL + pathParam.ReplaceAllString(strings.ReplaceAll(path, "{api_key_id}", "999999"), "1")
 			if hasScheme(op, "ManagementToken") {
 				got := []int{statusFor(t, method, url, "key-type"), statusFor(t, method, url, "key-type-secret")}
 				assert.Equal(t, []int{http.StatusUnauthorized, http.StatusUnauthorized}, got,

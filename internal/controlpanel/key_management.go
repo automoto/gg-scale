@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/automoto/gg-scale/internal/auditlog"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/projectadmin"
@@ -114,11 +112,15 @@ func parseManagedAPIKeyScopes(form url.Values) ([]string, error) {
 	return out, nil
 }
 
+// dashboardKeyScope lets a dashboard key change reach any key of the tenant,
+// revoked keys included.
+var dashboardKeyScope = projectadmin.KeyScope{TenantWide: true}
+
 func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenantID, apiKeyID int64, desired []string) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, projectadmin.KeyScope{}, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
 		return err
 	}
 	if h.cache != nil {
@@ -249,36 +251,14 @@ func (h *Handler) updateAPIKeyLabel(ctx context.Context, actorID, tenantID, apiK
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	return projectadmin.UpdateAPIKeyLabel(ctx, h.pool, h.rbac, tenantID, projectadmin.KeyScope{}, apiKeyID, label, projectadmin.Actor{UserID: actorID})
+	return projectadmin.UpdateAPIKeyLabel(ctx, h.pool, h.rbac, tenantID, dashboardKeyScope, apiKeyID, label, projectadmin.Actor{UserID: actorID})
 }
 
 func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID int64) error {
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	ctx = db.WithTenant(ctx, tenantID)
-	if err := h.pool.Q(ctx, func(tx pgx.Tx) error {
-		q := sqlcgen.New(tx)
-		if _, err := projectadmin.AuthorizeAPIKey(ctx, q, h.rbac, tenantID, projectadmin.KeyScope{}, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
-			return err
-		}
-		if err := q.RevokeAPIKey(ctx, apiKeyID); err != nil {
-			return err
-		}
-		if h.rbac != nil {
-			if err := h.rbac.RemoveAPIKeyRolesTx(ctx, tx, apiKeyID); err != nil {
-				return fmt.Errorf("rbac api key revoke: %w", err)
-			}
-		}
-		return auditlog.WritePlatform(ctx, tx, actorID, "control_panel.api_key.revoke", strconv.FormatInt(apiKeyID, 10), map[string]any{"tenant_id": tenantID})
-	}); err != nil {
-		return err
-	}
-	h.reloadRBACPolicy(ctx)
-	if h.cache == nil {
-		return nil
-	}
-	return h.cache.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID))
+	return projectadmin.RevokeAPIKey(ctx, h.pool, h.rbac, h.cache, tenantID, dashboardKeyScope, apiKeyID, projectadmin.Actor{UserID: actorID})
 }
 
 // TypeLabel renders the key type for the key table.

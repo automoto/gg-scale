@@ -601,3 +601,47 @@ func TestProjectLimits_dashboard_writes_should_save_and_audit_the_user(t *testin
 		 AND action IN ('control_panel.storage_limit.set', 'control_panel.rate_limit.set')`, ownerID, strconv.FormatInt(p.project, 10)).Scan(&audited))
 	assert.Equal(t, []any{int64(524288), 2, 2}, []any{bytes, overrides, audited})
 }
+
+func TestManagementTokens_page_should_show_the_key_risky_boxes_in_the_risky_group(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	group := strings.Index(body, "Risky access")
+	revoke := strings.Index(body, "Revoke API keys. Cannot be undone; a game that uses the key stops.")
+	secret := strings.Index(body, "Create secret API keys. The key value is returned to the token user.")
+	assert.Equal(t, []bool{true, true, true}, []bool{group >= 0 && revoke > group, secret > group, strings.Contains(body, "Needs read access to API keys")})
+}
+
+func TestManagementTokens_should_refuse_keys_revoke_without_keys_read(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, body := p.create(t, c, csrf, url.Values{"access_keys": {"none"}, "risky": {managementtoken.ScopeKeysRevoke}})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0}, []any{resp.StatusCode,
+		strings.Contains(body, "Needs read access to API keys. Give that access or uncheck the box."), p.tokenCount(t)})
+}
+
+func TestManagementTokens_should_give_the_key_risky_scopes_only_when_checked(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	resp, _ := p.create(t, c, csrf, url.Values{"access_keys": {"read"},
+		"risky": {managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}})
+
+	assert.Equal(t, []any{http.StatusOK, []string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}},
+		[]any{resp.StatusCode, p.onlyTokenScopes(t)})
+}
+
+func TestManagementTokens_should_refuse_keys_secret_when_the_creator_lacks_the_secret_pair(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "admin@example.com", "admin")
+	p.dropAdminPair(t, "api_key:secret")
+
+	resp, body := p.create(t, c, csrf, url.Values{"risky": {managementtoken.ScopeKeysSecret}})
+
+	assert.Equal(t, []any{http.StatusForbidden, true, 0},
+		[]any{resp.StatusCode, strings.Contains(body, `"keys:secret"`), p.tokenCount(t)})
+}

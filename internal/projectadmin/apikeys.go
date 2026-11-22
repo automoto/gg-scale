@@ -14,8 +14,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/automoto/gg-scale/internal/cache"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
@@ -98,14 +100,17 @@ func APIKeyObject(keyType string) (string, bool) {
 	}
 }
 
-// KeyScope limits which keys a change may touch. The zero value is the
-// dashboard: any key of the tenant, revoked keys included. A management
-// token sets both fields, so a request never reaches a key of another
-// Game Project or a revoked key.
+// KeyScope limits which keys a change may touch. The zero value matches no
+// key, so a caller that forgets to set it reaches nothing. The dashboard sets
+// TenantWide. A management token sets ProjectID and LiveOnly, so a request
+// never reaches a key of another Game Project, a tenant-wide key, or a
+// revoked key.
 type KeyScope struct {
 	// ProjectID, when set, limits the key to that project. A key with no
 	// project does not match it.
 	ProjectID *int64
+	// TenantWide, with no ProjectID, matches any key of the tenant.
+	TenantWide bool
 	// LiveOnly refuses a revoked key.
 	LiveOnly bool
 }
@@ -114,6 +119,9 @@ type KeyScope struct {
 // another project answers ErrAPIKeyNotFound before any permission check, so
 // a caller learns nothing about it. It returns the key's scopes and project.
 func AuthorizeAPIKey(ctx context.Context, q *sqlcgen.Queries, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) (sqlcgen.GetAPIKeyScopesRow, error) {
+	if scope.ProjectID == nil && !scope.TenantWide {
+		return sqlcgen.GetAPIKeyScopesRow{}, ErrAPIKeyNotFound
+	}
 	row, err := q.GetAPIKeyScopes(ctx, apiKeyID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return row, ErrAPIKeyNotFound
@@ -209,6 +217,43 @@ func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Author
 		}
 		return nil
 	})
+}
+
+// RevokeAPIKey revokes a key, removes its Casbin role, and writes the audit
+// row in one transaction. Then it reloads the policy and clears the key's
+// rate limit bucket in store (nil for none). scope limits the keys it may
+// touch. Authorization is as in AuthorizeAPIKey.
+func RevokeAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, store cache.Store, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) error {
+	ctx = db.WithTenant(ctx, tenantID)
+	err := pool.Q(ctx, func(tx pgx.Tx) error {
+		q := sqlcgen.New(tx)
+		row, err := AuthorizeAPIKey(ctx, q, authz, tenantID, scope, apiKeyID, actor)
+		if err != nil {
+			return err
+		}
+		if err := q.RevokeAPIKey(ctx, apiKeyID); err != nil {
+			return fmt.Errorf("revoke api key: %w", err)
+		}
+		if err := authz.RemoveAPIKeyRolesTx(ctx, tx, apiKeyID); err != nil {
+			return fmt.Errorf("rbac api key revoke: %w", err)
+		}
+		return actor.audit(ctx, tx, tenantID, keyProjectID(row), "control_panel.api_key.revoke", strconv.FormatInt(apiKeyID, 10), nil)
+	})
+	if err != nil {
+		return err
+	}
+	if err := authz.ReloadPolicy(); err != nil {
+		slog.WarnContext(ctx, "rbac reload after api key revoke", "err", err)
+	}
+	if store == nil {
+		return nil
+	}
+	// The key is already revoked, so a failed delete only leaves an unused
+	// bucket until it expires.
+	if err := store.Delete(ctx, ratelimit.APIKeyBucketKey(apiKeyID)); err != nil {
+		slog.WarnContext(ctx, "rate limit bucket delete after api key revoke", "err", err)
+	}
+	return nil
 }
 
 // KeySwitches are the server feature switches that gate key scopes.

@@ -78,9 +78,10 @@ type Config struct {
 	// ManagementMaxProjectTokens caps active (not revoked, not expired)
 	// management tokens for each project. Default 20.
 	ManagementMaxProjectTokens int `env:"MANAGEMENT_MAX_PROJECT_TOKENS" envDefault:"20"`
-	// ManagementMaxProjectAPIKeys refuses the create_api_key tool when the
-	// project already has this many active keys (all keys, not only
-	// agent-made ones). The dashboard is not limited by it. Default 20.
+	// ManagementMaxProjectAPIKeys refuses the create_api_key and
+	// create_secret_api_key tools when the project already has this many
+	// active keys (all keys, not only agent-made ones). The dashboard is not
+	// limited by it. Default 20.
 	ManagementMaxProjectAPIKeys int `env:"MANAGEMENT_MAX_PROJECT_API_KEYS" envDefault:"20"`
 	// LeaderboardMaxPerProject caps live leaderboards in each Game Project,
 	// for the dashboard and the management API. It applies also when the

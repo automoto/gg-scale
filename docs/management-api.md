@@ -99,7 +99,7 @@ the Game Project, as the dashboard pages do.
 | `leaderboards:write` | `rollback_leaderboard` | `POST /v1/project/leaderboards/{leaderboard_id}/rollback` | roll back again |
 | `leaderboards:write` | `delete_leaderboard` | `DELETE /v1/project/leaderboards/{leaderboard_id}` | `restore_leaderboard` |
 | `leaderboards:write` | `restore_leaderboard` | `POST /v1/project/leaderboards/{leaderboard_id}/restore` | `delete_leaderboard` |
-| `keys:create` | `create_api_key` (publishable `ggp_` keys only) | `POST /v1/project/api-keys` | revoke the key in the dashboard |
+| `keys:create` | `create_api_key` (publishable `ggp_` keys only) | `POST /v1/project/api-keys` | `revoke_api_key`, or revoke the key in the dashboard |
 | `origins:write` | `set_allowed_origins` | `PUT /v1/project/allowed-origins` | call it again with `old_origins` from its result |
 
 - The dashboard offers only the scopes that you have permission for.
@@ -123,11 +123,25 @@ the Game Project, as the dashboard pages do.
 - `create_api_key` gives the key the label
   `<label> (management token: <token label>)`. The key value is in the result
   one time only.
-- No operation can make a secret key, revoke a key, or delete a Game Project
-  or a player.
+- No operation can delete a Game Project. A player delete has a grace
+  period and can be cancelled.
 - The audit log shows each write as `management_token:<id>`, with the person
   who made the token. `list_revisions` shows the token ID as
   `management_token_id` and the source as `token`.
+
+### Risky scopes
+
+A risky scope is never included by Quick fill or by the default form. The
+token page shows it in a separate group with a warning. Give it only to a
+token that needs it.
+
+| Scope | Tool | HTTP | Risk |
+|---|---|---|---|
+| `keys:revoke` | `revoke_api_key` | `POST /v1/project/api-keys/{api_key_id}/revoke` | Cannot be undone. Each game client or server that uses the key stops at once. Needs `keys:read`. A key of another Game Project, a key with no Game Project, or a revoked key is 404. A secret key needs permission to manage secret keys for the person who made the token. |
+| `keys:secret` | `create_secret_api_key` | `POST /v1/project/secret-api-keys` | Returns a secret. The `ggs_` key value is in the result one time only. It is never in `list_api_keys`, `get_token`, the audit log, or the server log. Needs permission to manage secret keys for the person who made the token. Same label, scope, and `MANAGEMENT_MAX_PROJECT_API_KEYS` rules as `create_api_key`. |
+
+Each risky tool description starts with its risk ("Cannot be undone." or
+"Returns a secret."), so the agent sees the risk in its tool list.
 
 ### What a token can do
 
@@ -224,7 +238,7 @@ The feature is off by default. Set these environment variables:
 | `MANAGEMENT_AUTH_FAILURES_PER_MINUTE` | `10` | Failed authentications each minute for each client IP. |
 | `MANAGEMENT_AUTH_FAILURE_BURST` | `10` | Burst of failed authentications for each client IP. |
 | `MANAGEMENT_MAX_PROJECT_TOKENS` | `20` | Active tokens for each Game Project. |
-| `MANAGEMENT_MAX_PROJECT_API_KEYS` | `20` | `create_api_key` is refused when the Game Project has this many active API keys. The dashboard is not limited by it. |
+| `MANAGEMENT_MAX_PROJECT_API_KEYS` | `20` | `create_api_key` and `create_secret_api_key` are refused when the Game Project has this many active API keys. The dashboard is not limited by it. |
 | `LEADERBOARD_MAX_PER_PROJECT` | `1000` | `create_leaderboard` and `restore_leaderboard` answer 409 when the Game Project has this many live leaderboards. The dashboard has the same limit. A platform admin can change it for one Account Tenant (quota axis `leaderboards`). |
 | `CORS_MAX_PROJECT_ORIGINS` | `20` | Origins for each Game Project, for `set_allowed_origins` and the dashboard form. |
 

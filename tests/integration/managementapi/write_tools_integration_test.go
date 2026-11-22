@@ -49,6 +49,8 @@ func (f *fixture) writeToolCalls() map[string]struct {
 		"update_api_key_label":    {"keys:write", map[string]any{"api_key_id": key, "label": "renamed"}},
 		"update_api_key_features": {"keys:write", map[string]any{"api_key_id": key, "scopes": []string{"matchmaker"}}},
 		"set_allowed_origins":     {"origins:write", map[string]any{"origins": []string{"http://localhost:5173"}}},
+		"revoke_api_key":          {"keys:revoke", map[string]any{"api_key_id": key}},
+		"create_secret_api_key":   {"keys:secret", map[string]any{"label": "ci"}},
 	}
 }
 
@@ -89,7 +91,8 @@ func TestWriteTools_should_succeed_with_their_scope(t *testing.T) {
 	calls := f.writeToolCalls()
 
 	for _, name := range []string{"set_remote_config", "create_leaderboard", "update_leaderboard",
-		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins"} {
+		"delete_leaderboard", "restore_leaderboard", "create_api_key", "update_api_key_label", "update_api_key_features", "set_allowed_origins",
+		"create_secret_api_key", "revoke_api_key"} {
 		t.Run(name, func(t *testing.T) {
 			c := calls[name]
 

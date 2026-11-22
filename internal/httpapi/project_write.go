@@ -234,8 +234,27 @@ func checkProjectAPIKeyLabel(label string) error {
 	return nil
 }
 
+// Notes of the create result, by key type.
+const (
+	publishableKeyNote = "A publishable key is made to ship in a game client. The value is shown only now. " +
+		"Revoke it in the dashboard if it is not needed."
+	secretKeyNote = "A secret key is for game servers and back-end tools only. Never ship it in a game client. " +
+		"The value is shown only now: store it in a secret store. Revoke it at once if it leaks."
+)
+
 func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
-	label := in.Body.Label
+	return createProjectAPIKey(ctx, d, p, in.Body, tenant.KeyTypePublishable, publishableKeyNote)
+}
+
+func createSecretAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
+	return createProjectAPIKey(ctx, d, p, in.Body, tenant.KeyTypeSecret, secretKeyNote)
+}
+
+// createProjectAPIKey makes a key of keyType for the token's project, with
+// the label rules, the feature rules, and the key limit of every token key
+// create.
+func createProjectAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, body projectCreateAPIKeyBody, keyType tenant.KeyType, note string) (projectCreatedAPIKey, error) {
+	label := body.Label
 	if err := checkProjectAPIKeyLabel(label); err != nil {
 		return projectCreatedAPIKey{}, err
 	}
@@ -246,22 +265,15 @@ func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *
 	id, value, err := projectadmin.CreateAPIKey(ctx, d.Pool, d.RBAC, p.TenantID, projectadmin.NewAPIKey{
 		ProjectID: &projectID,
 		Label:     label,
-		Type:      tenant.KeyTypePublishable,
-		Scopes:    in.Body.Scopes,
+		Type:      keyType,
+		Scopes:    body.Scopes,
 		MaxActive: d.ManagementMaxProjectAPIKeys,
 		Switches:  projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled},
 	}, projectActor(p))
 	if err != nil {
 		return projectCreatedAPIKey{}, projectWriteError(err)
 	}
-	return projectCreatedAPIKey{
-		APIKeyID: id,
-		APIKey:   value,
-		KeyType:  tenant.KeyTypePublishable,
-		Label:    label,
-		Note: "A publishable key is made to ship in a game client. The value is shown only now. " +
-			"Revoke it in the dashboard if it is not needed.",
-	}, nil
+	return projectCreatedAPIKey{APIKeyID: id, APIKey: value, KeyType: keyType, Label: label, Note: note}, nil
 }
 
 type projectSetAllowedOriginsBody struct {
@@ -342,6 +354,17 @@ func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Princip
 		_ = d.Cache.Delete(ctx, ratelimit.APIKeyBucketKey(in.APIKeyID))
 	}
 	return projectAPIKeyUpdated{Updated: true}, nil
+}
+
+type projectAPIKeyRevoked struct {
+	Revoked bool `json:"revoked"`
+}
+
+func revokeAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectAPIKeyPath) (projectAPIKeyRevoked, error) {
+	if err := projectadmin.RevokeAPIKey(ctx, d.Pool, d.RBAC, d.Cache, p.TenantID, projectKeyScope(p), in.APIKeyID, projectActor(p)); err != nil {
+		return projectAPIKeyRevoked{}, projectWriteError(err)
+	}
+	return projectAPIKeyRevoked{Revoked: true}, nil
 }
 
 type projectSetPlayerDisabledInput struct {
