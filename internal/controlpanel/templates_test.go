@@ -821,3 +821,22 @@ func TestLayouts_should_show_legal_notice(t *testing.T) {
 		})
 	}
 }
+
+func TestManagementTokensPage_should_wrap_tables_and_long_labels(t *testing.T) {
+	html := renderToString(t, ManagementTokensPage(ManagementTokensView{
+		UserEmail: "a@example.com",
+		Tokens:    []ManagementTokenRowView{{ID: 1, Label: "x"}},
+	}))
+
+	assert.Contains(t, html, `class="table-scroll"`)
+	assert.Contains(t, html, `class="wrap-cell"`)
+}
+
+func TestFleetsPage_should_scroll_the_deleted_fleets_table(t *testing.T) {
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		UserEmail: "a@example.com", Enabled: true,
+		DeletedFleets: []FleetRowView{{ID: 7, Name: "old-one", Backend: "agones"}},
+	}))
+
+	assert.Contains(t, html, `class="table-scroll"`)
+}

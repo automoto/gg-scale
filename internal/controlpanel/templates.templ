@@ -640,7 +640,7 @@ templ apiKeyFeatureCell(tenantID int64, csrf string, key APIKeyView) {
 			hx-target="#modal-root"
 			hx-swap="innerHTML"
 		>Manage features</button>
-	</div>
+									</div>
 }
 
 templ APIKeyFeaturesDialog(tenantID int64, csrf string, key APIKeyView) {
@@ -2376,7 +2376,8 @@ templ FleetsListPage(vm FleetsListView) {
 		if len(vm.DeletedFleets) > 0 {
 			<section class="card">
 				<h2>Deleted fleets</h2>
-				<table>
+				<div class="table-scroll">
+				<table class="data-table">
 					<thead>
 						<tr>
 							<th>Name</th>
@@ -2387,7 +2388,7 @@ templ FleetsListPage(vm FleetsListView) {
 					<tbody>
 						for _, f := range vm.DeletedFleets {
 							<tr>
-								<td><code>{ f.Name }</code></td>
+								<td class="wrap-cell"><code>{ f.Name }</code></td>
 								<td><code>{ f.Backend }</code></td>
 								<td class="actions-cell">
 									<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(f.ID) + "/restore") }>
@@ -2399,6 +2400,7 @@ templ FleetsListPage(vm FleetsListView) {
 						}
 					</tbody>
 				</table>
+				</div>
 			</section>
 		}
 	}
@@ -2484,7 +2486,7 @@ templ agonesFleetFields(vm NewFleetView) {
 	<div class="kv-row">
 		<input name="selector_key[]" placeholder="key"/>
 		<input name="selector_value[]" placeholder="value"/>
-	</div>
+									</div>
 }
 
 templ pluginFleetFields(vm NewFleetView) {
@@ -2501,7 +2503,7 @@ templ pluginFleetFields(vm NewFleetView) {
 	<div class="kv-row">
 		<input name="config_key[]" placeholder="key"/>
 		<input name="config_value[]" placeholder="value"/>
-	</div>
+									</div>
 }
 
 templ EditFleetPage(vm EditFleetView) {
@@ -2667,7 +2669,7 @@ templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
 			<input name="score_max" value={ vm.ScoreMax } inputmode="numeric" placeholder="none" aria-describedby="score_max-error"/>
 			@fieldError(vm.FieldErrors, "score_max")
 		</label>
-	</div>
+									</div>
 	<div class="grid">
 		<label>
 			Reset schedule
@@ -2684,7 +2686,7 @@ templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
 			<input name="attempt_cap" value={ vm.AttemptCap } inputmode="numeric" placeholder="unlimited" aria-describedby="attempt_cap-error"/>
 			@fieldError(vm.FieldErrors, "attempt_cap")
 		</label>
-	</div>
+									</div>
 	if edit && vm.ResetSchedule != "none" {
 		<p class="muted">Current period: { stringFromInt(int64(vm.CurrentPeriod)) }</p>
 	}
@@ -3306,7 +3308,8 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<small id="days-help">From 1 to { stringFromInt(int64(vm.MaxDays)) }.</small>
 					@fieldError(vm.FieldErrors, "days")
 				</label>
-				<table>
+				<div class="table-scroll">
+				<table class="access-table">
 					<thead>
 						<tr>
 							<th scope="col">Access</th>
@@ -3346,6 +3349,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 						}
 					</tbody>
 				</table>
+				</div>
 				<p>
 					Quick fill:
 					<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "?fill=read_only") } role="button" class="secondary outline btn-inline">Read only</a>
@@ -3377,7 +3381,8 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 			if len(vm.Tokens) == 0 {
 				<p class="muted">No tokens.</p>
 			} else {
-				<table class="data-table">
+				<div class="table-scroll">
+				<table class="data-table token-table">
 					<thead>
 						<tr>
 							<th>Label</th>
@@ -3392,14 +3397,14 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<tbody>
 						for _, t := range vm.Tokens {
 							<tr>
-								<td>
+								<td data-label="Label" class="wrap-cell">
 									{ t.Label }
 									if t.Inactive {
 										<span class="badge badge-revoked">inactive</span>
 									}
 								</td>
-								<td><code>…{ t.Hint }</code></td>
-								<td>
+								<td data-label="Token"><code>…{ t.Hint }</code></td>
+								<td data-label="Access" class="access-cell">
 									{ t.Access }
 									if t.Risky {
 										<span class="badge badge-warning">risky</span>
@@ -3409,8 +3414,8 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 										<small>{ lostScopesText(t.LostScopes) }</small>
 									}
 								</td>
-								<td>{ t.CreatorEmail }</td>
-								<td>
+								<td data-label="Created by">{ t.CreatorEmail }</td>
+								<td data-label="Expires">
 									{ timeString(t.ExpiresAt) }
 									if t.Expired {
 										<span class="badge badge-revoked">expired</span>
@@ -3418,7 +3423,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 										<span class="badge">expires soon</span>
 									}
 								</td>
-								<td>
+								<td data-label="Last used">
 									if t.LastUsedAt != nil {
 										{ timeString(*t.LastUsedAt) }
 									} else {
@@ -3426,16 +3431,19 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 									}
 								</td>
 								<td class="actions-cell">
+									<div class="row-actions">
 									<a href={ templ.URL(t.LikeURL) } role="button" class="secondary outline btn-inline">New token like this</a>
 									<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
 										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 										<button type="submit" class="btn-inline contrast outline">Revoke</button>
 									</form>
+									</div>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
+				</div>
 			}
 		</section>
 	}
