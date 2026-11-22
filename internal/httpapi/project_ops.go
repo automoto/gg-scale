@@ -235,7 +235,8 @@ func projectWriteError(err error) error {
 		errors.Is(err, projectadmin.ErrInvalidSteamKey),
 		errors.Is(err, projectadmin.ErrSteamKeyMissing),
 		errors.Is(err, projectadmin.ErrScopeNotGrantable),
-		errors.Is(err, projectadmin.ErrInvalidKeyScope):
+		errors.Is(err, projectadmin.ErrInvalidKeyScope),
+		errors.Is(err, projectadmin.ErrInvalidKeyLabel):
 		return huma.Error422UnprocessableEntity(err.Error())
 	}
 	return err

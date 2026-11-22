@@ -666,3 +666,22 @@ func TestManagementTokens_should_refuse_allocations_write_when_the_fleet_switch_
 
 	assert.Equal(t, []any{http.StatusForbidden, 0}, []any{resp.StatusCode, p.tokenCount(t)})
 }
+
+func TestAPIKeys_dashboard_should_return_422_for_a_bidi_label(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	var keyID int64
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`INSERT INTO api_keys (tenant_id, project_id, key_hash, key_type, label, scopes)
+		 VALUES ($1, $2, sha256('k'::bytea), 'publishable', 'old', '{matchmaker}') RETURNING id`, p.tenantID, p.project).Scan(&keyID))
+	tenantBase := p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) + "/api-keys"
+
+	relabel, _ := tfPostForm(t, c, tenantBase+"/"+strconv.FormatInt(keyID, 10)+"/label", url.Values{"_csrf": {csrf}, "label": {"a\u202eb"}})
+	create, _ := tfPostForm(t, c, tenantBase, url.Values{"_csrf": {csrf}, "label": {"a\u202eb"}, "key_type": {"publishable"}, "project_id": {strconv.FormatInt(p.project, 10)}})
+
+	var label string
+	var bidi int
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT label FROM api_keys WHERE id = $1`, keyID).Scan(&label))
+	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT count(*) FROM api_keys WHERE label LIKE '%' || chr(8238) || '%'`).Scan(&bidi))
+	assert.Equal(t, []any{422, 422, "old", 0}, []any{relabel.StatusCode, create.StatusCode, label, bidi})
+}

@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -16,7 +14,6 @@ import (
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
-	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 const projectAPIKeyLabelMax = 64
@@ -230,8 +227,8 @@ func checkProjectAPIKeyLabel(label string) error {
 	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
 		return huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
 	}
-	if strings.ContainsFunc(label, func(r rune) bool { return unicode.IsControl(r) || webutil.IsBidiControl(r) }) {
-		return huma.Error422UnprocessableEntity("label must not contain control or text direction characters")
+	if err := projectadmin.ValidateAPIKeyLabel(label); err != nil {
+		return huma.Error422UnprocessableEntity(err.Error())
 	}
 	return nil
 }

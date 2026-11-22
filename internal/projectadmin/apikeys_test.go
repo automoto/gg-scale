@@ -102,3 +102,14 @@ func TestAuthorizeAPIKey_zero_scope_should_match_no_key(t *testing.T) {
 
 	assert.ErrorIs(t, err, ErrAPIKeyNotFound)
 }
+
+func TestAPIKeyLabel_should_be_refused_before_the_database(t *testing.T) {
+	long := strings.Repeat("x", APIKeyLabelMax+1)
+	for _, label := range []string{"a\u202eb", "a\u061cb", "a\u2028b", "a\tb", "a\xffb", long} {
+		_, _, createErr := CreateAPIKey(t.Context(), nil, nil, 1, NewAPIKey{Label: label, Type: tenant.KeyTypePublishable}, Actor{})
+		relabelErr := UpdateAPIKeyLabel(t.Context(), nil, nil, 1, KeyScope{}, 1, label, Actor{})
+
+		assert.ErrorIs(t, createErr, ErrInvalidKeyLabel, "%q", label)
+		assert.ErrorIs(t, relabelErr, ErrInvalidKeyLabel, "%q", label)
+	}
+}

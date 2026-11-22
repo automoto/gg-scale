@@ -700,6 +700,11 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		KeyType:   keyType,
 	})
 	if err != nil {
+		if errors.Is(err, projectadmin.ErrInvalidKeyLabel) {
+			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
+				http.StatusUnprocessableEntity, map[string]string{"label": err.Error()}, "")
+			return
+		}
 		if errors.Is(err, errProjectNotInTenant) {
 			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 				http.StatusUnprocessableEntity,
@@ -761,6 +766,8 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "forbidden", http.StatusForbidden)
 	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
+	case errors.Is(err, projectadmin.ErrInvalidKeyLabel):
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 	default:
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
 	}

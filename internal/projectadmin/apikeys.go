@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
 var (
@@ -160,9 +163,33 @@ func derefID(id *int64) int64 {
 	return *id
 }
 
+// APIKeyLabelMax is the longest stored key label in characters. A management
+// token adds its own label to the label of the keys it makes, so this is more
+// than the 64 characters its API takes for the name part.
+const APIKeyLabelMax = 200
+
+// ErrInvalidKeyLabel means a key label is too long, is not valid text, or has
+// a control or text direction character.
+var ErrInvalidKeyLabel = errors.New("label must be valid text of at most 200 characters, with no control or text direction characters")
+
+// ValidateAPIKeyLabel checks a key label as the create and relabel do.
+func ValidateAPIKeyLabel(label string) error {
+	label = strings.TrimSpace(label)
+	if !utf8.ValidString(label) || utf8.RuneCountInString(label) > APIKeyLabelMax {
+		return ErrInvalidKeyLabel
+	}
+	if strings.ContainsFunc(label, func(r rune) bool { return unicode.IsControl(r) || webutil.IsBidiControl(r) }) {
+		return ErrInvalidKeyLabel
+	}
+	return nil
+}
+
 // UpdateAPIKeyLabel renames a key. scope limits the keys it may touch.
 // Authorization is as in authorizeAPIKey.
 func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, tenantID int64, scope KeyScope, apiKeyID int64, label string, actor Actor) error {
+	if err := ValidateAPIKeyLabel(label); err != nil {
+		return err
+	}
 	ctx = db.WithTenant(ctx, tenantID)
 	return pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
@@ -310,6 +337,9 @@ type NewAPIKey struct {
 // caller checks that the actor may manage this key type. The key value is
 // returned once and is never stored.
 func CreateAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, tenantID int64, in NewAPIKey, actor Actor) (int64, string, error) {
+	if err := ValidateAPIKeyLabel(in.Label); err != nil {
+		return 0, "", err
+	}
 	scopes := []string{tenant.ScopeMatchmaker}
 	for _, s := range in.Scopes {
 		if slices.Contains(scopes, s) {
