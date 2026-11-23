@@ -72,6 +72,7 @@ func TestScopes_risky_scopes_should_have_their_pair_and_dependency(t *testing.T)
 		ScopeSteamWrite:       {rbac.ProjectConfigObject(42), rbac.ActionUpdate, "config", ""},
 		ScopePlayersPII:       {rbac.ProjectPlayersObject(42), rbac.ActionManage, "players", ScopePlayersRead},
 		ScopePlayersInvite:    {rbac.ProjectPlayersObject(42), rbac.ActionManage, "players", ScopePlayersRead},
+		ScopePlayersWrite:     {rbac.ProjectPlayersObject(42), rbac.ActionManage, "players", ScopePlayersRead},
 		ScopeAllocationsWrite: {rbac.ProjectAllocationObject(42), rbac.ActionAllocate, "fleets", ScopeFleetRead},
 	}
 	for scope, want := range cases {

@@ -234,14 +234,20 @@ func projectWriteError(err error) error {
 	case errors.Is(err, projectadmin.ErrOriginLimit):
 		// Before ErrInvalidOrigins, which it wraps.
 		return huma.Error409Conflict(err.Error())
+	// The origin and scope errors name the submitted value, so they get a
+	// fixed text.
+	case errors.Is(err, projectadmin.ErrInvalidOrigins):
+		return huma.Error422UnprocessableEntity("an origin is not valid. Each origin must be scheme://host or scheme://host:port " +
+			"with http or https, and have no wildcard, path, query, fragment, or user info.")
+	case errors.Is(err, projectadmin.ErrScopeNotGrantable):
+		return huma.Error422UnprocessableEntity("scope cannot be granted: a requested scope is not enabled for this Game Project, " +
+			"or its server feature switch is off.")
 	case errors.As(err, &limitErr),
 		errors.Is(err, projectadmin.ErrInvalidLeaderboard),
-		errors.Is(err, projectadmin.ErrInvalidOrigins),
 		errors.Is(err, projectadmin.ErrInvalidPlayerEmail),
 		errors.Is(err, projectadmin.ErrInvalidSteamAppID),
 		errors.Is(err, projectadmin.ErrInvalidSteamKey),
 		errors.Is(err, projectadmin.ErrSteamKeyMissing),
-		errors.Is(err, projectadmin.ErrScopeNotGrantable),
 		errors.Is(err, projectadmin.ErrInvalidKeyScope),
 		errors.Is(err, projectadmin.ErrInvalidKeyLabel):
 		return huma.Error422UnprocessableEntity(err.Error())
@@ -759,7 +765,7 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "set_player_disabled",
-		description: "Disable or enable one player in this Game Project (disabled: true or false). A disabled player cannot sign in, " +
+		description: "Changes player access. Disable or enable one player in this Game Project (disabled: true or false). A disabled player cannot sign in, " +
 			"and its live sessions stop working. This is not a ban: a ban of the whole Account Tenant is not available here. " +
 			"A player with a pending delete request answers 409; cancel the deletion first.",
 		scope: managementtoken.ScopePlayersWrite,
@@ -808,7 +814,7 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "request_player_delete",
-		description: "Request deletion of one player of this Game Project. The player is disabled and signed out now, and its data is " +
+		description: "Changes player access. Request deletion of one player of this Game Project. The player is disabled and signed out now, and its data is " +
 			"deleted after the grace period (PLAYER_DELETE_GRACE_PERIOD, 30 days by default) unless cancel_player_delete is called first. " +
 			"Answers 409 when an administrator already requested the deletion.",
 		scope: managementtoken.ScopePlayersWrite,
@@ -823,7 +829,7 @@ var projectOps = []projectOp{
 	},
 	{
 		tool: "cancel_player_delete",
-		description: "Cancel the pending deletion of one player of this Game Project, during the grace period. " +
+		description: "Changes player access. Cancel the pending deletion of one player of this Game Project, during the grace period. " +
 			"It also cancels a deletion that the player asked for. Answers 404 when the player has no pending deletion.",
 		scope: managementtoken.ScopePlayersWrite,
 		op: huma.Operation{

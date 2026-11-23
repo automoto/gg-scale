@@ -246,7 +246,7 @@ func TestManagementTokens_quick_fill_read_write_should_select_write_rows(t *test
 
 	_, body := tfGet(t, c, p.tokensURL()+"?fill=read_write")
 
-	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"write"}, "access_limits": {"write"}, "access_fleets": {"none"}},
+	assert.Equal(t, url.Values{"access_config": {"write"}, "access_leaderboards": {"write"}, "access_keys": {"write"}, "access_matchmaking": {"read"}, "access_players": {"read"}, "access_limits": {"write"}, "access_fleets": {"none"}},
 		checkedAccess(body))
 }
 

@@ -116,7 +116,11 @@ var Scopes = []ScopePair{
 		Label: "See player email and display name. They go into agent logs and to the AI model provider.", Needs: ScopePlayersRead,
 		Noun: "player email and display name",
 	},
-	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
+	{
+		Scope: ScopePlayersWrite, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
+		Label: "Disable players and request or cancel player deletion. A deleted player's data is lost after the grace period.",
+		Needs: ScopePlayersRead,
+	},
 	{
 		Scope: ScopePlayersInvite, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
 		Label: "Invite and link players. Sends email.", Needs: ScopePlayersRead,

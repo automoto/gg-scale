@@ -67,12 +67,13 @@ func riskyBox(t *testing.T, risky []RiskyBoxView, scope string) RiskyBoxView {
 	return RiskyBoxView{}
 }
 
-func TestAccessOptions_should_show_the_players_row_with_read_and_write(t *testing.T) {
+// players:write is a risky box, so the players row has no write option.
+func TestAccessOptions_should_show_the_players_row_with_read_only(t *testing.T) {
 	rows, _ := accessOptions(managementtoken.ScopeNames(), nil)
 
 	got := accessRow(t, rows, "players")
 
-	assert.Equal(t, []any{"Players (IDs and status)", true, true, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
+	assert.Equal(t, []any{"Players (IDs and status)", true, false, ""}, []any{got.Label, got.CanRead, got.HasWrite, got.Reason})
 }
 
 func TestAccessOptions_should_disable_a_risky_box_when_the_creator_lacks_the_pair(t *testing.T) {
@@ -204,7 +205,7 @@ func TestFillAccess_read_write_should_write_where_possible(t *testing.T) {
 
 	fillAccess(url.Values{"fill": {"read_write"}}, rows, risky)
 
-	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "write", "limits": "write", "fleets": "write"}, selections(rows))
+	assert.Equal(t, map[string]string{"config": "write", "leaderboards": "write", "keys": "write", "matchmaking": "read", "players": "read", "limits": "write", "fleets": "write"}, selections(rows))
 }
 
 // riskyScopes returns every class 2 scope of the table.

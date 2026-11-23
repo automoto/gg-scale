@@ -41,7 +41,7 @@ func TestProjectOps_should_use_only_project_level_casbin_objects(t *testing.T) {
 // A risky tool says its risk first, because MCP clients have no other mark
 // for a risky tool.
 func TestProjectOps_risky_tools_should_start_with_a_risk_sentence(t *testing.T) {
-	sentences := []string{"Cannot be undone.", "Sends an email.", "Returns a secret.", "Costs money."}
+	sentences := []string{"Cannot be undone.", "Sends an email.", "Returns a secret.", "Costs money.", "Changes player access."}
 	var missing []string
 	for _, row := range projectOps {
 		s, _ := managementtoken.Scope(row.scope)
@@ -442,6 +442,22 @@ func TestProjectWriteError_should_keep_other_errors_internal(t *testing.T) {
 	var se huma.StatusError
 
 	assert.False(t, errors.As(projectWriteError(errors.New("boom")), &se))
+}
+
+// The origin and scope errors carry the submitted value, so the answer
+// must use a fixed text.
+func TestProjectWriteError_should_not_echo_the_submitted_value(t *testing.T) {
+	cases := map[string]error{
+		"invalid origin":      fmt.Errorf("%w: %q must use http or https", projectadmin.ErrInvalidOrigins, "ftp://echo.example"),
+		"scope not grantable": fmt.Errorf("%w: %q", projectadmin.ErrScopeNotGrantable, "echo-scope"),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := projectWriteError(in)
+
+			assert.NotContains(t, err.Error(), "echo")
+		})
+	}
 }
 
 func TestProjectWriteError_should_show_the_safe_text_of_a_validation_error(t *testing.T) {
