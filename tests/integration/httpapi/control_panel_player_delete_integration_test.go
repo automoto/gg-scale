@@ -289,3 +289,36 @@ func TestControlPanelPlayerDisable_should_write_an_audit_row_for_disable_and_ena
 	}
 	assert.Equal(t, []string{"control_panel.player.disable", "control_panel.player.enable"}, actions)
 }
+
+func TestControlPanelPlayerAccountToggle_should_audit_by_account_id_without_email(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	ctx := context.Background()
+	const playerEmail = "audit-marker-player@example.com"
+	seedVerifiedPlayerAccount(t, c, playerEmail, "correct-horse-battery-staple")
+	var accountID string
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT id::text FROM player_accounts WHERE email = $1`, playerEmail).Scan(&accountID))
+	adminID := seedControlPanelUser(t, c, "pa-admin@example.com", "correct-horse-battery-staple", true)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "pa-admin@example.com", "correct-horse-battery-staple")
+	base := srv.URL + "/v1/control-panel/admin/player-accounts/" + accountID
+
+	// Act
+	for _, action := range []string{"/disable", "/enable"} {
+		resp := postForm(t, noRedirectClient(), base+action, url.Values{"_csrf": {csrf}}, cookie)
+		resp.Body.Close()
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	// Assert
+	var rows int
+	var text string
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT count(*), coalesce(string_agg(target || ' ' || payload::text, ' '), '')
+		 FROM platform_audit_log WHERE actor_user_id = $1 AND action LIKE 'control_panel.player_account.%'`,
+		adminID).Scan(&rows, &text))
+	assert.Equal(t, 2, rows)
+	assert.NotContains(t, text, "@")
+	assert.Contains(t, text, accountID)
+}

@@ -530,3 +530,6 @@ This text is for the CHANGELOG section that is written when the release is tagge
   messages no longer name the item or the address (for example "Invite sent."
   and "Fleet created."), and the player account pages say "provider" in place
   of the provider name in link and unlink messages.
+- The platform audit rows for disabling and enabling a player account name the
+  account by id only. They no longer hold the player email. Older rows keep
+  their values.

@@ -155,8 +155,7 @@ func (h *Handler) togglePlayerAccountDisabled(w http.ResponseWriter, r *http.Req
 
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		acc, err := q.GetPlayerAccountByID(r.Context(), pgID)
-		if err != nil {
+		if _, err := q.GetPlayerAccountByID(r.Context(), pgID); err != nil {
 			return err
 		}
 		if disable {
@@ -173,7 +172,7 @@ func (h *Handler) togglePlayerAccountDisabled(w http.ResponseWriter, r *http.Req
 		}
 		return auditlog.WritePlatform(r.Context(), tx, session.User.ID, action,
 			"player_account:"+accountID.String(),
-			map[string]any{"player_account_id": accountID.String(), "email": acc.Email})
+			map[string]any{"player_account_id": accountID.String()})
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
