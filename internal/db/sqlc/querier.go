@@ -464,10 +464,6 @@ type Querier interface {
 	// the URL and looks up tenant + verification state in one shot.
 	GetPlayerByEmailProject(ctx context.Context, arg GetPlayerByEmailProjectParams) (GetPlayerByEmailProjectRow, error)
 	GetPlayerByExternalID(ctx context.Context, arg GetPlayerByExternalIDParams) (GetPlayerByExternalIDRow, error)
-	// Race repair for the idempotent portal request: when the guarded UPDATE
-	// matched no rows because another surface scheduled the deletion first, this
-	// reads the timestamp that request stored.
-	GetPlayerDeleteRequestedByAccount(ctx context.Context, arg GetPlayerDeleteRequestedByAccountParams) (pgtype.Timestamptz, error)
 	// Tenant-scoped: finds an existing (possibly unlinked) player by project +
 	// email so a public-join / invite can link it instead of creating a duplicate.
 	GetPlayerForAccountLink(ctx context.Context, arg GetPlayerForAccountLinkParams) (GetPlayerForAccountLinkRow, error)

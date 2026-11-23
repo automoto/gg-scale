@@ -46,7 +46,9 @@ func TestFlashNotices_should_map_plain_codes_to_text(t *testing.T) {
 }
 
 // Only flash.go may read a page message from the URL or a url.Values, so a
-// new page cannot show free text from a link.
+// new page cannot show free text from a link. The patterns catch .Get,
+// FormValue, a map index on Query(), and a constant or variable that holds
+// the parameter name.
 func TestPackage_should_read_url_messages_only_in_flash_go(t *testing.T) {
 	files, err := os.ReadDir(".")
 	assert.NoError(t, err)
@@ -59,8 +61,10 @@ func TestPackage_should_read_url_messages_only_in_flash_go(t *testing.T) {
 		src, err := os.ReadFile(name)
 		assert.NoError(t, err)
 		for _, param := range []string{`"flash"`, `"created"`, `"error"`, `"notice"`, `"message"`} {
-			if strings.Contains(string(src), ".Get("+param+")") {
-				readers = append(readers, name+" "+param)
+			for _, pattern := range []string{".Get(" + param + ")", "FormValue(" + param + ")", "Query()[" + param + "]", "= " + param} {
+				if strings.Contains(string(src), pattern) {
+					readers = append(readers, name+" "+pattern)
+				}
 			}
 		}
 	}

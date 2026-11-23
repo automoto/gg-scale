@@ -1252,7 +1252,7 @@ func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if _, err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp); err != nil {
+	if err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp); err != nil {
 		webutil.InternalError(w, "account delete", err)
 		return
 	}
@@ -1293,12 +1293,9 @@ func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Requ
 // requestProjectPlayerDelete disables the player, stamps the delete request,
 // and revokes live game sessions in one transaction under the project's
 // tenant scope. An already-pending request (0 rows) is a benign double
-// submit: the stored timestamp is reloaded so the caller reports the real
-// purge date even when another surface won the race. A zero return means the
-// date could not be determined (the row vanished mid-flight).
-func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) (time.Time, error) {
-	requestedAt := lp.DeleteRequestedAt
-	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+// submit, also when another surface won the race.
+func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
 			return err
 		}
@@ -1308,22 +1305,11 @@ func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid
 			PlayerAccountID: toPgUUID(accountID),
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			stored, gerr := q.GetPlayerDeleteRequestedByAccount(ctx, sqlcgen.GetPlayerDeleteRequestedByAccountParams{
-				ID:              lp.PlayerID,
-				PlayerAccountID: toPgUUID(accountID),
-			})
-			if gerr != nil && !errors.Is(gerr, pgx.ErrNoRows) {
-				return gerr
-			}
-			if stored.Valid {
-				requestedAt = stored.Time
-			}
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		requestedAt = ts.Time
 		if _, err = q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
 			ProjectID: lp.ProjectID,
 			PlayerID:  lp.PlayerID,
@@ -1333,10 +1319,6 @@ func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid
 		return auditlog.Write(ctx, tx, lp.PlayerID, "account.player.delete_request", "",
 			map[string]any{"scheduled_purge_at": ts.Time.Add(h.deleteGrace())})
 	})
-	if err != nil || requestedAt.IsZero() {
-		return time.Time{}, err
-	}
-	return requestedAt.Add(h.deleteGrace()), nil
 }
 
 // cancelProjectPlayerDelete clears a pending delete request under the

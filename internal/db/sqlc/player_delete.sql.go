@@ -55,29 +55,6 @@ func (q *Queries) DeletePlayerGameSessionSignals(ctx context.Context, ids []int6
 	return err
 }
 
-const getPlayerDeleteRequestedByAccount = `-- name: GetPlayerDeleteRequestedByAccount :one
-SELECT delete_requested_at
-FROM project_players
-WHERE id = $1
-  AND player_account_id = $2
-  AND deleted_at IS NULL
-`
-
-type GetPlayerDeleteRequestedByAccountParams struct {
-	ID              int64
-	PlayerAccountID pgtype.UUID
-}
-
-// Race repair for the idempotent portal request: when the guarded UPDATE
-// matched no rows because another surface scheduled the deletion first, this
-// reads the timestamp that request stored.
-func (q *Queries) GetPlayerDeleteRequestedByAccount(ctx context.Context, arg GetPlayerDeleteRequestedByAccountParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, getPlayerDeleteRequestedByAccount, arg.ID, arg.PlayerAccountID)
-	var delete_requested_at pgtype.Timestamptz
-	err := row.Scan(&delete_requested_at)
-	return delete_requested_at, err
-}
-
 const hardDeletePlayers = `-- name: HardDeletePlayers :execrows
 DELETE FROM project_players
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
