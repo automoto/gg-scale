@@ -959,3 +959,52 @@ func TestControlPanelFleet_allocate_should_refuse_an_invalid_fleet_name_before_t
 		})
 	}
 }
+
+// Negative authorization for the dashboard fleet restore route. The fleet
+// stays deleted in each case.
+func TestControlPanelFleet_restore_should_refuse_without_the_right_fleet_or_grant(t *testing.T) {
+	cases := []struct {
+		name         string
+		role         string
+		otherProject bool
+		backend      string
+		wantStatus   int
+	}{
+		{"should_return_403_for_a_role_without_fleet_manage", "admin", false, "agones", http.StatusForbidden},
+		{"should_return_404_for_a_fleet_of_another_project", "owner", true, "agones", http.StatusNotFound},
+		{"should_return_403_for_a_backend_with_no_grant", "owner", false, "docker", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startCluster(t)
+			tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-restore-authz")
+			userID := seedControlPanelUser(t, c, "user@example.com", "correct-horse-battery-staple", false)
+			seedControlPanelMembership(t, c, userID, tenantID, tc.role)
+			for _, g := range []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend, rbac.FeatureFleetPluginBackend} {
+				seedFeatureGrant(t, c, tenantID, projectID, g)
+			}
+			fleetProject := projectID
+			if tc.otherProject {
+				require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+					`INSERT INTO projects (tenant_id, name) VALUES ($1, 'other') RETURNING id`, tenantID).Scan(&fleetProject))
+			}
+			var fleetID int64
+			require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+				`INSERT INTO fleets (tenant_id, project_id, name, backend, config, deleted_at)
+				 VALUES ($1, $2, 'gone', $3, '{}'::jsonb, now()) RETURNING id`,
+				tenantID, fleetProject, tc.backend).Scan(&fleetID))
+			srv, _ := newControlPanelFleetServer(t, c, newStubBackend(tc.backend), nil)
+			cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "user@example.com", "correct-horse-battery-staple")
+			restore := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+				"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets/" + strconv.FormatInt(fleetID, 10) + "/restore"
+
+			resp := postFormWithCookie(t, restore, url.Values{"_csrf": {csrf}}, cookie)
+			resp.Body.Close()
+
+			var deleted bool
+			require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+				`SELECT deleted_at IS NOT NULL FROM fleets WHERE id = $1`, fleetID).Scan(&deleted))
+			assert.Equal(t, []any{tc.wantStatus, true}, []any{resp.StatusCode, deleted})
+		})
+	}
+}
