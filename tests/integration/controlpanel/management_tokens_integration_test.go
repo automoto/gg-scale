@@ -7,6 +7,7 @@ package controlpanel_test
 import (
 	"context"
 	"html"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -768,6 +769,17 @@ func TestKeyRevealPages_should_send_no_store(t *testing.T) {
 			c, csrf := loginAsAdmin(t, p.srv, p.raw, adminID, "root@example.com")
 			return tfPostForm(t, c, p.srv.URL+pathControlPanel+"/tenants",
 				url.Values{"_csrf": {csrf}, "tenant_name": {"reveal-co"}, "project_name": {"game"}, "label": {"bootstrap"}})
+		}},
+		// The tenant create result is swapped into this page.
+		{"new tenant page", `id="signup-result"`, func(t *testing.T, p tokenPanel) (*http.Response, string) {
+			adminID := createPlatformAdminUser(t, p.raw, "root@example.com")
+			c, _ := loginAsAdmin(t, p.srv, p.raw, adminID, "root@example.com")
+			resp, err := c.Get(p.srv.URL + pathControlPanel + "/tenants/new")
+			require.NoError(t, err)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			return resp, string(body)
 		}},
 		{"management token", "ggm_", func(t *testing.T, p tokenPanel) (*http.Response, string) {
 			c, csrf, _ := p.member(t, "owner@example.com", "owner")

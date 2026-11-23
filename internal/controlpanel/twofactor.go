@@ -459,6 +459,7 @@ func (h *Handler) renderTwoFactorSetup(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "two-factor setup failed", http.StatusInternalServerError)
 		return
 	}
+	webutil.NoStore(w)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
@@ -545,6 +546,7 @@ func (h *Handler) twoFactorConfirm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, pathControlPanelAccount, http.StatusSeeOther)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, TwoFactorBackupCodesPage(TwoFactorBackupCodesView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
@@ -673,6 +675,7 @@ func (h *Handler) twoFactorRegenerateBackupCodes(w http.ResponseWriter, r *http.
 		http.Error(w, "backup code regeneration failed", http.StatusInternalServerError)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, TwoFactorBackupCodesPage(TwoFactorBackupCodesView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,

@@ -440,6 +440,7 @@ func (h *Handler) renderAccountTwoFactorSetup(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account 2fa setup", err)
 		return
 	}
+	webutil.NoStore(w)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
@@ -525,6 +526,7 @@ func (h *Handler) accountTwoFactorConfirm(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, accountTwoFactorPath, http.StatusSeeOther)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
@@ -665,6 +667,7 @@ func (h *Handler) accountTwoFactorBackupCodes(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account 2fa backup codes", err)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),

@@ -100,6 +100,12 @@ func ParseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// NoStore keeps a page that shows a secret once (a key, token, 2FA secret or
+// backup codes) out of every browser cache. Call it before WriteHeader.
+func NoStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+}
+
 // Render writes a templ component as text/html. On render error it
 // slogs the underlying err and writes a 500.
 func Render(r *http.Request, w http.ResponseWriter, c templ.Component) {

@@ -460,6 +460,8 @@ func (h *Handler) helpPage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) newTenantPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
+	// The tenant create result, with its key, is swapped into this page.
+	webutil.NoStore(w)
 	webutil.Render(r, w, NewTenantPage(NewTenantView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
@@ -571,8 +573,7 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, FormErrorFragment(msg))
 		return
 	}
-	// The page holds the key value: never cache it.
-	w.Header().Set("Cache-Control", "no-store")
+	webutil.NoStore(w)
 	webutil.Render(r, w, SignupSuccessPage(SignupSuccessView(result)))
 }
 
@@ -713,8 +714,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
-	// The page holds the key value: never cache it.
-	w.Header().Set("Cache-Control", "no-store")
+	webutil.NoStore(w)
 	webutil.Render(r, w, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: tenantID,
 		APIKeyID: result.APIKeyID,

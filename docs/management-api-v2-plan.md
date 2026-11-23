@@ -572,9 +572,10 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - The docs now say that a role, permission, or feature grant that the token
   creator loses can take up to 10 seconds (policy reload) or 5 seconds
   (feature grant cache) to stop the token on each server process.
-- The dashboard pages that show a new API key (secret or publishable, and
-  the key of a new Account Tenant) now send `Cache-Control: no-store`, as the
-  management token page does.
+- The pages that show a secret once now send `Cache-Control: no-store`, as
+  the management token page does: a new API key (secret or publishable), the
+  new Account Tenant page and its key, and the two-factor setup and backup
+  code pages of the dashboard and the player account pages.
 - `get_matchmaking_queue` refuses (422) a cursor text that it did not
   return, also when the text decodes to the same bytes (a changed last
   character or an added line break).

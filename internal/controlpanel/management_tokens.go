@@ -613,8 +613,7 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 	}
 	view.NewToken = token
 	view.NewTokenAccess, _ = accessWords(scopes)
-	// The page holds the token value: never cache it.
-	w.Header().Set("Cache-Control", "no-store")
+	webutil.NoStore(w)
 	webutil.Render(r, w, ManagementTokensPage(view))
 }
 

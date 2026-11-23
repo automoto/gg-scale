@@ -382,3 +382,47 @@ func TestPlayerAccountTwoFactor_replayedValidCodeDoesNotLock(t *testing.T) {
 			"replay #%d must be rejected as a bad code, not locked out", i)
 	}
 }
+
+func TestPlayerAccountTwoFactor_secret_pages_should_send_no_store(t *testing.T) {
+	// Arrange
+	pool, raw := startPlayersDB(t)
+	cipher, err := twofactor.NewCipher(testTwoFactorHexKey)
+	require.NoError(t, err)
+	noopMailer, err := mailer.New("noop", "", "", "", "noreply@test", "off")
+	require.NoError(t, err)
+	root := chi.NewRouter()
+	root.Mount("/v1/players", players.New(players.Deps{Pool: pool, Mailer: noopMailer, MailFrom: "noreply@test", Config: players.Config{Mount: true}, TwoFactor: cipher, VerifySigningKey: []byte(testEmailVerifySigningKey)}))
+	srv := httptest.NewServer(root)
+	defer srv.Close()
+	createVerifiedAccount(t, raw, "nostore@example.com")
+	c := newBrowser(t)
+	csrf := primeCSRF(t, c, srv.URL)
+	resp, _ := tfPostForm(t, c, srv.URL+accountBasePath+"/login", loginForm("nostore@example.com", csrf))
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	base := srv.URL + accountTwoFactorPath
+	got := map[string]string{}
+	header := func(name string, resp *http.Response, body string, holds *regexp.Regexp) {
+		require.Regexp(t, holds, body, name)
+		got[name] = resp.Header.Get("Cache-Control")
+	}
+	secretRe := regexp.MustCompile(`<code>([A-Z2-7 ]+)</code>`)
+	codesRe := regexp.MustCompile(`<code>[a-z2-7]{5}-[a-z2-7]{5}</code>`)
+
+	// Act
+	resp, body := tfPostForm(t, c, base+"/setup", url.Values{"_csrf": {csrf}})
+	header("setup", resp, body, secretRe)
+	secret := strings.ReplaceAll(secretRe.FindStringSubmatch(body)[1], " ", "")
+	resp, body = tfPostForm(t, c, base+"/confirm", url.Values{"_csrf": {csrf}, "code": {"000000"}})
+	header("setup after a wrong code", resp, body, secretRe)
+	resp, body = tfPostForm(t, c, base+"/confirm", url.Values{"_csrf": {csrf}, "code": {totpNow(t, secret)}})
+	header("backup codes after confirm", resp, body, codesRe)
+	resetAccountTOTPStep(t, raw, "nostore@example.com")
+	resp, body = tfPostForm(t, c, base+"/backup-codes", url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}, "code": {totpNow(t, secret)}})
+	header("regenerated backup codes", resp, body, codesRe)
+
+	// Assert
+	assert.Equal(t, map[string]string{
+		"setup": "no-store", "setup after a wrong code": "no-store",
+		"backup codes after confirm": "no-store", "regenerated backup codes": "no-store",
+	}, got)
+}
