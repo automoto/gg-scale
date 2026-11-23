@@ -58,11 +58,11 @@ func statusFromProto(s fleetpb.AllocationStatus) fleet.Status {
 }
 
 func reqToProto(r fleet.AllocationRequest) *fleetpb.AllocationRequest {
-	capacity := r.Capacity
-	if capacity < 0 || capacity > math.MaxInt32 {
-		// Anything outside int32 would silently wrap on the proto field —
-		// clamp to 0 so a config bug doesn't become an over-allocation.
-		capacity = 0
+	// Anything outside int32 would wrap on the proto field: send 0, so a
+	// config bug does not become an over-allocation.
+	var capacity int32
+	if r.Capacity >= 0 && r.Capacity <= math.MaxInt32 {
+		capacity = int32(r.Capacity)
 	}
 	return &fleetpb.AllocationRequest{
 		TenantId:  r.TenantID,
@@ -72,7 +72,7 @@ func reqToProto(r fleet.AllocationRequest) *fleetpb.AllocationRequest {
 		Config:    r.Config,
 		Region:    r.Region,
 		GameMode:  r.GameMode,
-		Capacity:  int32(capacity),
+		Capacity:  capacity,
 		Labels:    r.Labels,
 	}
 }
