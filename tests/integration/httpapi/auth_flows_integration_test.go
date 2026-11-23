@@ -401,6 +401,19 @@ func TestDisable_credentialed_requires_password_and_admin_reenable_restores(t *t
 	assert.Equal(t, sess.PlayerID, restored.PlayerID)
 }
 
+// authAuditTarget returns the target of the one audit row for the player and
+// action. It fails the test when there is not exactly one such row.
+func authAuditTarget(t *testing.T, c *cluster, action string, playerID int64) string {
+	t.Helper()
+	var target string
+	var rows int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT coalesce(max(target), ''), count(*) FROM audit_log WHERE action = $1 AND actor_user_id = $2`,
+		action, playerID).Scan(&target, &rows))
+	require.Equal(t, int64(1), rows, "audit rows for %s", action)
+	return target
+}
+
 // The auth audit rows name the player by id, so the audit log holds no
 // player address.
 func TestAuthAudit_should_name_the_player_by_id_not_by_email(t *testing.T) {
@@ -409,15 +422,31 @@ func TestAuthAudit_should_name_the_player_by_id_not_by_email(t *testing.T) {
 	srv, rec := newFullStackServer(t, c)
 	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "audited@example.com", "supersecret")
 
-	var targets []string
-	for _, action := range []string{"auth.signup", "auth.login"} {
-		var target string
-		require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
-			`SELECT coalesce(target, '') FROM audit_log WHERE action = $1 AND actor_user_id = $2`,
-			action, sess.PlayerID).Scan(&target))
-		targets = append(targets, target)
-	}
+	targets := []string{authAuditTarget(t, c, "auth.signup", sess.PlayerID), authAuditTarget(t, c, "auth.login", sess.PlayerID)}
 
 	id := strconv.FormatInt(sess.PlayerID, 10)
 	assert.Equal(t, []string{id, id}, targets)
+}
+
+// The external id of a custom token is chosen by the developer and can be
+// an address, so the audit row names the player by id and holds no
+// external id in any column.
+func TestAuthAudit_custom_token_should_name_the_player_by_id_not_by_external_id(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "ct")
+	priv := seedCustomTokenKey(t, c, tenantID)
+	srv, _ := newFullStackServer(t, c)
+	const sub = "custom.sub@example.com"
+	resp, body := doJSON(t, http.MethodPost, srv.URL+"/v1/auth/custom-token", "ct",
+		map[string]string{"token": signCustomToken(t, priv, sub)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	var sess authSession
+	require.NoError(t, json.Unmarshal(body, &sess))
+
+	target := authAuditTarget(t, c, "auth.custom_token", sess.PlayerID)
+	var holding int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM audit_log a WHERE strpos(a::text, $1) > 0`, sub).Scan(&holding))
+
+	assert.Equal(t, []any{strconv.FormatInt(sess.PlayerID, 10), int64(0)}, []any{target, holding})
 }

@@ -874,7 +874,9 @@ func signInExternalPlayer(ctx context.Context, tx pgx.Tx, projectID int64, exter
 	if sessionEpoch, err = playerEpoch(ctx, q, playerID); err != nil {
 		return 0, 0, err
 	}
-	if err := auditlog.Write(ctx, tx, playerID, auditAction, externalID, nil); err != nil {
+	// The external id is chosen by the developer and can be an address, so
+	// the row names the player by id.
+	if err := auditlog.Write(ctx, tx, playerID, auditAction, strconv.FormatInt(playerID, 10), nil); err != nil {
 		return 0, 0, err
 	}
 	if err := insertSession(ctx, tx, projectID, playerID, refreshTok, now); err != nil {
