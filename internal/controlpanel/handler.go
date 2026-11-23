@@ -238,8 +238,7 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/delete", h.leaderboardsDeleteHandler)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/restore", h.leaderboardRestoreHandler)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/rollback", h.leaderboardRollbackHandler)
-			// Consolidated settings pages (writes reuse the handlers above via
-			// a sanitized redirect_to).
+			// Consolidated settings pages (writes reuse the handlers above).
 			r.Get("/settings", h.tenantSettingsPage)
 			r.Post("/settings/tier", h.updateTenantTierHandler)
 			r.Post("/settings/features", h.updateTenantFeatureHandler)
@@ -911,7 +910,7 @@ func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code; redirectRateLimits takes its base from safeReturnPath
+	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {

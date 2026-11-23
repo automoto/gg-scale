@@ -430,12 +430,10 @@ type ProjectInviteLimitView struct {
 }
 
 // APILimitCardView is the tenant HTTP API limit card shared by the
-// rate-limits and tenant-settings pages. RedirectTo, when non-empty, is
-// posted as redirect_to so the save returns to the embedding page.
+// rate-limits and tenant-settings pages.
 type APILimitCardView struct {
 	TenantID        int64
 	CSRFToken       string
-	RedirectTo      string
 	IsPlatformAdmin bool
 	Overridden      bool
 	Rate            float64
@@ -1180,8 +1178,7 @@ func orDash(s string) string {
 	return s
 }
 
-// projectSettingsPathTpl builds the redirect_to target so a reused settings
-// POST (e.g. invite limits) returns to the project settings page.
+// projectSettingsPathTpl builds the project settings page path.
 func projectSettingsPathTpl(tenantID, projectID int64) string {
 	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/settings"

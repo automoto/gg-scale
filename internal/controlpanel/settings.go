@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"path"
 	"strconv"
 	"strings"
 
@@ -455,30 +453,4 @@ func formatBytes(b int64) string {
 	default:
 		return strconv.FormatInt(b, 10) + " B"
 	}
-}
-
-// safeReturnPath returns raw when it is a same-origin control panel-relative path
-// safe to redirect back to after a reused form post, else fallback. It rejects
-// absolute URLs, scheme-relative ("//host"), queries/fragments (callers append
-// "?flash="), dot segments, and anything outside /v1/control-panel, so the
-// server-controlled redirect can't become an open redirect or escape the
-// control panel.
-func safeReturnPath(raw, fallback string) string {
-	if raw == "" {
-		return fallback
-	}
-	if strings.HasPrefix(raw, "//") || strings.ContainsAny(raw, "\\\r\n?#") {
-		return fallback
-	}
-	if path.Clean(raw) != raw {
-		return fallback
-	}
-	if raw != pathControlPanel && !strings.HasPrefix(raw, pathControlPanel+"/") {
-		return fallback
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.IsAbs() || u.Host != "" {
-		return fallback
-	}
-	return raw
 }

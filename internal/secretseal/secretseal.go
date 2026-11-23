@@ -67,9 +67,7 @@ func (c *Cipher) Encrypt(plaintext []byte) ([]byte, error) {
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
-	out := make([]byte, 0, 1+len(nonce)+len(plaintext)+c.aead.Overhead())
-	out = append(out, sealVersion)
-	out = append(out, nonce...)
+	out := append([]byte{sealVersion}, nonce...)
 	return c.aead.Seal(out, nonce, plaintext, nil), nil
 }
 

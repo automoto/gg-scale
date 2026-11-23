@@ -3,8 +3,13 @@ package controlpanel
 import (
 	"context"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -150,4 +155,31 @@ func TestCountNum_adds_thousands_separators(t *testing.T) {
 	assert.Equal(t, "500", countNum(500))
 	assert.Equal(t, "50,000", countNum(50_000))
 	assert.Equal(t, "-1,000", countNum(-1_000))
+}
+
+func TestRedirectRateLimits_return_target(t *testing.T) {
+	cases := []struct {
+		name, ret, projectID, want string
+	}{
+		{"should_return_to_project_settings", "project_settings", "8", "/v1/control-panel/tenants/3/projects/8/settings?flash=invite_quotas_updated"},
+		{"should_use_rate_limits_without_return", "", "8", "/v1/control-panel/tenants/3/rate-limits?flash=invite_quotas_updated"},
+		{"should_ignore_unknown_return", "//evil.example", "8", "/v1/control-panel/tenants/3/rate-limits?flash=invite_quotas_updated"},
+		{"should_ignore_return_without_project", "project_settings", "", "/v1/control-panel/tenants/3/rate-limits?flash=invite_quotas_updated"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			form := url.Values{"return": {c.ret}}
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			require.NoError(t, req.ParseForm())
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("projectID", c.projectID)
+			req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+			w := httptest.NewRecorder()
+
+			(&Handler{}).redirectRateLimits(w, req, 3, flashInviteQuotasUpdated)
+
+			assert.Equal(t, c.want, w.Header().Get("Location"))
+		})
+	}
 }

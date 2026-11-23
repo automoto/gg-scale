@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -198,7 +200,15 @@ func (h *Handler) rateLimitError(w http.ResponseWriter, r *http.Request, tenantI
 	}
 }
 
+// returnProjectSettings is the form "return" value of a project settings form
+// that posts to a rate-limits route, so the save returns to that page.
+const returnProjectSettings = "project_settings"
+
 func (h *Handler) redirectRateLimits(w http.ResponseWriter, r *http.Request, tenantID int64, code flashCode) {
-	base := safeReturnPath(r.Form.Get("redirect_to"), pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/rate-limits")
+	base := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/rate-limits"
+	projectID, err := strconv.ParseInt(chi.URLParam(r, "projectID"), 10, 64)
+	if r.Form.Get("return") == returnProjectSettings && err == nil && projectID > 0 {
+		base = projectSettingsPathTpl(tenantID, projectID)
+	}
 	htmxRedirect(w, r, withFlash(base, code))
 }

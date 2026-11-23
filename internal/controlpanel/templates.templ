@@ -722,9 +722,6 @@ templ apiLimitCard(vm APILimitCardView) {
 		if vm.IsPlatformAdmin {
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				if vm.RedirectTo != "" {
-					<input type="hidden" name="redirect_to" value={ vm.RedirectTo }/>
-				}
 				<label>Rate (requests/second)
 					<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.Rate) } placeholder={ rlNum(vm.DefaultRate) }/>
 				</label>
@@ -3107,7 +3104,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 			</p>
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(vm.ProjectID) + "/invites") } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<input type="hidden" name="redirect_to" value={ projectSettingsPathTpl(vm.TenantID, vm.ProjectID) }/>
+				<input type="hidden" name="return" value={ returnProjectSettings }/>
 				<label>Invites / inviter / hour
 					<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(vm.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
 				</label>
