@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -58,7 +58,7 @@ func (h *Handler) allocationsListPage(w http.ResponseWriter, r *http.Request) {
 		Page:            page,
 		HasPrev:         page > 1,
 		HasNext:         int64(page*fleetPageSize) < total,
-		Message:         r.URL.Query().Get("flash"),
+		Message:         flashMessage(r),
 	}))
 }
 
@@ -115,7 +115,7 @@ func (h *Handler) allocationsDetailPage(w http.ResponseWriter, r *http.Request) 
 		ProjectID:  projectID,
 		Allocation: allocToView(alloc),
 		Events:     events,
-		Message:    r.URL.Query().Get("flash"),
+		Message:    flashMessage(r),
 	}))
 }
 
@@ -177,6 +177,10 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 	if !webutil.ParseForm(w, r) {
 		return
 	}
+	// The check runs before the form-error page, which lists the fleets.
+	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionAllocate) {
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
 	fleetName := strings.TrimSpace(r.Form.Get("fleet"))
 	region := strings.TrimSpace(r.Form.Get("region"))
@@ -193,8 +197,11 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		Fleets: h.loadFleetOptions(r.Context(), tenantID, projectID),
 	}
 	fieldErrors := map[string]string{}
-	if fleetName == "" {
+	switch {
+	case fleetName == "":
 		fieldErrors["fleet"] = "Fleet is required."
+	case !fleet.ValidText(fleetName):
+		fieldErrors["fleet"] = "Fleet is not valid or too long."
 	}
 	if region == "" {
 		fieldErrors["region"] = "Region is required."
@@ -203,9 +210,6 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		view.FieldErrors = fieldErrors
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
-		return
-	}
-	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionAllocate) {
 		return
 	}
 
@@ -217,41 +221,29 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if ferr != nil {
-		slog.ErrorContext(r.Context(), msgFleetLookupFailed, "err", ferr, "fleet", fleetName)
-		view.Error = "Fleet lookup failed: " + ferr.Error()
+		slog.ErrorContext(r.Context(), msgFleetLookupFailed, "err", ferr, "tenant", tenantID, "project", projectID)
+		view.Error = "Fleet lookup failed."
 		w.WriteHeader(http.StatusInternalServerError)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
+		return
+	}
+	if !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, f.Backend) {
 		return
 	}
 
-	alloc, err := h.fleet.Allocate(tenantCtx, fleet.AllocationRequest{
-		TenantID:  tenantID,
-		ProjectID: projectID,
-		FleetID:   f.ID,
-		Region:    region,
-		GameMode:  gameMode,
-		Capacity:  capacity,
-	})
+	alloc, err := fleet.AllocateServer(r.Context(), h.fleet, tenantID, fleet.ServerAllocate{
+		Fleet: f, Region: region, GameMode: gameMode, Capacity: capacity,
+	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "manual allocate failed", "err", err, "tenant", tenantID, "project", projectID)
-		view.Error = "Allocate failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		var status int
+		view.Error, status = fleetFormError("Allocate failed", err)
+		w.WriteHeader(status)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
 	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.allocate.manual", strconv.FormatInt(int64(alloc.ID), 10), map[string]any{
-		"project_id": projectID,
-		"fleet_id":   f.ID,
-		"fleet_name": f.Name,
-		"region":     region,
-		"game_mode":  gameMode,
-		"capacity":   capacity,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.allocate.manual", "err", auditErr)
-	}
-	target := allocationsBasePath(tenantID, projectID) + "/" + strconv.FormatInt(int64(alloc.ID), 10) +
-		queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(int64(alloc.ID), 10)+" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	id := strconv.FormatInt(int64(alloc.ID), 10)
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID)+"/"+id, flashAllocationCreated)
 }
 
 // loadFleetOptions fetches active fleet templates for the project so the
@@ -274,7 +266,7 @@ func (h *Handler) loadFleetOptions(ctx context.Context, tenantID, projectID int6
 			ID:                f.ID,
 			Name:              f.Name,
 			Backend:           f.Backend,
-			BackendMatches:    f.Backend == backend,
+			BackendMatches:    fleet.BackendMatches(f.Backend, backend),
 			BackendConfigured: backend,
 		})
 	}
@@ -325,51 +317,49 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 	if !webutil.ParseForm(w, r) {
 		return
 	}
-	typed := strings.TrimSpace(r.Form.Get("confirm_id"))
-	if typed != strconv.FormatInt(allocID, 10) {
-		session, _ := sessionFromContext(r.Context())
-		alloc, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID)
-		if err != nil {
-			http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		webutil.Render(r, w, DeallocateConfirmPage(DeallocateConfirmView{
-			UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
-			TenantID: tenantID, ProjectID: projectID, Allocation: allocToView(alloc),
-			Error: "Typed ID did not match. Type the allocation ID exactly to confirm.",
-		}))
-		return
-	}
-
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
+	// The check runs before the form-error page, which shows the allocation.
 	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
 		return
 	}
-	// Confirm the allocation belongs to this project before mutating it. RLS
-	// already confines the row to the tenant, but the authorization object is
-	// project-scoped, so a project boundary must be enforced here too — the
-	// read paths do this via loadAllocationDetail; the mutating path must match.
-	if _, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID); err != nil {
-		if errors.Is(err, fleet.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
+	typed := strings.TrimSpace(r.Form.Get("confirm_id"))
+	if typed != strconv.FormatInt(allocID, 10) {
+		h.renderDeallocateError(w, r, tenantID, projectID, allocID, "Typed ID did not match. Type the allocation ID exactly to confirm.")
 		return
 	}
-	if err := h.fleet.Deallocate(tenantCtx, fleet.AllocationID(allocID)); err != nil {
+
+	session, _ := sessionFromContext(r.Context())
+	_, err := fleet.DeallocateServer(r.Context(), h.fleet, tenantID, projectID, fleet.AllocationID(allocID), projectadmin.Actor{UserID: session.User.ID})
+	if errors.Is(err, fleet.ErrNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	var invalid fleet.InvalidError
+	if errors.As(err, &invalid) {
+		h.renderDeallocateError(w, r, tenantID, projectID, allocID, "Deallocate failed: "+invalid.Error())
+		return
+	}
+	if err != nil {
 		slog.ErrorContext(r.Context(), "manual deallocate failed", "err", err, "alloc", allocID)
 		http.Error(w, "deallocate failed", http.StatusInternalServerError)
 		return
 	}
+	redirectFlash(w, r, allocationsBasePath(tenantID, projectID), flashAllocationDeallocated)
+}
+
+// renderDeallocateError shows the confirm page again with msg and a 422.
+func (h *Handler) renderDeallocateError(w http.ResponseWriter, r *http.Request, tenantID, projectID, allocID int64, msg string) {
 	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.deallocate.manual",
-		strconv.FormatInt(allocID, 10), map[string]any{"project_id": projectID}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.deallocate.manual", "err", auditErr)
+	alloc, _, err := h.loadAllocationDetail(r.Context(), tenantID, projectID, allocID)
+	if err != nil {
+		http.Error(w, msgFleetDetailFailed, http.StatusInternalServerError)
+		return
 	}
-	target := allocationsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Allocation #"+strconv.FormatInt(allocID, 10)+" deallocated.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	webutil.Render(r, w, DeallocateConfirmPage(DeallocateConfirmView{
+		UserEmail: session.User.Email, CSRFToken: session.CSRFToken,
+		TenantID: tenantID, ProjectID: projectID, Allocation: allocToView(alloc),
+		Error: msg,
+	}))
 }
 
 // fleetBackendsPage shows the backends seen across this tenant's allocations

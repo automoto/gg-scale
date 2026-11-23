@@ -80,7 +80,7 @@ func (h *Handler) setAccountTwoFactorCookie(w http.ResponseWriter, accountID uui
 		Email:     email,
 		ExpiresAt: h.now().Add(twofactor.PendingTTL).Unix(),
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTwoFactorCookieName,
 		Value:    value,
 		Path:     accountBasePath,
@@ -92,7 +92,7 @@ func (h *Handler) setAccountTwoFactorCookie(w http.ResponseWriter, accountID uui
 }
 
 func (h *Handler) clearAccountTwoFactorCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTwoFactorCookieName,
 		Value:    "",
 		Path:     accountBasePath,
@@ -175,7 +175,7 @@ func (h *Handler) mintAccountTrustedDevice(ctx context.Context, w http.ResponseW
 	}); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTrustCookieName,
 		Value:    token,
 		Path:     accountBasePath,
@@ -440,6 +440,7 @@ func (h *Handler) renderAccountTwoFactorSetup(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account 2fa setup", err)
 		return
 	}
+	webutil.NoStore(w)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
@@ -525,6 +526,7 @@ func (h *Handler) accountTwoFactorConfirm(w http.ResponseWriter, r *http.Request
 		http.Redirect(w, r, accountTwoFactorPath, http.StatusSeeOther)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
@@ -665,6 +667,7 @@ func (h *Handler) accountTwoFactorBackupCodes(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account 2fa backup codes", err)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, AccountTwoFactorBackupCodesPage(AccountTwoFactorBackupCodesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),

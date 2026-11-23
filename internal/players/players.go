@@ -112,6 +112,7 @@ func New(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(webutil.PlayerSecurityHeadersWithFormActions(h.sso.Origins()...))
+	r.Use(webutil.CrossOriginProtection(d.Config.BaseURL))
 
 	// Global player-account routes (project-agnostic) — the platform-wide
 	// account identity: signup / login / verify / friends / account home.

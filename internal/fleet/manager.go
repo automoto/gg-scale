@@ -16,7 +16,13 @@ type Store interface {
 	InsertPending(ctx context.Context, req AllocationRequest, backend string) (AllocationID, error)
 	MarkReady(ctx context.Context, id AllocationID, backendRef, address string) error
 	MarkFailed(ctx context.Context, id AllocationID) error
+	// MarkReady and Release must run the commit hook of ctx (see
+	// WithCommitHook) in the transaction of the row change.
 	Release(ctx context.Context, id AllocationID) error
+	// ReleasePendingWithoutRef releases the row only while it is pending
+	// with no backend ref, and reports whether it did. It runs the commit
+	// hook like Release.
+	ReleasePendingWithoutRef(ctx context.Context, id AllocationID) (bool, error)
 	Get(ctx context.Context, id AllocationID) (*Allocation, error)
 
 	// List returns the most recent allocations for a project. include=true
@@ -59,6 +65,13 @@ type ManagerOptions struct {
 	// Clock returns the backoff duration before retry attempt n (1-indexed).
 	// nil falls back to 100ms * 2^(n-1).
 	Clock func(attempt int) time.Duration
+	// MaxCapacity is the largest capacity that AllocateServer accepts. Zero
+	// means no limit.
+	MaxCapacity int
+	// MaxLiveAllocations is the largest number of live allocations that a
+	// project may have when AllocateServer starts a new one. Zero means no
+	// limit.
+	MaxLiveAllocations int
 }
 
 // Manager is the matchmaker-facing entry point to the fleet subsystem. One
@@ -106,12 +119,20 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 	if err != nil {
 		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, err)
 	}
-	if f.Backend != m.backend.Name() {
+	// A fleet of another project never serves the request. The agones
+	// backend labels the allocation with req.ProjectID, so it must be the
+	// project of the fleet row.
+	if f.DeletedAt != nil || f.ProjectID != req.ProjectID {
+		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, ErrFleetNotFound)
+	}
+	if !BackendMatches(f.Backend, m.backend.Name()) {
 		return nil, fmt.Errorf("%w: fleet %q wants %q, manager runs %q",
 			ErrFleetBackendMismatch, f.Name, f.Backend, m.backend.Name())
 	}
 	req.Backend = f.Backend
-	req.Config = f.Config
+	if req.Config, err = f.OpenedConfig(ctx); err != nil {
+		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, err)
+	}
 
 	id, err := m.store.InsertPending(ctx, req, m.backend.Name())
 	if err != nil {
@@ -185,7 +206,12 @@ func (m *Manager) appendEvent(ctx context.Context, id AllocationID, status Statu
 
 // Deallocate releases the backend resource and marks the row shutdown.
 // Errors from the backend bubble up; the store update happens only on
-// backend success so we don't lose the ability to retry shutdown.
+// backend success so we don't lose the ability to retry shutdown. A pending
+// row with no backend ref (the process stopped during the backend call, or
+// the call still runs) is released only while it is still pending with no
+// ref. If MarkReady commits first, the row is read again and the server of
+// its ref is stopped before the release. If the release commits first,
+// MarkReady fails on the released row and the allocate frees the server.
 func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	a, err := m.store.Get(ctx, id)
 	if err != nil {
@@ -201,7 +227,11 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 			f, err := m.fleets.GetByID(ctx, a.FleetID)
 			switch {
 			case err == nil:
-				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], f.Config)
+				cfg, cfgErr := f.OpenedConfig(ctx)
+				if cfgErr != nil {
+					return cfgErr
+				}
+				cleanupErr = cleaner.CleanupResolution(ctx, a.ProjectID, a.Metadata["ggscale.dev/resolution-id"], cfg)
 			case errors.Is(err, ErrFleetNotFound) && a.BackendRef != "":
 				// A deleted template must not strand a known backend resource.
 				cleanupErr = ErrUnsupported
@@ -210,11 +240,7 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 			}
 		}
 		if cleanupErr == nil {
-			if err := m.store.Release(ctx, id); err != nil {
-				return err
-			}
-			m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
-			return nil
+			return m.release(ctx, id, a)
 		}
 		if !errors.Is(cleanupErr, ErrUnsupported) || a.BackendRef == "" {
 			return fmt.Errorf("allocation %d requires resolution cleanup: %w", id, cleanupErr)
@@ -223,6 +249,33 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	}
 	if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
 		return fmt.Errorf("fleet: backend deallocate: %w", err)
+	}
+	return m.release(ctx, id, a)
+}
+
+// release marks the row shutdown after its backend resource is gone. A row
+// read as pending with no ref is released only while it stays so. If it
+// changed (MarkReady, MarkFailed or another release), it is read again once,
+// and the server of its new ref is stopped before the release.
+func (m *Manager) release(ctx context.Context, id AllocationID, a *Allocation) error {
+	if a.Status == StatusPending && a.BackendRef == "" {
+		released, err := m.store.ReleasePendingWithoutRef(ctx, id)
+		if err != nil {
+			return err
+		}
+		if released {
+			m.appendEvent(ctx, id, StatusShutdown, "", "")
+			return nil
+		}
+		if a, err = m.store.Get(ctx, id); err != nil {
+			return err
+		}
+		if a.Status.IsTerminal() {
+			return nil
+		}
+		if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
+			return fmt.Errorf("fleet: backend deallocate: %w", err)
+		}
 	}
 	if err := m.store.Release(ctx, id); err != nil {
 		return err
@@ -276,6 +329,14 @@ func (m *Manager) Backend() Backend {
 // handler to resolve a fleet name to an id, and by the control panel fleets
 // CRUD pages. Tenant scoping happens inside the store via RLS.
 func (m *Manager) Fleets() FleetStore { return m.fleets }
+
+// FleetAdmin returns the Postgres fleet store, which runs the fleet writes
+// with the cipher it holds. It is nil when the manager runs on another
+// FleetStore (tests); its writes then answer an error.
+func (m *Manager) FleetAdmin() *PostgresFleetStore {
+	s, _ := m.fleets.(*PostgresFleetStore)
+	return s
+}
 
 func defaultBackoff(attempt int) time.Duration {
 	d := 100 * time.Millisecond

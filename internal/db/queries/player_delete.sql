@@ -33,16 +33,6 @@ WHERE id = sqlc.arg(id)
   AND delete_requested_at IS NOT NULL
   AND NOT delete_requested_by_admin;
 
--- name: GetPlayerDeleteRequestedByAccount :one
--- Race repair for the idempotent portal request: when the guarded UPDATE
--- matched no rows because another surface scheduled the deletion first, this
--- reads the timestamp that request stored.
-SELECT delete_requested_at
-FROM project_players
-WHERE id = sqlc.arg(id)
-  AND player_account_id = sqlc.arg(player_account_id)
-  AND deleted_at IS NULL;
-
 -- name: DeletePlayerGameSessionSignals :exec
 -- from/to player columns carry no foreign keys, and signals in a surviving
 -- session outlive the player-row cascade. Remove every signal the purged

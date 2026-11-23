@@ -1,6 +1,7 @@
 package controlpanel
 
 import (
+	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/webassets"
 )
@@ -721,9 +722,6 @@ templ apiLimitCard(vm APILimitCardView) {
 		if vm.IsPlatformAdmin {
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/api") } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				if vm.RedirectTo != "" {
-					<input type="hidden" name="redirect_to" value={ vm.RedirectTo }/>
-				}
 				<label>Rate (requests/second)
 					<input name="rate" type="number" step="any" min="0" value={ rlValue(vm.Rate) } placeholder={ rlNum(vm.DefaultRate) }/>
 				</label>
@@ -2373,6 +2371,36 @@ templ FleetsListPage(vm FleetsListView) {
 				</table>
 			}
 		</section>
+		if len(vm.DeletedFleets) > 0 {
+			<section class="card">
+				<h2>Deleted fleets</h2>
+				<div class="table-scroll">
+				<table class="data-table deleted-table">
+					<thead>
+						<tr>
+							<th>Name</th>
+							<th>Backend</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, f := range vm.DeletedFleets {
+							<tr>
+								<td class="wrap-cell"><code>{ f.Name }</code></td>
+								<td><code>{ f.Backend }</code></td>
+								<td class="actions-cell">
+									<form method="post" action={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(f.ID) + "/restore") }>
+										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
+										<button type="submit" class="secondary outline btn-inline">Restore</button>
+									</form>
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				</div>
+			</section>
+		}
 	}
 }
 
@@ -2406,7 +2434,7 @@ templ NewFleetPage(vm NewFleetView) {
 						hx-include="this"
 						hx-swap="innerHTML">
 						<option value="agones" selected?={ vm.Backend == "agones" || vm.Backend == "" }>agones</option>
-						<option value="plugin" selected?={ vm.Backend == "plugin" }>plugin</option>
+						<option value={ fleetPluginOption(vm.BackendConfigured) } selected?={ fleetBackendKind(vm.Backend) == "plugin" }>plugin</option>
 					</select>
 					@fieldError(vm.FieldErrors, "backend")
 				</label>
@@ -2441,11 +2469,16 @@ templ agonesFleetFields(vm NewFleetView) {
 	</label>
 	<label>
 		Namespace override
+		if vm.AgonesProjectIsolation {
+			<small class="muted">Agones project isolation is on. This server uses AGONES_NAMESPACE. Leave this field empty; a saved namespace is not used.</small>
+		}
 		<input name="namespace" value={ vm.Config["namespace"] } placeholder="(uses AGONES_NAMESPACE)"/>
+		@fieldError(vm.FieldErrors, "namespace")
 	</label>
 	<label>
 		Selector labels
 		<small class="muted">Optional key=value selectors that narrow which GameServers Agones returns. Add one per row.</small>
+		@fieldError(vm.FieldErrors, "selector_key")
 	</label>
 	for k, v := range fleetSelectorLabels(vm.Config) {
 		<div class="kv-row">
@@ -2459,15 +2492,28 @@ templ agonesFleetFields(vm NewFleetView) {
 	</div>
 }
 
+// pluginFleetFields never shows a config value: a plugin value can be a
+// secret. The edit form shows each saved key with an empty value input.
 templ pluginFleetFields(vm NewFleetView) {
 	<label>
 		Plugin config
 		<small class="muted">Free-form key/value pairs passed through to the plugin RPC.</small>
+		if vm.Retry && len(vm.Config) > 0 {
+			<small class="muted">Values are not shown again. Enter each value again.</small>
+		}
+		if vm.Saved && len(vm.Config) > 0 {
+			<small class="muted">Values are saved and not shown. An empty value keeps the saved value. Clear a key to remove it.</small>
+		}
+		@fieldError(vm.FieldErrors, "config_key")
 	</label>
-	for k, v := range vm.Config {
+	for _, k := range sortedConfigKeys(vm.Config) {
 		<div class="kv-row">
 			<input name="config_key[]" value={ k } placeholder="key"/>
-			<input name="config_value[]" value={ v } placeholder="value"/>
+			if vm.Saved {
+				<input name="config_value[]" placeholder="saved value"/>
+			} else {
+				<input name="config_value[]" placeholder="value"/>
+			}
 		</div>
 	}
 	<div class="kv-row">
@@ -2488,7 +2534,7 @@ templ EditFleetPage(vm EditFleetView) {
 				<h1>{ vm.Name }</h1>
 				<p class="subtitle">
 					Backend: <code>{ vm.Backend }</code>
-					if vm.Backend != vm.BackendConfigured {
+					if !fleet.BackendMatches(vm.Backend, vm.BackendConfigured) {
 						<small class="muted"> — does not match configured backend <code>{ vm.BackendConfigured }</code>; allocations will be refused.</small>
 					}
 				</p>
@@ -3058,7 +3104,7 @@ templ ProjectSettingsPage(vm ProjectSettingsView) {
 			</p>
 			<form method="post" action={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/rate-limits/projects/" + stringFromInt(vm.ProjectID) + "/invites") } class="settings-form">
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
-				<input type="hidden" name="redirect_to" value={ projectSettingsPathTpl(vm.TenantID, vm.ProjectID) }/>
+				<input type="hidden" name="return" value={ returnProjectSettings }/>
 				<label>Invites / inviter / hour
 					<input name="inviter_per_hour" type="number" step="any" min="0" value={ rlValue(vm.InviterPerHour) } placeholder={ rlNum(vm.DefaultInviterHour) }/>
 				</label>
@@ -3168,7 +3214,16 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ orDash(vm.Snapshot.FleetBackend) }</dd>
 				<dt>Region</dt>
 				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
+				<dt>Allocation maximum capacity</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.FleetAllocationMaxCapacity)) }</dd>
+				<dt>Live allocations per Game Project</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.FleetMaxLiveAllocationsPerProject)) }</dd>
+				<dt>Agones project isolation</dt>
+				<dd>@boolBadge(vm.Snapshot.AgonesProjectIsolation)</dd>
 			</dl>
+			if vm.Snapshot.FeatureFleetEnabled && vm.Snapshot.FleetBackend == "agones" && !vm.Snapshot.AgonesProjectIsolation {
+				<p role="alert">{ agonesIsolationOffWarning }</p>
+			}
 		</section>
 	}
 }
@@ -3254,6 +3309,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<dt>Token</dt>
 					<dd><code>{ vm.NewToken }</code></dd>
 				</dl>
+				<p>Access: { vm.NewTokenAccess }</p>
 				<p>Example for Claude Code:</p>
 				<pre>claude mcp add --transport http ggscale https://&lt;your-host&gt;/mcp --header "Authorization: Bearer { vm.NewToken }"</pre>
 			</section>
@@ -3261,7 +3317,10 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 		<section class="card">
 			<h2>New token</h2>
 			@errorAlert(vm.Error)
-			<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) } class="settings-form">
+			if vm.RiskyNotice != "" {
+				<p role="status">A link checked risky access in this form: { vm.RiskyNotice } Read it before you create the token. Uncheck the box if you do not want it.</p>
+			}
+			<form class="token-form" method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID)) }>
 				<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 				<label>
 					Label
@@ -3274,21 +3333,68 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<small id="days-help">From 1 to { stringFromInt(int64(vm.MaxDays)) }.</small>
 					@fieldError(vm.FieldErrors, "days")
 				</label>
-				<fieldset>
-					<legend>Access</legend>
-					<label><input type="radio" name="preset" value="read_only" checked/> Read only</label>
-					if len(vm.GrantableScopes) > 0 {
-						<label><input type="radio" name="preset" value="read_write"/> Read and write (all scopes below)</label>
-						<label><input type="radio" name="preset" value="custom"/> Custom (only the scopes checked below)</label>
-					}
-				</fieldset>
-				if len(vm.GrantableScopes) > 0 {
-					<fieldset>
-						<legend>Write scopes</legend>
-						for _, s := range vm.GrantableScopes {
-							<label><input type="checkbox" name="scopes" value={ s }/> <code>{ s }</code></label>
+				<div class="table-scroll">
+				<table class="access-table">
+					<thead>
+						<tr>
+							<th scope="col">Access</th>
+							<th scope="col">No access</th>
+							<th scope="col">Read</th>
+							<th scope="col">Read and write</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range vm.Access {
+							<tr>
+								<th scope="row">
+									{ row.Label }
+									if row.Reason != "" {
+										<br/>
+										<small id={ "access-" + row.Name + "-reason" }>{ row.Reason }</small>
+									}
+								</th>
+								<td><input type="radio" name={ "access_" + row.Name } value="none" checked?={ row.Selected == accessNone } aria-label={ row.Label + ": No access" }/></td>
+								<td><input type="radio" name={ "access_" + row.Name } value="read" checked?={ row.Selected == accessRead } disabled?={ !row.CanRead } aria-label={ row.Label + ": Read" }
+									if !row.CanRead {
+										aria-describedby={ "access-" + row.Name + "-reason" }
+									}
+								/></td>
+								<td>
+									if row.HasWrite {
+										<input type="radio" name={ "access_" + row.Name } value="write" checked?={ row.Selected == accessWrite } disabled?={ !row.CanWrite } aria-label={ row.Label + ": Read and write" }
+											if !row.CanWrite {
+												aria-describedby={ "access-" + row.Name + "-reason" }
+											}
+										/>
+									} else {
+										—
+									}
+								</td>
+							</tr>
 						}
-						<small>Only scopes that you have permission for are shown. Each write can be undone with a rollback or a restore.</small>
+					</tbody>
+				</table>
+				</div>
+				<p>
+					Quick fill:
+					<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "?fill=read_only") } role="button" class="secondary outline btn-inline">Read only</a>
+					<a href={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "?fill=read_write") } role="button" class="secondary outline btn-inline">Read and write</a>
+				</p>
+				if len(vm.Risky) > 0 {
+					<fieldset>
+						<legend>Risky access (never included by Quick fill)</legend>
+						for _, b := range vm.Risky {
+							<label>
+								<input type="checkbox" name="risky" value={ b.Scope } checked?={ b.Checked } disabled?={ b.Reason != "" }/>
+								{ b.Label }
+								if b.Needs != "" {
+									<small>{ b.Needs }</small>
+								}
+								if b.Reason != "" {
+									<small>{ b.Reason }</small>
+								}
+							</label>
+						}
 					</fieldset>
 				}
 				<button type="submit" class="btn-inline">Create token</button>
@@ -3300,12 +3406,13 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 			if len(vm.Tokens) == 0 {
 				<p class="muted">No tokens.</p>
 			} else {
-				<table class="data-table">
+				<div class="table-scroll">
+				<table class="data-table token-table">
 					<thead>
 						<tr>
 							<th>Label</th>
 							<th>Token</th>
-							<th>Scopes</th>
+							<th>Access</th>
 							<th>Created by</th>
 							<th>Expires</th>
 							<th>Last used</th>
@@ -3315,24 +3422,25 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 					<tbody>
 						for _, t := range vm.Tokens {
 							<tr>
-								<td>
+								<td data-label="Label" class="wrap-cell">
 									{ t.Label }
 									if t.Inactive {
 										<span class="badge badge-revoked">inactive</span>
 									}
 								</td>
-								<td><code>…{ t.Hint }</code></td>
-								<td>
-									if len(t.Scopes) == 0 {
-										read only
-									} else {
-										for _, s := range t.Scopes {
-											<code>{ s }</code>
-										}
+								<td data-label="Token"><code>…{ t.Hint }</code></td>
+								<td data-label="Access" class="access-cell">
+									{ t.Access }
+									if t.Risky {
+										<span class="badge badge-warning">risky</span>
+									}
+									if t.LostScopes > 0 {
+										<br/>
+										<small>{ lostScopesText(t.LostScopes) }</small>
 									}
 								</td>
-								<td>{ t.CreatorEmail }</td>
-								<td>
+								<td data-label="Created by">{ t.CreatorEmail }</td>
+								<td data-label="Expires">
 									{ timeString(t.ExpiresAt) }
 									if t.Expired {
 										<span class="badge badge-revoked">expired</span>
@@ -3340,7 +3448,7 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 										<span class="badge">expires soon</span>
 									}
 								</td>
-								<td>
+								<td data-label="Last used">
 									if t.LastUsedAt != nil {
 										{ timeString(*t.LastUsedAt) }
 									} else {
@@ -3348,15 +3456,19 @@ templ ManagementTokensPage(vm ManagementTokensView) {
 									}
 								</td>
 								<td class="actions-cell">
+									<div class="row-actions">
+									<a href={ templ.URL(t.LikeURL) } role="button" class="secondary outline btn-inline">New token like this</a>
 									<form method="post" action={ templ.URL(managementTokensPath(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(t.ID) + "/revoke") } data-confirm="Revoke this token?">
 										<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 										<button type="submit" class="btn-inline contrast outline">Revoke</button>
 									</form>
+									</div>
 								</td>
 							</tr>
 						}
 					</tbody>
 				</table>
+				</div>
 			}
 		</section>
 	}

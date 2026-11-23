@@ -3,7 +3,6 @@ package controlpanel
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -48,9 +47,7 @@ func (h *Handler) updateAllowedOriginsHandler(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "allowed origins: update", err)
 		return
 	}
-	http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
-		url.QueryEscape("Allowed origins saved. Each server uses the new list within "+
-			projectadmin.OriginCacheTTL.String()+"."), http.StatusSeeOther)
+	redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashOriginsSaved)
 }
 
 func (h *Handler) renderAllowedOriginsError(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, raw, msg string) {

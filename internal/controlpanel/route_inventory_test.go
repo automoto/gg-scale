@@ -3,6 +3,8 @@ package controlpanel_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -88,6 +90,7 @@ var postRouteGuards = map[string]guardTier{
 	"/tenants/{tenantID}/projects/{projectID}/fleets":                                tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}":                      tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}/delete":               tierTenantAdmin,
+	"/tenants/{tenantID}/projects/{projectID}/fleets/{fleetID}/restore":              tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards":                          tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards/{leaderboardID}":          tierTenantAdmin,
 	"/tenants/{tenantID}/projects/{projectID}/leaderboards/{leaderboardID}/delete":   tierTenantAdmin,
@@ -207,4 +210,58 @@ func TestControlPanel_should_rate_limit_signed_in_credential_checks(t *testing.T
 	for route := range limited {
 		assert.Equalf(t, base+1, middlewares[route], "route %q", route)
 	}
+}
+
+// TestControlPanel_should_refuse_a_cross_site_write_on_every_route walks every
+// state-changing route, so a new route cannot miss the cross-origin check.
+func TestControlPanel_should_refuse_a_cross_site_write_on_every_route(t *testing.T) {
+	h := controlpanel.New(controlpanel.Deps{VerifySigningKey: make([]byte, verifycode.SigningKeySize)})
+	routes, ok := h.(chi.Routes)
+	require.True(t, ok)
+	param := regexp.MustCompile(`\{[^}]+\}`)
+
+	refused := map[string]bool{}
+	want := map[string]bool{}
+	require.NoError(t, chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
+			return nil
+		}
+		req := httptest.NewRequest(method, param.ReplaceAllString(route, "1"), nil)
+		req.Header.Set("Sec-Fetch-Site", "cross-site")
+		req.Header.Set("Origin", "https://evil.example")
+		refused[route] = refusedAsCrossOrigin(h, req)
+		want[route] = true
+		return nil
+	}))
+
+	require.NotEmpty(t, refused)
+	assert.Equal(t, want, refused)
+}
+
+// refusedAsCrossOrigin reports whether the cross-origin check answered the
+// request. A handler that panics (it ran with no database) did not.
+func refusedAsCrossOrigin(h http.Handler, req *http.Request) (refused bool) {
+	defer func() {
+		if recover() != nil {
+			refused = false
+		}
+	}()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec.Code == http.StatusForbidden && strings.Contains(rec.Body.String(), "cross-origin request detected")
+}
+
+func TestControlPanel_should_trust_a_post_from_the_base_url_origin(t *testing.T) {
+	h := controlpanel.New(controlpanel.Deps{
+		VerifySigningKey: make([]byte, verifycode.SigningKeySize),
+		Config:           controlpanel.Config{BaseURL: "https://panel.example"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "http://ggscale:8080/setup/token", nil)
+	req.Header.Set("Origin", "https://panel.example")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	// With setup disabled, POST /setup/token answers 410 before any work.
+	assert.Equal(t, http.StatusGone, rec.Code)
 }

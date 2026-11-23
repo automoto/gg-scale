@@ -95,17 +95,28 @@ func (h *Handler) requireProjectRead(objectFor func(int64) string) func(http.Han
 	}
 }
 
-func (h *Handler) requireControlPanelFleetMutation(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
+// requireControlPanelFleetManage checks the fleet manage right and the
+// dedicated_servers feature. It needs no stored data, so the fleet POST
+// handlers run it before they load or show a fleet. The backend grant
+// (requireControlPanelBackendFeature) follows once the backend is known.
+func (h *Handler) requireControlPanelFleetManage(w http.ResponseWriter, r *http.Request, tenantID, projectID int64) bool {
 	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectFleetObject(projectID), rbac.ActionManage) {
 		return false
 	}
-	if !h.requireControlPanelFeature(w, r, tenantID, projectID, rbac.FeatureDedicatedServers) {
+	return h.requireControlPanelFeature(w, r, tenantID, projectID, rbac.FeatureDedicatedServers)
+}
+
+// requireControlPanelBackendFeature checks the feature grant of a fleet
+// backend. A backend name that maps to no grant is refused. Allocate runs no
+// other name check: Manager.Allocate only refuses a fleet whose backend does
+// not match the running one (fleet.BackendMatches).
+func (h *Handler) requireControlPanelBackendFeature(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
+	feature, ok := rbac.BackendFeature(backend)
+	if !ok {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
-	if backendFeature, ok := rbac.BackendFeature(backend); ok {
-		return h.requireControlPanelFeature(w, r, tenantID, projectID, backendFeature)
-	}
-	return true
+	return h.requireControlPanelFeature(w, r, tenantID, projectID, feature)
 }
 
 func (h *Handler) requireControlPanelAllocationMutation(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, action string) bool {

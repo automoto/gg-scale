@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +19,7 @@ import (
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/rbac"
@@ -110,6 +109,7 @@ type Handler struct {
 	overrides        ratelimit.OverrideStore
 	connectionEnvMax int64
 	inviteThrottle   *ratelimit.InviteThrottle
+	playerInvites    *projectadmin.PlayerInviter
 	reg              prometheus.Registerer
 	cfg              Config
 	bootstrap        *Bootstrap
@@ -138,6 +138,7 @@ func New(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(webutil.SecurityHeadersWithFormActions(h.sso.Origins()...))
+	r.Use(webutil.CrossOriginProtection(d.Config.BaseURL))
 	r.Get("/assets/*", h.assetHandler)
 	r.Get("/setup", h.setupTokenPage)
 	r.Get("/login", h.loginPage)
@@ -237,8 +238,7 @@ func New(d Deps) http.Handler {
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/delete", h.leaderboardsDeleteHandler)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/restore", h.leaderboardRestoreHandler)
 			r.Post("/projects/{projectID}/leaderboards/{leaderboardID}/rollback", h.leaderboardRollbackHandler)
-			// Consolidated settings pages (writes reuse the handlers above via
-			// a sanitized redirect_to).
+			// Consolidated settings pages (writes reuse the handlers above).
 			r.Get("/settings", h.tenantSettingsPage)
 			r.Post("/settings/tier", h.updateTenantTierHandler)
 			r.Post("/settings/features", h.updateTenantFeatureHandler)
@@ -297,6 +297,7 @@ func New(d Deps) http.Handler {
 				r.Post("/projects/{projectID}/fleets", h.fleetsCreateHandler)
 				r.Post("/projects/{projectID}/fleets/{fleetID}", h.fleetsUpdateHandler)
 				r.Post("/projects/{projectID}/fleets/{fleetID}/delete", h.fleetsDeleteHandler)
+				r.Post("/projects/{projectID}/fleets/{fleetID}/restore", h.fleetsRestoreHandler)
 				r.Get("/fleet/backends", h.fleetBackendsPage)
 			})
 		})
@@ -410,6 +411,10 @@ func newHandler(d Deps) *Handler {
 		h.inviteThrottle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, d.Registry).
 			WithOverrides(d.RateLimitOverrides)
 	}
+	h.playerInvites = &projectadmin.PlayerInviter{
+		Pool: d.Pool, Throttle: h.inviteThrottle, Mailer: d.Mailer, MailFrom: d.Config.MailFrom,
+		BaseURL: d.Config.BaseURL, SigningKey: h.verifySigningKey, Metrics: d.Metrics,
+	}
 	return h
 }
 
@@ -454,6 +459,8 @@ func (h *Handler) helpPage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) newTenantPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
+	// The tenant create result, with its key, is swapped into this page.
+	webutil.NoStore(w)
 	webutil.Render(r, w, NewTenantPage(NewTenantView{UserEmail: session.User.Email, CSRFToken: session.CSRFToken}))
 }
 
@@ -468,16 +475,12 @@ func (h *Handler) projectsPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	message := r.URL.Query().Get("created")
-	if flash := r.URL.Query().Get("flash"); flash != "" {
-		message = flash
-	}
 	webutil.Render(r, w, ProjectsPage(ProjectsView{
 		UserEmail:    session.User.Email,
 		TenantID:     tenantID,
 		CSRFToken:    session.CSRFToken,
 		Projects:     projects,
-		Message:      message,
+		Message:      flashMessage(r),
 		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
@@ -536,8 +539,7 @@ func (h *Handler) createProjectHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewProjectPage(view))
 		return
 	}
-	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) + "/projects?created=" + url.QueryEscape("Game Project \""+strings.TrimSpace(name)+"\" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+"/projects", flashProjectCreated)
 }
 
 func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
@@ -559,6 +561,9 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInvalidSignup):
 			status = http.StatusUnprocessableEntity
 			msg = "Account Tenant name and Game Project name are required"
+		case errors.Is(err, projectadmin.ErrInvalidKeyLabel):
+			status = http.StatusUnprocessableEntity
+			msg = err.Error()
 		case errors.Is(err, errDuplicateTenantName):
 			status = http.StatusConflict
 			msg = "An Account Tenant with that name already exists"
@@ -567,6 +572,7 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, FormErrorFragment(msg))
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, SignupSuccessPage(SignupSuccessView(result)))
 }
 
@@ -596,7 +602,6 @@ func (h *Handler) apiKeys(w http.ResponseWriter, r *http.Request) {
 		TenantID:  tenantID,
 		CSRFToken: session.CSRFToken,
 		Keys:      keys,
-		Message:   r.URL.Query().Get("created"),
 	}))
 
 }
@@ -671,7 +676,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	// The shared roleAdmin route guard only checks project:manage, so enforce
 	// the key-type capability here (api_key:secret vs api_key:publishable) —
 	// roles without the matching grant (e.g. analyst) are denied.
-	keyObject, _ := apiKeyObjectForType(keyType)
+	keyObject, _ := projectadmin.APIKeyObject(string(keyType))
 	if !h.requireControlPanelPermission(w, r, tenantID, keyObject, rbac.ActionManage) {
 		return
 	}
@@ -693,6 +698,11 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		KeyType:   keyType,
 	})
 	if err != nil {
+		if errors.Is(err, projectadmin.ErrInvalidKeyLabel) {
+			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
+				http.StatusUnprocessableEntity, map[string]string{"label": err.Error()}, "")
+			return
+		}
 		if errors.Is(err, errProjectNotInTenant) {
 			h.renderNewAPIKeyError(w, r, tenantID, label, rawProjectID, rawKeyType,
 				http.StatusUnprocessableEntity,
@@ -703,6 +713,7 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: tenantID,
 		APIKeyID: result.APIKeyID,
@@ -750,10 +761,12 @@ func (h *Handler) updateAPIKeyLabelHandler(w http.ResponseWriter, r *http.Reques
 	switch err := h.updateAPIKeyLabel(r.Context(), session.User.ID, tenantID, apiKeyID, r.Form.Get("label")); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, "forbidden", http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
+	case errors.Is(err, projectadmin.ErrInvalidKeyLabel):
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 	default:
 		http.Error(w, "api key label failed", http.StatusInternalServerError)
 	}
@@ -776,9 +789,9 @@ func (h *Handler) updateAPIKeyFeaturesHandler(w http.ResponseWriter, r *http.Req
 	switch err := h.updateAPIKeyManagedScopes(r.Context(), session.User.ID, tenantID, apiKeyID, scopes); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errInvalidScope), errors.Is(err, errScopeNotGrantable), errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrInvalidKeyScope), errors.Is(err, projectadmin.ErrScopeNotGrantable), errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, err.Error(), http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
 		http.Error(w, "api key feature update failed", http.StatusInternalServerError)
@@ -797,9 +810,9 @@ func (h *Handler) revokeAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 	switch err := h.revokeAPIKey(r.Context(), session.User.ID, tenantID, apiKeyID); {
 	case err == nil:
 		htmxRedirect(w, r, pathTenantsPrefix+strconv.FormatInt(tenantID, 10)+segAPIKeys)
-	case errors.Is(err, errAPIKeyManageDenied):
+	case errors.Is(err, projectadmin.ErrAPIKeyManageDenied):
 		http.Error(w, "forbidden", http.StatusForbidden)
-	case errors.Is(err, errKeyNotInTenant):
+	case errors.Is(err, projectadmin.ErrAPIKeyNotFound):
 		http.Error(w, "api key not found", http.StatusNotFound)
 	default:
 		http.Error(w, "api key revoke failed", http.StatusInternalServerError)
@@ -897,7 +910,7 @@ func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, path, http.StatusSeeOther)
+	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {

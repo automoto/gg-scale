@@ -1,10 +1,15 @@
 package controlpanel
 
 import (
+	"context"
+	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/automoto/gg-scale/internal/fleet"
 )
 
 func TestFleetsListPage_renders_empty_state_when_no_fleets(t *testing.T) {
@@ -140,9 +145,77 @@ func TestSummarizeFleetConfig_per_backend(t *testing.T) {
 		summarizeFleetConfig("agones", map[string]string{"fleet_name": "doomerang"}),
 	)
 	assert.Equal(t,
-		"flavor=b2-7",
-		summarizeFleetConfig("plugin:ovh", map[string]string{"flavor": "b2-7"}),
+		"api_token flavor",
+		summarizeFleetConfig("plugin:ovh", map[string]string{"flavor": "b2-7", "api_token": pluginSecretMarker}),
 	)
+}
+
+const pluginSecretMarker = "tok-SEALMARKER-7f3a"
+
+func TestFleetsListPage_should_not_show_a_plugin_config_value(t *testing.T) {
+	cfg := map[string]string{"api_token": pluginSecretMarker}
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:x", Enabled: true,
+		Fleets: []FleetRowView{{ID: 1, Name: "p", Backend: "plugin:x", BackendMatches: true, Summary: summarizeFleetConfig("plugin:x", cfg)}},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestEditFleetPage_should_not_show_a_plugin_config_value(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestEditFleetPage_should_show_each_plugin_key_with_a_keep_hint(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.Contains(t, html, `name="config_key[]" value="api_token"`)
+	assert.Contains(t, html, "An empty value keeps the saved value")
+}
+
+func TestNewFleetPage_should_not_show_a_typed_plugin_value_again(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:x", Backend: "plugin:x",
+		Config: map[string]string{"api_token": pluginSecretMarker},
+	}))
+	assert.NotContains(t, html, pluginSecretMarker)
+}
+
+func TestFleetFormConfig_should_hide_plugin_values_only(t *testing.T) {
+	assert.Equal(t, map[string]string{"api_token": ""}, fleetFormConfig("plugin:x", map[string]string{"api_token": pluginSecretMarker}))
+	assert.Equal(t, map[string]string{"fleet_name": "gs"}, fleetFormConfig("agones", map[string]string{"fleet_name": "gs"}))
+}
+
+func TestKeepStoredPluginValues(t *testing.T) {
+	stored := map[string]string{"api_token": "saved", "region": "GRA9"}
+	tests := []struct {
+		name   string
+		keys   []string
+		values []string
+		want   map[string]string
+	}{
+		{"should_keep_the_stored_value_when_the_value_is_empty", []string{"api_token", "region"}, []string{"", ""}, map[string]string{"api_token": "saved", "region": "GRA9"}},
+		{"should_replace_the_stored_value_with_a_new_value", []string{"api_token", "region"}, []string{"next", ""}, map[string]string{"api_token": "next", "region": "GRA9"}},
+		{"should_remove_a_key_whose_key_field_is_empty", []string{"", "region"}, []string{"", ""}, map[string]string{"region": "GRA9"}},
+		{"should_remove_a_key_with_no_row", []string{"region"}, []string{""}, map[string]string{"region": "GRA9"}},
+		{"should_clear_the_config_when_no_key_is_left", []string{"", "", ""}, []string{"", "", ""}, map[string]string{}},
+		{"should_add_a_new_key_with_an_empty_value", []string{"api_token", "region", "zone"}, []string{"", "", ""}, map[string]string{"api_token": "saved", "region": "GRA9", "zone": ""}},
+		{"should_lose_the_value_of_a_renamed_key_with_an_empty_value", []string{"token", "region"}, []string{"", ""}, map[string]string{"token": "", "region": "GRA9"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, _ := parseFleetConfigForm("plugin:x", url.Values{"config_key[]": tt.keys, "config_value[]": tt.values})
+
+			err := keepStoredPluginValues(context.Background(), cfg, &fleet.Fleet{Config: stored})
+
+			assert.Equal(t, []any{nil, tt.want}, []any{err, cfg})
+		})
+	}
 }
 
 func TestFleetBackendKind_buckets_plugin_variants(t *testing.T) {
@@ -195,4 +268,95 @@ func TestNewFleetAllocationPage_renders_fleet_dropdown_with_mismatch_marker(t *t
 	assert.Contains(t, html, "primary")
 	assert.Contains(t, html, "stale")
 	assert.Contains(t, html, "backend mismatch")
+}
+
+func TestFleetsListPage_lists_deleted_fleets_with_a_restore_form(t *testing.T) {
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "agones", Enabled: true, CSRFToken: "tok",
+		DeletedFleets: []FleetRowView{{ID: 7, Name: "old-one", Backend: "agones"}},
+	}))
+	assert.Contains(t, html, "old-one")
+	assert.Contains(t, html, `action="/v1/control-panel/tenants/1/projects/2/fleets/7/restore"`)
+	assert.Contains(t, html, `name="_csrf" value="tok"`)
+}
+
+func TestNewFleetPage_plugin_option_stores_the_configured_plugin_name(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:ovh",
+	}))
+	assert.Contains(t, html, `<option value="plugin:ovh"`)
+}
+
+func TestNewFleetPage_plugin_option_is_selected_for_the_configured_plugin(t *testing.T) {
+	html := renderToString(t, NewFleetPage(NewFleetView{
+		TenantID: 1, ProjectID: 2, BackendConfigured: "plugin:ovh", Backend: "plugin:ovh",
+	}))
+	assert.Contains(t, html, `<option value="plugin:ovh" selected`)
+}
+
+func TestParseFleetConfigForm_should_refuse_a_key_in_two_rows(t *testing.T) {
+	tests := []struct {
+		name    string
+		backend string
+		form    url.Values
+		field   string
+	}{
+		{"plugin", "plugin:x", url.Values{"config_key[]": {"api_token", " api_token"}, "config_value[]": {"next", ""}}, "config_key"},
+		{"agones_selector", "agones", url.Values{"fleet_name": {"gs"}, "selector_key[]": {"zone", "zone"}, "selector_value[]": {"eu", "us"}}, "selector_key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, errs := parseFleetConfigForm(tt.backend, tt.form)
+
+			assert.Contains(t, errs, tt.field)
+		})
+	}
+}
+
+func TestEditFleetPage_should_not_show_the_keep_hint_without_keys(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{},
+	}))
+	assert.NotContains(t, html, "An empty value keeps the saved value")
+}
+
+func TestEditFleetPage_should_ask_for_the_values_again_after_a_failed_save(t *testing.T) {
+	html := renderToString(t, EditFleetPage(EditFleetView{
+		TenantID: 1, ProjectID: 2, FleetID: 5, Name: "p", Backend: "plugin:x", BackendConfigured: "plugin:x",
+		Config: map[string]string{"api_token": ""}, Retry: true,
+	}))
+	assert.Contains(t, html, "Enter each value again")
+}
+
+func TestEditFleetPage_namespace_note(t *testing.T) {
+	cases := []struct {
+		name      string
+		isolation bool
+	}{
+		{"should_show_the_note_when_isolation_is_on", true},
+		{"should_not_show_the_note_when_isolation_is_off", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderToString(t, EditFleetPage(EditFleetView{
+				TenantID: 1, ProjectID: 2, FleetID: 3, Name: "f", Backend: "agones",
+				Config: map[string]string{"fleet_name": "gs", "namespace": "legacy"}, AgonesProjectIsolation: tc.isolation,
+			}))
+
+			assert.Equal(t, tc.isolation, strings.Contains(html, "This server uses AGONES_NAMESPACE. Leave this field empty"))
+		})
+	}
+}
+
+func TestFleetFormError_should_answer_409_with_the_setting_at_the_live_allocation_cap(t *testing.T) {
+	msg, status := fleetFormError("Allocate failed", fmt.Errorf("wrap: %w", fleet.ErrLiveAllocationLimit))
+
+	assert.Equal(t, []any{409, true}, []any{status, strings.Contains(msg, "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")}, msg)
+}
+
+func TestFleetFormError_should_answer_409_with_a_fixed_text_for_a_backend_mismatch(t *testing.T) {
+	msg, status := fleetFormError("Allocate failed", fmt.Errorf("%w: fleet %q wants %q", fleet.ErrFleetBackendMismatch, "name-marker", "plugin:x"))
+
+	assert.Equal(t, []any{409, "Allocate failed: the fleet backend does not match the server backend."}, []any{status, msg})
 }

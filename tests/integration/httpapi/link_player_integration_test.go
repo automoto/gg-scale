@@ -466,3 +466,40 @@ func TestLinkPlayer_accept_conflicts_when_row_linked_to_other_account(t *testing
 	require.NotNil(t, account)
 	assert.Equal(t, otherAccount, *account)
 }
+
+// TestPlayerInvite_dashboard_should_write_an_audit_row_for_invite_and_link
+// checks that the dashboard writes the same audit rows as a token, without
+// the invited address in the payload.
+func TestPlayerInvite_dashboard_should_write_an_audit_row_for_invite_and_link(t *testing.T) {
+	c := startCluster(t)
+	tenantA, projectA := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "key-a")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantA, "admin")
+	playerID := seedExternalIDOnlyPlayer(t, c, tenantA, projectA, "player-audit-1")
+	srv, _ := newControlPanelAndPlayerServer(t, c)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantA, 10) + "/projects/" + strconv.FormatInt(projectA, 10) + "/players/"
+	post := func(path, email string) {
+		form := url.Values{"_csrf": {csrf}, "email": {email}}
+		req, err := http.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.AddCookie(cookie)
+		resp, err := noRedirectClient().Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	post(base+"invite", "audit-invite@example.com")
+	post(base+strconv.FormatInt(playerID, 10)+"/link", "audit-link@example.com")
+
+	var invites, links, withAddress int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FILTER (WHERE action = 'control_panel.player.invite' AND target IS NOT NULL),
+		        count(*) FILTER (WHERE action = 'control_panel.player.link' AND target = $1),
+		        count(*) FILTER (WHERE payload::text LIKE '%@example.com%')
+		 FROM platform_audit_log WHERE actor_user_id = $2`, strconv.FormatInt(playerID, 10), adminID).
+		Scan(&invites, &links, &withAddress))
+	assert.Equal(t, []int{1, 1, 0}, []int{invites, links, withAddress})
+}

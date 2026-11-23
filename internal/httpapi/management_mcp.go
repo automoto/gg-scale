@@ -21,7 +21,8 @@ const mcpMaxBodyBytes = 131072
 
 // mcpInstructions is sent to MCP clients when they connect.
 const mcpInstructions = "ggscale backend for one Game Project. Use project_health_check first " +
-	"to find setup problems. All tools act on the Game Project of the token; no tool takes a project ID."
+	"to find setup problems. All tools act on the Game Project of the token; no tool takes a project ID. " +
+	"A tool that you expect is missing when the token lacks its scope: call get_token to see the scopes of the token."
 
 // attachManagementMCP serves the /v1/project operations as MCP tools on
 // POST /mcp. api must be bound to a root-level chi group: a tool call sends
@@ -37,8 +38,9 @@ func attachManagementMCP(api huma.API, version string) {
 }
 
 // managementToolFilter offers a tool only when it is a row of projectOps and
-// the token has the row's scope. It is not the authorization boundary: the
-// wrapper of each operation checks the scope and the creator pair again.
+// the token has the row's scope, or one of its anyScope list. It is not the
+// authorization boundary: the wrapper of each operation checks the scope and
+// the creator pair again.
 func managementToolFilter(ctx context.Context, op *huma.Operation) bool {
 	if _, ok := op.Metadata[managementToolMetadata].(string); !ok {
 		return false
@@ -47,8 +49,11 @@ func managementToolFilter(ctx context.Context, op *huma.Operation) bool {
 	if !ok {
 		return false
 	}
-	scope, _ := op.Metadata[managementScopeMetadata].(string)
-	return scope == "" || p.HasScope(scope)
+	if scope, _ := op.Metadata[managementScopeMetadata].(string); scope != "" {
+		return p.HasScope(scope)
+	}
+	anyScope, _ := op.Metadata[managementAnyScopeMetadata].([]string)
+	return len(anyScope) == 0 || slices.ContainsFunc(anyScope, p.HasScope)
 }
 
 // managementTool is a registered row operation, the argument names its tool
@@ -120,6 +125,8 @@ type mcpToolCallParams struct {
 // argument, so a misspelled or old setting name would remove that setting.
 // The answer is a JSON-RPC invalid-params error, as for an unknown tool. A
 // tool the token cannot see is passed on, so it still answers unknown tool.
+// A tools/call that is not valid UTF-8 text (see validText) is refused with
+// the same error form, before the tool is looked up.
 func strictToolArguments(doc *huma.OpenAPI) func(http.Handler) http.Handler {
 	tools := managementToolArguments(doc)
 	return func(next http.Handler) http.Handler {
@@ -141,6 +148,13 @@ func strictToolArguments(doc *huma.OpenAPI) func(http.Handler) http.Handler {
 			var req mcpRequest
 			if json.Unmarshal(bytes.TrimSpace(body), &req) != nil || req.Method != "tools/call" || len(req.ID) == 0 {
 				next.ServeHTTP(w, r)
+				return
+			}
+			// huma mcp decodes path, query, and header arguments to Go
+			// strings, which turns bad text into U+FFFD before the inner
+			// request reaches jsonFormat. Check the raw call here.
+			if !validText(body) {
+				writeInvalidParams(w, req.ID, errBodyText.Error())
 				return
 			}
 			var call mcpToolCallParams

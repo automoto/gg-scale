@@ -123,7 +123,7 @@ func SetAllowedOrigins(ctx context.Context, pool *db.Pool, tenantID, projectID i
 		if err := q.SetAllowedOrigins(ctx, sqlcgen.SetAllowedOriginsParams{Origins: origins, ProjectID: projectID}); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "project.allowed_origins.update", strconv.FormatInt(projectID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, "project.allowed_origins.update", strconv.FormatInt(projectID, 10), map[string]any{
 			"old_origins": old,
 			"new_origins": origins,
 		})

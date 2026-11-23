@@ -115,6 +115,10 @@ type AllocationRequest struct {
 	GameMode string
 	Capacity int
 	Labels   map[string]string
+	// MaxLive, when above 0, is the largest number of live allocations of
+	// the project. The store refuses the pending insert at the cap with
+	// ErrLiveAllocationLimit. Backends ignore it.
+	MaxLive int
 }
 
 // Allocation is the manager's view of one game-server slot. BackendRef is
@@ -179,6 +183,8 @@ var ErrUnsupported = errors.New("fleet: operation not supported by backend")
 
 // ResolutionCleaner removes resources created before the backend reference was
 // saved. Backends use the durable ggscale.dev/resolution-id allocation label.
+// projectID is the project of the allocation; it is 0 over the plugin
+// protocol.
 type ResolutionCleaner interface {
-	CleanupResolution(context.Context, string, map[string]string) error
+	CleanupResolution(ctx context.Context, projectID int64, resolutionID string, config map[string]string) error
 }

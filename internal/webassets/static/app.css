@@ -478,6 +478,7 @@ details.row-menu > summary:hover {
 .badge-active  { border-color: #4ade80; color: #4ade80; }
 .badge-revoked { opacity: 0.35; }
 .badge-role    { border-color: var(--pico-primary); color: var(--pico-primary); }
+.badge-warning { border-color: #f87171; color: #f87171; }
 
 /* === Alerts =============================================== */
 [role="alert"] {
@@ -641,4 +642,34 @@ dl.concept-list code { font-size: 0.85em; padding: 1px 5px; }
     padding: 4px 10px;
   }
   dl.concept-list { grid-template-columns: 1fr; row-gap: 0.5rem; }
+}
+
+/* === Wide tables, token page ============================== */
+.table-scroll { overflow-x: auto; }
+section.card .table-scroll { margin: 0 -1.5rem; }
+section.card .table-scroll .data-table { margin: 0; width: 100%; }
+.wrap-cell,
+.wrap-cell code { overflow-wrap: anywhere; white-space: normal; }
+.wrap-cell { min-width: 6rem; max-width: 16rem; }
+.token-table .access-cell { min-width: 12rem; }
+.token-table th, .token-table td { padding-left: 0.5rem; padding-right: 0.5rem; }
+.token-table td[data-label="Created by"] { overflow-wrap: anywhere; min-width: 8rem; }
+.token-table td[data-label="Expires"], .token-table td[data-label="Last used"] { min-width: 7.5rem; }
+.token-table .row-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem; }
+.token-table .row-actions form { display: block; }
+.access-table th, .access-table td { padding-left: 0.5rem; padding-right: 0.5rem; }
+.token-form fieldset label > small { display: block; margin: 0.25rem 0 0.75rem 1.75rem; }
+@media (max-width: 640px) {
+  section.card .table-scroll { margin: 0 -1rem; }
+  .access-table th, .access-table td { padding-left: 0.25rem; padding-right: 0.25rem; font-size: 0.8rem; }
+  .token-table thead { display: none; }
+  .token-table tbody, .token-table tr, .token-table td { display: block; }
+  .token-table td { border-bottom: none; padding: 0.15rem 1rem; }
+  .token-table tr { border-bottom: 1px solid var(--pico-border-color); padding: 0.5rem 0; }
+  .token-table td[data-label]::before { content: attr(data-label) ": "; opacity: 0.6; font-size: 0.8rem; }
+  .token-table { display: block; }
+  .token-table .actions-cell { position: static; background: none; }
+  .token-table .row-actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; }
+  .wrap-cell { max-width: none; }
+  .deleted-table .actions-cell { position: sticky; right: 0; background: var(--pico-card-background-color); }
 }

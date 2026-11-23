@@ -5,7 +5,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -55,6 +59,8 @@ func newHumaConfig(version string) huma.Config {
 	}
 	cfg := huma.DefaultConfig("ggscale API", version)
 	cfg.CreateHooks = nil
+	cfg.Transformers = append(cfg.Transformers, dropErrorValues)
+	cfg.Formats = map[string]huma.Format{"application/json": jsonFormat, "json": jsonFormat}
 	cfg.OpenAPIPath = ""
 	cfg.DocsPath = ""
 	cfg.SchemasPath = ""
@@ -185,4 +191,102 @@ func serverError(ctx context.Context, msg string, err error) error {
 	}
 	slog.ErrorContext(ctx, msg, "error", err)
 	return huma.Error500InternalServerError("internal error")
+}
+
+// keptErrorValues are the error details that keep their value. Each is data
+// the server makes, never request input: request validation puts a location
+// that starts with body, path, query, header or cookie, so input cannot make
+// these. The SDKs read the active ticket id (Go Error.ActiveTicketID, C#
+// GGScaleException.ActiveTicketId).
+var keptErrorValues = map[errorValueKey]bool{
+	{status: http.StatusConflict, location: "active_ticket_id"}: true,
+}
+
+type errorValueKey struct {
+	status   int
+	location string
+}
+
+// dropErrorValues removes the value from every error detail. huma copies the
+// refused value, or the whole body, into it, so an answer could send back a
+// password or a key.
+func dropErrorValues(_ huma.Context, _ string, v any) (any, error) {
+	model, ok := v.(*huma.ErrorModel)
+	if !ok {
+		return v, nil
+	}
+	for _, detail := range model.Errors {
+		if detail == nil || keptErrorValues[errorValueKey{status: model.Status, location: detail.Location}] {
+			continue
+		}
+		detail.Value = nil
+	}
+	return v, nil
+}
+
+// errBodyDecode is the message of every request body that does not decode:
+// JSON that does not parse, or valid JSON that does not fit the input type.
+// The decoder error quotes the first bad byte or the number.
+var errBodyDecode = errors.New("request body could not be decoded")
+
+// errBodyText is the message of a body that is not valid UTF-8 text.
+var errBodyText = errors.New("request body is not valid UTF-8 text")
+
+// jsonFormat is huma's JSON format with fixed error messages. It decodes
+// every JSON request body, and the body of every MCP tool call, so it is the
+// one place that refuses text the decoder would change to U+FFFD.
+var jsonFormat = huma.Format{
+	Marshal: huma.DefaultJSONFormat.Marshal,
+	Unmarshal: func(data []byte, v any) error {
+		if !validText(data) {
+			return errBodyText
+		}
+		if huma.DefaultJSONFormat.Unmarshal(data, v) != nil {
+			return errBodyDecode
+		}
+		return nil
+	},
+}
+
+// validText reports whether data is valid UTF-8 and every \u escape of a
+// surrogate is the first half of a pair followed by the second half.
+func validText(data []byte) bool {
+	if !utf8.Valid(data) {
+		return false
+	}
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' {
+			continue
+		}
+		r := unicodeEscape(data[i:])
+		if r < 0 {
+			// Another escape: skip the escaped byte.
+			i++
+			continue
+		}
+		// Skip the rest of this escape: u and four hex digits.
+		i += 5
+		if !utf16.IsSurrogate(r) {
+			continue
+		}
+		if utf16.DecodeRune(r, unicodeEscape(data[i+1:])) == unicode.ReplacementChar {
+			return false
+		}
+		// Skip the second escape of the pair: six bytes.
+		i += 6
+	}
+	return true
+}
+
+// unicodeEscape returns the rune of the \uXXXX escape at the start of b, or
+// -1 when b does not start with one.
+func unicodeEscape(b []byte) rune {
+	if len(b) < 6 || b[0] != '\\' || b[1] != 'u' {
+		return -1
+	}
+	n, err := strconv.ParseUint(string(b[2:6]), 16, 16)
+	if err != nil {
+		return -1
+	}
+	return rune(n)
 }

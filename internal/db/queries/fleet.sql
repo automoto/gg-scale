@@ -43,6 +43,18 @@ SET status      = 'shutdown',
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
+-- name: ReleasePendingAllocationWithoutRef :execrows
+-- 0 rows = the row changed after the caller read it (MarkAllocationReady,
+-- MarkAllocationFailed or another release), so the caller reads it again and
+-- stops the server that a new ref names.
+UPDATE game_server_allocations
+SET status      = 'shutdown',
+    released_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND status = 'pending'
+  AND COALESCE(backend_ref, '') = '';
+
 -- name: GetAllocation :one
 SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at
@@ -73,6 +85,11 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY id DESC
 LIMIT sqlc.arg(lim)
 OFFSET sqlc.arg(off);
+
+-- name: LockProjectForAllocationCap :exec
+-- Transaction-scoped advisory lock that serializes the live allocation cap
+-- check and the pending insert per project. Released on commit/rollback.
+SELECT pg_advisory_xact_lock(hashtextextended('fleet_live_alloc_cap', sqlc.arg('project_id')));
 
 -- name: CountAllocationsForProject :one
 SELECT count(*)::bigint
@@ -112,3 +129,15 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND allocation_id = sqlc.arg(allocation_id)
 ORDER BY id DESC
 LIMIT sqlc.arg(lim);
+
+-- name: ListAllocationsPageForProject :many
+-- Management API list: keyset on id, newest first. before_id = 0 starts at
+-- the newest row.
+SELECT id, fleet_id, backend, backend_ref, region, address, status::text AS status
+FROM game_server_allocations
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = sqlc.arg(project_id)
+  AND (sqlc.arg(include_terminal)::boolean OR released_at IS NULL)
+  AND (sqlc.arg(before_id)::bigint = 0 OR id < sqlc.arg(before_id)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(row_limit);

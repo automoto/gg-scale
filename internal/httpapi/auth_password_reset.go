@@ -109,7 +109,7 @@ func mintAndSendCode(ctx context.Context, d Deps, email, subject, bodyTmpl strin
 	send := false
 	err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		var perr error
-		send, perr = prepare(sqlcgen.New(tx), verifycode.Hash(salt, code), salt)
+		send, perr = prepare(sqlcgen.New(tx), verifycode.HashCode(d.EmailVerifySigningKey, salt, code), salt)
 		return perr
 	})
 	if err != nil {
@@ -204,7 +204,7 @@ func resetConfirm(d Deps) func(context.Context, *resetConfirmInput) (*struct{}, 
 				return qerr
 			}
 			var cerr error
-			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, challengeState{
+			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, d.EmailVerifySigningKey, challengeState{
 				ID:          row.ID,
 				CodeHash:    row.PasswordResetCodeHash,
 				Salt:        row.PasswordResetSalt,

@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
@@ -41,28 +42,7 @@ func TestParseManagedAPIKeyScopes(t *testing.T) {
 func TestParseManagedAPIKeyScopes_rejects_unknown_scope(t *testing.T) {
 	_, err := parseManagedAPIKeyScopes(url.Values{"scopes": {"admin"}})
 
-	assert.ErrorIs(t, err, errInvalidScope)
-}
-
-func TestManagedScopeChanges_reports_grants_and_revokes(t *testing.T) {
-	changes := managedScopeChanges(
-		[]string{tenant.ScopeMatchmaker, tenant.ScopeFleet},
-		[]string{tenant.ScopeMatchmaker, tenant.ScopeP2PRelay},
-	)
-
-	assert.Equal(t, []scopeChange{
-		{Scope: tenant.ScopeFleet, Grant: false},
-		{Scope: tenant.ScopeP2PRelay, Grant: true},
-	}, changes)
-}
-
-func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
-	next := applyManagedScopes(
-		[]string{"storage:read", tenant.ScopeMatchmaker, tenant.ScopeFleet},
-		[]string{tenant.ScopeP2PRelay},
-	)
-
-	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
+	assert.ErrorIs(t, err, projectadmin.ErrInvalidKeyScope)
 }
 
 func TestCreateAPIKey_RejectsInvalidKeyType(t *testing.T) {

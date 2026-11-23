@@ -745,6 +745,49 @@ func TestServerSettingsPage_should_show_the_management_token_cache_ttl(t *testin
 	assert.Contains(t, html, "<dt>Token cache entries</dt><dd>10000</dd>")
 }
 
+func TestServerSettingsPage_should_show_the_allocation_max_capacity(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{FleetAllocationMaxCapacity: 100},
+	}))
+
+	assert.Contains(t, html, "<dt>Allocation maximum capacity</dt><dd>100</dd>")
+}
+
+func TestServerSettingsPage_should_show_the_live_allocation_cap(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{FleetMaxLiveAllocationsPerProject: 100},
+	}))
+
+	assert.Contains(t, html, "<dt>Live allocations per Game Project</dt><dd>100</dd>")
+}
+
+func TestServerSettingsPage_agones_project_isolation(t *testing.T) {
+	cases := []struct {
+		name        string
+		fleetOn     bool
+		backend     string
+		isolation   bool
+		wantBadge   string
+		wantWarning bool
+	}{
+		{"should_warn_when_agones_runs_without_isolation", true, "agones", false, "badge-revoked\">off", true},
+		{"should_not_warn_when_isolation_is_on", true, "agones", true, "badge-active\">on", false},
+		{"should_not_warn_for_a_plugin_backend", true, "plugin:demo", false, "badge-revoked\">off", false},
+		{"should_not_warn_when_the_fleet_switch_is_off", false, "agones", false, "badge-revoked\">off", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+				Snapshot: ServerSettingsSnapshot{FeatureFleetEnabled: tc.fleetOn, FleetBackend: tc.backend, AgonesProjectIsolation: tc.isolation},
+			}))
+
+			assert.Equal(t, []bool{true, tc.wantWarning},
+				[]bool{strings.Contains(html, "<dt>Agones project isolation</dt><dd><span class=\"badge "+tc.wantBadge),
+					strings.Contains(html, "Agones project isolation is off.")})
+		})
+	}
+}
+
 func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
 		TenantID:        1,
@@ -820,4 +863,25 @@ func TestLayouts_should_show_legal_notice(t *testing.T) {
 			assert.Contains(t, html, "GNU GPL v3")
 		})
 	}
+}
+
+func TestManagementTokensPage_should_wrap_tables_and_long_labels(t *testing.T) {
+	html := renderToString(t, ManagementTokensPage(ManagementTokensView{
+		UserEmail: "a@example.com",
+		Tokens:    []ManagementTokenRowView{{ID: 1, Label: "x"}},
+	}))
+
+	for _, want := range []string{`class="table-scroll"`, `token-table`, `access-table`, `data-label="Created by"`, `class="row-actions"`, `class="wrap-cell"`} {
+		assert.Contains(t, html, want)
+	}
+}
+
+func TestFleetsPage_should_scroll_the_deleted_fleets_table(t *testing.T) {
+	html := renderToString(t, FleetsListPage(FleetsListView{
+		UserEmail: "a@example.com", Enabled: true,
+		DeletedFleets: []FleetRowView{{ID: 7, Name: "old-one", Backend: "agones"}},
+	}))
+
+	assert.Contains(t, html, `class="table-scroll"`)
+	assert.Contains(t, html, `deleted-table`)
 }

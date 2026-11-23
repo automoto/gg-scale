@@ -297,7 +297,7 @@ func TestPlatformUsers_invite_accept_for_disabled_account_friendly_error(t *test
 	// Hand-seed a (still-open) invitation against the disabled user's email.
 	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "some-key")
 	code := "raw-test-invite-code-very-long-for-security"
-	codeHash := sha256.Sum256([]byte(":" + code)) // matches verifycode.Hash(nil, code)
+	codeHash := sha256.Sum256([]byte(":" + code)) // matches verifycode.HashToken(code)
 	expiresAt := time.Now().Add(72 * time.Hour)
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`INSERT INTO control_panel_invitations (email, tenant_id, role, code_hash, expires_at, invited_by_user_id)

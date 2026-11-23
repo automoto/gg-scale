@@ -39,7 +39,7 @@ func newFleetPGQueueServer(t *testing.T, c *cluster, backend fleet.Backend) *htt
 	t.Cleanup(authorizer.Close)
 	mgr := fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool),
+		fleet.NewPostgresFleetStore(pool, nil),
 		backend,
 		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }},
 	)
@@ -84,7 +84,7 @@ func TestFleetAllocationTicket_cappedPerPlayerUnclaimed(t *testing.T) {
 		tenantID, projectID, string(rbac.FeatureDedicatedServers))
 	require.NoError(t, err)
 
-	backend := newStubBackend("stub")
+	backend := newStubBackend("agones")
 	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
 	var fleetID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
@@ -110,7 +110,7 @@ func TestFleetAllocationTicket_cappedPerPlayerUnclaimed(t *testing.T) {
 		var allocID int64
 		require.NoError(t, c.bootstrapPool.QueryRow(ctx,
 			`INSERT INTO game_server_allocations (tenant_id, project_id, backend, status, fleet_id)
-			 VALUES ($1, $2, 'stub', 'ready', $3) RETURNING id`,
+			 VALUES ($1, $2, 'agones', 'ready', $3) RETURNING id`,
 			tenantID, projectID, fleetID).Scan(&allocID))
 		_, serr := c.bootstrapPool.Exec(ctx,
 			`INSERT INTO matchmaker_matches (id, tenant_id, project_id, mode, allocation_id, roster, expires_at)

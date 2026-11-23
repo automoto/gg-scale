@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/automoto/gg-scale/internal/auth"
+	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/managementtoken"
@@ -84,7 +85,7 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, authorizer.SetControlPanelMembershipRole(ownerID, tenantID, "owner"))
 	scopes := []string{}
-	for _, s := range managementtoken.WriteScopes {
+	for _, s := range managementtoken.Scopes {
 		scopes = append(scopes, s.Scope)
 	}
 	managementHash := sha256.Sum256([]byte(keyTypeManagementToken))
@@ -102,6 +103,7 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 		// per-IP buckets for unknown keys and failed token logins never
 		// change an answer.
 		ProxyTrust:           ratelimit.NewProxyTrust(clientIPHeader, []string{"127.0.0.0/8", "::1/128"}),
+		ControlPanel:         controlpanel.Config{FleetEnabled: true},
 		ManagementAPIEnabled: true, ManagementTokenRatePerSecond: 1000, ManagementTokenBurst: 1000,
 	}))
 	t.Cleanup(srv.Close)
@@ -115,7 +117,12 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 			if op == nil || len(op.Security) == 0 || path == "/v1/ws" || path == "/v1/healthz" {
 				continue
 			}
-			url := srv.URL + pathParam.ReplaceAllString(path, "1")
+			// An API key ID or player ID of 1 can be a row of this test, and
+			// the token has keys:revoke and players:write, so no path uses a
+			// real key or player ID. A disabled player 1 would make the
+			// storage routes that run after it answer 403.
+			fake := strings.NewReplacer("{api_key_id}", "999999", "{player_id}", "999999")
+			url := srv.URL + pathParam.ReplaceAllString(fake.Replace(path), "1")
 			if hasScheme(op, "ManagementToken") {
 				got := []int{statusFor(t, method, url, "key-type"), statusFor(t, method, url, "key-type-secret")}
 				assert.Equal(t, []int{http.StatusUnauthorized, http.StatusUnauthorized}, got,

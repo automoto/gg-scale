@@ -7,11 +7,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,7 +47,129 @@ type fixture struct {
 	ownerID  int64 // owner of tenant A
 }
 
-// newFixture migrates a fresh database and serves the real router with the
+const templateDB = "ggscale_mgmt_template"
+
+// postgresFixture is one Postgres server for the package. It holds a migrated
+// template database; each test copies it into its own database.
+type postgresFixture struct {
+	ctr         *tcpostgres.PostgresContainer
+	admin       *pgxpool.Pool
+	templateDSN string
+	seq         atomic.Uint64
+	err         error
+}
+
+var (
+	pgOnce sync.Once
+	pg     *postgresFixture
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if pg != nil {
+		pg.close()
+	}
+	os.Exit(code)
+}
+
+func sharedPostgres(t *testing.T) *postgresFixture {
+	t.Helper()
+	pgOnce.Do(func() {
+		pg = &postgresFixture{}
+		pg.err = pg.start(context.Background())
+	})
+	require.NoError(t, pg.err)
+	return pg
+}
+
+// start runs the container (or uses MANAGEMENTAPI_TEST_DATABASE_URL) and
+// migrates the template database once.
+func (p *postgresFixture) start(ctx context.Context) error {
+	dsn := os.Getenv("MANAGEMENTAPI_TEST_DATABASE_URL")
+	if dsn == "" {
+		ctr, err := tcpostgres.Run(ctx, "postgres:17",
+			tcpostgres.WithDatabase(templateDB),
+			tcpostgres.WithUsername("ggscale"),
+			tcpostgres.WithPassword("ggscale"),
+			tcpostgres.BasicWaitStrategies(),
+		)
+		if err != nil {
+			return err
+		}
+		p.ctr = ctr
+		dsn, err = ctr.ConnectionString(ctx, "sslmode=disable")
+		if err != nil {
+			return err
+		}
+	}
+	p.templateDSN = dsn
+
+	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
+	if err != nil {
+		return err
+	}
+	runner, err := migrate.New(dsn, dir)
+	if err != nil {
+		return err
+	}
+	if err := runner.Up(); err != nil {
+		_ = runner.Close()
+		return err
+	}
+	if err := runner.Close(); err != nil {
+		return err
+	}
+
+	adminDSN, err := dsnForDatabase(dsn, "postgres")
+	if err != nil {
+		return err
+	}
+	p.admin, err = pgxpool.New(ctx, adminDSN)
+	return err
+}
+
+func (p *postgresFixture) createDatabase(t *testing.T) (string, string) {
+	t.Helper()
+	dbName := fmt.Sprintf("ggscale_mgmt_%d", p.seq.Add(1))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := p.admin.Exec(ctx,
+		"CREATE DATABASE "+pgx.Identifier{dbName}.Sanitize()+
+			" WITH TEMPLATE "+pgx.Identifier{templateDB}.Sanitize()+
+			" OWNER ggscale")
+	require.NoError(t, err)
+	dsn, err := dsnForDatabase(p.templateDSN, dbName)
+	require.NoError(t, err)
+	return dbName, dsn
+}
+
+func (p *postgresFixture) dropDatabase(dbName string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, _ = p.admin.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{dbName}.Sanitize()+" WITH (FORCE)")
+}
+
+func (p *postgresFixture) close() {
+	if p.admin != nil {
+		p.admin.Close()
+	}
+	if p.ctr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = p.ctr.Terminate(ctx)
+	}
+}
+
+func dsnForDatabase(dsn, dbName string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/" + dbName
+	return u.String(), nil
+}
+
+// newFixture copies the migrated template into a fresh database and serves the real router with the
 // management API switched on, over an app-role pool, so the token
 // middleware, row security, and grants apply as in production.
 func newFixture(t *testing.T) *fixture {
@@ -55,26 +182,9 @@ func newFixtureWith(t *testing.T, change func(*httpapi.Deps)) *fixture {
 	t.Helper()
 	t.Parallel()
 	ctx := context.Background()
-	ctr, err := tcpostgres.Run(ctx, "postgres:17",
-		tcpostgres.WithDatabase("ggscale_test"),
-		tcpostgres.WithUsername("ggscale"),
-		tcpostgres.WithPassword("ggscale"),
-		tcpostgres.BasicWaitStrategies(),
-	)
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		_ = ctr.Terminate(shutdownCtx)
-	})
-	dsn, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "db", "migrations"))
-	require.NoError(t, err)
-	runner, err := migrate.New(dsn, dir)
-	require.NoError(t, err)
-	require.NoError(t, runner.Up())
-	require.NoError(t, runner.Close())
+	pg := sharedPostgres(t)
+	dbName, dsn := pg.createDatabase(t)
+	t.Cleanup(func() { pg.dropDatabase(dbName) })
 
 	owner, err := pgxpool.New(ctx, dsn)
 	require.NoError(t, err)
@@ -112,6 +222,7 @@ func newFixtureWith(t *testing.T, change func(*httpapi.Deps)) *fixture {
 		ManagementMaxProjectAPIKeys:  3,
 		CORSMaxProjectOrigins:        2,
 	}
+	withCipher(&deps)
 	if change != nil {
 		change(&deps)
 	}
@@ -131,6 +242,13 @@ func (f *fixture) exec(sql string, args ...any) {
 	f.t.Helper()
 	_, err := f.owner.Exec(context.Background(), sql, args...)
 	require.NoError(f.t, err)
+}
+
+// dropPair removes one Casbin policy row and reloads the policy.
+func (f *fixture) dropPair(role, object, action string) {
+	f.t.Helper()
+	f.exec(`DELETE FROM casbin_rule WHERE ptype = 'p' AND v0 = $1 AND v2 = $2 AND v3 = $3`, role, object, action)
+	require.NoError(f.t, f.authz.ReloadPolicy())
 }
 
 func (f *fixture) count(sql string, args ...any) int {
@@ -179,6 +297,7 @@ type response struct {
 	status int
 	body   map[string]any
 	raw    string
+	header http.Header
 }
 
 func (f *fixture) do(token, method, path, body string, header ...string) response {
@@ -205,7 +324,7 @@ func (f *fixture) do(token, method, path, body string, header ...string) respons
 	require.NoError(f.t, err)
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
-	return response{status: resp.StatusCode, body: out, raw: string(raw)}
+	return response{status: resp.StatusCode, body: out, raw: string(raw), header: resp.Header}
 }
 
 // detail is the problem+json detail text of an error answer.

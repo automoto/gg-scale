@@ -86,7 +86,7 @@ func (h *Handler) createInvite(ctx context.Context, in inviteTeammateInput) (inv
 	if err != nil {
 		return inviteResult{}, fmt.Errorf("invite code: %w", err)
 	}
-	codeHash := verifycode.Hash(nil, code)
+	codeHash := verifycode.HashToken(code)
 	expiresAt := h.now().Add(verifycode.InviteTTL)
 
 	var row sqlcgen.CreateControlPanelInvitationRow

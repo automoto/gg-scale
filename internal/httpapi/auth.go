@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -330,7 +331,7 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 		if err != nil {
 			return nil, serverError(ctx, "signup: salt", err)
 		}
-		codeHash := verifycode.Hash(salt, code)
+		codeHash := verifycode.HashCode(d.EmailVerifySigningKey, salt, code)
 		externalID, err := webutil.RandomHex("user_", 16)
 		if err != nil {
 			return nil, serverError(ctx, "signup: ext_id rand", err)
@@ -360,7 +361,7 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 			if err != nil {
 				return fmt.Errorf("insert player: %w", err)
 			}
-			if err := auditlog.Write(ctx, tx, id, "auth.signup", email, nil); err != nil {
+			if err := auditlog.Write(ctx, tx, id, "auth.signup", strconv.FormatInt(id, 10), nil); err != nil {
 				return err
 			}
 			return reservePlayerSlot(ctx, q, qc)
@@ -438,7 +439,7 @@ type challengeState struct {
 // restarts the lifetime budget once a lockout has expired — without it the
 // reserve below would re-trip the cap on the old count before the compare,
 // locking the account forever.
-func checkCodeChallenge(ctx context.Context, s challengeState, code string, now time.Time,
+func checkCodeChallenge(ctx context.Context, key []byte, s challengeState, code string, now time.Time,
 	reserve func(context.Context, int64, int32) (int32, error),
 	lock func(context.Context, int64, pgtype.Timestamptz) error,
 	clearLock func(context.Context, int64) error,
@@ -471,7 +472,7 @@ func checkCodeChallenge(ctx context.Context, s challengeState, code string, now 
 		}
 		return true, false, nil
 	}
-	if subtle.ConstantTimeCompare(verifycode.Hash(s.Salt, code), s.CodeHash) != 1 {
+	if subtle.ConstantTimeCompare(verifycode.HashCode(key, s.Salt, code), s.CodeHash) != 1 {
 		return false, true, nil
 	}
 	return false, false, nil
@@ -508,7 +509,7 @@ func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, erro
 			// tx, handing an attacker unlimited guesses at the 10^6 code
 			// space. The 400/429 is raised from the flags after commit.
 			var cerr error
-			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, challengeState{
+			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, d.EmailVerifySigningKey, challengeState{
 				ID:          row.ID,
 				CodeHash:    row.EmailVerificationCodeHash,
 				Salt:        row.EmailVerificationSalt,
@@ -620,7 +621,7 @@ func authLogin(d Deps) func(context.Context, *loginInput) (*sessionOutput, error
 			if err := insertSession(ctx, tx, projectID, row.ID, refreshToken, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, row.ID, "auth.login", in.Body.Email, nil)
+			return auditlog.Write(ctx, tx, row.ID, "auth.login", strconv.FormatInt(row.ID, 10), nil)
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(in.Body.Password))
@@ -873,7 +874,9 @@ func signInExternalPlayer(ctx context.Context, tx pgx.Tx, projectID int64, exter
 	if sessionEpoch, err = playerEpoch(ctx, q, playerID); err != nil {
 		return 0, 0, err
 	}
-	if err := auditlog.Write(ctx, tx, playerID, auditAction, externalID, nil); err != nil {
+	// The external id is chosen by the developer and can be an address, so
+	// the row names the player by id.
+	if err := auditlog.Write(ctx, tx, playerID, auditAction, strconv.FormatInt(playerID, 10), nil); err != nil {
 		return 0, 0, err
 	}
 	if err := insertSession(ctx, tx, projectID, playerID, refreshTok, now); err != nil {

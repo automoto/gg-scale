@@ -124,7 +124,7 @@ func authLinkEmail(d Deps) func(context.Context, *linkEmailInput) (*struct{}, er
 			rows, qerr := sqlcgen.New(tx).LinkPlayerEmailCredentials(ctx, sqlcgen.LinkPlayerEmailCredentialsParams{
 				Email:                      &email,
 				PasswordHash:               hash,
-				EmailVerificationCodeHash:  verifycode.Hash(salt, code),
+				EmailVerificationCodeHash:  verifycode.HashCode(d.EmailVerifySigningKey, salt, code),
 				EmailVerificationSalt:      salt,
 				EmailVerificationExpiresAt: pgtype.Timestamptz{Time: now.Add(verifycode.CodeTTL), Valid: true},
 				ID:                         me,

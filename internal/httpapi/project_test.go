@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -37,25 +38,101 @@ func TestProjectOps_should_use_only_project_level_casbin_objects(t *testing.T) {
 	}
 }
 
-func TestProjectOps_should_use_only_known_scopes(t *testing.T) {
-	known := map[string]bool{"": true}
-	for _, s := range managementtoken.WriteScopes {
-		known[s.Scope] = true
-	}
+// A risky tool says its risk first, because MCP clients have no other mark
+// for a risky tool.
+func TestProjectOps_risky_tools_should_start_with_a_risk_sentence(t *testing.T) {
+	sentences := []string{"Cannot be undone.", "Sends an email.", "Returns a secret.", "Costs money.", "Changes player access."}
+	var missing []string
 	for _, row := range projectOps {
-		assert.True(t, known[row.scope], "tool %s has unknown scope %q", row.tool, row.scope)
-	}
-}
-
-func TestProjectOps_ticket_trace_should_need_matchmaker_read(t *testing.T) {
-	var got [2]string
-	for _, row := range projectOps {
-		if row.tool == "matchmaking_ticket_trace" {
-			got = [2]string{row.pair(testProjectID), row.action}
+		s, _ := managementtoken.Scope(row.scope)
+		if s.Class != managementtoken.ClassRisky {
+			continue
+		}
+		if !slices.ContainsFunc(sentences, func(p string) bool { return strings.HasPrefix(row.description, p) }) {
+			missing = append(missing, row.tool)
 		}
 	}
 
-	assert.Equal(t, [2]string{"project:42:matchmaker", "read"}, got)
+	assert.Empty(t, missing)
+}
+
+// A row with no scope is open to every token, so only these two may have none.
+func TestProjectOps_only_the_open_rows_should_have_no_scope(t *testing.T) {
+	var open []string
+	for _, row := range projectOps {
+		if row.scope == "" && len(row.anyScope) == 0 {
+			open = append(open, row.tool)
+		}
+	}
+
+	assert.Equal(t, []string{"project_health_check", "get_token"}, open)
+}
+
+func TestProjectOps_should_use_only_known_scopes(t *testing.T) {
+	known := map[string]bool{"": true}
+	for _, s := range managementtoken.Scopes {
+		known[s.Scope] = true
+	}
+	for _, row := range projectOps {
+		for _, scope := range append([]string{row.scope}, row.anyScope...) {
+			assert.True(t, known[scope], "tool %s has unknown scope %q", row.tool, scope)
+		}
+	}
+}
+
+func TestProjectOps_read_rows_should_need_their_read_scope(t *testing.T) {
+	want := map[string]string{
+		"project_health_check":     "",
+		"matchmaking_ticket_trace": managementtoken.ScopeMatchmakingRead,
+		"get_remote_config":        managementtoken.ScopeConfigRead,
+		"list_leaderboards":        managementtoken.ScopeLeaderboardsRead,
+		"get_leaderboard":          managementtoken.ScopeLeaderboardsRead,
+		"list_api_keys":            managementtoken.ScopeKeysRead,
+		"list_players":             managementtoken.ScopePlayersRead,
+		"get_player":               managementtoken.ScopePlayersRead,
+	}
+	got := map[string]string{}
+	for _, row := range projectOps {
+		if _, ok := want[row.tool]; ok {
+			got[row.tool] = row.scope
+		}
+	}
+
+	assert.Equal(t, want, got)
+}
+
+func TestProjectOps_list_revisions_should_be_shown_for_either_read_scope(t *testing.T) {
+	var got []string
+	for _, row := range projectOps {
+		if row.tool == "list_revisions" {
+			got = append([]string{row.scope}, row.anyScope...)
+		}
+	}
+
+	assert.Equal(t, []string{"", managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}, got)
+}
+
+func TestListRevisions_should_return_403_when_the_read_scope_of_the_resource_is_missing(t *testing.T) {
+	cases := map[string]struct {
+		in    projectListRevisionsInput
+		scope string
+	}{
+		"remote config": {projectListRevisionsInput{Resource: projectadmin.KindRemoteConfig}, managementtoken.ScopeLeaderboardsRead},
+		"leaderboard":   {projectListRevisionsInput{Resource: projectadmin.KindLeaderboard, LeaderboardID: 1}, managementtoken.ScopeConfigRead},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			a, err := rbac.NewMemoryAuthorizer()
+			require.NoError(t, err)
+			require.NoError(t, a.SetControlPanelMembershipRole(7, 1, "owner"))
+
+			_, err = listRevisions(context.Background(), Deps{RBAC: a}, *creatorToken(c.scope), &c.in)
+
+			var se huma.StatusError
+			require.ErrorAs(t, err, &se)
+			assert.Equal(t, http.StatusForbidden, se.GetStatus())
+		})
+	}
 }
 
 // projectOperations returns each documented operation under /v1/project,
@@ -222,6 +299,12 @@ func serveProbe(t *testing.T, row projectOp, role string, p *managementtoken.Pri
 	a, err := rbac.NewMemoryAuthorizer()
 	require.NoError(t, err)
 	require.NoError(t, a.SetControlPanelMembershipRole(7, 1, role))
+	return serveProbeWith(t, row, a, p)
+}
+
+// serveProbeWith is serveProbe with the authorizer chosen by the test.
+func serveProbeWith(t *testing.T, row projectOp, a *rbac.Authorizer, p *managementtoken.Principal) *httptest.ResponseRecorder {
+	t.Helper()
 	r := chi.NewRouter()
 	r.Route("/v1", func(r chi.Router) {
 		if p != nil {
@@ -248,11 +331,43 @@ func TestProjectHandler_should_answer_401_without_a_principal(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, rec.Code)
 }
 
+func TestProjectHandler_should_return_403_when_the_token_has_none_of_the_scopes(t *testing.T) {
+	row := probeRow("", nil, "", nil)
+	row.anyScope = []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}
+
+	rec := serveProbe(t, row, "owner", creatorToken(managementtoken.ScopeKeysRead))
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestProjectHandler_should_permit_a_token_with_one_of_the_scopes(t *testing.T) {
+	row := probeRow("", nil, "", nil)
+	row.anyScope = []string{managementtoken.ScopeConfigRead, managementtoken.ScopeLeaderboardsRead}
+
+	rec := serveProbe(t, row, "owner", creatorToken(managementtoken.ScopeLeaderboardsRead))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestProjectHandler_should_name_the_missing_scope(t *testing.T) {
 	rec := serveProbe(t, probeRow(managementtoken.ScopeConfigWrite, nil, "", nil), "owner", creatorToken())
 
 	assert.Equal(t, []any{http.StatusForbidden, true},
 		[]any{rec.Code, strings.Contains(rec.Body.String(), managementtoken.ScopeConfigWrite)})
+}
+
+func TestProjectHandler_should_return_403_when_the_scope_needs_another_scope_on_each_request(t *testing.T) {
+	rec := serveProbe(t, probeRow(managementtoken.ScopePlayersInvite, nil, "", nil), "owner", creatorToken(managementtoken.ScopePlayersInvite))
+
+	assert.Equal(t, []any{http.StatusForbidden, true},
+		[]any{rec.Code, strings.Contains(rec.Body.String(), managementtoken.ScopePlayersPII)})
+}
+
+func TestProjectHandler_should_permit_a_token_with_the_scope_and_the_scope_it_needs(t *testing.T) {
+	rec := serveProbe(t, probeRow(managementtoken.ScopePlayersInvite, nil, "", nil), "owner",
+		creatorToken(managementtoken.ScopePlayersInvite, managementtoken.ScopePlayersPII))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
 func TestProjectHandler_should_permit_a_token_with_the_scope(t *testing.T) {
@@ -327,6 +442,22 @@ func TestProjectWriteError_should_keep_other_errors_internal(t *testing.T) {
 	var se huma.StatusError
 
 	assert.False(t, errors.As(projectWriteError(errors.New("boom")), &se))
+}
+
+// The origin and scope errors carry the submitted value, so the answer
+// must use a fixed text.
+func TestProjectWriteError_should_not_echo_the_submitted_value(t *testing.T) {
+	cases := map[string]error{
+		"invalid origin":      fmt.Errorf("%w: %q must use http or https", projectadmin.ErrInvalidOrigins, "ftp://echo.example"),
+		"scope not grantable": fmt.Errorf("%w: %q", projectadmin.ErrScopeNotGrantable, "echo-scope"),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := projectWriteError(in)
+
+			assert.NotContains(t, err.Error(), "echo")
+		})
+	}
 }
 
 func TestProjectWriteError_should_show_the_safe_text_of_a_validation_error(t *testing.T) {
@@ -431,4 +562,74 @@ func TestQuotaState(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, c.want, quotaState(c.limit, c.current), "%d of %d", c.current, c.limit)
 	}
+}
+
+func TestActiveScopes_should_drop_a_scope_whose_pair_the_creator_lost(t *testing.T) {
+	// Arrange: a member has matchmaker read but no config update.
+	a, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+	require.NoError(t, a.SetControlPanelMembershipRole(7, 1, "member"))
+	p := creatorToken(managementtoken.ScopeConfigWrite, managementtoken.ScopeMatchmakingRead)
+
+	// Act
+	got, err := activeScopes(context.Background(), Deps{RBAC: a}, *p)
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, []string{managementtoken.ScopeMatchmakingRead}, got)
+}
+
+func TestActiveScopes_should_return_an_empty_list_for_a_token_with_no_scopes(t *testing.T) {
+	a, err := rbac.NewMemoryAuthorizer()
+	require.NoError(t, err)
+
+	got, err := activeScopes(context.Background(), Deps{RBAC: a}, *creatorToken())
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{}, got)
+}
+
+func statusOf(t *testing.T, err error) int {
+	t.Helper()
+	var se huma.StatusError
+	require.ErrorAs(t, err, &se)
+	return se.GetStatus()
+}
+
+func TestUpdateAPIKeyFeatures_should_return_422_when_scopes_is_null(t *testing.T) {
+	in := &projectUpdateAPIKeyFeaturesInput{ProjectAPIKeyPath: ProjectAPIKeyPath{APIKeyID: 1}}
+
+	_, err := updateAPIKeyFeatures(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestSetAllowedOrigins_should_return_422_when_origins_is_null(t *testing.T) {
+	in := &projectSetAllowedOriginsInput{}
+
+	_, err := setAllowedOrigins(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestCheckProjectAPIKeyLabel_should_refuse_bidi_controls(t *testing.T) {
+	for _, label := range []string{"a\u202eb", "a\u200fb", "a\u2067b"} {
+		assert.Equal(t, 422, statusOf(t, checkProjectAPIKeyLabel(label)), "%q", label)
+	}
+}
+
+func TestListPlayers_should_return_422_for_a_nul_external_id(t *testing.T) {
+	in := &projectListPlayersInput{ExternalID: "a\x00b"}
+
+	_, err := listPlayers(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
+}
+
+func TestListLeaderboards_should_return_422_for_a_nul_cursor(t *testing.T) {
+	in := &projectListLeaderboardsInput{ProjectPageInput: ProjectPageInput{Cursor: "a\x00b"}}
+
+	_, err := listLeaderboards(t.Context(), Deps{}, managementtoken.Principal{}, in)
+
+	assert.Equal(t, 422, statusOf(t, err))
 }

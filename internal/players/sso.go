@@ -109,12 +109,8 @@ func (h *Handler) renderAccountLogin(w http.ResponseWriter, r *http.Request, sta
 	}))
 }
 
-func redirectAccountHomeError(w http.ResponseWriter, r *http.Request, msg string) {
-	http.Redirect(w, r, accountBasePath+"/?error="+url.QueryEscape(msg), http.StatusSeeOther)
-}
-
-func redirectAccountHomeFlash(w http.ResponseWriter, r *http.Request, msg string) {
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(msg), http.StatusSeeOther)
+func redirectAccountHome(w http.ResponseWriter, r *http.Request, code flashCode) {
+	redirectFlash(w, r, accountBasePath+"/", code)
 }
 
 // confirmAccountIdentity is the check before a change to the sign-in
@@ -164,13 +160,13 @@ func (h *Handler) signInMethodChange(w http.ResponseWriter, r *http.Request) (ac
 	case err == nil:
 		return sess, provider, true
 	case errors.Is(err, errIdentityPassword):
-		redirectAccountHomeError(w, r, "Current password is incorrect.")
+		redirectAccountHome(w, r, flashPasswordIncorrect)
 	case errors.Is(err, errTwoFactorBadCode):
-		redirectAccountHomeError(w, r, msgTwoFactorBadCode)
+		redirectAccountHome(w, r, flashTwoFactorBadCode)
 	case errors.Is(err, errTwoFactorLocked):
-		redirectAccountHomeError(w, r, msgTwoFactorLocked)
+		redirectAccountHome(w, r, flashTwoFactorLocked)
 	case errors.Is(err, errTwoFactorUnavailable):
-		redirectAccountHomeError(w, r, msgTwoFactorBroken)
+		redirectAccountHome(w, r, flashTwoFactorBroken)
 	default:
 		webutil.InternalError(w, "account sso: identity check", err)
 	}
@@ -221,7 +217,11 @@ func (h *Handler) accountSSOCallback(w http.ResponseWriter, r *http.Request) {
 			slog.ErrorContext(r.Context(), "player account sso callback", "provider", provider, "err", err)
 		}
 		if pending.Mode == sso.ModeLink {
-			redirectAccountHomeError(w, r, msg)
+			code := flashSSOUnreachable
+			if errors.Is(err, sso.ErrDenied) {
+				code = flashSSOCancelled
+			}
+			redirectAccountHome(w, r, code)
 			return
 		}
 		h.metrics.Login(observability.SurfacePlayer, observability.LoginInvalid)
@@ -357,20 +357,19 @@ func (h *Handler) ssoLink(w http.ResponseWriter, r *http.Request, pending sso.Pe
 		return
 	}
 	outcome, err := h.linkAccountConnection(r.Context(), toPgUUID(sess.AccountID), id)
-	label := h.sso.Label(id.Provider)
 	switch {
 	case webutil.IsUniqueViolation(err):
-		redirectAccountHomeError(w, r, msgSSORetry)
+		redirectAccountHome(w, r, flashSSORetry)
 	case err != nil:
 		webutil.InternalError(w, "account sso: link", err)
 	case outcome == linkAlready:
-		redirectAccountHomeFlash(w, r, "This "+label+" account is already linked.")
+		redirectAccountHome(w, r, flashSSOAlreadyLinked)
 	case outcome == linkSubjectTaken:
-		redirectAccountHomeError(w, r, "This "+label+" account cannot be linked.")
+		redirectAccountHome(w, r, flashSSOCannotLink)
 	case outcome == linkProviderTaken:
-		redirectAccountHomeError(w, r, "Your account already has a "+label+" account linked. Unlink it first.")
+		redirectAccountHome(w, r, flashSSOProviderTaken)
 	default:
-		redirectAccountHomeFlash(w, r, label+" linked.")
+		redirectAccountHome(w, r, flashSSOLinked)
 	}
 }
 
@@ -450,15 +449,14 @@ func (h *Handler) accountSSOUnlink(w http.ResponseWriter, r *http.Request) {
 		return auditlog.WritePlatformService(r.Context(), tx, accountSSOAuditActor, "sso.unlink",
 			sess.AccountID.String(), map[string]any{"provider": provider})
 	})
-	label := h.sso.Label(provider)
 	switch {
 	case errors.Is(err, errSSONotLinked):
-		redirectAccountHomeError(w, r, label+" is not linked.")
+		redirectAccountHome(w, r, flashSSONotLinked)
 	case errors.Is(err, errSSOLastMethod):
-		redirectAccountHomeError(w, r, label+" is your only sign-in method. Set a password or link a different provider first.")
+		redirectAccountHome(w, r, flashSSOLastMethod)
 	case err != nil:
 		webutil.InternalError(w, "account sso: unlink", err)
 	default:
-		redirectAccountHomeFlash(w, r, label+" unlinked.")
+		redirectAccountHome(w, r, flashSSOUnlinked)
 	}
 }

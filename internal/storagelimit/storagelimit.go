@@ -126,31 +126,38 @@ func (s *Store) Set(ctx context.Context, updatedBy, tenantID int64, projectID *i
 		return ErrUnavailable
 	}
 	return s.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-		if maxBytes <= 0 {
-			if _, err := tx.Exec(ctx,
-				`DELETE FROM storage_limits
-				 WHERE tenant_id = $1 AND COALESCE(project_id, 0) = COALESCE($2::bigint, 0)`,
-				tenantID, projectID); err != nil {
-				return fmt.Errorf("storagelimit: clear: %w", err)
-			}
-			return nil
-		}
-		// updated_by is a control_panel_users FK; 0 (no actor, e.g. tests/seed)
-		// must be stored as NULL, not a non-existent id.
-		var updatedByArg any
-		if updatedBy > 0 {
-			updatedByArg = updatedBy
-		}
+		return SetTx(ctx, tx, updatedBy, tenantID, projectID, maxBytes)
+	})
+}
+
+// SetTx is Set inside the caller's transaction, so a caller can commit the
+// limit and its audit row together. It does not drop any cached value: the
+// caller calls Invalidate on the store after the commit.
+func SetTx(ctx context.Context, tx pgx.Tx, updatedBy, tenantID int64, projectID *int64, maxBytes int64) error {
+	if maxBytes <= 0 {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO storage_limits (tenant_id, project_id, max_value_bytes, updated_by)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (tenant_id, COALESCE(project_id, 0))
-			 DO UPDATE SET max_value_bytes = EXCLUDED.max_value_bytes,
-			               updated_by = EXCLUDED.updated_by,
-			               updated_at = now()`,
-			tenantID, projectID, maxBytes, updatedByArg); err != nil {
-			return fmt.Errorf("storagelimit: set: %w", err)
+			`DELETE FROM storage_limits
+			 WHERE tenant_id = $1 AND COALESCE(project_id, 0) = COALESCE($2::bigint, 0)`,
+			tenantID, projectID); err != nil {
+			return fmt.Errorf("storagelimit: clear: %w", err)
 		}
 		return nil
-	})
+	}
+	// updated_by is a control_panel_users FK; 0 (no actor, e.g. tests/seed)
+	// must be stored as NULL, not a non-existent id.
+	var updatedByArg any
+	if updatedBy > 0 {
+		updatedByArg = updatedBy
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO storage_limits (tenant_id, project_id, max_value_bytes, updated_by)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (tenant_id, COALESCE(project_id, 0))
+		 DO UPDATE SET max_value_bytes = EXCLUDED.max_value_bytes,
+		               updated_by = EXCLUDED.updated_by,
+		               updated_at = now()`,
+		tenantID, projectID, maxBytes, updatedByArg); err != nil {
+		return fmt.Errorf("storagelimit: set: %w", err)
+	}
+	return nil
 }

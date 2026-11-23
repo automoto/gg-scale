@@ -107,13 +107,14 @@ func (h *Handler) accountHomePage(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account home: two-factor lookup", err)
 		return
 	}
+	flash, flashErr := flashFromRequest(r)
 	view := AccountHomeView{
 		Email:            sess.Email,
 		DisplayName:      sess.DisplayName,
 		Projects:         projects,
 		CSRFToken:        h.csrf(r),
-		Flash:            r.URL.Query().Get("flash"),
-		FlashError:       r.URL.Query().Get("error"),
+		Flash:            flash,
+		FlashError:       flashErr,
 		RemoteAddrCount:  remoteAddrCount(addrs),
 		HasPassword:      sess.HasPassword,
 		TwoFactorEnabled: totpFound && totp.ConfirmedAt.Valid,
@@ -300,11 +301,12 @@ func (h *Handler) accountRemoteAddrListPage(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	rows := connectionAddressRows(addrs)
+	flash, flashErr := flashFromRequest(r)
 	webutil.Render(r, w, ConnectionAddressesPage(ConnectionAddressesView{
 		AccountEmail: sess.Email,
 		CSRFToken:    h.csrf(r),
-		Flash:        r.URL.Query().Get("flash"),
-		FlashError:   r.URL.Query().Get("error"),
+		Flash:        flash,
+		FlashError:   flashErr,
 		Addresses:    rows,
 		CanAdd:       len(rows) < remoteAddrFormRows,
 	}))
@@ -369,7 +371,7 @@ func (h *Handler) accountRemoteAddrCreate(w http.ResponseWriter, r *http.Request
 		webutil.InternalError(w, "account remote-addr create", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address added.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrAdded)
 }
 
 func (h *Handler) accountRemoteAddrEditPage(w http.ResponseWriter, r *http.Request) {
@@ -464,7 +466,7 @@ func (h *Handler) accountRemoteAddrUpdateSlot(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "account remote-addr update", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address updated.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrUpdated)
 }
 
 // accountRemoteAddrDeletePage renders a confirmation step before deletion. The
@@ -518,7 +520,7 @@ func (h *Handler) accountRemoteAddrDelete(w http.ResponseWriter, r *http.Request
 		webutil.InternalError(w, "account remote-addr delete", err)
 		return
 	}
-	h.redirectRemoteAddrs(w, r, "Connection address removed.", "")
+	redirectFlash(w, r, accountBasePath+"/remote-addrs", flashAddrRemoved)
 }
 
 func remoteAddrScopeLabel(a remoteaddr.Address) string {
@@ -531,17 +533,6 @@ func remoteAddrScopeLabel(a remoteaddr.Address) string {
 		return "LAN"
 	}
 	return ""
-}
-
-func (h *Handler) redirectRemoteAddrs(w http.ResponseWriter, r *http.Request, flash, flashErr string) {
-	target := accountBasePath + "/remote-addrs"
-	switch {
-	case flash != "":
-		target += "?flash=" + url.QueryEscape(flash)
-	case flashErr != "":
-		target += "?error=" + url.QueryEscape(flashErr)
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 // --- mutating handlers -----------------------------------------------------
@@ -587,7 +578,7 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 		displayPtr = &displayName
 	}
 
-	codeHash := verifycode.Hash(salt, code)
+	codeHash := verifycode.HashCode(h.verifySigningKey, salt, code)
 	var accountID pgtype.UUID
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).CreatePlayerAccount(r.Context(), sqlcgen.CreatePlayerAccountParams{
@@ -834,7 +825,7 @@ func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype
 	if err != nil {
 		return err
 	}
-	codeHash := verifycode.Hash(salt, code)
+	codeHash := verifycode.HashCode(h.verifySigningKey, salt, code)
 	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).SetPlayerAccountVerificationCode(ctx, sqlcgen.SetPlayerAccountVerificationCodeParams{
 			ID:        accountID,
@@ -914,7 +905,7 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 			locked = true
 			return nil
 		}
-		expected := verifycode.Hash(state.EmailVerificationSalt, code)
+		expected := verifycode.HashCode(h.verifySigningKey, state.EmailVerificationSalt, code)
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
 			return errBadVerifyCode
 		}
@@ -1006,7 +997,7 @@ func (h *Handler) issueAccountSession(ctx context.Context, w http.ResponseWriter
 		return err
 	}
 	h.metrics.PlayerSessionOpened()
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountSessionCookieName,
 		Value:    refreshToken,
 		Path:     "/v1/players",
@@ -1049,7 +1040,7 @@ func (h *Handler) accountSessionFromRequest(r *http.Request) (accountSession, bo
 }
 
 func (h *Handler) clearAccountSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountSessionCookieName,
 		Value:    "",
 		Path:     "/v1/players",
@@ -1187,9 +1178,7 @@ func (h *Handler) accountProjectUnlinkPage(w http.ResponseWriter, r *http.Reques
 // cancellation path while the purge stays scheduled. The update query carries
 // the same guard, so a stale form races safely too.
 func (h *Handler) redirectUnlinkBlockedByDelete(w http.ResponseWriter, r *http.Request, lp LinkedProject) {
-	http.Redirect(w, r, accountBasePath+"/?error="+url.QueryEscape(
-		"A data deletion is scheduled for "+lp.ProjectName+". Cancel the deletion before unlinking."),
-		http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashUnlinkBlocked)
 }
 
 func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
@@ -1215,9 +1204,7 @@ func (h *Handler) accountProjectUnlink(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, "account unlink", err)
 		return
 	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(
-		"Unlinked from "+lp.ProjectName+". Your game data is kept; accepting a new invite restores it."),
-		http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashProjectUnlinked)
 }
 
 // --- project data deletion ---------------------------------------------------
@@ -1265,17 +1252,11 @@ func (h *Handler) accountProjectDelete(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	purgeAt, err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp)
-	if err != nil {
+	if err := h.requestProjectPlayerDelete(r.Context(), sess.AccountID, lp); err != nil {
 		webutil.InternalError(w, "account delete", err)
 		return
 	}
-	flash := "Deletion of your " + lp.ProjectName + " data is scheduled. You can cancel until the purge runs."
-	if !purgeAt.IsZero() {
-		flash = "Deletion of your " + lp.ProjectName + " data is scheduled for " + purgeTimeLabel(purgeAt) +
-			". You can cancel until then."
-	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", flashDeleteScheduled)
 }
 
 func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Request) {
@@ -1298,26 +1279,23 @@ func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Requ
 		webutil.InternalError(w, "account delete cancel", err)
 		return
 	}
-	flash := "Deletion cancelled. Your " + lp.ProjectName + " data is kept."
+	code := flashDeleteCancelled
 	switch {
 	case lp.DeleteRequestedByAdmin:
-		flash = "The " + lp.ProjectName + " team requested this deletion. Contact them to cancel it."
+		code = flashDeleteByTeam
 	case !cancelled:
 		// The purge won the race, or the request was already cancelled.
-		flash = "No pending deletion for " + lp.ProjectName + "."
+		code = flashDeleteNone
 	}
-	http.Redirect(w, r, accountBasePath+"/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	redirectFlash(w, r, accountBasePath+"/", code)
 }
 
 // requestProjectPlayerDelete disables the player, stamps the delete request,
 // and revokes live game sessions in one transaction under the project's
 // tenant scope. An already-pending request (0 rows) is a benign double
-// submit: the stored timestamp is reloaded so the caller reports the real
-// purge date even when another surface won the race. A zero return means the
-// date could not be determined (the row vanished mid-flight).
-func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) (time.Time, error) {
-	requestedAt := lp.DeleteRequestedAt
-	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+// submit, also when another surface won the race.
+func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) error {
+	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
 			return err
 		}
@@ -1327,22 +1305,11 @@ func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid
 			PlayerAccountID: toPgUUID(accountID),
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			stored, gerr := q.GetPlayerDeleteRequestedByAccount(ctx, sqlcgen.GetPlayerDeleteRequestedByAccountParams{
-				ID:              lp.PlayerID,
-				PlayerAccountID: toPgUUID(accountID),
-			})
-			if gerr != nil && !errors.Is(gerr, pgx.ErrNoRows) {
-				return gerr
-			}
-			if stored.Valid {
-				requestedAt = stored.Time
-			}
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		requestedAt = ts.Time
 		if _, err = q.RevokeActivePlayerSessions(ctx, sqlcgen.RevokeActivePlayerSessionsParams{
 			ProjectID: lp.ProjectID,
 			PlayerID:  lp.PlayerID,
@@ -1352,10 +1319,6 @@ func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid
 		return auditlog.Write(ctx, tx, lp.PlayerID, "account.player.delete_request", "",
 			map[string]any{"scheduled_purge_at": ts.Time.Add(h.deleteGrace())})
 	})
-	if err != nil || requestedAt.IsZero() {
-		return time.Time{}, err
-	}
-	return requestedAt.Add(h.deleteGrace()), nil
 }
 
 // cancelProjectPlayerDelete clears a pending delete request under the
@@ -1420,7 +1383,7 @@ func (h *Handler) setAccountVerifyCookie(w http.ResponseWriter, accountID uuid.U
 		ExpiresAt: expiresAt,
 		Email:     email,
 	}, h.verifySigningKey)
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountVerifyCookieName,
 		Value:    val,
 		Path:     accountBasePath,
@@ -1432,7 +1395,7 @@ func (h *Handler) setAccountVerifyCookie(w http.ResponseWriter, accountID uuid.U
 }
 
 func (h *Handler) clearAccountVerifyCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountVerifyCookieName,
 		Value:    "",
 		Path:     accountBasePath,

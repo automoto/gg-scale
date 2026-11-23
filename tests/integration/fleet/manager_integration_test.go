@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,25 +47,25 @@ func (fakeBackend) HealthCheck(context.Context) error { return nil }
 // TestManager_resolves_fleet_then_allocates is the load-bearing assertion for
 // the fleet-template feature: an operator-authored fleet row in Postgres
 // translates into an allocation whose persisted row records the fleet it came
-// from. Exercises PostgresFleetStore.Create, Manager.Allocate (fleet lookup +
+// from. Exercises CreateFleet, Manager.Allocate (fleet lookup +
 // backend dispatch), and the allocation store, against a real Postgres.
 func TestManager_resolves_fleet_then_allocates(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	fleetStore := fleet.NewPostgresFleetStore(pool)
+	fleetStore := fleet.NewPostgresFleetStore(pool, nil)
 	allocStore := fleet.NewPostgresStore(pool)
 
 	mgr := fleet.NewManager(allocStore, fleetStore, fakeBackend{name: "agones"}, fleet.ManagerOptions{
 		Clock: func(int) time.Duration { return 0 },
 	})
 
-	tmpl, err := fleetStore.Create(ctx, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "doomerang",
 		Backend:   "agones",
 		Config:    map[string]string{"fleet_name": "doomerang"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
 	alloc, err := mgr.Allocate(ctx, fleet.AllocationRequest{
@@ -96,19 +97,19 @@ func TestManager_refuses_fleet_with_mismatched_backend(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	fleetStore := fleet.NewPostgresFleetStore(pool)
+	fleetStore := fleet.NewPostgresFleetStore(pool, nil)
 	allocStore := fleet.NewPostgresStore(pool)
 
 	mgr := fleet.NewManager(allocStore, fleetStore, fakeBackend{name: "agones"}, fleet.ManagerOptions{
 		Clock: func(int) time.Duration { return 0 },
 	})
 
-	tmpl, err := fleetStore.Create(ctx, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "wrong-backend",
 		Backend:   "plugin:ovh",
 		Config:    map[string]string{"flavor": "b2-7"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
 	_, err = mgr.Allocate(ctx, fleet.AllocationRequest{
@@ -126,7 +127,7 @@ func TestManager_refuses_missing_fleet(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	ctx := db.WithTenant(context.Background(), tenantID)
 
-	fleetStore := fleet.NewPostgresFleetStore(pool)
+	fleetStore := fleet.NewPostgresFleetStore(pool, nil)
 	allocStore := fleet.NewPostgresStore(pool)
 
 	mgr := fleet.NewManager(allocStore, fleetStore, fakeBackend{name: "agones"}, fleet.ManagerOptions{
@@ -165,15 +166,15 @@ func (b *gatedBackend) Deallocate(_ context.Context, _ fleet.AllocationID, ref s
 func TestManager_Allocate_should_free_server_when_row_was_released_during_backend_call(t *testing.T) {
 	pool, tenantID, projectID := startMigratedDB(t)
 	ctx := db.WithTenant(context.Background(), tenantID)
-	fleetStore := fleet.NewPostgresFleetStore(pool)
+	fleetStore := fleet.NewPostgresFleetStore(pool, nil)
 	backend := &gatedBackend{fakeBackend: fakeBackend{name: "agones"}, gate: make(chan struct{})}
 	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleetStore, backend, fleet.ManagerOptions{})
-	tmpl, err := fleetStore.Create(ctx, fleet.FleetCreate{
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      "doomerang",
 		Backend:   "agones",
 		Config:    map[string]string{"fleet_name": "doomerang"},
-	})
+	}, actor)
 	require.NoError(t, err)
 
 	allocateErr := make(chan error, 1)
@@ -202,4 +203,68 @@ func TestManager_Allocate_should_free_server_when_row_was_released_during_backen
 	require.NoError(t, err)
 	assert.Equal(t, fleet.StatusShutdown, persisted.Status)
 	assert.Contains(t, backend.deallocated, "fake-ref-1", "the server the late call created must be freed")
+}
+
+func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, nil), fakeBackend{name: "agones"}, fleet.ManagerOptions{
+		Clock: func(int) time.Duration { return 0 },
+	})
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
+		ProjectID: projectID, Name: "doomerang", Backend: "agones", Config: map[string]string{"fleet_name": "doomerang"},
+	}, actor)
+	require.NoError(t, err)
+	require.NoError(t, fleet.NewPostgresFleetStore(pool, nil).DeleteFleet(ctx, tenantID, projectID, tmpl.ID, actor))
+
+	_, err = mgr.Allocate(ctx, fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local", Capacity: 1})
+
+	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
+}
+
+func TestManager_should_roll_back_the_ready_change_when_the_commit_hook_fails(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	mgr := fleet.NewManager(fleet.NewPostgresStore(pool), fleet.NewPostgresFleetStore(pool, nil), fakeBackend{name: "agones"}, fleet.ManagerOptions{
+		Clock: func(int) time.Duration { return 0 },
+	})
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
+		ProjectID: projectID, Name: "hooked", Backend: "agones", Config: map[string]string{"fleet_name": "hooked"},
+	}, actor)
+	require.NoError(t, err)
+	hooked := fleet.WithCommitHook(ctx, func(context.Context, pgx.Tx, fleet.AllocationID) error { return errors.New("audit failed") })
+
+	_, err = mgr.Allocate(hooked, fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local", Capacity: 1})
+
+	rows, _, lerr := mgr.List(ctx, projectID, true, 10, 0)
+	require.NoError(t, lerr)
+	assert.Equal(t, []any{true, 1, fleet.StatusFailed}, []any{err != nil, len(rows), rows[0].Status})
+}
+
+// ReleasePendingWithoutRef releases a row only while it is pending with no
+// backend ref. A row that MarkReady already changed stays as it is.
+func TestPostgresStore_ReleasePendingWithoutRef(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := fleet.NewPostgresStore(pool)
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
+		ProjectID: projectID, Name: "release", Backend: "agones", Config: map[string]string{"fleet_name": "gs"},
+	}, actor)
+	require.NoError(t, err)
+	req := fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local"}
+	pending, err := store.InsertPending(ctx, req, "agones")
+	require.NoError(t, err)
+	ready, err := store.InsertPending(ctx, req, "agones")
+	require.NoError(t, err)
+	require.NoError(t, store.MarkReady(ctx, ready, "ns/gs-1", "203.0.113.1:7777"))
+
+	releasedPending, errPending := store.ReleasePendingWithoutRef(ctx, pending)
+	releasedReady, errReady := store.ReleasePendingWithoutRef(ctx, ready)
+
+	p, err := store.Get(ctx, pending)
+	require.NoError(t, err)
+	r, err := store.Get(ctx, ready)
+	require.NoError(t, err)
+	assert.Equal(t, []any{true, nil, fleet.StatusShutdown, false, nil, fleet.StatusReady},
+		[]any{releasedPending, errPending, p.Status, releasedReady, errReady, r.Status})
 }

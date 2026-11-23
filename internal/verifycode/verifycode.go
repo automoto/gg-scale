@@ -3,15 +3,16 @@
 // player-facing player flow:
 //
 //   - 6-digit numeric code generation
-//   - per-user salt + SHA-256 hashing (avoids precomputed rainbow tables
-//     on the small 10^6 code space)
+//   - per-user salt + HMAC-SHA256 under a server key (a database read
+//     alone does not give the code from the small 10^6 code space)
 //   - expiry / attempt / resend-cooldown checks
 //
-// Invite-link codes use a longer URL-safe alphabet; both kinds of codes
-// share the salt+hash storage convention.
+// Invite-link codes use a longer URL-safe random value and an unkeyed
+// lookup hash.
 package verifycode
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -82,13 +83,26 @@ func NewSalt() ([]byte, error) {
 	return buf, nil
 }
 
-// Hash returns SHA-256(salt || ":" || code).
-func Hash(salt []byte, code string) []byte {
-	h := sha256.New()
-	h.Write(salt)
-	h.Write([]byte(":"))
-	h.Write([]byte(code))
-	return h.Sum(nil)
+// HashToken returns SHA-256(":" || token), the lookup hash of a random
+// invite or sign-up link code. These codes are long random values, so a fast
+// unkeyed hash is enough.
+func HashToken(token string) []byte {
+	sum := sha256.Sum256([]byte(":" + token))
+	return sum[:]
+}
+
+// HashCode returns HMAC-SHA256(salt || ":" || code) under a key derived from
+// the email verification signing key. A 6-digit code has only 10^6 values, so
+// an unkeyed hash in a stored row gives the code at once. With the key, a
+// database read alone does not.
+func HashCode(signingKey, salt []byte, code string) []byte {
+	derive := hmac.New(sha256.New, signingKey)
+	derive.Write([]byte("ggscale verify code"))
+	mac := hmac.New(sha256.New, derive.Sum(nil))
+	mac.Write(salt)
+	mac.Write([]byte(":"))
+	mac.Write([]byte(code))
+	return mac.Sum(nil)
 }
 
 // CanResend reports whether enough time has elapsed since the last send

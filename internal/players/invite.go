@@ -82,7 +82,7 @@ func (h *Handler) inviteAcceptHandler(w http.ResponseWriter, r *http.Request) {
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		// Re-validate the invite inside the tx (SECURITY DEFINER lookup).
-		row, qerr := q.PlayerInviteLookup(r.Context(), verifycode.Hash(nil, code))
+		row, qerr := q.PlayerInviteLookup(r.Context(), verifycode.HashToken(code))
 		if errors.Is(qerr, pgx.ErrNoRows) {
 			return errInviteNotFound
 		}
@@ -297,7 +297,7 @@ func (h *Handler) lookupPlayerInvite(ctx context.Context, projectID int64, code 
 	if code == "" {
 		return InviteAcceptView{}, errInviteNotFound
 	}
-	codeHash := verifycode.Hash(nil, code)
+	codeHash := verifycode.HashToken(code)
 	var out InviteAcceptView
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)

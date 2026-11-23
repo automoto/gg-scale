@@ -25,6 +25,8 @@ type Config struct {
 	PluginDir     string
 	AgonesNS      string
 	AgonesKubecfg string
+	// AgonesProjectIsolation is AGONES_PROJECT_ISOLATION: see agones.Config.
+	AgonesProjectIsolation bool
 
 	// Out-of-cluster k3s auth (Dokku deploys). When all three are set the
 	// agones backend builds rest.Config from these instead of AgonesKubecfg.
@@ -40,7 +42,7 @@ type Config struct {
 func New(c Config) (fleet.Backend, error) {
 	switch c.Backend {
 	case "agones":
-		agonesCfg := agonesbackend.Config{Namespace: c.AgonesNS}
+		agonesCfg := agonesbackend.Config{Namespace: c.AgonesNS, ProjectIsolation: c.AgonesProjectIsolation}
 		if c.K3sAPIURL != "" {
 			return agonesbackend.NewFromEnvVars(agonesCfg, c.K3sAPIURL, c.K3sSAToken, c.K3sCACertB64)
 		}

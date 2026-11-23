@@ -65,10 +65,18 @@ LEFT JOIN projects p ON p.id = k.project_id
 WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
 ORDER BY k.id DESC;
 
--- name: GetAPIKeyType :one
-SELECT key_type
-FROM api_keys
-WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
+-- name: ListActiveAPIKeysPageForProject :many
+-- One page of the unrevoked keys that work for a project: keys bound to it and
+-- tenant-wide keys. Keyset-paginated on id, newest first. before_id 0 starts at
+-- the newest key. The caller reads one row more than the page.
+SELECT k.id, k.project_id, k.label, k.key_type, k.scopes, k.created_at
+FROM api_keys k
+WHERE k.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND k.revoked_at IS NULL
+  AND (k.project_id IS NULL OR k.project_id = sqlc.arg(project_id))
+  AND (sqlc.arg(before_id)::bigint = 0 OR k.id < sqlc.arg(before_id)::bigint)
+ORDER BY k.id DESC
+LIMIT sqlc.arg(row_limit);
 
 -- name: UpdateAPIKeyLabel :exec
 UPDATE api_keys
@@ -76,7 +84,7 @@ SET label = nullif(trim(sqlc.arg(label)::text), '')
 WHERE id = sqlc.arg(id) AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 
 -- name: GetAPIKeyScopes :one
-SELECT scopes, project_id
+SELECT scopes, project_id, revoked_at, key_type
 FROM api_keys
 WHERE id = $1 AND tenant_id = current_setting('app.tenant_id', true)::bigint;
 

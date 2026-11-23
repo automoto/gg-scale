@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/netip"
 	"strings"
 )
 
@@ -19,10 +20,11 @@ const (
 // usable RFC 5322 address.
 var ErrInvalidEmail = errors.New("webutil: invalid email address")
 
-// ValidateEmail wraps net/mail.ParseAddress with three policy layers
+// ValidateEmail wraps net/mail.ParseAddress with four policy layers
 // stdlib doesn't enforce: the RFC 5321 length cap, a refusal of the
 // display-name "Alice <a@b.c>" form (signup fields should hold an
-// address, not a mailbox), and lowercase normalisation of the domain.
+// address, not a mailbox), a refusal of IP-literal domains, and lowercase
+// normalisation of the domain.
 // Control-char / CR / LF / NUL injection is already rejected by
 // ParseAddress, so no separate scan is needed.
 func ValidateEmail(s string) (string, error) {
@@ -38,5 +40,8 @@ func ValidateEmail(s string) (string, error) {
 		return "", fmt.Errorf("%w: display name not allowed", ErrInvalidEmail)
 	}
 	local, domain, _ := strings.Cut(addr.Address, "@")
+	if _, ipErr := netip.ParseAddr(domain); ipErr == nil || strings.HasPrefix(domain, "[") {
+		return "", fmt.Errorf("%w: IP address domain not allowed", ErrInvalidEmail)
+	}
 	return local + "@" + strings.ToLower(domain), nil
 }

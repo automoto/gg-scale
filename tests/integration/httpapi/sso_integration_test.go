@@ -103,7 +103,7 @@ func TestSSO_player_routes_work_in_the_full_router_on_the_app_role(t *testing.T)
 	assert.Equal(t, "/v1/players/account/", signIn.Header.Get("Location"))
 	// The last sign-in method stays: the unlink ran the row lock and the
 	// count on the application role, then refused.
-	assert.Contains(t, unlink.Header.Get("Location"), "/v1/players/account/?error=")
+	assert.Equal(t, "/v1/players/account/?flash=sso_last_method", unlink.Header.Get("Location"))
 	var connections, audits int
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM player_account_connections c

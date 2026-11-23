@@ -5,8 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
-	"path"
 	"strconv"
 	"strings"
 
@@ -41,7 +39,7 @@ func (h *Handler) tenantSettingsPage(w http.ResponseWriter, r *http.Request) {
 	view.UserEmail = session.User.Email
 	view.CSRFToken = session.CSRFToken
 	view.IsPlatformAdmin = session.User.IsPlatformAdmin
-	view.Message = r.URL.Query().Get("flash")
+	view.Message = flashMessage(r)
 	webutil.Render(r, w, TenantSettingsPage(view))
 }
 
@@ -140,7 +138,7 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 	}
 	target, err := parseRequestedTier(r.Form.Get("tier"))
 	if err != nil {
-		h.redirectTenantSettings(w, r, tenantID, "Choose a valid Account Tenant tier.")
+		h.redirectTenantSettings(w, r, tenantID, flashTierInvalid)
 		return
 	}
 	changed, err := h.setTenantTier(r.Context(), session.User.ID, tenantID, target)
@@ -153,10 +151,10 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if !changed {
-		h.redirectTenantSettings(w, r, tenantID, "Account Tenant is already on "+tenant.Tier(target).String()+".")
+		h.redirectTenantSettings(w, r, tenantID, flashTierUnchanged)
 		return
 	}
-	h.redirectTenantSettings(w, r, tenantID, "Account Tenant tier changed to "+tenant.Tier(target).String()+".")
+	h.redirectTenantSettings(w, r, tenantID, flashTierChanged)
 }
 
 func (h *Handler) setTenantTier(ctx context.Context, actorID, tenantID int64, target int16) (bool, error) {
@@ -223,12 +221,12 @@ func (h *Handler) updateTenantFeatureHandler(w http.ResponseWriter, r *http.Requ
 	}
 	feature := r.Form.Get("feature")
 	if !isGrantableFeature(feature) {
-		h.redirectTenantSettings(w, r, tenantID, "Choose a valid feature to grant.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureInvalid)
 		return
 	}
 	enable := r.Form.Get("enabled") == "on"
 	if enable && !h.featureEnabledByEnv(feature) {
-		h.redirectTenantSettings(w, r, tenantID, "That feature's server switch is off; enable it in server settings first.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureSwitchOff)
 		return
 	}
 	changed, err := h.setTenantFeatureGrant(r.Context(), session.User.ID, tenantID, feature, enable)
@@ -245,13 +243,13 @@ func (h *Handler) updateTenantFeatureHandler(w http.ResponseWriter, r *http.Requ
 	}
 	switch {
 	case !changed && enable:
-		h.redirectTenantSettings(w, r, tenantID, "Feature is already enabled.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureAlreadyEnabled)
 	case !changed:
-		h.redirectTenantSettings(w, r, tenantID, "Feature is already disabled.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureAlreadyDisabled)
 	case enable:
-		h.redirectTenantSettings(w, r, tenantID, "Feature enabled.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureEnabled)
 	default:
-		h.redirectTenantSettings(w, r, tenantID, "Feature disabled.")
+		h.redirectTenantSettings(w, r, tenantID, flashFeatureDisabled)
 	}
 }
 
@@ -333,7 +331,7 @@ func (h *Handler) projectSettingsPage(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	view.UserEmail = session.User.Email
 	view.CSRFToken = session.CSRFToken
-	view.Message = r.URL.Query().Get("flash")
+	view.Message = flashMessage(r)
 	webutil.Render(r, w, ProjectSettingsPage(view))
 }
 
@@ -455,30 +453,4 @@ func formatBytes(b int64) string {
 	default:
 		return strconv.FormatInt(b, 10) + " B"
 	}
-}
-
-// safeReturnPath returns raw when it is a same-origin control panel-relative path
-// safe to redirect back to after a reused form post, else fallback. It rejects
-// absolute URLs, scheme-relative ("//host"), queries/fragments (callers append
-// "?flash="), dot segments, and anything outside /v1/control-panel, so the
-// server-controlled redirect can't become an open redirect or escape the
-// control panel.
-func safeReturnPath(raw, fallback string) string {
-	if raw == "" {
-		return fallback
-	}
-	if strings.HasPrefix(raw, "//") || strings.ContainsAny(raw, "\\\r\n?#") {
-		return fallback
-	}
-	if path.Clean(raw) != raw {
-		return fallback
-	}
-	if raw != pathControlPanel && !strings.HasPrefix(raw, pathControlPanel+"/") {
-		return fallback
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.IsAbs() || u.Host != "" {
-		return fallback
-	}
-	return raw
 }

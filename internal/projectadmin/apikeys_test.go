@@ -73,3 +73,43 @@ func TestScopeGrantable_should_refuse_when_the_server_switch_is_off(t *testing.T
 
 	assert.Equal(t, []bool{false, false}, got)
 }
+
+func TestManagedScopeChanges_reports_grants_and_revokes(t *testing.T) {
+	changes := managedScopeChanges(
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeMatchmaker, tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []scopeChange{
+		{Scope: tenant.ScopeFleet, Grant: false},
+		{Scope: tenant.ScopeP2PRelay, Grant: true},
+	}, changes)
+}
+
+func TestApplyManagedScopes_preserves_unrelated_scopes(t *testing.T) {
+	next := applyManagedScopes(
+		[]string{"storage:read", tenant.ScopeMatchmaker, tenant.ScopeFleet},
+		[]string{tenant.ScopeP2PRelay},
+	)
+
+	assert.Equal(t, []string{"storage:read", tenant.ScopeP2PRelay}, next)
+}
+
+// The zero KeyScope must fail closed: a caller that forgets to set a scope
+// reaches no key. It answers before any query, so no database is needed.
+func TestAuthorizeAPIKey_zero_scope_should_match_no_key(t *testing.T) {
+	_, err := authorizeAPIKey(t.Context(), nil, nil, 7, KeyScope{}, 1, Actor{UserID: 1})
+
+	assert.ErrorIs(t, err, ErrAPIKeyNotFound)
+}
+
+func TestAPIKeyLabel_should_be_refused_before_the_database(t *testing.T) {
+	long := strings.Repeat("x", APIKeyLabelMax+1)
+	for _, label := range []string{"a\u202eb", "a\u061cb", "a\u2028b", "a\tb", "a\xffb", long} {
+		_, _, createErr := CreateAPIKey(t.Context(), nil, nil, 1, NewAPIKey{Label: label, Type: tenant.KeyTypePublishable}, Actor{})
+		relabelErr := UpdateAPIKeyLabel(t.Context(), nil, nil, 1, KeyScope{}, 1, label, Actor{})
+
+		assert.ErrorIs(t, createErr, ErrInvalidKeyLabel, "%q", label)
+		assert.ErrorIs(t, relabelErr, ErrInvalidKeyLabel, "%q", label)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
@@ -50,7 +51,15 @@ type GameServerEvent struct {
 type Config struct {
 	API       API
 	Namespace string
+	// ProjectIsolation pins every allocation to Namespace and adds the
+	// ProjectLabel selector with the project id of the request. The
+	// operator labels the GameServer template of each Agones Fleet.
+	ProjectIsolation bool
 }
+
+// ProjectLabel is the GameServer label that ties a server to a Game
+// Project when ProjectIsolation is on. Only the server sets it.
+const ProjectLabel = "ggscale.dev/project"
 
 // Backend allocates Agones GameServers.
 type Backend struct {
@@ -167,12 +176,20 @@ func TemplateFromConfig(cfg map[string]string) Template {
 func (b *Backend) Allocate(ctx context.Context, req fleet.AllocationRequest) (*fleet.Allocation, error) {
 	tmpl := TemplateFromConfig(req.Config)
 	namespace := b.resolveNamespace(tmpl.Namespace)
+	selector := selectorWithRegion(tmpl.SelectorLabels, req.Region)
+	if b.cfg.ProjectIsolation {
+		if req.ProjectID <= 0 {
+			return nil, errors.New("agones: project isolation needs the project id of the allocation")
+		}
+		// Set last, so a stored selector of an old row cannot change it.
+		selector[ProjectLabel] = strconv.FormatInt(req.ProjectID, 10)
+	}
 	gsa := &allocationv1.GameServerAllocation{
 		Spec: allocationv1.GameServerAllocationSpec{
 			MetaPatch: allocationv1.MetaPatch{Labels: req.Labels},
 			Selectors: []allocationv1.GameServerSelector{
 				{
-					LabelSelector: metav1.LabelSelector{MatchLabels: selectorWithRegion(tmpl.SelectorLabels, req.Region)},
+					LabelSelector: metav1.LabelSelector{MatchLabels: selector},
 				},
 			},
 		},
@@ -219,17 +236,25 @@ func (b *Backend) splitBackendRef(ref string) (ns, name string) {
 	return b.cfg.Namespace, ref
 }
 
+// resolveNamespace returns the namespace of a new allocation or a cleanup.
+// With ProjectIsolation on it is always the server namespace, also for an
+// old fleet row that stored a namespace.
 func (b *Backend) resolveNamespace(tmplNamespace string) string {
-	if tmplNamespace != "" {
+	if tmplNamespace != "" && !b.cfg.ProjectIsolation {
 		return tmplNamespace
 	}
 	return b.cfg.Namespace
 }
 
 // Deallocate deletes the GameServer CR; Agones reaps the underlying pod.
-// A "not found" delete is treated as success (idempotent shutdown).
+// A "not found" delete is treated as success (idempotent shutdown). An empty
+// ref (a row that stayed pending) names no GameServer, so there is nothing
+// to delete.
 func (b *Backend) Deallocate(ctx context.Context, _ fleet.AllocationID, backendRef string) error {
 	namespace, name := b.splitBackendRef(backendRef)
+	if name == "" {
+		return nil
+	}
 	if err := b.cfg.API.DeleteGameServer(ctx, namespace, name, metav1.DeleteOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -416,15 +441,23 @@ func (a clientsetAdapter) Ping(ctx context.Context) error {
 }
 
 // CleanupResolution removes all servers tagged by an interrupted allocation.
-func (b *Backend) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+// With ProjectIsolation on, it also selects by the ProjectLabel of projectID.
+func (b *Backend) CleanupResolution(ctx context.Context, projectID int64, id string, config map[string]string) error {
 	api, ok := b.cfg.API.(interface {
 		ListGameServers(context.Context, string, string) (*agonesv1.GameServerList, error)
 	})
 	if !ok {
 		return fleet.ErrUnsupported
 	}
+	selector := "ggscale.dev/resolution-id=" + id
+	if b.cfg.ProjectIsolation {
+		if projectID <= 0 {
+			return errors.New("agones: project isolation needs the project id of the allocation")
+		}
+		selector += "," + ProjectLabel + "=" + strconv.FormatInt(projectID, 10)
+	}
 	namespace := b.resolveNamespace(TemplateFromConfig(config).Namespace)
-	servers, err := api.ListGameServers(ctx, namespace, "ggscale.dev/resolution-id="+id)
+	servers, err := api.ListGameServers(ctx, namespace, selector)
 	if err != nil {
 		return err
 	}

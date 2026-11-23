@@ -2,14 +2,17 @@ package httpapi
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
@@ -18,11 +21,50 @@ import (
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/rbac"
+	"github.com/automoto/gg-scale/internal/secretseal"
 	"github.com/automoto/gg-scale/internal/tenant"
+	"github.com/automoto/gg-scale/internal/webutil"
 )
 
-// projectMaxListRows caps each list result. There is no paging.
+// projectMaxListRows caps the key list in the health check. The list
+// operations are paged instead.
 const projectMaxListRows = 50
+
+// ProjectPageInput is the paging input of a list operation, as for
+// GET /v1/leaderboards. The cursor is the sort key of the last row of the
+// previous page. Its form depends on the list, so a client sends back the
+// next_cursor value unchanged.
+type ProjectPageInput struct {
+	Limit  string `query:"limit" doc:"Rows per page, at most 100. The default is 100." example:"100"`
+	Cursor string `query:"cursor" doc:"The next_cursor of the previous page, sent back unchanged. Leave it out for the first page."`
+}
+
+func (in ProjectPageInput) limit() int32 {
+	return parseLimit(in.Limit, leaderboardListPageSize, leaderboardListPageSize)
+}
+
+// trimPage cuts rows, read with one row more than limit, to one page. more is
+// true when a next page exists.
+func trimPage[T any](rows []T, limit int32) (page []T, more bool) {
+	if len(rows) <= int(limit) {
+		return rows, false
+	}
+	return rows[:limit], true
+}
+
+// decodeIDCursor reads a cursor that is a row ID: empty, or a positive number.
+func decodeIDCursor(s string) (int64, bool) {
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func errBadCursor() error { return huma.Error422UnprocessableEntity("cursor is not valid") }
 
 // projectQ runs fn in a transaction scoped to the token's tenant. It uses the
 // primary, not the read replica: a stale revision number from a replica
@@ -102,30 +144,38 @@ type projectDeletedLeaderboard struct {
 
 type projectLeaderboardList struct {
 	Leaderboards []projectLeaderboard `json:"leaderboards"`
-	Truncated    bool                 `json:"truncated" doc:"True when there are more than 50 leaderboards."`
+	NextCursor   string               `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
 	// A pointer, so the key is absent unless include_deleted is set.
 	DeletedLeaderboards *[]projectDeletedLeaderboard `json:"deleted_leaderboards,omitempty" doc:"Deleted leaderboards that can be restored. Only when include_deleted is set."`
 }
 
 type projectListLeaderboardsInput struct {
-	IncludeDeleted bool `query:"include_deleted" doc:"Also list deleted leaderboards that can be restored."`
+	ProjectPageInput
+	IncludeDeleted bool `query:"include_deleted" doc:"Also list deleted leaderboards that can be restored. They are in the first page only."`
 }
 
 func listLeaderboards(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListLeaderboardsInput) (projectLeaderboardList, error) {
+	if !webutil.ValidText(in.Cursor) {
+		return projectLeaderboardList{}, errBadCursor()
+	}
+	limit := in.limit()
 	var rows []sqlcgen.ListLeaderboardsPageForProjectRow
 	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
-		rows, err = q.ListLeaderboardsPageForProject(ctx, sqlcgen.ListLeaderboardsPageForProjectParams{ProjectID: p.ProjectID, RowLimit: projectMaxListRows + 1})
+		rows, err = q.ListLeaderboardsPageForProject(ctx, sqlcgen.ListLeaderboardsPageForProjectParams{
+			ProjectID: p.ProjectID, AfterName: in.Cursor, RowLimit: limit + 1,
+		})
 		return err
 	})
 	if err != nil {
 		return projectLeaderboardList{}, err
 	}
-	out := projectLeaderboardList{
-		Truncated:    len(rows) > projectMaxListRows,
-		Leaderboards: make([]projectLeaderboard, 0, min(len(rows), projectMaxListRows)),
+	rows, more := trimPage(rows, limit)
+	out := projectLeaderboardList{Leaderboards: make([]projectLeaderboard, 0, len(rows))}
+	if more {
+		out.NextCursor = rows[len(rows)-1].Name
 	}
-	for _, r := range rows[:min(len(rows), projectMaxListRows)] {
+	for _, r := range rows {
 		out.Leaderboards = append(out.Leaderboards, projectLeaderboard{
 			ID: r.ID, Name: r.Name, SortOrder: r.SortOrder, ScoreOperator: r.ScoreOperator,
 			ClientSubmissions: r.ClientSubmissions, ScoreMin: r.ScoreMin, ScoreMax: r.ScoreMax,
@@ -133,7 +183,7 @@ func listLeaderboards(ctx context.Context, d Deps, p managementtoken.Principal, 
 			CurrentPeriod: r.CurrentPeriod, NextResetAt: timestamptzPtr(r.NextResetAt), CreatedAt: timestamptzPtr(r.CreatedAt),
 		})
 	}
-	if !in.IncludeDeleted {
+	if !in.IncludeDeleted || in.Cursor != "" {
 		return out, nil
 	}
 	deleted, err := projectadmin.ListDeletedLeaderboards(ctx, d.Pool, p.TenantID, p.ProjectID)
@@ -188,6 +238,14 @@ type projectAPIKey struct {
 	CreatedAt   *time.Time `json:"created_at"`
 }
 
+func newProjectAPIKey(id int64, label *string, keyType string, scopes []string, projectID *int64, createdAt pgtype.Timestamptz) projectAPIKey {
+	k := projectAPIKey{ID: id, Type: keyType, Scopes: scopes, AllProjects: projectID == nil, CreatedAt: timestamptzPtr(createdAt)}
+	if label != nil {
+		k.Label = *label
+	}
+	return k
+}
+
 // projectActiveKeys returns the unrevoked keys that work for the token's
 // project: keys bound to it and tenant-wide keys (project_id NULL).
 func projectActiveKeys(ctx context.Context, d Deps, p managementtoken.Principal) ([]projectAPIKey, error) {
@@ -205,29 +263,151 @@ func projectActiveKeys(ctx context.Context, d Deps, p managementtoken.Principal)
 		if r.RevokedAt.Valid || (r.ProjectID != nil && *r.ProjectID != p.ProjectID) {
 			continue
 		}
-		v := projectAPIKey{ID: r.ID, Type: r.KeyType, Scopes: r.Scopes, AllProjects: r.ProjectID == nil, CreatedAt: timestamptzPtr(r.CreatedAt)}
-		if r.Label != nil {
-			v.Label = *r.Label
-		}
-		out = append(out, v)
+		out = append(out, newProjectAPIKey(r.ID, r.Label, r.KeyType, r.Scopes, r.ProjectID, r.CreatedAt))
 	}
 	return out, nil
 }
 
 type projectAPIKeyList struct {
-	APIKeys   []projectAPIKey `json:"api_keys"`
-	Truncated bool            `json:"truncated" doc:"True when there are more than 50 keys."`
+	APIKeys    []projectAPIKey `json:"api_keys"`
+	NextCursor string          `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
 }
 
-func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectAPIKeyList, error) {
-	keys, err := projectActiveKeys(ctx, d, p)
+// listAPIKeys pages by key ID, newest first: the cursor is the ID of the
+// last key of the page.
+func listAPIKeys(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectAPIKeyList, error) {
+	before, ok := decodeIDCursor(in.Cursor)
+	if !ok {
+		return projectAPIKeyList{}, errBadCursor()
+	}
+	limit := in.limit()
+	var rows []sqlcgen.ListActiveAPIKeysPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListActiveAPIKeysPageForProject(ctx, sqlcgen.ListActiveAPIKeysPageForProjectParams{
+			ProjectID: &p.ProjectID, BeforeID: before, RowLimit: limit + 1,
+		})
+		return err
+	})
 	if err != nil {
 		return projectAPIKeyList{}, err
 	}
-	return projectAPIKeyList{
-		APIKeys:   keys[:min(len(keys), projectMaxListRows)],
-		Truncated: len(keys) > projectMaxListRows,
-	}, nil
+	rows, more := trimPage(rows, limit)
+	out := projectAPIKeyList{APIKeys: make([]projectAPIKey, 0, len(rows))}
+	if more {
+		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
+	}
+	for _, r := range rows {
+		out.APIKeys = append(out.APIKeys, newProjectAPIKey(r.ID, r.Label, r.KeyType, r.Scopes, r.ProjectID, r.CreatedAt))
+	}
+	return out, nil
+}
+
+// projectPlayer is a player of the token's project. email and display_name
+// are pointers, so each key is absent unless the token has players:pii. Both
+// are text that players wrote.
+type projectPlayer struct {
+	ID                int64      `json:"id" example:"42"`
+	ExternalID        string     `json:"external_id" doc:"Set by the sign-in of the game. It may hold text that the game chose." example:"7a1c0b52-5d3e-4a35-9a54-6f1f63f2f0a1"`
+	EmailVerified     bool       `json:"email_verified"`
+	Disabled          bool       `json:"disabled"`
+	DeleteRequested   bool       `json:"delete_requested" doc:"A delete request is pending and the player is in the grace period."`
+	CreatedAt         *time.Time `json:"created_at"`
+	DisabledAt        *time.Time `json:"disabled_at"`
+	DeleteRequestedAt *time.Time `json:"delete_requested_at"`
+	Email             *string    `json:"email,omitempty" doc:"Text that the player wrote. Only with the players:pii scope; the empty string means the player has no email."`
+	DisplayName       *string    `json:"display_name,omitempty" doc:"Text that the player wrote. Only with the players:pii scope; the empty string means the player has no display name."`
+}
+
+// playerView builds the result for one row. It leaves email and display name
+// out unless pii is true.
+func playerView(pii bool, r sqlcgen.ListPlayersPageForProjectRow) projectPlayer {
+	v := projectPlayer{
+		ID: r.ID, ExternalID: r.ExternalID,
+		EmailVerified: r.EmailVerifiedAt.Valid, Disabled: r.DisabledAt.Valid, DeleteRequested: r.DeleteRequestedAt.Valid,
+		CreatedAt: timestamptzPtr(r.CreatedAt), DisabledAt: timestamptzPtr(r.DisabledAt), DeleteRequestedAt: timestamptzPtr(r.DeleteRequestedAt),
+	}
+	if pii {
+		v.Email, v.DisplayName = &r.Email, &r.DisplayName
+	}
+	return v
+}
+
+type projectListPlayersInput struct {
+	ProjectPageInput
+	PlayerID   int64  `query:"player_id" doc:"Only the player with this ID."`
+	ExternalID string `query:"external_id" maxLength:"255" doc:"Only the player with exactly this external ID."`
+}
+
+type projectPlayerList struct {
+	Players    []projectPlayer `json:"players"`
+	NextCursor string          `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
+}
+
+// listPlayers pages by player ID, newest first: the cursor is the ID of the
+// last player of the page. The pair of players:pii is the pair of
+// players:read, so the scope test alone decides the personal fields.
+func listPlayers(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListPlayersInput) (projectPlayerList, error) {
+	before, ok := decodeIDCursor(in.Cursor)
+	if !ok {
+		return projectPlayerList{}, errBadCursor()
+	}
+	if !webutil.ValidText(in.ExternalID) {
+		return projectPlayerList{}, huma.Error422UnprocessableEntity("external_id is not valid text")
+	}
+	limit := in.limit()
+	var rows []sqlcgen.ListPlayersPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListPlayersPageForProject(ctx, sqlcgen.ListPlayersPageForProjectParams{
+			ProjectID: p.ProjectID, PlayerID: in.PlayerID, ExternalID: in.ExternalID,
+			BeforeID: before, RowLimit: limit + 1,
+		})
+		return err
+	})
+	if err != nil {
+		return projectPlayerList{}, err
+	}
+	rows, more := trimPage(rows, limit)
+	out := projectPlayerList{Players: make([]projectPlayer, 0, len(rows))}
+	if more {
+		out.NextCursor = strconv.FormatInt(rows[len(rows)-1].ID, 10)
+	}
+	pii := p.HasScope(managementtoken.ScopePlayersPII)
+	for _, r := range rows {
+		out.Players = append(out.Players, playerView(pii, r))
+	}
+	return out, nil
+}
+
+// ProjectPlayerPath is exported because huma reads an embedded struct only when its type is exported.
+type ProjectPlayerPath struct {
+	PlayerID int64 `path:"player_id" doc:"Player ID." example:"42"`
+}
+
+func getPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	return readPlayer(ctx, d, p, in.PlayerID)
+}
+
+// readPlayer returns one live player of the token's project. In the list
+// query a player_id of 0 means no filter, so a non-positive ID is a 404 here.
+func readPlayer(ctx context.Context, d Deps, p managementtoken.Principal, playerID int64) (projectPlayer, error) {
+	if playerID <= 0 {
+		return projectPlayer{}, errProjectNotFound()
+	}
+	var rows []sqlcgen.ListPlayersPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListPlayersPageForProject(ctx, sqlcgen.ListPlayersPageForProjectParams{ProjectID: p.ProjectID, PlayerID: playerID, RowLimit: 1})
+		return err
+	})
+	if err != nil {
+		return projectPlayer{}, err
+	}
+	if len(rows) == 0 {
+		return projectPlayer{}, errProjectNotFound()
+	}
+	return playerView(p.HasScope(managementtoken.ScopePlayersPII), rows[0]), nil
 }
 
 type projectListRevisionsInput struct {
@@ -250,12 +430,15 @@ type projectRevisionList struct {
 
 func listRevisions(ctx context.Context, d Deps, p managementtoken.Principal, in *projectListRevisionsInput) (projectRevisionList, error) {
 	// The enum of Resource refuses other values before the handler runs.
-	kind, resourceID := projectadmin.KindRemoteConfig, p.ProjectID
+	kind, resourceID, scope := projectadmin.KindRemoteConfig, p.ProjectID, managementtoken.ScopeConfigRead
 	if in.Resource == projectadmin.KindLeaderboard {
 		if in.LeaderboardID == 0 {
 			return projectRevisionList{}, huma.Error422UnprocessableEntity("leaderboard_id is required when resource is leaderboard")
 		}
-		kind, resourceID = projectadmin.KindLeaderboard, in.LeaderboardID
+		kind, resourceID, scope = projectadmin.KindLeaderboard, in.LeaderboardID, managementtoken.ScopeLeaderboardsRead
+	}
+	if err := requireScope(ctx, d, p, scope); err != nil {
+		return projectRevisionList{}, err
 	}
 	revs, err := projectadmin.ListRevisions(ctx, d.Pool, p.TenantID, p.ProjectID, kind, resourceID)
 	if err != nil {
@@ -410,14 +593,17 @@ type projectHealth struct {
 	Checks   projectHealthChecks `json:"checks"`
 }
 
+// projectHealthChecks leaves out each section that needs a read scope the
+// token does not have. The pointers make the key absent, so a client can
+// tell a left-out section from an empty one.
 type projectHealthChecks struct {
-	APIKeys            []projectAPIKey       `json:"api_keys"`
+	APIKeys            *[]projectAPIKey      `json:"api_keys,omitempty" doc:"Absent without the keys:read scope."`
 	FeatureGrants      map[string]bool       `json:"feature_grants"`
 	ServerSwitches     projectServerSwitches `json:"server_switches"`
-	CORSAllowedOrigins projectHealthOrigins  `json:"cors_allowed_origins"`
-	SteamSignIn        bool                  `json:"steam_sign_in"`
-	RemoteConfigBytes  int                   `json:"remote_config_bytes"`
-	Quotas             projectHealthQuotas   `json:"quotas"`
+	CORSAllowedOrigins *projectHealthOrigins `json:"cors_allowed_origins,omitempty" doc:"Absent without the config:read scope."`
+	SteamSignIn        *bool                 `json:"steam_sign_in,omitempty" doc:"Absent without the config:read scope."`
+	RemoteConfigBytes  *int                  `json:"remote_config_bytes,omitempty" doc:"Absent without the config:read scope."`
+	Quotas             *projectHealthQuotas  `json:"quotas,omitempty" doc:"Absent without the limits:read scope."`
 }
 
 type projectServerSwitches struct {
@@ -439,10 +625,9 @@ type projectHealthQuotas struct {
 	Projects string `json:"projects,omitempty" enum:"ok,near_limit,at_limit"`
 	Players  string `json:"players,omitempty" enum:"ok,near_limit,at_limit"`
 	// open_sessions is a project quota, so its counts are returned.
-	OpenSessions projectQuotaCount `json:"open_sessions"`
-	// leaderboards is a project limit that applies also when quotas are
-	// not enforced.
-	Leaderboards projectQuotaCount `json:"leaderboards"`
+	// leaderboards is a project limit that applies also when quotas are not
+	// enforced.
+	ProjectLimitUsage
 }
 
 type projectQuotaCount struct {
@@ -450,25 +635,38 @@ type projectQuotaCount struct {
 	Limit   int64 `json:"limit"`
 }
 
+// projectHealthCheck is open to every token. The pairs of keys:read,
+// config:read, and limits:read are (project, manage), which the token
+// middleware checks, so the scope test alone decides each section.
 func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectHealth, error) {
 	fleetEnabled, relayEnabled, relayConfigured := d.ControlPanel.FleetEnabled, d.ControlPanel.RelayEnabled, d.RelayIssuer != nil
+	showKeys, showConfig := p.HasScope(managementtoken.ScopeKeysRead), p.HasScope(managementtoken.ScopeConfigRead)
+	showQuotas := p.HasScope(managementtoken.ScopeLimitsRead)
+	// The leaderboard count is leaderboard data, so leaderboards:read also
+	// shows the leaderboard limit problem.
+	showBoardLimit := showQuotas || p.HasScope(managementtoken.ScopeLeaderboardsRead)
 	problems := []string{}
-	keys, err := projectActiveKeys(ctx, d, p)
-	if err != nil {
-		return projectHealth{}, err
-	}
-	var hasPublishable bool
+	var checks projectHealthChecks
 	keyScopes := map[string]bool{}
-	for _, k := range keys {
-		if k.Type == string(tenant.KeyTypePublishable) {
-			hasPublishable = true
+	if showKeys {
+		keys, err := projectActiveKeys(ctx, d, p)
+		if err != nil {
+			return projectHealth{}, err
 		}
-		for _, s := range k.Scopes {
-			keyScopes[s] = true
+		var hasPublishable bool
+		for _, k := range keys {
+			if k.Type == string(tenant.KeyTypePublishable) {
+				hasPublishable = true
+			}
+			for _, s := range k.Scopes {
+				keyScopes[s] = true
+			}
 		}
-	}
-	if !hasPublishable {
-		problems = append(problems, "No active publishable API key works for this Game Project. Game clients cannot call the API.")
+		if !hasPublishable {
+			problems = append(problems, "No active publishable API key works for this Game Project. Game clients cannot call the API.")
+		}
+		keys = keys[:min(len(keys), projectMaxListRows)]
+		checks.APIKeys = &keys
 	}
 
 	grants := map[string]bool{}
@@ -479,14 +677,14 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		}
 		grants[string(f)] = on
 	}
-	if grants[string(rbac.FeatureMatchmaker)] && !keyScopes[tenant.ScopeMatchmaker] {
+	if showKeys && grants[string(rbac.FeatureMatchmaker)] && !keyScopes[tenant.ScopeMatchmaker] {
 		problems = append(problems, "Matchmaking is granted, but no active API key has the matchmaker scope. /v1/matchmaker calls get 403.")
 	}
 	if grants[string(rbac.FeatureP2PRelay)] {
 		switch {
 		case !relayEnabled || !relayConfigured:
 			problems = append(problems, "The relay is granted, but the server relay is off or not configured. /v1/relay is not available.")
-		case !keyScopes[tenant.ScopeP2PRelay]:
+		case showKeys && !keyScopes[tenant.ScopeP2PRelay]:
 			problems = append(problems, "The relay is granted, but no active API key has the p2p_relay scope.")
 		}
 	}
@@ -494,27 +692,22 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		problems = append(problems, "Dedicated servers are granted, but FEATURE_FLEET_ENABLED is off on the server.")
 	}
 
+	qc, limits, usage, err := projectUsage(ctx, d, p)
+	if err != nil {
+		return projectHealth{}, err
+	}
 	var (
-		qc           sqlcgen.GetTenantQuotaContextRow
-		projects     int64
-		openSessions int64
-		boards       int64
-		configBytes  int
-		steam        sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
+		projects    int64
+		configBytes int
+		steam       sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
 	)
 	err = projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
 		var err error
-		if qc, err = q.GetTenantQuotaContext(ctx); err != nil {
-			return err
-		}
 		if projects, err = q.CountProjectsForTenant(ctx); err != nil {
 			return err
 		}
-		if openSessions, err = q.CountOpenGameSessionsForProject(ctx, p.ProjectID); err != nil {
-			return err
-		}
-		if boards, err = q.CountLiveLeaderboardsForProject(ctx, p.ProjectID); err != nil {
-			return err
+		if !showConfig {
+			return nil
 		}
 		cfg, err := q.GetRemoteConfig(ctx, p.ProjectID)
 		if err != nil {
@@ -529,19 +722,11 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 	if err != nil {
 		return projectHealth{}, err
 	}
-	limits, err := quota.ResolveSnapshot(int(qc.Tier), qc.Overrides)
-	if err != nil {
-		return projectHealth{}, err
-	}
-	quotas := projectHealthQuotas{
-		Enforced:     qc.EnforceQuotas,
-		OpenSessions: projectQuotaCount{Current: openSessions, Limit: limits.OpenSessionsPerProject},
-		Leaderboards: projectQuotaCount{Current: boards, Limit: limits.LeaderboardsPerProject},
-	}
-	if quotaState(limits.LeaderboardsPerProject, boards) == "at_limit" {
+	quotas := projectHealthQuotas{Enforced: qc.EnforceQuotas, ProjectLimitUsage: usage}
+	if showBoardLimit && quotaState(limits.LeaderboardsPerProject, usage.Leaderboards.Current) == "at_limit" {
 		problems = append(problems, fmt.Sprintf("The Game Project is at its leaderboard limit (%d). New leaderboards are refused.", limits.LeaderboardsPerProject))
 	}
-	if qc.EnforceQuotas {
+	if showQuotas && qc.EnforceQuotas {
 		quotas.Projects = quotaState(int64(limits.Projects), projects)
 		quotas.Players = quotaState(limits.Players, qc.PlayerCount)
 		for axis, state := range map[string]string{quota.AxisProjects: quotas.Projects, quota.AxisPlayers: quotas.Players} {
@@ -551,34 +736,210 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 		}
 	}
 
-	steamConfigured := steam.SteamAppID != "" && steam.SteamKeyConfigured != nil && *steam.SteamKeyConfigured
-	if steam.SteamAppID != "" && !steamConfigured {
-		problems = append(problems, "Steam sign-in has an App ID but no Web API key, so it is off.")
-	}
-	serverOrigins := d.CORSAllowedOrigins
-	if len(serverOrigins) == 0 {
-		serverOrigins = []string{"*"}
-	}
-	projectOrigins, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
-	if err != nil {
-		return projectHealth{}, err
+	if showConfig {
+		steamConfigured := steam.SteamAppID != "" && steam.SteamKeyConfigured != nil && *steam.SteamKeyConfigured
+		if steam.SteamAppID != "" && !steamConfigured {
+			problems = append(problems, "Steam sign-in has an App ID but no Web API key, so it is off.")
+		}
+		serverOrigins := d.CORSAllowedOrigins
+		if len(serverOrigins) == 0 {
+			serverOrigins = []string{"*"}
+		}
+		projectOrigins, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
+		if err != nil {
+			return projectHealth{}, err
+		}
+		checks.CORSAllowedOrigins = &projectHealthOrigins{
+			Server:  serverOrigins,
+			Project: projectOrigins,
+			Note: "A browser origin is accepted if the server list or the list of any Game Project has it. " +
+				"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
+		}
+		checks.SteamSignIn = &steamConfigured
+		checks.RemoteConfigBytes = &configBytes
 	}
 	sort.Strings(problems)
-	return projectHealth{
-		Problems: problems,
-		Checks: projectHealthChecks{
-			APIKeys:        keys[:min(len(keys), projectMaxListRows)],
-			FeatureGrants:  grants,
-			ServerSwitches: projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured},
-			CORSAllowedOrigins: projectHealthOrigins{
-				Server:  serverOrigins,
-				Project: projectOrigins,
-				Note: "A browser origin is accepted if the server list or the list of any Game Project has it. " +
-					"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
-			},
-			SteamSignIn:       steamConfigured,
-			RemoteConfigBytes: configBytes,
-			Quotas:            quotas,
-		},
+	checks.FeatureGrants = grants
+	checks.ServerSwitches = projectServerSwitches{Fleet: fleetEnabled, P2PRelay: relayEnabled, RelayConfigured: relayConfigured}
+	if showQuotas {
+		checks.Quotas = &quotas
+	}
+	return projectHealth{Problems: problems, Checks: checks}, nil
+}
+
+type projectToken struct {
+	TokenID      int64     `json:"token_id" example:"5"`
+	Label        string    `json:"label" example:"claude agent"`
+	ProjectID    int64     `json:"project_id" example:"3"`
+	ProjectName  string    `json:"project_name" example:"My Game"`
+	TenantID     int64     `json:"tenant_id" example:"2"`
+	Scopes       []string  `json:"scopes" doc:"The scopes of the token."`
+	ActiveScopes []string  `json:"active_scopes" doc:"The scopes of the token that work now. A scope is left out when the person who created the token cannot use it now, or when the token does not have a scope that it needs on each request (players:invite needs players:pii)."`
+	ExpiresAt    time.Time `json:"expires_at"`
+}
+
+// activeScopes returns the scopes of the token whose creator pair the creator
+// passes now, with the same check as the per-request creator check, less a
+// scope whose NeedsOnRequest scope is not active.
+func activeScopes(ctx context.Context, d Deps, p managementtoken.Principal) ([]string, error) {
+	out, err := managementtoken.AllowedScopes(d.RBAC, p.CreatedByUserID, p.TenantID, p.ProjectID, p.Scopes)
+	if err != nil {
+		return nil, serverError(ctx, "project management: active scopes", err)
+	}
+	return out, nil
+}
+
+// getToken is open to every token.
+func getToken(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectToken, error) {
+	var name string
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		name, err = q.GetProjectName(ctx, p.ProjectID)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return projectToken{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectToken{}, err
+	}
+	active, err := activeScopes(ctx, d, p)
+	if err != nil {
+		return projectToken{}, err
+	}
+	scopes := p.Scopes
+	if scopes == nil {
+		scopes = []string{}
+	}
+	return projectToken{
+		TokenID: p.TokenID, Label: p.Label, ProjectID: p.ProjectID, ProjectName: name, TenantID: p.TenantID,
+		Scopes: scopes, ActiveScopes: active, ExpiresAt: p.ExpiresAt,
 	}, nil
+}
+
+type projectQueueBucket struct {
+	Mode     string     `json:"mode" example:"game_session"`
+	Region   string     `json:"region" example:"eu"`
+	GameMode string     `json:"game_mode" example:"duel"`
+	Status   string     `json:"status" example:"queued"`
+	Tickets  int64      `json:"tickets" doc:"Tickets in this bucket."`
+	OldestAt *time.Time `json:"oldest_at" doc:"Creation time of the oldest ticket in this bucket."`
+	MinCount int32      `json:"min_count" doc:"Lowest min_count of the tickets in this bucket."`
+	MaxCount int32      `json:"max_count" doc:"Highest max_count of the tickets in this bucket."`
+}
+
+type projectQueue struct {
+	Buckets    []projectQueueBucket `json:"buckets"`
+	NextCursor string               `json:"next_cursor,omitempty" doc:"Send as cursor for the next page. Absent on the last page."`
+}
+
+// queueCursor is the bucket key of the last bucket of a page.
+type queueCursor struct {
+	Mode, Region, GameMode, Status string
+}
+
+// encodeQueueCursor seals the key with the credential cipher, so the cursor
+// does not carry player text a client could read.
+func encodeQueueCursor(cipher *secretseal.Cipher, c queueCursor) (string, error) {
+	if cipher == nil {
+		return "", errors.New("queue cursor: credential cipher is not configured")
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := cipher.Encrypt(raw)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(sealed), nil
+}
+
+func decodeQueueCursor(cipher *secretseal.Cipher, s string) (queueCursor, bool) {
+	var c queueCursor
+	sealed, err := base64.RawURLEncoding.DecodeString(s)
+	// The decoder ignores the unused bits of the last character and CR or LF,
+	// so other texts decode to the same bytes. Accept only the text we encode.
+	if err != nil || cipher == nil || base64.RawURLEncoding.EncodeToString(sealed) != s {
+		return queueCursor{}, false
+	}
+	raw, err := cipher.Decrypt(sealed)
+	if err != nil || json.Unmarshal(raw, &c) != nil {
+		return queueCursor{}, false
+	}
+	// Postgres rejects a NUL byte in a text value.
+	for _, v := range []string{c.Mode, c.Region, c.GameMode, c.Status} {
+		if !webutil.ValidText(v) {
+			return queueCursor{}, false
+		}
+	}
+	return c, true
+}
+
+// getMatchmakingQueue lists the buckets of the dashboard queue page, ordered
+// by bucket key. The cursor is that key of the last bucket of the page, sealed so a client cannot read it. Text
+// that a game client sent is shown as the trace shows it.
+func getMatchmakingQueue(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPageInput) (projectQueue, error) {
+	limit := in.limit()
+	params := sqlcgen.ListMatchmakerBucketsPageForProjectParams{ProjectID: p.ProjectID, RowLimit: limit + 1}
+	if in.Cursor != "" {
+		c, ok := decodeQueueCursor(d.CredentialCipher, in.Cursor)
+		if !ok {
+			return projectQueue{}, errBadCursor()
+		}
+		params.HasAfter, params.AfterMode, params.AfterRegion, params.AfterGameMode, params.AfterStatus =
+			true, c.Mode, c.Region, c.GameMode, c.Status
+	}
+	var rows []sqlcgen.ListMatchmakerBucketsPageForProjectRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		rows, err = q.ListMatchmakerBucketsPageForProject(ctx, params)
+		return err
+	})
+	if err != nil {
+		return projectQueue{}, err
+	}
+	rows, more := trimPage(rows, limit)
+	out := projectQueue{Buckets: make([]projectQueueBucket, 0, len(rows))}
+	for _, r := range rows {
+		out.Buckets = append(out.Buckets, projectQueueBucket{
+			Mode: clientText(r.Mode), Region: clientText(r.Region), GameMode: clientText(r.GameMode), Status: r.Status,
+			Tickets: r.TicketCount, OldestAt: timestamptzPtr(r.Oldest), MinCount: r.MinCountLow, MaxCount: r.MaxCountHigh,
+		})
+	}
+	if more {
+		last := rows[len(rows)-1]
+		out.NextCursor, err = encodeQueueCursor(d.CredentialCipher, queueCursor{Mode: last.Mode, Region: last.Region, GameMode: last.GameMode, Status: last.Status})
+		if err != nil {
+			return projectQueue{}, err
+		}
+	}
+	return out, nil
+}
+
+type projectSteamAuth struct {
+	AppID        *string `json:"app_id" doc:"The Steam App ID, or null when it is not set."`
+	WebAPIKeySet bool    `json:"web_api_key_set" doc:"True when a Steam Web API key is stored. The key is never returned."`
+}
+
+func getSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectSteamAuth, error) {
+	var row sqlcgen.GetProjectSteamAuthConfigForControlPanelRow
+	err := projectQ(ctx, d, p, func(ctx context.Context, q *sqlcgen.Queries) error {
+		var err error
+		row, err = q.GetProjectSteamAuthConfigForControlPanel(ctx, sqlcgen.GetProjectSteamAuthConfigForControlPanelParams{
+			ProjectID: p.ProjectID, TenantID: p.TenantID,
+		})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return projectSteamAuth{}, errProjectNotFound()
+	}
+	if err != nil {
+		return projectSteamAuth{}, err
+	}
+	out := projectSteamAuth{WebAPIKeySet: row.SteamKeyConfigured != nil && *row.SteamKeyConfigured}
+	if row.SteamAppID != "" {
+		out.AppID = &row.SteamAppID
+	}
+	return out, nil
 }

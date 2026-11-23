@@ -86,15 +86,17 @@ func (f *fixture) rpcError(token, name string, args map[string]any) string {
 	return msg
 }
 
+// ownerToken is a token of the tenant A owner for project A with every read
+// scope and no write scope.
 func (f *fixture) ownerToken() string {
-	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	return tok
 }
 
 func TestMCP_should_return_401_with_bearer_challenge_for_bad_tokens(t *testing.T) {
 	f := newFixture(t)
 	expired, _ := f.token(f.tenantA, f.projectA, f.ownerID, nil, -time.Hour)
-	revoked, revokedID := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	revoked, revokedID := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, revokedID)
 
 	for name, tok := range map[string]string{"missing": "", "wrong": "ggm_nope", "expired": expired, "revoked": revoked} {
@@ -230,7 +232,7 @@ func TestMCP_should_return_403_when_access_ends(t *testing.T) {
 func TestMCP_admin_token_stops_when_admin_becomes_member(t *testing.T) {
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
-	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, admin, readScopes, time.Hour)
 	require.NoError(t, f.authz.RemoveControlPanelRoles(admin, f.tenantA))
 	require.NoError(t, f.authz.SetControlPanelMembershipRole(admin, f.tenantA, "member"))
 
@@ -242,7 +244,7 @@ func TestMCP_admin_token_stops_when_admin_becomes_member(t *testing.T) {
 func TestMCP_admin_token_can_use_ticket_trace(t *testing.T) {
 	f := newFixture(t)
 	admin := f.user("admin@example.com", f.tenantA, "admin")
-	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, admin, readScopes, time.Hour)
 	ticket := f.ticket(f.projectA, f.player(f.projectA), "queued", `{}`)
 
 	res := f.call(tok, "matchmaking_ticket_trace", map[string]any{"ticket_id": ticket})
@@ -306,7 +308,7 @@ func TestMCP_health_check_returns_no_count_for_tenant_quota(t *testing.T) {
 
 func TestMCP_last_used_is_written_at_most_once_a_minute(t *testing.T) {
 	f := newFixture(t)
-	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	f.post(tok, initialize)
 	var first time.Time
 	require.NoError(t, f.owner.QueryRow(context.Background(), `SELECT last_used_at FROM management_tokens WHERE id = $1`, id).Scan(&first))
@@ -328,7 +330,7 @@ func (f *fixture) platformAdmin(email string) int64 {
 
 func TestMCP_platform_admin_token_is_limited_to_its_project(t *testing.T) {
 	f := newFixture(t)
-	tok, _ := f.token(f.tenantA, f.projectA, f.platformAdmin("pa@example.com"), nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, f.platformAdmin("pa@example.com"), readScopes, time.Hour)
 
 	texts := []string{}
 	for _, project := range []int64{f.projectB, f.projectC} {
@@ -342,7 +344,7 @@ func TestMCP_platform_admin_token_is_limited_to_its_project(t *testing.T) {
 func TestMCP_platform_admin_token_stops_when_flag_is_removed(t *testing.T) {
 	f := newFixture(t)
 	admin := f.platformAdmin("pa@example.com")
-	tok, _ := f.token(f.tenantA, f.projectA, admin, nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, admin, readScopes, time.Hour)
 	require.NoError(t, f.authz.RemovePlatformAdmin(admin))
 
 	resp, _ := f.post(tok, initialize)
@@ -352,7 +354,7 @@ func TestMCP_platform_admin_token_stops_when_flag_is_removed(t *testing.T) {
 
 func TestMCP_platform_admin_tools_list_has_only_table_tools(t *testing.T) {
 	f := newFixture(t)
-	tok, _ := f.token(f.tenantA, f.projectA, f.platformAdmin("pa@example.com"), nil, time.Hour)
+	tok, _ := f.token(f.tenantA, f.projectA, f.platformAdmin("pa@example.com"), readScopes, time.Hour)
 
 	_, out := f.post(tok, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 
@@ -360,10 +362,7 @@ func TestMCP_platform_admin_tools_list_has_only_table_tools(t *testing.T) {
 	for _, tl := range out["result"].(map[string]any)["tools"].([]any) {
 		names = append(names, tl.(map[string]any)["name"].(string))
 	}
-	assert.ElementsMatch(t, []string{
-		"project_health_check", "matchmaking_ticket_trace", "get_remote_config",
-		"list_leaderboards", "get_leaderboard", "list_api_keys", "list_revisions",
-	}, names)
+	assert.ElementsMatch(t, readTools, names)
 }
 
 func TestMCP_token_that_no_longer_works_is_limited_by_ip(t *testing.T) {
@@ -394,7 +393,7 @@ func TestMCP_agent_over_its_token_rate_keeps_the_ip_bucket(t *testing.T) {
 
 func TestMCP_refused_request_does_not_update_last_used(t *testing.T) {
 	f := newFixture(t)
-	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	require.NoError(t, f.authz.RemoveControlPanelRoles(f.ownerID, f.tenantA))
 
 	f.post(tok, initialize)
@@ -407,7 +406,7 @@ func TestMCP_refused_request_does_not_update_last_used(t *testing.T) {
 
 func TestMCP_revoked_and_unknown_tokens_get_the_same_answer(t *testing.T) {
 	f := newFixture(t)
-	revoked, id := f.token(f.tenantA, f.projectA, f.ownerID, nil, time.Hour)
+	revoked, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
 	f.exec(`UPDATE management_tokens SET revoked_at = now() WHERE id = $1`, id)
 
 	got := []string{postBody(t, f, revoked), postBody(t, f, "ggm_unknown")}

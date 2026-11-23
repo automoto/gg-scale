@@ -64,6 +64,7 @@ func (c *Config) Validate() error {
 	c.warnLowDBPool()
 	c.warnRequestTimeout()
 	c.warnSharedProbeToken()
+	c.warnAgonesProjectIsolation()
 	return nil
 }
 
@@ -338,6 +339,17 @@ func (c *Config) warnSharedProbeToken() {
 	}
 }
 
+// warnAgonesProjectIsolation flags an Agones fleet backend that runs
+// without project isolation. One server has one cluster, so a Game Project
+// with the agones grant can then allocate (and delete) the GameServers of
+// another Game Project.
+func (c *Config) warnAgonesProjectIsolation() {
+	if c.FeatureFleetEnabled && c.FleetBackend == "agones" && !c.AgonesProjectIsolation {
+		slog.Warn("Agones project isolation is off; do not give fleet_agones_backend to more than one Game Project on one Agones cluster",
+			"hint", "set AGONES_PROJECT_ISOLATION=true and label the GameServer template of each Agones Fleet with ggscale.dev/project=<project id>")
+	}
+}
+
 func (c *Config) warnLowDBPool() {
 	if c.DBMaxConns < 8 && c.FleetBackend != "" {
 		slog.Warn("DB_MAX_CONNS is low for an enabled matchmaker", "value", c.DBMaxConns,
@@ -399,6 +411,8 @@ func (c *Config) checkFields() error {
 		{"MANAGEMENT_MAX_PROJECT_API_KEYS", int64(c.ManagementMaxProjectAPIKeys)},
 		{"CORS_MAX_PROJECT_ORIGINS", int64(c.CORSMaxProjectOrigins)},
 		{"LEADERBOARD_MAX_PER_PROJECT", int64(c.LeaderboardMaxPerProject)},
+		{"FLEET_ALLOCATION_MAX_CAPACITY", int64(c.FleetAllocationMaxCapacity)},
+		{"FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT", int64(c.FleetMaxLiveAllocationsPerProject)},
 	} {
 		// The message has no value: the name tells the operator what to fix,
 		// and a value read from a field such as ...APIKeys is reported by

@@ -7,7 +7,6 @@ package controlpanel
 import (
 	"errors"
 	"net/http"
-	"net/url"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -64,7 +63,7 @@ func (h *Handler) platformPlayerAccountsPage(w http.ResponseWriter, r *http.Requ
 		CSRFToken: session.CSRFToken,
 		Search:    search,
 		Accounts:  accounts,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 }
 
@@ -120,7 +119,7 @@ func (h *Handler) platformPlayerAccountDetailPage(w http.ResponseWriter, r *http
 		Disabled:  acc.DisabledAt.Valid,
 		CreatedAt: acc.CreatedAt.Time,
 		Projects:  projects,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}
 	if acc.DisplayName != nil {
 		view.DisplayName = *acc.DisplayName
@@ -148,16 +147,15 @@ func (h *Handler) togglePlayerAccountDisabled(w http.ResponseWriter, r *http.Req
 	session, _ := sessionFromContext(r.Context())
 
 	action := "control_panel.player_account.enabled"
-	flashMsg := "Account re-enabled."
+	code := flashAccountReenabled
 	if disable {
 		action = "control_panel.player_account.disabled"
-		flashMsg = "Account disabled platform-wide. Sessions revoked."
+		code = flashAccountDisabled
 	}
 
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		acc, err := q.GetPlayerAccountByID(r.Context(), pgID)
-		if err != nil {
+		if _, err := q.GetPlayerAccountByID(r.Context(), pgID); err != nil {
 			return err
 		}
 		if disable {
@@ -174,7 +172,7 @@ func (h *Handler) togglePlayerAccountDisabled(w http.ResponseWriter, r *http.Req
 		}
 		return auditlog.WritePlatform(r.Context(), tx, session.User.ID, action,
 			"player_account:"+accountID.String(),
-			map[string]any{"player_account_id": accountID.String(), "email": acc.Email})
+			map[string]any{"player_account_id": accountID.String()})
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		http.NotFound(w, r)
@@ -184,5 +182,5 @@ func (h *Handler) togglePlayerAccountDisabled(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "player account toggle", err)
 		return
 	}
-	htmxRedirect(w, r, pathAdminAccounts+"/"+accountID.String()+queryFlash+url.QueryEscape(flashMsg))
+	htmxRedirect(w, r, withFlash(pathAdminAccounts+"/"+accountID.String(), code))
 }

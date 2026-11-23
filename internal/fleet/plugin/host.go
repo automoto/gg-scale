@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 
 	hclog "github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
@@ -23,7 +22,7 @@ import (
 // validPluginName constrains FLEET_BACKEND=plugin:<name> so the launcher
 // cannot resolve a path outside cfg.PluginDir. Operator-controlled input —
 // defence-in-depth, not a request-boundary check.
-var validPluginName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+var validPluginName = fleet.PluginNamePattern
 
 // LaunchConfig resolves to the binary path "<Dir>/ggscale-fleet-<Name>".
 type LaunchConfig struct {

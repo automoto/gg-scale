@@ -13,6 +13,7 @@ import (
 	"github.com/automoto/gg-scale/internal/auditlog"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 type changePasswordInput struct {
@@ -37,20 +38,17 @@ type deleteRequestOutput struct {
 
 type deleteCancelInput struct {
 	Body struct {
-		Email    string `json:"email" format:"email" example:"player@example.com"`
+		// No format:"email": huma's message for that format quotes the
+		// address. The handler checks it.
+		Email    string `json:"email" example:"player@example.com"`
 		Password string `json:"password" example:"correct-horse-battery-staple"`
 	}
 }
 
-// defaultDeleteGracePeriod backs Deps.DeleteGracePeriod when unset, keeping
-// test fixtures and sparse deployments on the documented 30-day window.
-const defaultDeleteGracePeriod = 720 * time.Hour
-
+// deleteGrace is Deps.DeleteGracePeriod, or the documented 30-day window when
+// unset.
 func deleteGrace(d Deps) time.Duration {
-	if d.DeleteGracePeriod > 0 {
-		return d.DeleteGracePeriod
-	}
-	return defaultDeleteGracePeriod
+	return projectadmin.DeleteGrace(d.DeleteGracePeriod)
 }
 
 // registerAuthAccountRoutes carries the session-authenticated account
@@ -271,6 +269,10 @@ func requestPlayerDelete(d Deps) func(context.Context, *disableInput) (*deleteRe
 // confirms which emails have a pending deletion.
 func authDeleteCancel(d Deps) func(context.Context, *deleteCancelInput) (*struct{}, error) {
 	return func(ctx context.Context, in *deleteCancelInput) (*struct{}, error) {
+		if !validateEmail(in.Body.Email) {
+			return nil, huma.Error422UnprocessableEntity("validation failed",
+				&huma.ErrorDetail{Message: "expected a valid email address", Location: "body.email"})
+		}
 		projectID, _, err := pinnedProject(ctx)
 		if err != nil {
 			return nil, err

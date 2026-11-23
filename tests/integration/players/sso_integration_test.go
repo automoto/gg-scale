@@ -343,7 +343,7 @@ func TestPlayerSSO_link(t *testing.T) {
 		resp, _ := tfPostForm(t, c, linkURL, url.Values{"_csrf": {csrf}, "current_password": {"not-the-password"}})
 
 		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?error=")
+		assert.Equal(t, accountBasePath+"/?flash=password_incorrect", resp.Header.Get("Location"))
 	})
 
 	t.Run("should_reject_link_without_session", func(t *testing.T) {
@@ -364,7 +364,8 @@ func TestPlayerSSO_link(t *testing.T) {
 		resp, body := ssoRoundTrip(t, c, linkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
 		require.Equal(t, http.StatusSeeOther, resp.StatusCode, body)
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?flash=")
+		_, page := browserGet(t, c, s.url+resp.Header.Get("Location"))
+		assert.Contains(t, page, "Provider account linked.")
 		assert.Equal(t, 1, s.connections(t, "linker@example.com"))
 		assert.Equal(t, 1, s.audits(t, "sso.link"))
 	})
@@ -375,7 +376,7 @@ func TestPlayerSSO_link(t *testing.T) {
 
 		resp, _ := ssoRoundTrip(t, c, linkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
-		assert.Contains(t, resp.Header.Get("Location"), "already+linked")
+		assert.Equal(t, accountBasePath+"/?flash=sso_already_linked", resp.Header.Get("Location"))
 		assert.Equal(t, 1, s.connections(t, "linker@example.com"))
 	})
 
@@ -385,7 +386,7 @@ func TestPlayerSSO_link(t *testing.T) {
 
 		resp, _ := ssoRoundTrip(t, c, linkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?error=")
+		assert.Equal(t, accountBasePath+"/?flash=sso_provider_taken", resp.Header.Get("Location"))
 		assert.Equal(t, 1, s.connections(t, "linker@example.com"))
 	})
 
@@ -396,10 +397,9 @@ func TestPlayerSSO_link(t *testing.T) {
 
 		resp, _ := ssoRoundTrip(t, c, linkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
-		location, err := url.QueryUnescape(resp.Header.Get("Location"))
-		require.NoError(t, err)
-		assert.Contains(t, location, "cannot be linked")
-		assert.NotContains(t, location, "linker@example.com")
+		_, page := browserGet(t, c, s.url+resp.Header.Get("Location"))
+		assert.Contains(t, page, "This provider account cannot be linked.")
+		assert.NotContains(t, page, "linker@example.com")
 		assert.Equal(t, 0, s.connections(t, "intruder@example.com"))
 		assert.Equal(t, 1, s.audits(t, "sso.link_collision"))
 	})
@@ -436,7 +436,7 @@ func TestPlayerSSO_unlink(t *testing.T) {
 
 		resp, _ := tfPostForm(t, c, unlinkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?flash=")
+		assert.Equal(t, accountBasePath+"/?flash=sso_unlinked", resp.Header.Get("Location"))
 		assert.Equal(t, 0, s.connections(t, "haspw@example.com"))
 		assert.Equal(t, 1, s.audits(t, "sso.unlink"))
 	})
@@ -448,7 +448,7 @@ func TestPlayerSSO_unlink(t *testing.T) {
 
 		resp, _ := tfPostForm(t, c, unlinkURL, url.Values{"_csrf": {csrf}, "current_password": {"not-the-password"}})
 
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?error=")
+		assert.Equal(t, accountBasePath+"/?flash=password_incorrect", resp.Header.Get("Location"))
 		assert.Equal(t, 1, s.connections(t, "guarded@example.com"))
 	})
 
@@ -461,9 +461,8 @@ func TestPlayerSSO_unlink(t *testing.T) {
 
 		resp, _ := tfPostForm(t, c, unlinkURL, url.Values{"_csrf": {csrf}})
 
-		location, err := url.QueryUnescape(resp.Header.Get("Location"))
-		require.NoError(t, err)
-		assert.Contains(t, location, "only sign-in method")
+		_, page := browserGet(t, c, s.url+resp.Header.Get("Location"))
+		assert.Contains(t, page, "only sign-in method")
 		assert.Equal(t, 1, s.connections(t, "only@example.com"))
 	})
 
@@ -477,7 +476,7 @@ func TestPlayerSSO_unlink(t *testing.T) {
 
 		resp, _ := tfPostForm(t, c, unlinkURL, url.Values{"_csrf": {csrf}})
 
-		assert.Contains(t, resp.Header.Get("Location"), accountBasePath+"/?flash=")
+		assert.Equal(t, accountBasePath+"/?flash=sso_unlinked", resp.Header.Get("Location"))
 		assert.Equal(t, 1, s.connections(t, "two@example.com"))
 	})
 
@@ -487,9 +486,8 @@ func TestPlayerSSO_unlink(t *testing.T) {
 
 		resp, _ := tfPostForm(t, c, unlinkURL, url.Values{"_csrf": {csrf}, "current_password": {tfTestPassword}})
 
-		location, err := url.QueryUnescape(resp.Header.Get("Location"))
-		require.NoError(t, err)
-		assert.Contains(t, location, "is not linked")
+		_, page := browserGet(t, c, s.url+resp.Header.Get("Location"))
+		assert.Contains(t, page, "That provider is not linked.")
 	})
 }
 

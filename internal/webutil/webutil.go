@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/a-h/templ"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -99,6 +100,12 @@ func ParseForm(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// NoStore keeps a page that shows a secret once (a key, token, 2FA secret or
+// backup codes) out of every browser cache. Call it before WriteHeader.
+func NoStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+}
+
 // Render writes a templ component as text/html. On render error it
 // slogs the underlying err and writes a 500.
 func Render(r *http.Request, w http.ResponseWriter, c templ.Component) {
@@ -114,6 +121,36 @@ func Render(r *http.Request, w http.ResponseWriter, c templ.Component) {
 func InternalError(w http.ResponseWriter, msg string, err error) {
 	slog.Error(msg, "error", err)
 	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// ValidText reports whether s is valid UTF-8 with no NUL byte. Postgres
+// refuses other text values.
+func ValidText(s string) bool {
+	return utf8.ValidString(s) && !strings.ContainsRune(s, 0)
+}
+
+// Unicode text direction and line break characters. They change the display
+// order or the layout of the text around them, so a label that holds one can
+// spoof its neighbors.
+const (
+	arabicLetterMark    = '\u061C'
+	leftToRightMark     = '\u200E'
+	rightToLeftMark     = '\u200F'
+	lineSeparator       = '\u2028'
+	paragraphSeparator  = '\u2029'
+	leftToRightEmbed    = '\u202A' // through rightToLeftOverride
+	rightToLeftOverride = '\u202E'
+	leftToRightIsolate  = '\u2066' // through popDirectionalIsolate
+	popDirIsolate       = '\u2069'
+)
+
+// IsBidiControl reports whether r is a Unicode bidirectional format
+// character or a line or paragraph separator.
+func IsBidiControl(r rune) bool {
+	return r == arabicLetterMark || r == leftToRightMark || r == rightToLeftMark ||
+		r == lineSeparator || r == paragraphSeparator ||
+		(r >= leftToRightEmbed && r <= rightToLeftOverride) ||
+		(r >= leftToRightIsolate && r <= popDirIsolate)
 }
 
 // IsUniqueViolation reports whether err is (or wraps) a Postgres 23505

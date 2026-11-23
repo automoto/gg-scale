@@ -105,7 +105,7 @@ func (h *Handler) setTwoFactorPendingCookie(w http.ResponseWriter, user controlP
 		Email:     user.Email,
 		ExpiresAt: h.now().Add(twofactor.PendingTTL).Unix(),
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     twoFactorPendingCookieName,
 		Value:    value,
 		Path:     pathControlPanel,
@@ -117,7 +117,7 @@ func (h *Handler) setTwoFactorPendingCookie(w http.ResponseWriter, user controlP
 }
 
 func (h *Handler) clearTwoFactorPendingCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     twoFactorPendingCookieName,
 		Value:    "",
 		Path:     pathControlPanel,
@@ -202,7 +202,7 @@ func (h *Handler) mintTrustedDevice(ctx context.Context, w http.ResponseWriter, 
 	}); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     trustedDeviceCookieName,
 		Value:    token,
 		Path:     pathControlPanel,
@@ -459,6 +459,7 @@ func (h *Handler) renderTwoFactorSetup(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "two-factor setup failed", http.StatusInternalServerError)
 		return
 	}
+	webutil.NoStore(w)
 	if status != http.StatusOK {
 		w.WriteHeader(status)
 	}
@@ -545,6 +546,7 @@ func (h *Handler) twoFactorConfirm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, pathControlPanelAccount, http.StatusSeeOther)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, TwoFactorBackupCodesPage(TwoFactorBackupCodesView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,
@@ -673,6 +675,7 @@ func (h *Handler) twoFactorRegenerateBackupCodes(w http.ResponseWriter, r *http.
 		http.Error(w, "backup code regeneration failed", http.StatusInternalServerError)
 		return
 	}
+	webutil.NoStore(w)
 	webutil.Render(r, w, TwoFactorBackupCodesPage(TwoFactorBackupCodesView{
 		UserEmail: session.User.Email,
 		CSRFToken: session.CSRFToken,

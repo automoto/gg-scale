@@ -108,3 +108,30 @@ WHERE id = sqlc.arg(id)
   AND tenant_id = sqlc.arg(tenant_id)
   AND deleted_at IS NULL
   AND delete_requested_at IS NOT NULL;
+
+-- name: ListPlayersPageForProject :many
+-- One page of the live players of a project for the management API. Keyset
+-- paginated on id, newest first. before_id 0 starts at the newest player.
+-- player_id and external_id are exact-match filters (0 and '' mean no filter).
+-- The caller reads one row more than the page. display_name rides along from
+-- the linked global account; the handler leaves it out without players:pii.
+SELECT
+    u.id,
+    u.external_id,
+    coalesce(u.email, '')::text AS email,
+    coalesce(a.display_name, '')::text AS display_name,
+    u.email_verified_at,
+    u.disabled_at,
+    u.delete_requested_at,
+    u.created_at
+FROM project_players u
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
+WHERE u.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND u.project_id = sqlc.arg(project_id)
+  AND u.deleted_at IS NULL
+  AND (sqlc.arg(player_id)::bigint = 0 OR u.id = sqlc.arg(player_id)::bigint)
+  AND (sqlc.arg(external_id)::text = '' OR u.external_id = sqlc.arg(external_id)::text)
+  AND (sqlc.arg(before_id)::bigint = 0 OR u.id < sqlc.arg(before_id)::bigint)
+ORDER BY u.id DESC
+LIMIT sqlc.arg(row_limit);
+

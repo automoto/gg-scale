@@ -58,11 +58,11 @@ func statusFromProto(s fleetpb.AllocationStatus) fleet.Status {
 }
 
 func reqToProto(r fleet.AllocationRequest) *fleetpb.AllocationRequest {
-	capacity := r.Capacity
-	if capacity < 0 || capacity > math.MaxInt32 {
-		// Anything outside int32 would silently wrap on the proto field —
-		// clamp to 0 so a config bug doesn't become an over-allocation.
-		capacity = 0
+	// Anything outside int32 would wrap on the proto field: send 0, so a
+	// config bug does not become an over-allocation.
+	var capacity int32
+	if r.Capacity >= 0 && r.Capacity <= math.MaxInt32 {
+		capacity = int32(r.Capacity)
 	}
 	return &fleetpb.AllocationRequest{
 		TenantId:  r.TenantID,
@@ -72,7 +72,7 @@ func reqToProto(r fleet.AllocationRequest) *fleetpb.AllocationRequest {
 		Config:    r.Config,
 		Region:    r.Region,
 		GameMode:  r.GameMode,
-		Capacity:  int32(capacity),
+		Capacity:  capacity,
 		Labels:    r.Labels,
 	}
 }
@@ -350,13 +350,15 @@ func (s *grpcServer) CleanupResolution(ctx context.Context, req *fleetpb.Cleanup
 	if !ok {
 		return nil, errToStatus(fleet.ErrUnsupported)
 	}
-	if err := cleaner.CleanupResolution(ctx, req.GetResolutionId(), req.GetConfig()); err != nil {
+	// The plugin protocol does not carry the project id. The resolution id
+	// is unique, so a plugin cleans up by it alone.
+	if err := cleaner.CleanupResolution(ctx, 0, req.GetResolutionId(), req.GetConfig()); err != nil {
 		return nil, errToStatus(err)
 	}
 	return &fleetpb.CleanupResolutionResponse{}, nil
 }
 
-func (c *grpcClient) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+func (c *grpcClient) CleanupResolution(ctx context.Context, _ int64, id string, config map[string]string) error {
 	_, err := c.client.CleanupResolution(ctx, &fleetpb.CleanupResolutionRequest{ResolutionId: id, Config: config})
 	return errFromStatus(err)
 }

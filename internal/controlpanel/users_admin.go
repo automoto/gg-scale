@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -94,7 +93,7 @@ func (h *Handler) platformUsersPage(w http.ResponseWriter, r *http.Request) {
 		Page:      page,
 		HasPrev:   page > 1,
 		HasNext:   hasNext,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 }
 
@@ -117,20 +116,18 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 	session, _ := sessionFromContext(r.Context())
 	if disable {
 		if err := validateUserDisableTarget(session.User.ID, userID); err != nil {
-			http.Redirect(w, r,
-				pathAdminUsersFlash+url.QueryEscape("You can't disable yourself; ask another platform admin."),
-				http.StatusSeeOther)
+			redirectFlash(w, r, pathAdminUsers, flashUserDisableSelf)
 			return
 		}
 	}
 
 	var disabledAt pgtype.Timestamptz
 	action := "control_panel.user.enabled"
-	flashMsg := "User re-enabled."
+	code := flashUserReenabled
 	if disable {
 		disabledAt = pgtype.Timestamptz{Time: h.now(), Valid: true}
 		action = "control_panel.user.disabled"
-		flashMsg = "User disabled. Sessions and pending invitations revoked."
+		code = flashUserDisabled
 	}
 
 	var mirroredPlatformAdmin bool
@@ -194,9 +191,7 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 		return
 	}
 	if errors.Is(err, errCannotDisableLastPlatformAdmin) {
-		http.Redirect(w, r,
-			pathAdminUsersFlash+url.QueryEscape("You can't disable the last enabled platform admin."),
-			http.StatusSeeOther)
+		redirectFlash(w, r, pathAdminUsers, flashUserLastAdmin)
 		return
 	}
 	if err != nil {
@@ -209,5 +204,5 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 		h.reloadRBACPolicy(r.Context())
 	}
 
-	htmxRedirect(w, r, pathAdminUsersFlash+url.QueryEscape(flashMsg))
+	htmxRedirect(w, r, withFlash(pathAdminUsers, code))
 }

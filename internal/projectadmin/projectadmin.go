@@ -54,6 +54,15 @@ type Actor struct {
 	TokenCreatorID int64
 }
 
+// authzUserID is the user whose rights limit the change: the dashboard user,
+// or the creator of the token.
+func (a Actor) authzUserID() int64 {
+	if a.TokenID != 0 {
+		return a.TokenCreatorID
+	}
+	return a.UserID
+}
+
 func (a Actor) source() string {
 	if a.TokenID != 0 {
 		return sourceToken
@@ -61,9 +70,10 @@ func (a Actor) source() string {
 	return sourceDashboard
 }
 
-// audit writes the platform audit row inside tx, so it commits or rolls back
-// with the change.
-func (a Actor) audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
+// Audit writes the platform audit row inside tx, so it commits or rolls back
+// with the change. Other packages call it inside their own tenant-scoped
+// transaction.
+func (a Actor) Audit(ctx context.Context, tx pgx.Tx, tenantID, projectID int64, action, target string, payload map[string]any) error {
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -233,7 +243,7 @@ func writeRemoteConfig(ctx context.Context, pool *db.Pool, tenantID, projectID i
 			return err
 		}
 		hash := sha256.Sum256(w.after)
-		return actor.audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(projectID, 10), map[string]any{
+		return actor.Audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(projectID, 10), map[string]any{
 			"config_bytes": len(w.after),
 			"config_hash":  hex.EncodeToString(hash[:]),
 			"revision":     rev,

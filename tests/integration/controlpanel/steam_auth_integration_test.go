@@ -58,6 +58,13 @@ func TestSteamAuth_save_persists_sealed_key_and_audits(t *testing.T) {
 		ORDER BY id DESC LIMIT 1`, strconv.FormatInt(projectA, 10)).Scan(&payload))
 	assert.NotContains(t, payload, testSteamKey, "audit payload must not carry key material")
 	assert.Contains(t, payload, `"app_id": "480"`)
+	assert.Contains(t, payload, `"key_changed": true`)
+
+	var actorUser int64
+	require.NoError(t, raw.QueryRow(context.Background(), `
+		SELECT actor_user_id FROM platform_audit_log
+		WHERE action = 'control_panel.steam_auth.update' AND target = $1`, strconv.FormatInt(projectA, 10)).Scan(&actorUser))
+	assert.Equal(t, userID, actorUser)
 }
 
 func TestSteamAuth_settings_page_never_shows_the_key(t *testing.T) {

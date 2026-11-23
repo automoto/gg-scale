@@ -1,6 +1,7 @@
 package verifycode
 
 import (
+	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -43,18 +44,36 @@ func TestNewSalt_length(t *testing.T) {
 	assert.Len(t, s, saltBytes)
 }
 
-func TestHash_deterministic_with_salt(t *testing.T) {
-	salt := []byte("abc")
-	assert.Equal(t, Hash(salt, "123456"), Hash(salt, "123456"))
+func TestHashToken_should_match_the_stored_link_hash(t *testing.T) {
+	want := sha256.Sum256([]byte(":abc"))
+
+	assert.Equal(t, want[:], HashToken("abc"))
 }
 
-func TestHash_changes_with_salt(t *testing.T) {
-	assert.NotEqual(t, Hash([]byte("a"), "123456"), Hash([]byte("b"), "123456"))
+var testKey = []byte("0123456789abcdef0123456789abcdef")
+
+func TestHashCode_should_be_deterministic(t *testing.T) {
+	assert.Equal(t, HashCode(testKey, []byte("abc"), "123456"), HashCode(testKey, []byte("abc"), "123456"))
 }
 
-func TestHash_changes_with_code(t *testing.T) {
-	salt := []byte("abc")
-	assert.NotEqual(t, Hash(salt, "123456"), Hash(salt, "654321"))
+func TestHashCode_should_change_with_salt(t *testing.T) {
+	assert.NotEqual(t, HashCode(testKey, []byte("a"), "123456"), HashCode(testKey, []byte("b"), "123456"))
+}
+
+func TestHashCode_should_change_with_code(t *testing.T) {
+	assert.NotEqual(t, HashCode(testKey, []byte("abc"), "123456"), HashCode(testKey, []byte("abc"), "654321"))
+}
+
+func TestHashCode_should_change_with_key(t *testing.T) {
+	other := []byte("fedcba9876543210fedcba9876543210")
+
+	assert.NotEqual(t, HashCode(testKey, []byte("abc"), "123456"), HashCode(other, []byte("abc"), "123456"))
+}
+
+func TestHashCode_should_not_be_a_plain_hash(t *testing.T) {
+	plain := sha256.Sum256([]byte("abc:123456"))
+
+	assert.NotEqual(t, plain[:], HashCode(testKey, []byte("abc"), "123456"))
 }
 
 func TestCanResend(t *testing.T) {

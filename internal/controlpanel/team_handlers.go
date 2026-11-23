@@ -15,6 +15,7 @@ import (
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
@@ -42,7 +43,7 @@ func (h *Handler) teamPage(w http.ResponseWriter, r *http.Request) {
 		IsOwnerID:    session.User.ID,
 		Members:      members,
 		Pending:      pending,
-		Message:      r.URL.Query().Get("flash"),
+		Message:      flashMessage(r),
 		FleetEnabled: h.cfg.FleetEnabled,
 	}))
 
@@ -105,8 +106,7 @@ func (h *Handler) inviteTeammateHandler(w http.ResponseWriter, r *http.Request) 
 		subject = fmt.Sprintf("You've been invited to %s on ggscale", tenantName)
 	}
 	h.sendInviteEmail(r.Context(), res, subject, tenantName, h.roleExplanation(role))
-	target := tenantTeamPath(tenantID) + queryFlash + url.QueryEscape("Invite sent to "+res.Email)
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, tenantTeamPath(tenantID), flashInviteSent)
 }
 
 func (h *Handler) renderInviteTeamError(w http.ResponseWriter, r *http.Request, tenantID int64, email, role string, err error) {
@@ -174,7 +174,7 @@ func (h *Handler) revokeInviteHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Invite revoked."))
+	htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashInviteRevoked))
 }
 
 func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +197,7 @@ func (h *Handler) updateMemberRoleHandler(w http.ResponseWriter, r *http.Request
 	session, _ := sessionFromContext(r.Context())
 	switch err := h.setTeamMemberRole(r.Context(), session.User.ID, tenantID, targetUserID, role, grant); {
 	case err == nil:
-		htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Roles updated."))
+		htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashRolesUpdated))
 	case errors.Is(err, errInvalidGrantRole):
 		http.Error(w, "role not grantable", http.StatusForbidden)
 	case errors.Is(err, errMemberNotInTenant):
@@ -225,14 +225,14 @@ func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	err := h.removeMember(r.Context(), session.User.ID, tenantID, membershipID)
 	if errors.Is(err, errCannotRemoveSelf) {
-		http.Redirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("You can't remove yourself; ask another admin."), http.StatusSeeOther)
+		redirectFlash(w, r, tenantTeamPath(tenantID), flashRemoveSelf)
 		return
 	}
 	if err != nil {
 		http.Error(w, "remove failed", http.StatusInternalServerError)
 		return
 	}
-	htmxRedirect(w, r, tenantTeamPath(tenantID)+queryFlash+url.QueryEscape("Member removed."))
+	htmxRedirect(w, r, withFlash(tenantTeamPath(tenantID), flashMemberRemoved))
 }
 
 func (h *Handler) platformTeamPage(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +251,7 @@ func (h *Handler) platformTeamPage(w http.ResponseWriter, r *http.Request) {
 		CSRFToken: session.CSRFToken,
 		Admins:    admins,
 		Pending:   pending,
-		Message:   r.URL.Query().Get("flash"),
+		Message:   flashMessage(r),
 	}))
 
 }
@@ -307,7 +307,7 @@ func (h *Handler) invitePlatformAdminHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.sendInviteEmail(r.Context(), res, inviteEmailSubjectPlatform, "", "")
-	http.Redirect(w, r, "/v1/control-panel/admin/team?flash="+url.QueryEscape("Invite sent to "+res.Email), http.StatusSeeOther)
+	redirectFlash(w, r, "/v1/control-panel/admin/team", flashInviteSent)
 }
 
 func (h *Handler) acceptInvitePage(w http.ResponseWriter, r *http.Request) {
@@ -440,7 +440,7 @@ func (h *Handler) sendInviteEmail(ctx context.Context, res inviteResult, subject
 		slog.WarnContext(ctx, "control panel invite: no mailer configured", "invite_id", res.ID, "email", res.Email)
 		return
 	}
-	if h.inviteEmailSuppressed(ctx, res.Email) {
+	if projectadmin.EmailSuppressed(ctx, h.pool, res.Email) {
 		return
 	}
 	link := h.inviteAcceptURL(res.Code)
@@ -480,24 +480,7 @@ func (h *Handler) tenantDisplayName(ctx context.Context, tenantID int64) string 
 	if err != nil {
 		return ""
 	}
-	return headerSafeName(name, "")
-}
-
-// headerSafeName returns name when it can be embedded in a mail subject —
-// printable and small enough that the composed header stays far under RFC
-// 5322's line limit — else fallback. Resource names are user-controlled and
-// barely validated at creation; a weird name must degrade the email copy,
-// not break delivery (the SMTP send error would only be logged while the
-// operator sees a success flash).
-func headerSafeName(name, fallback string) string {
-	const maxNameBytes = 120
-	if name == "" || len(name) > maxNameBytes {
-		return fallback
-	}
-	if _, err := webutil.SanitizeHeader(name); err != nil {
-		return fallback
-	}
-	return name
+	return projectadmin.HeaderSafeName(name, "")
 }
 
 func (h *Handler) inviteAcceptURL(code string) string {

@@ -84,6 +84,9 @@ func newFakeStore() *fakeStore {
 func (s *fakeStore) InsertPending(_ context.Context, req fleet.AllocationRequest, backend string) (fleet.AllocationID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if req.MaxLive > 0 && s.countLive(req.ProjectID) >= int64(req.MaxLive) {
+		return 0, fleet.ErrLiveAllocationLimit
+	}
 	s.next++
 	a := &fleet.Allocation{
 		ID:        s.next,
@@ -143,6 +146,17 @@ func (s *fakeStore) Release(_ context.Context, id fleet.AllocationID) error {
 	return nil
 }
 
+func (s *fakeStore) ReleasePendingWithoutRef(_ context.Context, id fleet.AllocationID) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.allocations[id]
+	if !ok || a.Status != fleet.StatusPending || a.BackendRef != "" {
+		return false, nil
+	}
+	a.Status = fleet.StatusShutdown
+	return true, nil
+}
+
 func (s *fakeStore) Get(_ context.Context, id fleet.AllocationID) (*fleet.Allocation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,6 +191,17 @@ func (s *fakeStore) List(_ context.Context, projectID int64, includeTerminal boo
 		end = len(matched)
 	}
 	return matched[offset:end], total, nil
+}
+
+// countLive counts the live allocations of the project. The caller holds mu.
+func (s *fakeStore) countLive(projectID int64) int64 {
+	var n int64
+	for _, a := range s.allocations {
+		if a.ProjectID == projectID && !a.Status.IsTerminal() {
+			n++
+		}
+	}
+	return n
 }
 
 func (s *fakeStore) AppendEvent(_ context.Context, id fleet.AllocationID, status fleet.Status, address, errMessage string) error {
@@ -242,10 +267,6 @@ func (s *fakeFleetStore) seed(projectID int64, name, backend string, cfg map[str
 	return f
 }
 
-func (s *fakeFleetStore) Create(_ context.Context, in fleet.FleetCreate) (*fleet.Fleet, error) {
-	return s.seed(in.ProjectID, in.Name, in.Backend, in.Config), nil
-}
-
 func (s *fakeFleetStore) GetByID(_ context.Context, id int64) (*fleet.Fleet, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -276,8 +297,9 @@ func (s *fakeFleetStore) ListForProject(_ context.Context, projectID int64) ([]*
 	return out, nil
 }
 
-func (s *fakeFleetStore) Update(_ context.Context, _ fleet.FleetUpdate) error { return nil }
-func (s *fakeFleetStore) SoftDelete(_ context.Context, _ int64) error         { return nil }
+func (s *fakeFleetStore) ListDeletedForProject(_ context.Context, _ int64) ([]*fleet.Fleet, error) {
+	return nil, nil
+}
 
 // newFakeFleetStoreSeed returns a fleet store seeded with one row whose
 // Backend matches backendName, so sampleReq() (which uses FleetID=1)
@@ -590,11 +612,30 @@ func TestManagerRetainsUnknownResolutionWithoutOptionalCleaner(t *testing.T) {
 
 type cleanupBackend struct {
 	*fakeBackend
-	cleanupErr error
+	cleanupErr     error
+	cleanupProject int64
 }
 
-func (b *cleanupBackend) CleanupResolution(context.Context, string, map[string]string) error {
+func (b *cleanupBackend) CleanupResolution(_ context.Context, projectID int64, _ string, _ map[string]string) error {
+	b.cleanupProject = projectID
 	return b.cleanupErr
+}
+
+func TestManagerResolutionCleanup_should_pass_the_project_of_the_allocation(t *testing.T) {
+	backend := &cleanupBackend{fakeBackend: &fakeBackend{name: "fake", allocateImpl: func(int) (*fleet.Allocation, error) {
+		return &fleet.Allocation{BackendRef: "ref-1", Address: "10.0.0.1:7777"}, nil
+	}}}
+	mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_cleanup"}
+	a, err := mgr.Allocate(t.Context(), req)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = mgr.Deallocate(t.Context(), a.ID)
+
+	assert.Equal(t, []any{nil, req.ProjectID}, []any{err, backend.cleanupProject})
 }
 
 func TestManagerResolutionCleanupHandlesMissingFleetAndAuditsShutdown(t *testing.T) {
@@ -626,4 +667,178 @@ func TestManagerResolutionCleanupHandlesMissingFleetAndAuditsShutdown(t *testing
 			assert.Equal(t, fleet.StatusShutdown, store.events[len(store.events)-1].Status)
 		})
 	}
+}
+
+func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
+	backend := &fakeBackend{name: "fake"}
+	fleets := newFakeFleetStoreSeed(backend.name)
+	deletedAt := time.Now()
+	fleets.byID[1].DeletedAt = &deletedAt
+	mgr := fleet.NewManager(newFakeStore(), fleets, backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
+
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+
+	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
+}
+
+func TestManager_Allocate_should_refuse_a_fleet_of_another_project(t *testing.T) {
+	backend := &fakeBackend{name: "fake"}
+	fleets := newFakeFleetStoreSeed(backend.name)
+	fleets.byID[1].ProjectID = 3
+	store := newFakeStore()
+	mgr := fleet.NewManager(store, fleets, backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
+
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+
+	assert.Equal(t, []any{true, 0, 0}, []any{errors.Is(err, fleet.ErrFleetNotFound), backend.allocateCalls, len(store.allocations)})
+}
+
+func TestManagerAllocate_plugin_backend_names(t *testing.T) {
+	cases := []struct {
+		name    string
+		stored  string
+		running string
+		wantErr bool
+	}{
+		{"should_allocate_when_stored_name_equals_running_name", "plugin:example", "plugin:example", false},
+		{"should_allocate_when_stored_bare_plugin_and_running_any_plugin", "plugin", "plugin:example", false},
+		{"should_refuse_when_stored_plugin_name_differs", "plugin:other", "plugin:example", true},
+		{"should_refuse_when_stored_bare_plugin_and_running_agones", "plugin", "agones", true},
+		{"should_refuse_when_stored_agones_and_running_plugin", "agones", "plugin:example", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeBackend{name: tc.running, allocateImpl: func(int) (*fleet.Allocation, error) {
+				return &fleet.Allocation{BackendRef: "ref", Address: "127.0.0.1:1"}, nil
+			}}
+			mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(tc.stored), backend, fleet.ManagerOptions{Clock: zeroClock})
+
+			_, err := mgr.Allocate(context.Background(), sampleReq())
+
+			if tc.wantErr {
+				assert.ErrorIs(t, err, fleet.ErrFleetBackendMismatch)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+// A pending row with no backend ref still gets its backend call (a plugin
+// can track the server by allocation id), then it is released only while it
+// is still pending with no ref.
+func TestManager_Deallocate_pending_row_with_no_ref(t *testing.T) {
+	cases := []struct {
+		name       string
+		backendErr error
+		wantErr    bool
+		wantStatus fleet.Status
+	}{
+		{"should_call_the_backend_and_release_the_row", nil, false, fleet.StatusShutdown},
+		{"should_keep_the_row_when_the_backend_fails", errors.New("plugin down"), true, fleet.StatusPending},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			backend := &fakeBackend{name: "fake", deallocateImpl: func(context.Context, fleet.AllocationID, string) error {
+				return tc.backendErr
+			}}
+			mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+			id, err := store.InsertPending(t.Context(), sampleReq(), backend.name)
+			require.NoError(t, err)
+
+			err = mgr.Deallocate(t.Context(), id)
+
+			a, getErr := store.Get(t.Context(), id)
+			require.NoError(t, getErr)
+			assert.Equal(t, []any{tc.wantErr, []string{""}, tc.wantStatus},
+				[]any{err != nil, backend.deallocateRefs, a.Status})
+		})
+	}
+}
+
+func TestManager_Deallocate_should_add_a_shutdown_event_with_no_address_for_a_pending_row_with_no_ref(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{name: "fake"}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	id, err := store.InsertPending(t.Context(), sampleReq(), backend.name)
+	require.NoError(t, err)
+	store.allocations[id].Address = "203.0.113.1:7777"
+
+	require.NoError(t, mgr.Deallocate(t.Context(), id))
+
+	events, _ := store.ListEvents(t.Context(), id, 1)
+	assert.Equal(t, []fleet.Event{{ID: 1, AllocationID: id, Status: fleet.StatusShutdown}}, events)
+}
+
+// staleGetStore returns a pending row with no ref on the first Get, while the
+// stored row is already ready with a ref: MarkReady committed between the
+// read and the release.
+type staleGetStore struct {
+	*fakeStore
+	reads int
+}
+
+func (s *staleGetStore) Get(ctx context.Context, id fleet.AllocationID) (*fleet.Allocation, error) {
+	a, err := s.fakeStore.Get(ctx, id)
+	s.reads++
+	if err == nil && s.reads == 1 {
+		a.Status, a.BackendRef = fleet.StatusPending, ""
+	}
+	return a, err
+}
+
+func TestManager_Deallocate_should_stop_the_server_when_mark_ready_wins_the_race(t *testing.T) {
+	cases := []struct {
+		name       string
+		backendErr error
+		wantErr    bool
+		wantStatus fleet.Status
+	}{
+		{"should_call_the_backend_with_the_real_ref_and_release", nil, false, fleet.StatusShutdown},
+		{"should_keep_the_row_ready_when_the_backend_fails", errors.New("delete failed"), true, fleet.StatusReady},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &staleGetStore{fakeStore: newFakeStore()}
+			backend := &fakeBackend{name: "fake", deallocateImpl: func(_ context.Context, _ fleet.AllocationID, ref string) error {
+				if ref == "" {
+					return nil
+				}
+				return tc.backendErr
+			}}
+			mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+			id, err := store.InsertPending(t.Context(), sampleReq(), backend.name)
+			require.NoError(t, err)
+			require.NoError(t, store.MarkReady(t.Context(), id, "ns/gs-1", "203.0.113.1:7777"))
+
+			err = mgr.Deallocate(t.Context(), id)
+
+			a, getErr := store.fakeStore.Get(t.Context(), id)
+			require.NoError(t, getErr)
+			assert.Equal(t, []any{tc.wantErr, []string{"", "ns/gs-1"}, tc.wantStatus},
+				[]any{err != nil, backend.deallocateRefs, a.Status})
+		})
+	}
+}
+
+// The resolution cleanup can miss a server that is labelled after its list.
+// When MarkReady commits between the read and the release, the row is read
+// again and the server of its new ref is stopped before the release.
+func TestManagerResolutionCleanup_should_stop_the_server_when_mark_ready_wins_the_race(t *testing.T) {
+	store := &staleGetStore{fakeStore: newFakeStore()}
+	backend := &cleanupBackend{fakeBackend: &fakeBackend{name: "fake"}}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_race"}
+	id, err := store.InsertPending(t.Context(), req, backend.name)
+	require.NoError(t, err)
+	require.NoError(t, store.MarkReady(t.Context(), id, "ns/gs-late", "203.0.113.1:7777"))
+
+	err = mgr.Deallocate(t.Context(), id)
+
+	a, getErr := store.fakeStore.Get(t.Context(), id)
+	require.NoError(t, getErr)
+	assert.Equal(t, []any{nil, []string{"ns/gs-late"}, fleet.StatusShutdown},
+		[]any{err, backend.deallocateRefs, a.Status})
 }

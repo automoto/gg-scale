@@ -46,9 +46,10 @@ func TestControlPanelPlayerDelete_admin_request_and_cancel(t *testing.T) {
 	resp := postForm(t, noRedirectClient(), base+"/request-delete", url.Values{"_csrf": {csrf}}, cookie)
 	resp.Body.Close()
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	flash, err := url.QueryUnescape(resp.Header.Get("Location"))
-	require.NoError(t, err)
-	assert.Contains(t, flash, " UTC.", "the flash shows the purge time, not only the date")
+	location := resp.Header.Get("Location")
+	assert.Equal(t, "/v1/control-panel"+playerDeleteBase(tenantID, projectID, playerID)+"?flash=player_delete_scheduled", location)
+	assert.Contains(t, getWithCookie(t, srv.URL+location, cookie), " UTC</strong>",
+		"the page shows the purge time, not only the date")
 
 	var disabledMatches, pending, byAdmin bool
 	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
@@ -250,4 +251,74 @@ func TestControlPanelPlayerDelete_admin_request_should_show_only_while_player_ow
 
 	assert.Contains(t, playerOwned, "/request-delete")
 	assert.NotContains(t, adminOwned, "/request-delete")
+}
+
+func TestControlPanelPlayerDisable_should_write_an_audit_row_for_disable_and_enable(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	ctx := context.Background()
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "cp-dis")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	var playerID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`INSERT INTO project_players (tenant_id, project_id, external_id) VALUES ($1, $2, 'p') RETURNING id`,
+		tenantID, projectID).Scan(&playerID))
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	base := srv.URL + "/v1/control-panel" + playerDeleteBase(tenantID, projectID, playerID)
+
+	// Act
+	for _, enable := range []string{"false", "true"} {
+		resp := postForm(t, noRedirectClient(), base+"/disable", url.Values{"_csrf": {csrf}, "enable": {enable}}, cookie)
+		resp.Body.Close()
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	// Assert
+	var actions []string
+	rows, err := c.bootstrapPool.Query(ctx,
+		`SELECT action FROM platform_audit_log WHERE action LIKE 'control_panel.player.%able' AND actor_user_id = $1 AND target = $2 ORDER BY id`,
+		adminID, fmt.Sprint(playerID))
+	require.NoError(t, err)
+	defer rows.Close()
+	for rows.Next() {
+		var a string
+		require.NoError(t, rows.Scan(&a))
+		actions = append(actions, a)
+	}
+	assert.Equal(t, []string{"control_panel.player.disable", "control_panel.player.enable"}, actions)
+}
+
+func TestControlPanelPlayerAccountToggle_should_audit_by_account_id_without_email(t *testing.T) {
+	// Arrange
+	c := startCluster(t)
+	ctx := context.Background()
+	const playerEmail = "audit-marker-player@example.com"
+	seedVerifiedPlayerAccount(t, c, playerEmail, "correct-horse-battery-staple")
+	var accountID string
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT id::text FROM player_accounts WHERE email = $1`, playerEmail).Scan(&accountID))
+	adminID := seedControlPanelUser(t, c, "pa-admin@example.com", "correct-horse-battery-staple", true)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "pa-admin@example.com", "correct-horse-battery-staple")
+	base := srv.URL + "/v1/control-panel/admin/player-accounts/" + accountID
+
+	// Act
+	for _, action := range []string{"/disable", "/enable"} {
+		resp := postForm(t, noRedirectClient(), base+action, url.Values{"_csrf": {csrf}}, cookie)
+		resp.Body.Close()
+		require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	}
+
+	// Assert
+	var rows int
+	var text string
+	require.NoError(t, c.bootstrapPool.QueryRow(ctx,
+		`SELECT count(*), coalesce(string_agg(target || ' ' || payload::text, ' '), '')
+		 FROM platform_audit_log WHERE actor_user_id = $1 AND action LIKE 'control_panel.player_account.%'`,
+		adminID).Scan(&rows, &text))
+	assert.Equal(t, 2, rows)
+	assert.NotContains(t, text, "@")
+	assert.Contains(t, text, accountID)
 }

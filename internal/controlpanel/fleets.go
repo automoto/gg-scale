@@ -1,15 +1,18 @@
 package controlpanel
 
 import (
+	"context"
 	"errors"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
-	"strconv"
+	"slices"
 	"strings"
 
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/fleet"
+	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/webutil"
 )
 
@@ -29,7 +32,7 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 		ProjectID:         projectID,
 		BackendConfigured: h.fleetBackendName(),
 		Enabled:           h.fleetEnabled(),
-		Message:           r.URL.Query().Get("flash"),
+		Message:           flashMessage(r),
 	}
 	if h.fleetEnabled() {
 		tenantCtx := db.WithTenant(r.Context(), tenantID)
@@ -39,12 +42,21 @@ func (h *Handler) fleetsListPage(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "fleets list failed", http.StatusInternalServerError)
 			return
 		}
+		deleted, err := h.fleet.Fleets().ListDeletedForProject(tenantCtx, projectID)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "deleted fleets list failed", "err", err)
+			http.Error(w, "fleets list failed", http.StatusInternalServerError)
+			return
+		}
+		for _, f := range deleted {
+			view.DeletedFleets = append(view.DeletedFleets, FleetRowView{ID: f.ID, Name: f.Name, Backend: f.Backend})
+		}
 		for _, f := range fleets {
 			view.Fleets = append(view.Fleets, FleetRowView{
 				ID:             f.ID,
 				Name:           f.Name,
 				Backend:        f.Backend,
-				BackendMatches: f.Backend == view.BackendConfigured,
+				BackendMatches: fleet.BackendMatches(f.Backend, view.BackendConfigured),
 				Summary:        summarizeFleetConfig(f.Backend, f.Config),
 			})
 		}
@@ -62,12 +74,13 @@ func (h *Handler) fleetsNewPage(w http.ResponseWriter, r *http.Request) {
 	}
 	session, _ := sessionFromContext(r.Context())
 	view := NewFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		BackendConfigured: h.fleetBackendName(),
-		Backend:           h.fleetBackendName(),
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Backend:                h.fleetBackendName(),
 	}
 	webutil.Render(r, w, NewFleetPage(view))
 }
@@ -92,6 +105,8 @@ func (h *Handler) fleetsNewFormFragment(w http.ResponseWriter, r *http.Request) 
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Backend:   backend,
+
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
 	}))
 }
 
@@ -107,6 +122,9 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
 		return
 	}
+	if !h.requireControlPanelFleetManage(w, r, tenantID, projectID) {
+		return
+	}
 	if !webutil.ParseForm(w, r) {
 		return
 	}
@@ -114,6 +132,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.Form.Get("name"))
 	backend := strings.TrimSpace(r.Form.Get("backend"))
 	cfg, fieldErrors := parseFleetConfigForm(backend, r.Form)
+	h.checkAgonesServerSetKeys(backend, cfg, fieldErrors)
 	if name == "" {
 		fieldErrors["name"] = "Name is required."
 	}
@@ -121,220 +140,228 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		fieldErrors["backend"] = "Backend is required."
 	}
 	view := NewFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		BackendConfigured: h.fleetBackendName(),
-		Name:              name,
-		Backend:           backend,
-		Config:            cfg,
-		FieldErrors:       fieldErrors,
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Name:                   name,
+		Backend:                backend,
+		Config:                 fleetFormConfig(backend, cfg),
+		Retry:                  true,
+		FieldErrors:            fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, backend) {
+	if !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, backend) {
 		return
 	}
 
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	f, err := h.fleet.Fleets().Create(tenantCtx, fleet.FleetCreate{
+	_, err := h.fleet.FleetAdmin().CreateFleet(r.Context(), tenantID, fleet.FleetCreate{
 		ProjectID: projectID,
 		Name:      name,
 		Backend:   backend,
 		Config:    cfg,
-	})
+	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
+		var status int
+		view.Error, status = fleetFormError("Create failed", err)
 		slog.ErrorContext(r.Context(), "create fleet failed", "err", err)
-		view.Error = "Create failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.create", strconv.FormatInt(f.ID, 10), map[string]any{
-		"project_id": projectID,
-		"fleet_name": f.Name,
-		"backend":    f.Backend,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.create", "err", auditErr)
-	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+f.Name+"\" created.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetCreated)
 }
 
 // fleetsEditPage renders the edit form prefilled with the fleet's current
 // values. Name can change; backend is fixed (changing backend would break
 // existing allocations referencing the row).
 func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, f, ok := h.projectFleet(w, r, false)
 	if !ok {
 		return
 	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	f, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if f.ProjectID != projectID {
+	if f.DeletedAt != nil {
 		http.NotFound(w, r)
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, EditFleetPage(EditFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		FleetID:           f.ID,
-		Name:              f.Name,
-		Backend:           f.Backend,
-		Config:            f.Config,
-		BackendConfigured: h.fleetBackendName(),
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		FleetID:                f.ID,
+		Name:                   f.Name,
+		Backend:                f.Backend,
+		Config:                 fleetFormConfig(f.Backend, f.Config),
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
 	}))
 }
 
 // fleetsUpdateHandler persists changes to name / config. Backend is fixed
 // on update; recreating under a different backend is the supported path.
 func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
 	if !ok {
 		return
 	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	if !webutil.ParseForm(w, r) {
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.NotFound(w, r)
-		return
-	}
+	fleetID := existing.ID
 	session, _ := sessionFromContext(r.Context())
 	name := strings.TrimSpace(r.Form.Get("name"))
 	cfg, fieldErrors := parseFleetConfigForm(existing.Backend, r.Form)
+	h.checkAgonesServerSetKeys(existing.Backend, cfg, fieldErrors)
+	if fleet.ConfigIsSecret(existing.Backend) {
+		if err := keepStoredPluginValues(r.Context(), cfg, existing); err != nil {
+			fieldErrors["config_key"] = err.Error()
+		}
+	}
 	if name == "" {
 		fieldErrors["name"] = "Name is required."
 	}
 	view := EditFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		FleetID:           fleetID,
-		Name:              name,
-		Backend:           existing.Backend,
-		Config:            cfg,
-		BackendConfigured: h.fleetBackendName(),
-		FieldErrors:       fieldErrors,
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		FleetID:                fleetID,
+		Name:                   name,
+		Backend:                existing.Backend,
+		Config:                 fleetFormConfig(existing.Backend, cfg),
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Retry:                  true,
+		FieldErrors:            fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
-		return
-	}
-	if err := h.fleet.Fleets().Update(tenantCtx, fleet.FleetUpdate{
-		ID:      fleetID,
-		Name:    name,
-		Backend: existing.Backend,
-		Config:  cfg,
-	}); err != nil {
+	if _, err := h.fleet.FleetAdmin().UpdateFleet(r.Context(), tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+		if errors.Is(err, fleet.ErrFleetNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		var status int
+		view.Error, status = fleetFormError("Update failed", err)
 		slog.ErrorContext(r.Context(), "update fleet failed", "err", err)
-		view.Error = "Update failed: " + err.Error()
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(status)
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.update", strconv.FormatInt(fleetID, 10), map[string]any{
-		"project_id": projectID,
-		"fleet_name": name,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.update", "err", auditErr)
-	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet \""+name+"\" updated.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetUpdated)
 }
 
 // fleetsDeleteHandler soft-deletes the template. Historical allocations
 // keep their fleet_id reference; the control panel surfaces the (now-deleted)
 // name from the row.
 func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, ok := h.parseTenantAndProject(w, r)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
 	if !ok {
 		return
 	}
-	fleetID, ok := parsePathID(w, r, "fleetID")
-	if !ok {
-		return
-	}
-	if h.fleet == nil {
-		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
-		return
-	}
-	tenantCtx := db.WithTenant(r.Context(), tenantID)
-	existing, err := h.fleet.Fleets().GetByID(tenantCtx, fleetID)
-	if errors.Is(err, fleet.ErrFleetNotFound) {
-		http.NotFound(w, r)
-		return
-	}
-	if err != nil {
-		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
-		return
-	}
-	if existing.ProjectID != projectID {
-		http.NotFound(w, r)
-		return
-	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
-		return
-	}
-	if err := h.fleet.Fleets().SoftDelete(tenantCtx, fleetID); err != nil {
+	session, _ := sessionFromContext(r.Context())
+	if err := h.fleet.FleetAdmin().DeleteFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID}); err != nil {
+		if errors.Is(err, fleet.ErrFleetNotFound) {
+			http.NotFound(w, r)
+			return
+		}
 		slog.ErrorContext(r.Context(), "delete fleet failed", "err", err)
 		http.Error(w, "delete failed", http.StatusInternalServerError)
 		return
 	}
-	session, _ := sessionFromContext(r.Context())
-	if auditErr := h.writePlatformAudit(r.Context(), tenantID, session.User.ID, "fleet.template.delete", strconv.FormatInt(fleetID, 10), map[string]any{
-		"project_id": projectID,
-	}); auditErr != nil {
-		slog.WarnContext(r.Context(), "audit log: fleet.template.delete", "err", auditErr)
+	redirectFlash(w, r, fleetsBasePath(tenantID, projectID), flashFleetDeleted)
+}
+
+// fleetsRestoreHandler brings back a deleted template. A live template with
+// the same name blocks the restore.
+func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
+	if !ok {
+		return
 	}
-	target := fleetsBasePath(tenantID, projectID) + queryFlash + url.QueryEscape("Fleet deleted.")
-	http.Redirect(w, r, target, http.StatusSeeOther)
+	session, _ := sessionFromContext(r.Context())
+	_, err := h.fleet.FleetAdmin().RestoreFleet(r.Context(), tenantID, projectID, existing.ID, projectadmin.Actor{UserID: session.User.ID})
+	base := fleetsBasePath(tenantID, projectID)
+	switch {
+	case errors.Is(err, fleet.ErrFleetNotFound):
+		http.NotFound(w, r)
+	case errors.Is(err, fleet.ErrFleetNameTaken):
+		redirectFlash(w, r, base, flashFleetNameTaken)
+	case err != nil:
+		slog.ErrorContext(r.Context(), "restore fleet failed", "err", err)
+		http.Error(w, "restore failed", http.StatusInternalServerError)
+	default:
+		redirectFlash(w, r, base, flashFleetRestored)
+	}
+}
+
+// projectFleet parses the IDs of a fleet route and returns the fleet (live or
+// deleted) of the project. On failure it writes the answer and ok is false.
+// For a write (mutate) it checks the fleet manage right before the lookup, so
+// a role without it learns nothing about the fleet, then reads the form, and
+// checks the backend grant of the stored fleet after the lookup.
+func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, mutate bool) (tenantID, projectID int64, f *fleet.Fleet, ok bool) {
+	tenantID, projectID, ok = h.parseTenantAndProject(w, r)
+	if !ok {
+		return 0, 0, nil, false
+	}
+	fleetID, ok := parsePathID(w, r, "fleetID")
+	if !ok {
+		return 0, 0, nil, false
+	}
+	if h.fleet == nil {
+		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
+		return 0, 0, nil, false
+	}
+	if mutate && !h.requireControlPanelFleetManage(w, r, tenantID, projectID) {
+		return 0, 0, nil, false
+	}
+	if mutate && !webutil.ParseForm(w, r) {
+		return 0, 0, nil, false
+	}
+	f, err := h.fleet.Fleets().GetByID(db.WithTenant(r.Context(), tenantID), fleetID)
+	if errors.Is(err, fleet.ErrFleetNotFound) {
+		http.NotFound(w, r)
+		return 0, 0, nil, false
+	}
+	if err != nil {
+		http.Error(w, msgFleetLookupFailed, http.StatusInternalServerError)
+		return 0, 0, nil, false
+	}
+	if f.ProjectID != projectID {
+		http.NotFound(w, r)
+		return 0, 0, nil, false
+	}
+	if mutate && !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, f.Backend) {
+		return 0, 0, nil, false
+	}
+	return tenantID, projectID, f, true
+}
+
+// fleetFormError returns the text and HTTP status for a failed fleet write.
+// An invalid input or a taken name shows its own text; other errors show a
+// fixed text, so no database text reaches the page.
+func fleetFormError(prefix string, err error) (string, int) {
+	var invalid fleet.InvalidError
+	switch {
+	case errors.As(err, &invalid):
+		return prefix + ": " + invalid.Error(), http.StatusUnprocessableEntity
+	case errors.Is(err, fleet.ErrFleetNameTaken):
+		return prefix + ": a fleet with that name already exists.", http.StatusConflict
+	case errors.Is(err, fleet.ErrLiveAllocationLimit):
+		return prefix + ": " + fleet.ErrLiveAllocationLimit.Error() + ".", http.StatusConflict
+	case errors.Is(err, fleet.ErrFleetBackendMismatch):
+		return prefix + ": the fleet backend does not match the server backend.", http.StatusConflict
+	}
+	return prefix + ".", http.StatusInternalServerError
 }
 
 // parseFleetConfigForm extracts the per-backend fields from the submitted
@@ -356,24 +383,59 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 		cfg["namespace"] = ns
 	}
 	errs := map[string]string{}
-	pairs, overCap := boundedKeyValuePairs(form["selector_key[]"], form["selector_value[]"])
+	pairs, overCap, duplicate := boundedKeyValuePairs(form["selector_key[]"], form["selector_value[]"])
 	if overCap {
 		errs["selector_key"] = "Too many selector keys."
+	}
+	if duplicate {
+		errs["selector_key"] = "A selector key is in two rows. Keep one row for each key."
 	}
 	for k, v := range pairs {
 		cfg["selector."+k] = v
 	}
-	if cfg["fleet_name"] == "" {
-		errs["fleet_name"] = "Fleet name is required."
+	if err := fleet.ValidateConfig("agones", cfg); err != nil {
+		errs["fleet_name"] = err.Error()
 	}
 	return cfg, errs
 }
 
+// checkAgonesServerSetKeys adds a field error for each agones config key
+// that the server sets when Agones project isolation is on. The fleet store
+// refuses the same keys; this check shows the error at the field.
+func (h *Handler) checkAgonesServerSetKeys(backend string, cfg, errs map[string]string) {
+	if backend != "agones" || !h.agonesProjectIsolation() {
+		return
+	}
+	for k := range cfg {
+		if !fleet.AgonesServerSetKey(k) {
+			continue
+		}
+		field := "selector_key"
+		if k == "namespace" {
+			field = "namespace"
+		}
+		errs[field] = fleet.ErrAgonesServerSetKey.Error()
+	}
+}
+
+// agonesProjectIsolation reports whether the fleet store refuses the agones
+// keys that the server sets (AGONES_PROJECT_ISOLATION).
+func (h *Handler) agonesProjectIsolation() bool {
+	if h.fleet == nil {
+		return false
+	}
+	store := h.fleet.FleetAdmin()
+	return store != nil && store.AgonesProjectIsolation
+}
+
 func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]string) {
-	cfg, overCap := boundedKeyValuePairs(form["config_key[]"], form["config_value[]"])
+	cfg, overCap, duplicate := boundedKeyValuePairs(form["config_key[]"], form["config_value[]"])
 	errs := map[string]string{}
 	if overCap {
 		errs["config_key"] = "Too many config keys."
+	}
+	if duplicate {
+		errs["config_key"] = "A config key is in two rows. Keep one row for each key."
 	}
 	return cfg, errs
 }
@@ -381,48 +443,69 @@ func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]stri
 // boundedKeyValuePairs zips a key[] / value[] form pair into a map, enforcing
 // the per-form count and per-entry length caps. Blank keys and entries past
 // the value slice are skipped. overCap reports whether the key count was
-// truncated so callers can surface a field error.
-func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overCap bool) {
+// truncated so callers can surface a field error. duplicate reports a key in
+// two rows, so no typed value is dropped without a word.
+func boundedKeyValuePairs(keys, values []string) (pairs map[string]string, overCap, duplicate bool) {
 	pairs = map[string]string{}
-	if len(keys) > fleetFormKeyValuePairsCap {
+	if len(keys) > fleet.MaxConfigKeys {
 		overCap = true
-		keys = keys[:fleetFormKeyValuePairsCap]
+		keys = keys[:fleet.MaxConfigKeys]
 	}
 	for i, k := range keys {
 		k = strings.TrimSpace(k)
-		if k == "" || len(k) > fleetFormKeyOrValueLenCap || i >= len(values) {
+		if k == "" || len(k) > fleet.MaxConfigKeyOrVal || i >= len(values) {
 			continue
 		}
 		v := strings.TrimSpace(values[i])
-		if len(v) > fleetFormKeyOrValueLenCap {
+		if len(v) > fleet.MaxConfigKeyOrVal {
 			continue
+		}
+		if _, ok := pairs[k]; ok {
+			duplicate = true
 		}
 		pairs[k] = v
 	}
-	return pairs, overCap
+	return pairs, overCap, duplicate
 }
 
-// fleetFormKeyValuePairsCap is the upper bound on selector_key[] / config_key[]
-// arrays. Bounded only by the overall form-body limit before this; a single
-// request used to be able to stuff thousands of entries into a fleet config,
-// JSON-serialise them, store them, and re-render them on the next page load.
-const fleetFormKeyValuePairsCap = 64
-
-// fleetFormKeyOrValueLenCap bounds a single key or value within those forms.
-const fleetFormKeyOrValueLenCap = 256
-
 // summarizeFleetConfig returns a one-line preview for the list page, so
-// operators can scan templates without opening each one.
+// operators can scan templates without opening each one. A plugin config
+// shows its keys only, because a value can be a secret.
 func summarizeFleetConfig(backend string, cfg map[string]string) string {
-	switch backend {
-	case "agones":
+	if !fleet.ConfigIsSecret(backend) {
 		return cfg["fleet_name"]
-	default:
-		// plugin: render the first few keys joined.
-		var keys []string
-		for k := range cfg {
-			keys = append(keys, k+"="+cfg[k])
-		}
-		return strings.Join(keys, " ")
 	}
+	return strings.Join(slices.Sorted(maps.Keys(cfg)), " ")
+}
+
+// fleetFormConfig returns the config that a fleet form shows: an agones
+// config as it is, and the keys of a plugin config with empty values.
+func fleetFormConfig(backend string, cfg map[string]string) map[string]string {
+	if !fleet.ConfigIsSecret(backend) {
+		return cfg
+	}
+	out := make(map[string]string, len(cfg))
+	for k := range cfg {
+		out[k] = ""
+	}
+	return out
+}
+
+// keepStoredPluginValues gives each key of cfg that has an empty value the
+// stored value of existing. The edit page never shows a stored value, so an
+// empty value means "keep it". A key that is not in cfg is removed by the
+// update. It returns fleet.ErrConfigNotOpened when a value must be kept and
+// the stored config does not open.
+func keepStoredPluginValues(ctx context.Context, cfg map[string]string, existing *fleet.Fleet) error {
+	for k, v := range cfg {
+		if _, ok := existing.Config[k]; !ok || v != "" {
+			continue
+		}
+		stored, err := existing.OpenedConfig(ctx)
+		if err != nil {
+			return err
+		}
+		cfg[k] = stored[k]
+	}
+	return nil
 }

@@ -28,34 +28,6 @@ func TestSetTenantFeatureGrant_rejects_unknown_feature_before_database_access(t 
 	assert.ErrorIs(t, err, errInvalidFeature)
 }
 
-func TestSafeReturnPath(t *testing.T) {
-	const fallback = "/v1/control-panel/tenants/1/projects"
-	cases := []struct {
-		raw  string
-		want string
-	}{
-		{"/v1/control-panel/tenants/5/settings", "/v1/control-panel/tenants/5/settings"},
-		{"/v1/control-panel", "/v1/control-panel"},
-		{"/v1/control-panel/tenants/5/projects/9/settings", "/v1/control-panel/tenants/5/projects/9/settings"},
-		{"", fallback},
-		{"http://evil.com/x", fallback},
-		{"//evil.com", fallback},
-		{"/etc/passwd", fallback},
-		{"javascript:alert(1)", fallback},
-		{"/v1/control-panelX/evil", fallback},
-		// Callers append "?flash=", so a raw query or fragment would corrupt
-		// the redirect URL.
-		{"/v1/control-panel/tenants/5/settings?x=1", fallback},
-		{"/v1/control-panel/tenants/5/settings#frag", fallback},
-		// Dot segments would let the browser normalize past /v1/control-panel.
-		{"/v1/control-panel/../../metrics", fallback},
-		{"/v1/control-panel/./evil", fallback},
-	}
-	for _, c := range cases {
-		assert.Equal(t, c.want, safeReturnPath(c.raw, fallback), "raw=%q", c.raw)
-	}
-}
-
 func TestTenantSettingsPage_renders_tier_form_for_platform_admin(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
 		TenantID: 3, TenantName: "acme", Tier: "tier_0",
@@ -141,7 +113,7 @@ func TestProjectSettingsPage_shows_invite_quota_forms(t *testing.T) {
 	assert.NotContains(t, html, "public-joining")
 	assert.NotContains(t, html, "Public joining")
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/rate-limits/projects/8/invites")
-	assert.Contains(t, html, `name="redirect_to" value="/v1/control-panel/tenants/3/projects/8/settings"`)
+	assert.Contains(t, html, `name="return" value="project_settings"`)
 	assert.Contains(t, html, "/v1/control-panel/tenants/3/projects/8/config")
 	assert.Contains(t, html, `name="config"`)
 	assert.Contains(t, html, `&#34;maintenance_mode&#34;: false`)
@@ -170,6 +142,6 @@ func TestServerSettingsPage_is_read_only(t *testing.T) {
 	// Read-only: no settings forms or editable controls (the only <form> is the
 	// layout's logout form in the header chrome).
 	assert.Equal(t, 1, strings.Count(html, "<form"), "server settings page adds no forms")
-	assert.NotContains(t, html, `name="redirect_to"`)
+	assert.NotContains(t, html, `name="return"`)
 	assert.NotContains(t, html, "Save")
 }

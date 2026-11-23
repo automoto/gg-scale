@@ -16,6 +16,13 @@ type LimitStore interface {
 	ListForTenant(ctx context.Context, tenantID int64) ([]Override, error)
 }
 
+// Invalidator is implemented by a store that caches. Only the caching layer
+// has anything to drop.
+type Invalidator interface {
+	Invalidate(tenantID int64)
+}
+
+var _ Invalidator = (*CachedStore)(nil)
 var _ LimitStore = (*Store)(nil)
 var _ LimitStore = (*CachedStore)(nil)
 
@@ -86,7 +93,7 @@ func (c *CachedStore) Set(ctx context.Context, updatedBy, tenantID int64, projec
 	if err := c.inner.Set(ctx, updatedBy, tenantID, projectID, maxBytes); err != nil {
 		return err
 	}
-	c.invalidate(tenantID)
+	c.Invalidate(tenantID)
 	return nil
 }
 
@@ -95,7 +102,9 @@ func (c *CachedStore) ListForTenant(ctx context.Context, tenantID int64) ([]Over
 	return c.inner.ListForTenant(ctx, tenantID)
 }
 
-func (c *CachedStore) invalidate(tenantID int64) {
+// Invalidate drops the tenant's cached entries. A write that does not go
+// through Set calls it after its commit.
+func (c *CachedStore) Invalidate(tenantID int64) {
 	prefix := strconv.FormatInt(tenantID, 10) + ":"
 	c.mu.Lock()
 	defer c.mu.Unlock()

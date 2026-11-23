@@ -68,11 +68,11 @@ func (h *Handler) updateCustomTokenKeyHandler(w http.ResponseWriter, r *http.Req
 		slog.WarnContext(r.Context(), "audit log: custom token key update", "err", err)
 	}
 
-	msg := "Custom token signing key saved."
+	code := flashCustomTokenSaved
 	if pemKey == "" {
-		msg = "Custom token sign-in disabled."
+		code = flashCustomTokenDisabled
 	}
-	h.redirectTenantSettings(w, r, tenantID, msg)
+	h.redirectTenantSettings(w, r, tenantID, code)
 }
 
 // renderCustomTokenKeyError re-renders the settings page with a field error.

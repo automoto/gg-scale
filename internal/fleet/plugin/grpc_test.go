@@ -372,7 +372,7 @@ type resolutionBackend struct {
 	cleaned string
 }
 
-func (b *resolutionBackend) CleanupResolution(_ context.Context, id string, _ map[string]string) error {
+func (b *resolutionBackend) CleanupResolution(_ context.Context, _ int64, id string, _ map[string]string) error {
 	b.cleaned = id
 	return nil
 }
@@ -381,7 +381,7 @@ func TestRoundTripResolutionCleanup(t *testing.T) {
 	backend := &resolutionBackend{}
 	client, cleanup := dialBufconn(t, backend)
 	defer cleanup()
-	err := client.CleanupResolution(context.Background(), "mm_recovery", map[string]string{"namespace": "games"})
+	err := client.CleanupResolution(context.Background(), 2, "mm_recovery", map[string]string{"namespace": "games"})
 	assert.NoError(t, err)
 	assert.Equal(t, "mm_recovery", backend.cleaned)
 }

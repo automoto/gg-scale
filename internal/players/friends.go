@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -43,7 +42,8 @@ func (h *Handler) friendsPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, accountBasePath+"/login", http.StatusSeeOther)
 		return
 	}
-	view := FriendsView{AccountEmail: sess.Email, CSRFToken: h.csrf(r), Flash: r.URL.Query().Get("flash"), FlashError: r.URL.Query().Get("error")}
+	flash, flashErr := flashFromRequest(r)
+	view := FriendsView{AccountEmail: sess.Email, CSRFToken: h.csrf(r), Flash: flash, FlashError: flashErr}
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		var e error
 		view.Accepted, e = h.loadFriendGroup(r.Context(), tx, sess.AccountID, "accepted")
@@ -166,7 +166,7 @@ func (h *Handler) friendRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	target := strings.TrimSpace(r.Form.Get("target"))
 	if target == "" {
-		h.redirectFriends(w, r, "", "Enter an email or display name.")
+		redirectFlash(w, r, friendsPath, flashFriendTargetEmpty)
 		return
 	}
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
@@ -195,15 +195,15 @@ func (h *Handler) friendRequest(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errFriendTargetNotFound):
 		// Uniform with the success path so a caller can't probe which emails /
 		// display names have an account (and a block stays hidden).
-		h.redirectFriends(w, r, friendRequestSentFlash, "")
+		redirectFlash(w, r, friendsPath, flashFriendRequestSent)
 	case errors.Is(err, errFriendAmbiguous):
-		h.redirectFriends(w, r, "", "Multiple accounts share that display name — use an email.")
+		redirectFlash(w, r, friendsPath, flashFriendAmbiguous)
 	case errors.Is(err, errFriendSelfTarget):
-		h.redirectFriends(w, r, "", "You can't friend yourself.")
+		redirectFlash(w, r, friendsPath, flashFriendSelf)
 	case err != nil:
 		webutil.InternalError(w, "friend request", err)
 	default:
-		h.redirectFriends(w, r, friendRequestSentFlash, "")
+		redirectFlash(w, r, friendsPath, flashFriendRequestSent)
 	}
 }
 
@@ -243,26 +243,26 @@ func (h *Handler) friendAction(action string) http.HandlerFunc {
 		}
 		otherID, perr := uuid.Parse(chi.URLParam(r, "accountID"))
 		if perr != nil {
-			h.redirectFriends(w, r, "", "Unknown account.")
+			redirectFlash(w, r, friendsPath, flashFriendUnknown)
 			return
 		}
 		me := toPgUUID(sess.AccountID)
 		other := toPgUUID(otherID)
 		if me == other {
-			h.redirectFriends(w, r, "", "That action isn't allowed.")
+			redirectFlash(w, r, friendsPath, flashFriendNotAllowed)
 			return
 		}
-		flash, err := h.applyFriendAction(r.Context(), action, me, other)
+		code, err := h.applyFriendAction(r.Context(), action, me, other)
 		if err != nil {
 			webutil.InternalError(w, "friend action", err)
 			return
 		}
-		h.redirectFriends(w, r, flash, "")
+		redirectFlash(w, r, friendsPath, code)
 	}
 }
 
-func (h *Handler) applyFriendAction(ctx context.Context, action string, me, other pgtype.UUID) (string, error) {
-	var flash string
+func (h *Handler) applyFriendAction(ctx context.Context, action string, me, other pgtype.UUID) (flashCode, error) {
+	var flash flashCode
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		switch action {
@@ -271,10 +271,10 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 			// rejected. The query enforces this for both this path and the JSON
 			// path, so a blocked user cannot turn the block into a friendship.
 			newStatus := "accepted"
-			flash = "Friend added."
+			flash = flashFriendAdded
 			if action == "reject" {
 				newStatus = "rejected"
-				flash = "Request declined."
+				flash = flashFriendDeclined
 			}
 			n, err := q.ResolvePendingFriendEdge(ctx, sqlcgen.ResolvePendingFriendEdgeParams{
 				FromAccountID: other, ToAccountID: me, Status: newStatus,
@@ -283,15 +283,15 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 				return err
 			}
 			if n == 0 {
-				flash = "That request is no longer available."
+				flash = flashFriendRequestGone
 			}
 			return nil
 		case "unfriend":
-			flash = "Removed."
+			flash = flashFriendRemoved
 			_, e := q.DeleteFriendEdgeByAccount(ctx, sqlcgen.DeleteFriendEdgeByAccountParams{Me: me, Other: other})
 			return e
 		case "block":
-			flash = "Blocked."
+			flash = flashFriendBlocked
 			_, _ = q.DeleteFriendEdgeDirected(ctx, sqlcgen.DeleteFriendEdgeDirectedParams{
 				FromAccountID: other, ToAccountID: me, Status: "accepted",
 			})
@@ -302,7 +302,7 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 				FromAccountID: me, ToAccountID: other, Status: "blocked",
 			})
 		case "unblock":
-			flash = "Unblocked."
+			flash = flashFriendUnblocked
 			_, e := q.DeleteFriendEdgeDirected(ctx, sqlcgen.DeleteFriendEdgeDirectedParams{
 				FromAccountID: me, ToAccountID: other, Status: "blocked",
 			})
@@ -313,17 +313,6 @@ func (h *Handler) applyFriendAction(ctx context.Context, action string, me, othe
 		}
 	})
 	return flash, err
-}
-
-func (h *Handler) redirectFriends(w http.ResponseWriter, r *http.Request, flash, flashErr string) {
-	target := friendsPath
-	switch {
-	case flash != "":
-		target += "?flash=" + url.QueryEscape(flash)
-	case flashErr != "":
-		target += "?error=" + url.QueryEscape(flashErr)
-	}
-	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func ptrString(s string) *string { return &s }

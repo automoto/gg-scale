@@ -87,3 +87,34 @@ func TestRequireCSRFPassesSafeMethods(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+func TestCrossOriginProtection_should_trust_the_public_base_url(t *testing.T) {
+	cases := []struct {
+		name    string
+		baseURL string
+		origin  string
+		want    int
+	}{
+		{"works_for_the_base_url_origin_with_another_host", "https://panel.example/", "https://panel.example", http.StatusNoContent},
+		{"works_for_a_base_url_with_a_port_and_path", "http://10.0.0.5:8080/ggscale", "http://10.0.0.5:8080", http.StatusNoContent},
+		{"refused_for_another_origin", "https://panel.example", "https://evil.example", http.StatusForbidden},
+		{"refused_for_a_base_url_with_another_scheme", "https://panel.example", "http://panel.example", http.StatusForbidden},
+		{"refused_with_no_base_url", "", "https://panel.example", http.StatusForbidden},
+		{"refused_with_a_bad_base_url", "ftp://panel.example", "ftp://panel.example", http.StatusForbidden},
+		{"refused_with_a_base_url_that_does_not_parse", "https://panel.example:bad", "https://panel.example", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := webutil.CrossOriginProtection(tc.baseURL)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "http://ggscale:8080/v1/control-panel/login", nil)
+			req.Header.Set("Origin", tc.origin)
+			rec := httptest.NewRecorder()
+
+			h.ServeHTTP(rec, req)
+
+			assert.Equal(t, tc.want, rec.Code)
+		})
+	}
+}

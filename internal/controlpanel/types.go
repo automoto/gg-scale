@@ -4,6 +4,8 @@ package controlpanel
 import (
 	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -105,6 +107,12 @@ type ServerSettingsSnapshot struct {
 
 	FleetBackend string
 	FleetRegion  string
+
+	FleetAllocationMaxCapacity        int
+	FleetMaxLiveAllocationsPerProject int
+	// AgonesProjectIsolation mirrors AGONES_PROJECT_ISOLATION. When it is
+	// off and the backend is agones, the page shows a warning.
+	AgonesProjectIsolation bool
 }
 
 // Enabled reports whether the control panel should be mounted.
@@ -280,7 +288,7 @@ func (v APIKeyView) HasScope(scope string) bool {
 
 // HasManagedScope reports whether the key holds any managed feature scope.
 func (v APIKeyView) HasManagedScope() bool {
-	for _, scope := range managedAPIKeyScopes {
+	for _, scope := range projectadmin.ManagedKeyScopes {
 		if v.HasScope(scope) {
 			return true
 		}
@@ -422,12 +430,10 @@ type ProjectInviteLimitView struct {
 }
 
 // APILimitCardView is the tenant HTTP API limit card shared by the
-// rate-limits and tenant-settings pages. RedirectTo, when non-empty, is
-// posted as redirect_to so the save returns to the embedding page.
+// rate-limits and tenant-settings pages.
 type APILimitCardView struct {
 	TenantID        int64
 	CSRFToken       string
-	RedirectTo      string
 	IsPlatformAdmin bool
 	Overridden      bool
 	Rate            float64
@@ -550,6 +556,9 @@ type PendingChangeRequestView struct {
 	Note        string
 	Requester   string
 	CreatedAt   time.Time
+	// Warning is shown above the approve button, for example for the agones
+	// backend grant while Agones project isolation is off.
+	Warning string
 }
 
 // ProjectSettingsView consolidates project-scoped configuration on one page.
@@ -885,7 +894,9 @@ type FleetsListView struct {
 	BackendConfigured string
 	Enabled           bool
 	Fleets            []FleetRowView
-	Message           string
+	// DeletedFleets have a restore button. Only ID, Name, and Backend are set.
+	DeletedFleets []FleetRowView
+	Message       string
 }
 
 // FleetRowView is one row on the fleets list.
@@ -907,8 +918,16 @@ type NewFleetView struct {
 	Name              string
 	Backend           string
 	Config            map[string]string
-	Error             string
-	FieldErrors       map[string]string
+	// Saved marks the edit form: a plugin config key has a saved value that
+	// the form does not show.
+	Saved bool
+	// Retry marks a form shown again after a failed save: the typed plugin
+	// values are not shown, so they must be entered again.
+	Retry bool
+	// AgonesProjectIsolation shows the note that the server sets the namespace.
+	AgonesProjectIsolation bool
+	Error                  string
+	FieldErrors            map[string]string
 }
 
 // EditFleetView is the data rendered by /fleets/{id}.
@@ -922,8 +941,12 @@ type EditFleetView struct {
 	Backend           string
 	Config            map[string]string
 	BackendConfigured string
-	Error             string
-	FieldErrors       map[string]string
+	// Retry marks the form shown again after a failed save.
+	Retry bool
+	// AgonesProjectIsolation shows the note that the server sets the namespace.
+	AgonesProjectIsolation bool
+	Error                  string
+	FieldErrors            map[string]string
 }
 
 // DeallocateConfirmView is the data rendered by the type-the-ID confirm page.
@@ -1011,6 +1034,15 @@ func fleetBackendKind(backend string) string {
 	return "agones"
 }
 
+// fleetPluginOption is the backend value the plugin choice stores: the
+// configured plugin:<name>, or the bare "plugin" when none is configured.
+func fleetPluginOption(configured string) string {
+	if strings.HasPrefix(configured, "plugin:") {
+		return configured
+	}
+	return "plugin"
+}
+
 // editToNewFleetView projects an EditFleetView onto the NewFleetView shape
 // so EditFleetPage can reuse FleetBackendFieldsFragment. templ struggles
 // with multi-line struct literals inside @-calls; the named helper keeps
@@ -1021,8 +1053,18 @@ func editToNewFleetView(vm EditFleetView) NewFleetView {
 		ProjectID:   vm.ProjectID,
 		Backend:     vm.Backend,
 		Config:      vm.Config,
+		Saved:       true,
+		Retry:       vm.Retry,
 		FieldErrors: vm.FieldErrors,
+
+		AgonesProjectIsolation: vm.AgonesProjectIsolation,
 	}
+}
+
+// sortedConfigKeys returns the keys of a fleet config in order, so a form
+// shows its rows in the same order each time.
+func sortedConfigKeys(cfg map[string]string) []string {
+	return slices.Sorted(maps.Keys(cfg))
 }
 
 // fleetSelectorLabels strips the "selector." prefix from a fleet's config
@@ -1136,8 +1178,7 @@ func orDash(s string) string {
 	return s
 }
 
-// projectSettingsPathTpl builds the redirect_to target so a reused settings
-// POST (e.g. invite limits) returns to the project settings page.
+// projectSettingsPathTpl builds the project settings page path.
 func projectSettingsPathTpl(tenantID, projectID int64) string {
 	return pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) + "/settings"

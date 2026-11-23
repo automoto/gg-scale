@@ -32,38 +32,56 @@ const (
 	managementTokenDefaultDays   = 30
 	managementTokenExpiryWarning = 7 * 24 * time.Hour
 	managementTokenLabelMax      = 64
-	presetReadWrite              = "read_write"
-	presetCustom                 = "custom"
+
+	accessNone  = "none"
+	accessRead  = "read"
+	accessWrite = "write"
+
+	fillReadOnly  = "read_only"
+	fillReadWrite = "read_write"
+
+	reasonRole   = "Your role does not allow this."
+	reasonGrant  = "Not enabled for this Account Tenant."
+	reasonSwitch = "Turned off on this server."
 )
 
 var errManagementTokenLimit = errors.New("control panel: management token limit reached")
 
 // ManagementTokensView renders a project's management token page.
 type ManagementTokensView struct {
-	UserEmail       string
-	CSRFToken       string
-	TenantID        int64
-	ProjectID       int64
-	Tokens          []ManagementTokenRowView
-	GrantableScopes []string
-	MaxDays         int
-	DefaultDays     int
-	// NewToken is the token value, shown once right after creation.
-	NewToken    string
-	Message     string
-	Error       string
-	FieldErrors map[string]string
-	Label       string
-	Days        string
+	UserEmail   string
+	CSRFToken   string
+	TenantID    int64
+	ProjectID   int64
+	Tokens      []ManagementTokenRowView
+	Access      []AccessRowView
+	Risky       []RiskyBoxView
+	MaxDays     int
+	DefaultDays int
+	// RiskyNotice names the risky boxes that a link checked. It is empty when
+	// none is checked.
+	RiskyNotice string
+	// NewToken is the token value, shown once right after creation, with
+	// its access in words.
+	NewToken       string
+	NewTokenAccess string
+	Message        string
+	Error          string
+	FieldErrors    map[string]string
+	Label          string
+	Days           string
 }
 
 // ManagementTokenRowView is one token in the list. Token values are never
 // stored.
 type ManagementTokenRowView struct {
-	ID           int64
-	Label        string
-	Hint         string
-	Scopes       []string
+	ID     int64
+	Label  string
+	Hint   string
+	Access string
+	Risky  bool
+	// LikeURL fills the form with the same access.
+	LikeURL      string
 	CreatorEmail string
 	ExpiresAt    time.Time
 	ExpiresSoon  bool
@@ -72,6 +90,38 @@ type ManagementTokenRowView struct {
 	// Inactive means the creator no longer passes (project, manage), so
 	// each request with the token is refused.
 	Inactive bool
+	// LostScopes counts the scopes whose pair the creator no longer passes.
+	// A scope that is inactive because the token lacks the scope it needs
+	// on each request is named in Access instead.
+	LostScopes int
+}
+
+// AccessRowView is one row of the access table in the new token form.
+type AccessRowView struct {
+	Name     string
+	Label    string
+	HasWrite bool
+	CanRead  bool
+	CanWrite bool
+	// Reason says why an option of the row is disabled.
+	Reason string
+	// Selected is the checked option: none, read, or write.
+	Selected string
+
+	read   string
+	writes []string
+}
+
+// RiskyBoxView is one opt-in scope in the risky group of the form.
+type RiskyBoxView struct {
+	Scope string
+	Label string
+	// Needs says which other access the box needs, for example "Needs read
+	// access to Players". It is empty when the box needs none.
+	Needs string
+	// Reason says why the box is disabled.
+	Reason  string
+	Checked bool
 }
 
 func managementTokensPath(tenantID, projectID int64) string {
@@ -103,20 +153,300 @@ func (h *Handler) managementMaxTokens() int64 {
 	return 20
 }
 
-// grantableManagementScopes returns the write scopes whose Casbin pair the
-// user passes now. A token can never get a scope its creator could not use.
+// grantableManagementScopes returns the scopes whose Casbin pair the user
+// passes now. A token can never get a scope its creator could not use.
 func (h *Handler) grantableManagementScopes(userID, tenantID, projectID int64) ([]string, error) {
-	var out []string
-	for _, s := range managementtoken.WriteScopes {
-		ok, err := h.rbac.CanControlPanel(userID, tenantID, s.Pair(projectID), s.Action)
+	return managementtoken.AllowedScopes(h.rbac, userID, tenantID, projectID, managementtoken.ScopeNames())
+}
+
+// featureGate returns why a row that needs feature is disabled, or "".
+func (h *Handler) featureGate(ctx context.Context, tenantID, projectID int64, feature rbac.Feature) (string, error) {
+	if feature == "" {
+		return "", nil
+	}
+	if on, known := h.featureSwitch(string(feature)); known && !on {
+		return reasonSwitch, nil
+	}
+	ok, err := h.rbac.FeatureEnabled(ctx, tenantID, projectID, feature)
+	if err != nil || ok {
+		return "", err
+	}
+	return reasonGrant, nil
+}
+
+// managementAccess returns the access table and the risky group with the
+// options that the user can give now.
+func (h *Handler) managementAccess(ctx context.Context, userID, tenantID, projectID int64) ([]AccessRowView, []RiskyBoxView, error) {
+	grantable, err := h.grantableManagementScopes(userID, tenantID, projectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	gates := map[string]string{}
+	for _, res := range managementtoken.Resources {
+		gates[res.Name], err = h.featureGate(ctx, tenantID, projectID, res.Feature)
 		if err != nil {
-			return nil, err
-		}
-		if ok {
-			out = append(out, s.Scope)
+			return nil, nil, err
 		}
 	}
-	return out, nil
+	rows, risky := accessOptions(grantable, gates)
+	return rows, risky, nil
+}
+
+// accessOptions builds the form options from the grantable scopes and the
+// gate reason of each row.
+func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView, []RiskyBoxView) {
+	var rows []AccessRowView
+	for _, res := range managementtoken.Resources {
+		writes := res.WriteScopes()
+		row := AccessRowView{Name: res.Name, Label: res.Label, HasWrite: len(writes) > 0, read: res.Read, Reason: gates[res.Name]}
+		if row.Reason != "" {
+			rows = append(rows, row)
+			continue
+		}
+		row.CanRead = slices.Contains(grantable, res.Read)
+		for _, s := range writes {
+			if slices.Contains(grantable, s) {
+				row.writes = append(row.writes, s)
+			}
+		}
+		row.CanWrite = row.CanRead && len(row.writes) > 0
+		if !row.CanRead || row.HasWrite && !row.CanWrite {
+			row.Reason = reasonRole
+		}
+		rows = append(rows, row)
+	}
+	var risky []RiskyBoxView
+	for _, s := range managementtoken.Scopes {
+		if s.Class != managementtoken.ClassRisky {
+			continue
+		}
+		box := RiskyBoxView{Scope: s.Scope, Label: s.Label, Needs: needsText(s), Reason: gates[s.Resource]}
+		if box.Reason == "" && !slices.Contains(grantable, s.Scope) {
+			box.Reason = reasonRole
+		}
+		risky = append(risky, box)
+	}
+	return rows, risky
+}
+
+// needsText returns "Needs <access>" for the scopes that a risky scope
+// needs, or "" when it needs none.
+func needsText(sp managementtoken.ScopePair) string {
+	var access []string
+	for _, scope := range []string{sp.Needs, sp.NeedsOnRequest} {
+		if scope != "" {
+			access = append(access, accessText(scope))
+		}
+	}
+	if len(access) == 0 {
+		return ""
+	}
+	return "Needs " + strings.Join(access, " and ")
+}
+
+// accessText names the access that a needed scope gives: "read access to
+// <row>" for the read scope of a row, or "access to <noun>" for a risky
+// scope.
+func accessText(scope string) string {
+	if sp, _ := managementtoken.Scope(scope); sp.Noun != "" {
+		return "access to " + sp.Noun
+	}
+	res := managementtoken.Resources[slices.IndexFunc(managementtoken.Resources, func(r managementtoken.Resource) bool { return r.Read == scope })]
+	if res.Noun != "" {
+		return "read access to " + res.Noun
+	}
+	return "read access to " + res.Label
+}
+
+// riskyNotice joins the labels of the risky boxes that are checked.
+func riskyNotice(risky []RiskyBoxView) string {
+	var labels []string
+	for _, b := range risky {
+		if b.Checked {
+			labels = append(labels, b.Label)
+		}
+	}
+	return strings.Join(labels, " ")
+}
+
+// missingDependency returns a message for the first risky scope in scopes
+// whose needed scope is not in scopes, or "". This is a normal form mistake,
+// so the page shows it as a form error.
+func missingDependency(scopes []string) string {
+	for _, v := range scopes {
+		sp, _ := managementtoken.Scope(v)
+		for _, need := range []string{sp.Needs, sp.NeedsOnRequest} {
+			if need != "" && !slices.Contains(scopes, need) {
+				return sp.Label + " Needs " + accessText(need) + ". Give that access or uncheck the box."
+			}
+		}
+	}
+	return ""
+}
+
+// scopesFromAccessForm turns the access_<resource> and risky form fields
+// into scopes. It refuses any option that the form shows disabled or does
+// not have. An absent row field gives no access.
+func scopesFromAccessForm(form url.Values, rows []AccessRowView, risky []RiskyBoxView) ([]string, error) {
+	scopes := []string{}
+	for _, row := range rows {
+		switch v := form.Get("access_" + row.Name); {
+		case v == "" || v == accessNone:
+		case v == accessRead && row.CanRead:
+			scopes = append(scopes, row.read)
+		case v == accessWrite && row.CanWrite:
+			scopes = append(scopes, row.read)
+			scopes = append(scopes, row.writes...)
+		default:
+			return nil, fmt.Errorf("you cannot give %s access to %s", strconv.Quote(v), row.Label)
+		}
+	}
+	for _, v := range form["risky"] {
+		i := slices.IndexFunc(risky, func(b RiskyBoxView) bool { return b.Scope == v })
+		if i < 0 || risky[i].Reason != "" {
+			return nil, fmt.Errorf("you cannot give the scope %s", strconv.Quote(v))
+		}
+		if !slices.Contains(scopes, v) {
+			scopes = append(scopes, v)
+		}
+	}
+	return scopes, nil
+}
+
+// fillAccess selects the form options from q: a Quick fill, or the
+// access_<resource> and risky values of a "New token like this" link or of
+// a refused form. "Read" is the default. A disabled option steps down to
+// the next one that the user can give. Quick fill never checks a risky box.
+func fillAccess(q url.Values, rows []AccessRowView, risky []RiskyBoxView) {
+	fill := q.Get("fill")
+	for i := range rows {
+		want := q.Get("access_" + rows[i].Name)
+		switch fill {
+		case fillReadOnly:
+			want = accessRead
+		case fillReadWrite:
+			want = accessWrite
+		}
+		switch {
+		case want == accessWrite && rows[i].CanWrite:
+			rows[i].Selected = accessWrite
+		case want != accessNone && rows[i].CanRead:
+			rows[i].Selected = accessRead
+		default:
+			rows[i].Selected = accessNone
+		}
+	}
+	if fill != "" {
+		return
+	}
+	for i := range risky {
+		risky[i].Checked = risky[i].Reason == "" && slices.Contains(q["risky"], risky[i].Scope)
+	}
+}
+
+// tokenAccessLevel returns the option of res that scopes match: write only
+// when they hold the read scope and every write scope of the row.
+func tokenAccessLevel(scopes []string, res managementtoken.Resource) string {
+	if !slices.Contains(scopes, res.Read) {
+		return accessNone
+	}
+	writes := res.WriteScopes()
+	if len(writes) > 0 && !slices.ContainsFunc(writes, func(s string) bool { return !slices.Contains(scopes, s) }) {
+		return accessWrite
+	}
+	return accessRead
+}
+
+// tokenAccessValues returns the form values that give the same access as
+// scopes, or less for a row that holds only some of its write scopes.
+func tokenAccessValues(scopes []string) url.Values {
+	v := url.Values{}
+	for _, res := range managementtoken.Resources {
+		v.Set("access_"+res.Name, tokenAccessLevel(scopes, res))
+	}
+	for _, s := range scopes {
+		if sp, ok := managementtoken.Scope(s); ok && sp.Class == managementtoken.ClassRisky {
+			v.Add("risky", s)
+		}
+	}
+	return v
+}
+
+// accessWords describes scopes for people, and reports whether they hold
+// risky access. A write scope that the row option does not cover is named.
+func accessWords(scopes []string) (string, bool) {
+	var parts, risky []string
+	for _, res := range managementtoken.Resources {
+		level := tokenAccessLevel(scopes, res)
+		var words []string
+		switch level {
+		case accessWrite:
+			words = []string{"read and write"}
+		case accessRead:
+			words = []string{"read"}
+		}
+		if level != accessWrite {
+			for _, s := range res.WriteScopes() {
+				if slices.Contains(scopes, s) {
+					words = append(words, s)
+				}
+			}
+		}
+		if len(words) > 0 {
+			parts = append(parts, res.Label+": "+strings.Join(words, ", "))
+		}
+	}
+	for _, s := range scopes {
+		if sp, ok := managementtoken.Scope(s); ok && sp.Class == managementtoken.ClassRisky {
+			risky = append(risky, s)
+		}
+	}
+	if len(risky) > 0 {
+		parts = append(parts, "Risky: "+strings.Join(risky, ", "))
+	}
+	if len(parts) == 0 {
+		return "No access", false
+	}
+	return strings.Join(parts, " · "), len(risky) > 0
+}
+
+func lostScopesText(n int) string {
+	if n == 1 {
+		return "1 permission inactive: creator lost access"
+	}
+	return strconv.Itoa(n) + " permissions inactive: creator lost access"
+}
+
+// lostScopes counts the scopes whose pair the creator fails now, with the
+// same check as each request. A scope that is not in the table is skipped,
+// and so is a scope that the token cannot use because it lacks the scope
+// that it needs on each request (requestScopeText names those).
+func (h *Handler) lostScopes(creatorID, tenantID, projectID int64, scopes []string) (int, error) {
+	allowed, err := managementtoken.AllowedScopes(h.rbac, creatorID, tenantID, projectID, scopes)
+	if err != nil {
+		return 0, err
+	}
+	missing := managementtoken.MissingRequestScopes(scopes)
+	lost := 0
+	for _, name := range scopes {
+		_, known := managementtoken.Scope(name)
+		if !known || slices.Contains(allowed, name) ||
+			slices.ContainsFunc(missing, func(s managementtoken.ScopePair) bool { return s.Scope == name }) {
+			continue
+		}
+		lost++
+	}
+	return lost, nil
+}
+
+// requestScopeText names each scope of the token that each request refuses
+// because the token does not have the scope that it needs, or "".
+func requestScopeText(scopes []string) string {
+	var parts []string
+	for _, sp := range managementtoken.MissingRequestScopes(scopes) {
+		parts = append(parts, sp.Scope+" inactive: the token does not have "+sp.NeedsOnRequest)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {
@@ -124,16 +454,19 @@ func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := h.managementTokensView(r.Context(), tenantID, projectID)
+	view, err := h.managementTokensView(r.Context(), tenantID, projectID, r.URL.Query())
 	if err != nil {
 		webutil.InternalError(w, "management tokens: load", err)
 		return
 	}
-	view.Message = r.URL.Query().Get("flash")
+	view.Message = flashMessage(r)
+	view.RiskyNotice = riskyNotice(view.Risky)
 	webutil.Render(r, w, ManagementTokensPage(view))
 }
 
-func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID int64) (ManagementTokensView, error) {
+// managementTokensView loads the page. fill selects the form options, as
+// fillAccess reads them, and gives the label.
+func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID int64, fill url.Values) (ManagementTokensView, error) {
 	session, _ := sessionFromContext(ctx)
 	view := ManagementTokensView{
 		UserEmail:   session.User.Email,
@@ -143,11 +476,14 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 		MaxDays:     h.managementMaxDays(),
 		DefaultDays: managementTokenDefaultDays,
 		Days:        strconv.Itoa(managementTokenDefaultDays),
+		Label:       fill.Get("label"),
 	}
 	var err error
-	if view.GrantableScopes, err = h.grantableManagementScopes(session.User.ID, tenantID, projectID); err != nil {
+	view.Access, view.Risky, err = h.managementAccess(ctx, session.User.ID, tenantID, projectID)
+	if err != nil {
 		return view, err
 	}
+	fillAccess(fill, view.Access, view.Risky)
 	var rows []sqlcgen.ListManagementTokensForProjectRow
 	tctx := db.WithTenant(ctx, tenantID)
 	err = h.pool.Q(tctx, func(tx pgx.Tx) error {
@@ -164,16 +500,27 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 		if err != nil {
 			return view, err
 		}
+		lost, err := h.lostScopes(row.CreatedByUserID, tenantID, projectID, row.Scopes)
+		if err != nil {
+			return view, err
+		}
+		like := tokenAccessValues(row.Scopes)
+		like.Set("label", row.Label)
 		v := ManagementTokenRowView{
 			ID:           row.ID,
 			Label:        row.Label,
 			Hint:         row.TokenHint,
-			Scopes:       row.Scopes,
+			LikeURL:      managementTokensPath(tenantID, projectID) + "?" + like.Encode(),
 			CreatorEmail: row.CreatorEmail,
 			ExpiresAt:    row.ExpiresAt.Time,
 			Expired:      !row.ExpiresAt.Time.After(now),
 			ExpiresSoon:  row.ExpiresAt.Time.Sub(now) <= managementTokenExpiryWarning,
 			Inactive:     !active,
+			LostScopes:   lost,
+		}
+		v.Access, v.Risky = accessWords(row.Scopes)
+		if text := requestScopeText(row.Scopes); text != "" {
+			v.Access += " · " + text
 		}
 		if row.LastUsedAt.Valid {
 			v.LastUsedAt = &row.LastUsedAt.Time
@@ -188,7 +535,7 @@ func validManagementTokenLabel(label string) bool {
 		return false
 	}
 	for _, r := range label {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || webutil.IsBidiControl(r) {
 			return false
 		}
 	}
@@ -204,38 +551,24 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
-	grantable, err := h.grantableManagementScopes(session.User.ID, tenantID, projectID)
+	rows, risky, err := h.managementAccess(r.Context(), session.User.ID, tenantID, projectID)
 	if err != nil {
 		webutil.InternalError(w, "management tokens: scopes", err)
 		return
 	}
-	// Check the scopes again on the POST: the form offered only grantable
-	// ones, but a crafted request can send any value.
-	scopes := []string{}
-	for _, s := range r.Form["scopes"] {
-		if !slices.Contains(grantable, s) {
-			http.Error(w, "forbidden: you cannot grant the scope "+strconv.Quote(s), http.StatusForbidden)
-			return
-		}
-		if !slices.Contains(scopes, s) {
-			scopes = append(scopes, s)
-		}
-	}
-	// Only the custom preset uses the checked scopes. Any other value,
-	// "read_only" included, gives a token with no write scopes.
-	switch r.Form.Get("preset") {
-	case presetReadWrite:
-		scopes = grantable
-	case presetCustom:
-	default:
-		scopes = []string{}
+	// Check each option again on the POST: the form disables the options
+	// that the user cannot give, but a crafted request can send any value.
+	scopes, err := scopesFromAccessForm(r.Form, rows, risky)
+	if err != nil {
+		http.Error(w, "forbidden: "+err.Error(), http.StatusForbidden)
+		return
 	}
 
 	label := strings.TrimSpace(r.Form.Get("label"))
 	daysRaw := strings.TrimSpace(r.Form.Get("days"))
 	fieldErrs := map[string]string{}
 	if !validManagementTokenLabel(label) {
-		fieldErrs["label"] = fmt.Sprintf("Label must be 1–%d characters and cannot contain control characters.", managementTokenLabelMax)
+		fieldErrs["label"] = fmt.Sprintf("Label must be 1–%d characters and cannot contain control or text direction characters.", managementTokenLabelMax)
 	}
 	days := managementTokenDefaultDays
 	if daysRaw != "" {
@@ -246,6 +579,10 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 	}
 	if len(fieldErrs) > 0 {
 		h.renderManagementTokensError(w, r, tenantID, projectID, http.StatusUnprocessableEntity, "", fieldErrs, label, daysRaw)
+		return
+	}
+	if msg := missingDependency(scopes); msg != "" {
+		h.renderManagementTokensError(w, r, tenantID, projectID, http.StatusUnprocessableEntity, msg, nil, label, daysRaw)
 		return
 	}
 
@@ -269,19 +606,21 @@ func (h *Handler) managementTokenCreateHandler(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	view, err := h.managementTokensView(r.Context(), tenantID, projectID)
+	view, err := h.managementTokensView(r.Context(), tenantID, projectID, nil)
 	if err != nil {
 		webutil.InternalError(w, "management tokens: load", err)
 		return
 	}
 	view.NewToken = token
-	// The page holds the token value: never cache it.
-	w.Header().Set("Cache-Control", "no-store")
+	view.NewTokenAccess, _ = accessWords(scopes)
+	webutil.NoStore(w)
 	webutil.Render(r, w, ManagementTokensPage(view))
 }
 
+// renderManagementTokensError renders the page with the posted form values
+// filled in again.
 func (h *Handler) renderManagementTokensError(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, status int, msg string, fieldErrs map[string]string, label, days string) {
-	view, err := h.managementTokensView(r.Context(), tenantID, projectID)
+	view, err := h.managementTokensView(r.Context(), tenantID, projectID, r.Form)
 	if err != nil {
 		webutil.InternalError(w, "management tokens: load", err)
 		return
@@ -398,5 +737,5 @@ func (h *Handler) managementTokenRevokeHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, managementTokensPath(tenantID, projectID)+queryFlash+url.QueryEscape("Management token revoked."), http.StatusSeeOther)
+	redirectFlash(w, r, managementTokensPath(tenantID, projectID), flashManagementTokenRevoked)
 }

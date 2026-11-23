@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"unicode"
+	"time"
 	"unicode/utf8"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/projectadmin"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
@@ -219,15 +221,41 @@ type projectCreatedAPIKey struct {
 	Note     string         `json:"note"`
 }
 
-func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
-	label := in.Body.Label
+// checkProjectAPIKeyLabel answers 422 unless label is 1 to 64 valid
+// characters with no control character.
+func checkProjectAPIKeyLabel(label string) error {
 	if label == "" || !utf8.ValidString(label) || utf8.RuneCountInString(label) > projectAPIKeyLabelMax {
-		return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
+		return huma.Error422UnprocessableEntity(fmt.Sprintf("label must be 1 to %d characters", projectAPIKeyLabelMax))
 	}
-	for _, r := range label {
-		if unicode.IsControl(r) {
-			return projectCreatedAPIKey{}, huma.Error422UnprocessableEntity("label must not contain control characters")
-		}
+	if err := projectadmin.ValidateAPIKeyLabel(label); err != nil {
+		return huma.Error422UnprocessableEntity(err.Error())
+	}
+	return nil
+}
+
+// Notes of the create result, by key type.
+const (
+	publishableKeyNote = "A publishable key is made to ship in a game client. The value is shown only now. " +
+		"Revoke it in the dashboard if it is not needed."
+	secretKeyNote = "A secret key is for game servers and back-end tools only. Never ship it in a game client. " +
+		"The value is shown only now: store it in a secret store. Revoke it at once if it leaks."
+)
+
+func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
+	return createProjectAPIKey(ctx, d, p, in.Body, tenant.KeyTypePublishable, publishableKeyNote)
+}
+
+func createSecretAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *projectCreateAPIKeyInput) (projectCreatedAPIKey, error) {
+	return createProjectAPIKey(ctx, d, p, in.Body, tenant.KeyTypeSecret, secretKeyNote)
+}
+
+// createProjectAPIKey makes a key of keyType for the token's project, with
+// the label rules, the feature rules, and the key limit of every token key
+// create.
+func createProjectAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, body projectCreateAPIKeyBody, keyType tenant.KeyType, note string) (projectCreatedAPIKey, error) {
+	label := body.Label
+	if err := checkProjectAPIKeyLabel(label); err != nil {
+		return projectCreatedAPIKey{}, err
 	}
 	// The token label goes into the key label, so a person can find the
 	// key in the dashboard and revoke it.
@@ -236,22 +264,15 @@ func createAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *
 	id, value, err := projectadmin.CreateAPIKey(ctx, d.Pool, d.RBAC, p.TenantID, projectadmin.NewAPIKey{
 		ProjectID: &projectID,
 		Label:     label,
-		Type:      tenant.KeyTypePublishable,
-		Scopes:    in.Body.Scopes,
+		Type:      keyType,
+		Scopes:    body.Scopes,
 		MaxActive: d.ManagementMaxProjectAPIKeys,
 		Switches:  projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled},
 	}, projectActor(p))
 	if err != nil {
 		return projectCreatedAPIKey{}, projectWriteError(err)
 	}
-	return projectCreatedAPIKey{
-		APIKeyID: id,
-		APIKey:   value,
-		KeyType:  tenant.KeyTypePublishable,
-		Label:    label,
-		Note: "A publishable key is made to ship in a game client. The value is shown only now. " +
-			"Revoke it in the dashboard if it is not needed.",
-	}, nil
+	return projectCreatedAPIKey{APIKeyID: id, APIKey: value, KeyType: keyType, Label: label, Note: note}, nil
 }
 
 type projectSetAllowedOriginsBody struct {
@@ -269,6 +290,9 @@ type projectAllowedOrigins struct {
 }
 
 func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetAllowedOriginsInput) (projectAllowedOrigins, error) {
+	if in.Body.Origins == nil {
+		return projectAllowedOrigins{}, huma.Error422UnprocessableEntity("origins must be a list; send [] to remove all origins")
+	}
 	old, err := projectadmin.SetAllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID, in.Body.Origins, d.CORSMaxProjectOrigins, projectActor(p))
 	if err != nil {
 		return projectAllowedOrigins{}, projectWriteError(err)
@@ -283,4 +307,172 @@ func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal,
 		Note: "To undo, call set_allowed_origins with old_origins. Each server uses the new list within " +
 			projectadmin.OriginCacheTTL.String() + ".",
 	}, nil
+}
+
+// projectKeyScope limits a key change to live keys of the token's project.
+func projectKeyScope(p managementtoken.Principal) projectadmin.KeyScope {
+	return projectadmin.KeyScope{ProjectID: &p.ProjectID, LiveOnly: true}
+}
+
+// ProjectAPIKeyPath is exported because huma reads an embedded struct only when its type is exported.
+type ProjectAPIKeyPath struct {
+	APIKeyID int64 `path:"api_key_id" doc:"API key ID." example:"12"`
+}
+
+type projectUpdateAPIKeyLabelInput struct {
+	ProjectAPIKeyPath
+	Body struct {
+		Label string `json:"label" doc:"1 to 64 characters." example:"web build"`
+	}
+}
+
+type projectAPIKeyUpdated struct {
+	Updated bool `json:"updated"`
+}
+
+func updateAPIKeyLabel(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyLabelInput) (projectAPIKeyUpdated, error) {
+	if err := checkProjectAPIKeyLabel(in.Body.Label); err != nil {
+		return projectAPIKeyUpdated{}, err
+	}
+	if err := projectadmin.UpdateAPIKeyLabel(ctx, d.Pool, d.RBAC, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Label, projectActor(p)); err != nil {
+		return projectAPIKeyUpdated{}, projectWriteError(err)
+	}
+	return projectAPIKeyUpdated{Updated: true}, nil
+}
+
+type projectUpdateAPIKeyFeaturesInput struct {
+	ProjectAPIKeyPath
+	Body struct {
+		Scopes []string `json:"scopes" doc:"The full list of feature scopes: matchmaker, fleet, p2p_relay. Scopes not listed are removed." example:"[\"matchmaker\"]"`
+	}
+}
+
+func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Principal, in *projectUpdateAPIKeyFeaturesInput) (projectAPIKeyUpdated, error) {
+	if in.Body.Scopes == nil {
+		return projectAPIKeyUpdated{}, huma.Error422UnprocessableEntity("scopes must be a list; send [] to remove all features")
+	}
+	sw := projectadmin.KeySwitches{FleetEnabled: d.ControlPanel.FleetEnabled, RelayEnabled: d.ControlPanel.RelayEnabled}
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, d.Cache, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
+		return projectAPIKeyUpdated{}, projectWriteError(err)
+	}
+	return projectAPIKeyUpdated{Updated: true}, nil
+}
+
+type projectAPIKeyRevoked struct {
+	Revoked bool `json:"revoked"`
+}
+
+func revokeAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectAPIKeyPath) (projectAPIKeyRevoked, error) {
+	if err := projectadmin.RevokeAPIKey(ctx, d.Pool, d.RBAC, d.Cache, p.TenantID, projectKeyScope(p), in.APIKeyID, projectActor(p)); err != nil {
+		return projectAPIKeyRevoked{}, projectWriteError(err)
+	}
+	return projectAPIKeyRevoked{Revoked: true}, nil
+}
+
+type projectSetPlayerDisabledInput struct {
+	ProjectPlayerPath
+	Body struct {
+		Disabled bool `json:"disabled" doc:"true disables the player in this Game Project; false enables it again."`
+	}
+}
+
+// playerWriteResult reads the player again after a write. A write error is
+// mapped first, so a player of another project is 404 before any change.
+func playerWriteResult(ctx context.Context, d Deps, p managementtoken.Principal, playerID int64, err error) (projectPlayer, error) {
+	if err != nil {
+		return projectPlayer{}, projectWriteError(err)
+	}
+	return readPlayer(ctx, d, p, playerID)
+}
+
+func setPlayerDisabled(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetPlayerDisabledInput) (projectPlayer, error) {
+	err := projectadmin.SetPlayerDisabled(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, in.Body.Disabled, time.Now(), projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
+}
+
+func requestProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	_, err := projectadmin.RequestPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID,
+		deleteGrace(d), projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
+}
+
+func cancelProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
+	err := projectadmin.CancelPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, projectActor(p))
+	return playerWriteResult(ctx, d, p, in.PlayerID, err)
+}
+
+type projectSetSteamAuthBody struct {
+	AppID     string `json:"app_id" doc:"The Steam App ID, a decimal number." example:"480"`
+	WebAPIKey string `json:"web_api_key,omitempty" doc:"The 32-character publisher Web API key. Input only: it is never returned. Leave it out to keep the stored key."`
+}
+
+type projectSetSteamAuthInput struct {
+	Body projectSetSteamAuthBody
+}
+
+func setSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetSteamAuthInput) (projectSteamAuth, error) {
+	if err := projectadmin.SetSteamAuth(ctx, d.Pool, d.CredentialCipher, p.TenantID, p.ProjectID, in.Body.AppID, in.Body.WebAPIKey, projectActor(p)); err != nil {
+		return projectSteamAuth{}, projectWriteError(err)
+	}
+	return getSteamAuth(ctx, d, p, nil)
+}
+
+func clearSteamAuth(ctx context.Context, d Deps, p managementtoken.Principal, _ *struct{}) (projectSteamAuth, error) {
+	if err := projectadmin.ClearSteamAuth(ctx, d.Pool, p.TenantID, p.ProjectID, projectActor(p)); err != nil {
+		return projectSteamAuth{}, projectWriteError(err)
+	}
+	return getSteamAuth(ctx, d, p, nil)
+}
+
+// newPlayerInviter builds the invite sender of the token routes. It uses the
+// same limiter, overrides, and mail settings as the dashboard, so both share
+// one invite throttle.
+func newPlayerInviter(d Deps, reg prometheus.Registerer) *projectadmin.PlayerInviter {
+	inviter := &projectadmin.PlayerInviter{
+		Pool: d.Pool, Mailer: d.Mailer, MailFrom: d.MailFrom, BaseURL: d.ControlPanel.BaseURL,
+		SigningKey: d.EmailVerifySigningKey, Metrics: d.Metrics,
+	}
+	if d.Limiter != nil {
+		inviter.Throttle = ratelimit.NewInviteThrottle(d.Limiter, ratelimit.DefaultInviteLimits, reg).WithOverrides(d.RateLimitOverrides)
+	}
+	return inviter
+}
+
+type projectInviteBody struct {
+	Email string `json:"email" doc:"The address that gets the invite email." example:"player@example.com"`
+}
+
+type projectInvitePlayerInput struct {
+	Body projectInviteBody
+}
+
+type projectLinkPlayerInput struct {
+	ProjectPlayerPath
+	Body projectInviteBody
+}
+
+// projectPlayerInvite is the result of an invite or a link. The scope of
+// both operations needs players:pii, so the result holds the address.
+type projectPlayerInvite struct {
+	InviteID  int64     `json:"invite_id" example:"12"`
+	PlayerID  *int64    `json:"player_id,omitempty" doc:"The player that the invite links. Absent for a plain invite." example:"42"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Email     string    `json:"email" doc:"The address that was given as input, in lower case." example:"player@example.com"`
+}
+
+// invite sends an invite, or a link invite when playerID is set.
+func invite(ctx context.Context, d Deps, p managementtoken.Principal, email string, playerID *int64) (projectPlayerInvite, error) {
+	res, err := d.playerInviter.Invite(ctx, p.TenantID, p.ProjectID, email, playerID, time.Now(), projectActor(p))
+	if err != nil {
+		return projectPlayerInvite{}, projectWriteError(err)
+	}
+	return projectPlayerInvite{InviteID: res.ID, PlayerID: playerID, ExpiresAt: res.ExpiresAt, Email: res.Email}, nil
+}
+
+func invitePlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectInvitePlayerInput) (projectPlayerInvite, error) {
+	return invite(ctx, d, p, in.Body.Email, nil)
+}
+
+func linkPlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectLinkPlayerInput) (projectPlayerInvite, error) {
+	return invite(ctx, d, p, in.Body.Email, &in.PlayerID)
 }

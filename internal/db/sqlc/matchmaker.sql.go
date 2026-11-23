@@ -940,6 +940,88 @@ func (q *Queries) ListMatchmakerBucketsForProject(ctx context.Context, projectID
 	return items, nil
 }
 
+const listMatchmakerBucketsPageForProject = `-- name: ListMatchmakerBucketsPageForProject :many
+SELECT mode,
+       region,
+       game_mode,
+       status::text AS status,
+       count(*)::bigint AS ticket_count,
+       min(created_at)::timestamptz AS oldest,
+       min(min_count)::int AS min_count_low,
+       max(max_count)::int AS max_count_high
+FROM matchmaking_tickets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+GROUP BY mode, region, game_mode, status
+HAVING NOT $2::boolean
+    OR (mode, region, game_mode, status::text)
+       > ($3::text, $4::text, $5::text, $6::text)
+ORDER BY mode, region, game_mode, status
+LIMIT $7
+`
+
+type ListMatchmakerBucketsPageForProjectParams struct {
+	ProjectID     int64
+	HasAfter      bool
+	AfterMode     string
+	AfterRegion   string
+	AfterGameMode string
+	AfterStatus   string
+	RowLimit      int32
+}
+
+type ListMatchmakerBucketsPageForProjectRow struct {
+	Mode         string
+	Region       string
+	GameMode     string
+	Status       string
+	TicketCount  int64
+	Oldest       pgtype.Timestamptz
+	MinCountLow  int32
+	MaxCountHigh int32
+}
+
+// Same buckets as ListMatchmakerBucketsForProject, one page at a time.
+// Keyset-paginated on the bucket key (mode, region, game_mode, status).
+// has_after false starts at the first bucket. The caller reads one row more
+// than the page.
+func (q *Queries) ListMatchmakerBucketsPageForProject(ctx context.Context, arg ListMatchmakerBucketsPageForProjectParams) ([]ListMatchmakerBucketsPageForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listMatchmakerBucketsPageForProject,
+		arg.ProjectID,
+		arg.HasAfter,
+		arg.AfterMode,
+		arg.AfterRegion,
+		arg.AfterGameMode,
+		arg.AfterStatus,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMatchmakerBucketsPageForProjectRow
+	for rows.Next() {
+		var i ListMatchmakerBucketsPageForProjectRow
+		if err := rows.Scan(
+			&i.Mode,
+			&i.Region,
+			&i.GameMode,
+			&i.Status,
+			&i.TicketCount,
+			&i.Oldest,
+			&i.MinCountLow,
+			&i.MaxCountHigh,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listReadyMatchmakerBuckets = `-- name: ListReadyMatchmakerBuckets :many
 SELECT tenant_id, project_id, mode, fleet_id,
        (CASE WHEN mode = 'fleet_allocation' THEN region ELSE '' END)::text AS region,

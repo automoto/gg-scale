@@ -172,3 +172,33 @@ func TestChangeRequestDecisionEmail_uses_account_tenant_name(t *testing.T) {
 	assert.Equal(t, "Your ggscale change request was approved", subject)
 	assert.Contains(t, body, "applied to your Account Tenant")
 }
+
+func TestAgonesGrantWarning(t *testing.T) {
+	cases := []struct {
+		name      string
+		kind      string
+		target    string
+		isolation bool
+		want      bool
+	}{
+		{"should_warn_for_the_agones_grant_when_isolation_is_off", changeKindFeature, "fleet_agones_backend", false, true},
+		{"should_not_warn_when_isolation_is_on", changeKindFeature, "fleet_agones_backend", true, false},
+		{"should_not_warn_for_another_feature", changeKindFeature, "dedicated_servers", false, false},
+		{"should_not_warn_for_a_tier_upgrade", changeKindTierUpgrade, "tier_1", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := agonesGrantWarning(PendingChangeRequestView{Kind: tc.kind, Target: tc.target}, tc.isolation)
+
+			assert.Equal(t, tc.want, got != "")
+		})
+	}
+}
+
+func TestChangeRequestsPage_should_show_the_warning_of_a_request(t *testing.T) {
+	html := renderToString(t, ChangeRequestsPage(ChangeRequestsView{
+		Requests: []PendingChangeRequestView{{ID: 1, Kind: changeKindFeature, Target: "fleet_agones_backend", Warning: agonesIsolationOffWarning}},
+	}))
+
+	assert.Contains(t, html, "Agones project isolation is off.")
+}

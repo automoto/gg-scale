@@ -434,6 +434,8 @@ func TestLoad_should_read_management_limits(t *testing.T) {
 		{"MANAGEMENT_MAX_PROJECT_TOKENS", func(c *config.Config) int { return c.ManagementMaxProjectTokens }},
 		{"MANAGEMENT_MAX_PROJECT_API_KEYS", func(c *config.Config) int { return c.ManagementMaxProjectAPIKeys }},
 		{"LEADERBOARD_MAX_PER_PROJECT", func(c *config.Config) int { return c.LeaderboardMaxPerProject }},
+		{"FLEET_ALLOCATION_MAX_CAPACITY", func(c *config.Config) int { return c.FleetAllocationMaxCapacity }},
+		{"FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT", func(c *config.Config) int { return c.FleetMaxLiveAllocationsPerProject }},
 	}
 	for _, c := range cases {
 		t.Run(c.envVar, func(t *testing.T) {
@@ -577,7 +579,7 @@ func clearEnv(t *testing.T) {
 		"CONTROL_PANEL_DISABLED", "CONTROL_PANEL_BOOTSTRAP_TOKEN_FILE", "CONTROL_PANEL_COOKIE_SECURE",
 		"RELAY_URLS", "RELAY_PROBE_TOKEN", "RELAY_PROBE_TOKEN_FILE", "PLATFORM_ADMIN_TOKEN", "PLATFORM_ADMIN_TOKEN_FILE",
 		"FEATURE_MANAGEMENT_API_ENABLED", "MANAGEMENT_TOKEN_MAX_EXPIRY_DAYS", "MANAGEMENT_MAX_PROJECT_TOKENS",
-		"LEADERBOARD_MAX_PER_PROJECT",
+		"LEADERBOARD_MAX_PER_PROJECT", "FLEET_ALLOCATION_MAX_CAPACITY", "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT",
 	} {
 		t.Setenv(k, "")
 	}
@@ -601,4 +603,76 @@ func TestLoad_should_refuse_leaderboard_max_per_project_of_zero(t *testing.T) {
 	_, err := config.Load()
 
 	assert.ErrorContains(t, err, "LEADERBOARD_MAX_PER_PROJECT")
+}
+
+func TestLoad_should_default_fleet_allocation_max_capacity_to_100(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 100, cfg.FleetAllocationMaxCapacity)
+}
+
+func TestLoad_should_refuse_fleet_allocation_max_capacity_of_zero(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("FLEET_ALLOCATION_MAX_CAPACITY", "0")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "FLEET_ALLOCATION_MAX_CAPACITY")
+}
+
+func TestLoad_should_default_fleet_max_live_allocations_per_project_to_100(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.Equal(t, 100, cfg.FleetMaxLiveAllocationsPerProject)
+}
+
+func TestLoad_should_refuse_fleet_max_live_allocations_per_project_of_zero(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT", "0")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")
+}
+
+func TestLoad_should_default_agones_project_isolation_to_off(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.AgonesProjectIsolation)
+}
+
+func TestLoad_should_read_agones_project_isolation(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.AgonesProjectIsolation)
+}
+
+func TestLoad_should_refuse_an_agones_project_isolation_that_is_not_a_bool(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "maybe")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "AGONES_PROJECT_ISOLATION")
 }

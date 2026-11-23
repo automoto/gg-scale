@@ -78,9 +78,10 @@ type Config struct {
 	// ManagementMaxProjectTokens caps active (not revoked, not expired)
 	// management tokens for each project. Default 20.
 	ManagementMaxProjectTokens int `env:"MANAGEMENT_MAX_PROJECT_TOKENS" envDefault:"20"`
-	// ManagementMaxProjectAPIKeys refuses the create_api_key tool when the
-	// project already has this many active keys (all keys, not only
-	// agent-made ones). The dashboard is not limited by it. Default 20.
+	// ManagementMaxProjectAPIKeys refuses the create_api_key and
+	// create_secret_api_key tools when the project already has this many
+	// active keys (all keys, not only agent-made ones). The dashboard is not
+	// limited by it. Default 20.
 	ManagementMaxProjectAPIKeys int `env:"MANAGEMENT_MAX_PROJECT_API_KEYS" envDefault:"20"`
 	// LeaderboardMaxPerProject caps live leaderboards in each Game Project,
 	// for the dashboard and the management API. It applies also when the
@@ -99,11 +100,24 @@ type Config struct {
 	// binaries. Default "/etc/ggscale/plugins". Only consulted when
 	// FleetBackend starts with "plugin:".
 	FleetPluginDir string `env:"FLEET_PLUGIN_DIR" envDefault:"/etc/ggscale/plugins"`
+	// FleetAllocationMaxCapacity is the largest capacity that one manual
+	// allocation (dashboard or management token) may ask for.
+	FleetAllocationMaxCapacity int `env:"FLEET_ALLOCATION_MAX_CAPACITY" envDefault:"100"`
+	// FleetMaxLiveAllocationsPerProject is the largest number of live
+	// allocations a project may have when a manual allocation (dashboard or
+	// management token) starts. Matchmaker allocations count but are not
+	// refused.
+	FleetMaxLiveAllocationsPerProject int `env:"FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT" envDefault:"100"`
 
 	// Agones fleet-backend host-wide tunables. Per-template values (fleet
 	// name, selector labels) live on the fleet template, not in env vars.
 	AgonesNamespace  string `env:"AGONES_NAMESPACE" envDefault:"default"`
 	AgonesKubeconfig string `env:"AGONES_KUBECONFIG"`
+	// AgonesProjectIsolation pins every Agones allocation to
+	// AGONES_NAMESPACE and to GameServers labeled
+	// ggscale.dev/project=<project id>. Off by default, so a single-tenant
+	// cluster works with no labels.
+	AgonesProjectIsolation bool `env:"AGONES_PROJECT_ISOLATION" envDefault:"false"`
 
 	// k3s API auth via ServiceAccount + bearer token, for deployments where
 	// ggscale-server runs outside the cluster (e.g. as a Dokku app on a
@@ -246,7 +260,8 @@ type Config struct {
 	// restored as a decrypt fallback.
 	TwoFactorEncKey string `env:"TWO_FACTOR_ENC_KEY" envFile:"true"`
 	// CredentialEncKey is an optional 32-byte hex AES key that encrypts stored
-	// provider credentials (e.g. the Steam Web API key) at rest. When empty
+	// provider credentials (the Steam Web API key and plugin fleet config
+	// values) at rest. When empty
 	// the server auto-generates and persists a key (zero-config self-host);
 	// set this to keep key material out of database backups. A removed key
 	// falls back to treating stored values as opaque, so restore the prior
@@ -268,7 +283,8 @@ type Config struct {
 	ControlPanelCookieSecure bool `env:"CONTROL_PANEL_COOKIE_SECURE" envDefault:"false"`
 	// ControlPanelBaseURL is the externally-visible origin prefixed onto magic
 	// links emitted in control panel invite emails. Empty means relative paths
-	// (fine for local dev; bad for production).
+	// (fine for local dev; bad for production). Its origin is also a trusted
+	// origin for the cross-origin check on the dashboard and player pages.
 	ControlPanelBaseURL string `env:"CONTROL_PANEL_BASE_URL"`
 	// PlayersEnabled mounts /v1/players for player-facing signup/verify/login.
 	PlayersEnabled bool `env:"PLAYERS_ENABLED" envDefault:"true"`

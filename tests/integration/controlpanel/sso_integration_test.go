@@ -165,7 +165,7 @@ func (s ssoPanel) createInvite(t *testing.T, inviterID int64, email, code string
 	_, err := s.raw.Exec(context.Background(),
 		`INSERT INTO control_panel_invitations (email, role, code_hash, expires_at, invited_by_user_id)
 		 VALUES ($1, 'platform_admin', $2, $3, $4)`,
-		email, verifycode.Hash(nil, code), time.Now().Add(time.Hour), inviterID)
+		email, verifycode.HashToken(code), time.Now().Add(time.Hour), inviterID)
 	require.NoError(t, err)
 }
 
@@ -455,7 +455,7 @@ func TestControlPanelSSO_signup_accept(t *testing.T) {
 			`INSERT INTO tenant_signup_requests
 			   (email, requested_tenant_name, final_tenant_name, project_description, status, code_hash, code_expires_at)
 			 VALUES ($1, $2, $2, 'a game', 'approved', $3, $4)`,
-			email, tenantName, verifycode.Hash(nil, code), time.Now().Add(time.Hour))
+			email, tenantName, verifycode.HashToken(code), time.Now().Add(time.Hour))
 		require.NoError(t, err)
 	}
 

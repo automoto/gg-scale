@@ -17,6 +17,9 @@ func TestValidateEmailAccepts(t *testing.T) {
 		{"  alice@example.com  ", "alice@example.com"},
 		{"alice@EXAMPLE.com", "alice@example.com"},
 		{"a+filter@b.co", "a+filter@b.co"},
+		{"a@münchen.example", "a@münchen.example"},
+		{"a@例え.jp", "a@例え.jp"},
+		{"a@1password.com", "a@1password.com"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
@@ -37,6 +40,11 @@ func TestValidateEmailRejects(t *testing.T) {
 		"alice@example.com\r\nBcc: evil@x",
 		"alice\nbob@example.com",
 		"alice\x00@example.com",
+		"a@[127.0.0.1]",
+		"a@[IPv6:::1]",
+		"a@[IPv6:2001:db8::1]",
+		"a@127.0.0.1",
+		"a@[10.0.0.1]",
 	}
 	for _, in := range tests {
 		t.Run(in, func(t *testing.T) {

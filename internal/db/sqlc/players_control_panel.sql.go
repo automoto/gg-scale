@@ -221,6 +221,87 @@ func (q *Queries) ListPlayersForProject(ctx context.Context, arg ListPlayersForP
 	return items, nil
 }
 
+const listPlayersPageForProject = `-- name: ListPlayersPageForProject :many
+SELECT
+    u.id,
+    u.external_id,
+    coalesce(u.email, '')::text AS email,
+    coalesce(a.display_name, '')::text AS display_name,
+    u.email_verified_at,
+    u.disabled_at,
+    u.delete_requested_at,
+    u.created_at
+FROM project_players u
+LEFT JOIN player_accounts a ON a.id = u.player_account_id
+WHERE u.tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND u.project_id = $1
+  AND u.deleted_at IS NULL
+  AND ($2::bigint = 0 OR u.id = $2::bigint)
+  AND ($3::text = '' OR u.external_id = $3::text)
+  AND ($4::bigint = 0 OR u.id < $4::bigint)
+ORDER BY u.id DESC
+LIMIT $5
+`
+
+type ListPlayersPageForProjectParams struct {
+	ProjectID  int64
+	PlayerID   int64
+	ExternalID string
+	BeforeID   int64
+	RowLimit   int32
+}
+
+type ListPlayersPageForProjectRow struct {
+	ID                int64
+	ExternalID        string
+	Email             string
+	DisplayName       string
+	EmailVerifiedAt   pgtype.Timestamptz
+	DisabledAt        pgtype.Timestamptz
+	DeleteRequestedAt pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+}
+
+// One page of the live players of a project for the management API. Keyset
+// paginated on id, newest first. before_id 0 starts at the newest player.
+// player_id and external_id are exact-match filters (0 and ” mean no filter).
+// The caller reads one row more than the page. display_name rides along from
+// the linked global account; the handler leaves it out without players:pii.
+func (q *Queries) ListPlayersPageForProject(ctx context.Context, arg ListPlayersPageForProjectParams) ([]ListPlayersPageForProjectRow, error) {
+	rows, err := q.db.Query(ctx, listPlayersPageForProject,
+		arg.ProjectID,
+		arg.PlayerID,
+		arg.ExternalID,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPlayersPageForProjectRow
+	for rows.Next() {
+		var i ListPlayersPageForProjectRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ExternalID,
+			&i.Email,
+			&i.DisplayName,
+			&i.EmailVerifiedAt,
+			&i.DisabledAt,
+			&i.DeleteRequestedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const requestPlayerDeleteInProject = `-- name: RequestPlayerDeleteInProject :one
 UPDATE project_players
 SET delete_requested_at = COALESCE(delete_requested_at, now()),

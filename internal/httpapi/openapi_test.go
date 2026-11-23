@@ -83,17 +83,40 @@ var expectedV1Paths = []string{
 	"/v1/players/by-code/{code}",
 	"/v1/players/{id}",
 	"/v1/presence",
+	"/v1/project/allocations",
+	"/v1/project/allocations/{allocation_id}",
+	"/v1/project/allocations/{allocation_id}/deallocate",
+	"/v1/project/allocations/{allocation_id}/events",
 	"/v1/project/allowed-origins",
 	"/v1/project/api-keys",
+	"/v1/project/api-keys/{api_key_id}/features",
+	"/v1/project/api-keys/{api_key_id}/label",
+	"/v1/project/api-keys/{api_key_id}/revoke",
+	"/v1/project/fleets",
+	"/v1/project/fleets/{fleet_id}",
+	"/v1/project/fleets/{fleet_id}/restore",
 	"/v1/project/health",
 	"/v1/project/leaderboards",
 	"/v1/project/leaderboards/{leaderboard_id}",
 	"/v1/project/leaderboards/{leaderboard_id}/restore",
 	"/v1/project/leaderboards/{leaderboard_id}/rollback",
+	"/v1/project/limits",
+	"/v1/project/limits/invites",
+	"/v1/project/limits/storage",
+	"/v1/project/matchmaking/queue",
 	"/v1/project/matchmaking/ticket-trace",
+	"/v1/project/players",
+	"/v1/project/players/invite",
+	"/v1/project/players/{player_id}",
+	"/v1/project/players/{player_id}/delete-request",
+	"/v1/project/players/{player_id}/disabled",
+	"/v1/project/players/{player_id}/link",
 	"/v1/project/remote-config",
 	"/v1/project/remote-config/rollback",
 	"/v1/project/revisions",
+	"/v1/project/secret-api-keys",
+	"/v1/project/steam-auth",
+	"/v1/project/token",
 	"/v1/profile",
 	"/v1/profile/friend-code",
 	"/v1/relay/credentials",
@@ -271,4 +294,12 @@ func TestOpenAPIDoc_verify_stays_api_key_only_and_documented(t *testing.T) {
 	require.NotNil(t, item.Post.RequestBody)
 	assert.Contains(t, item.Post.Responses, "200")
 	assert.Contains(t, item.Post.Responses, "401")
+}
+
+func TestOpenAPIDoc_error_detail_value_says_it_is_left_out(t *testing.T) {
+	doc := OpenAPIDoc("test")
+
+	value := doc.Components.Schemas.Map()["ErrorDetail"].Properties["value"]
+
+	assert.Equal(t, errorDetailValueDescription, value.Description)
 }

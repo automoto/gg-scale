@@ -526,7 +526,7 @@ func run() error {
 		}
 	}
 
-	fleetMgr, fleetCloser, err := buildFleet(cfg, appPool, logger)
+	fleetMgr, fleetCloser, err := buildFleet(cfg, appPool, credCipher, logger)
 	if err != nil {
 		return err
 	}
@@ -753,25 +753,28 @@ func run() error {
 			// Secrets are reduced to booleans here so raw values never
 			// cross into the control panel package.
 			ServerSettings: controlpanel.ServerSettingsSnapshot{
-				Env:                            cfg.Env,
-				LogLevel:                       cfg.LogLevel,
-				HTTPAddr:                       cfg.HTTPAddr,
-				PlayersEnabled:                 cfg.PlayersEnabled,
-				FeatureFleetEnabled:            cfg.FeatureFleetEnabled,
-				FeatureP2PRelayEnabled:         cfg.FeatureP2PRelayEnabled,
-				FeatureManagementAPIEnabled:    cfg.FeatureManagementAPIEnabled,
-				ManagementTokenMaxExpiryDays:   cfg.ManagementTokenMaxExpiryDays,
-				ManagementTokenRatePerSecond:   cfg.ManagementTokenRatePerSecond,
-				ManagementTokenRateBurst:       cfg.ManagementTokenRateBurst,
-				ManagementTokenCacheTTL:        cfg.ManagementTokenCacheTTL,
-				ManagementTokenCacheMaxEntries: cfg.ManagementTokenCacheMaxEntries,
-				ManagementMaxProjectTokens:     cfg.ManagementMaxProjectTokens,
-				ManagementMaxProjectAPIKeys:    cfg.ManagementMaxProjectAPIKeys,
-				CORSAllowedOrigins:             cfg.CORSAllowedOrigins,
-				CORSMaxProjectOrigins:          cfg.CORSMaxProjectOrigins,
-				LeaderboardMaxPerProject:       cfg.LeaderboardMaxPerProject,
-				FleetBackend:                   cfg.FleetBackend,
-				FleetRegion:                    cfg.FleetRegion,
+				Env:                               cfg.Env,
+				LogLevel:                          cfg.LogLevel,
+				HTTPAddr:                          cfg.HTTPAddr,
+				PlayersEnabled:                    cfg.PlayersEnabled,
+				FeatureFleetEnabled:               cfg.FeatureFleetEnabled,
+				FeatureP2PRelayEnabled:            cfg.FeatureP2PRelayEnabled,
+				FeatureManagementAPIEnabled:       cfg.FeatureManagementAPIEnabled,
+				ManagementTokenMaxExpiryDays:      cfg.ManagementTokenMaxExpiryDays,
+				ManagementTokenRatePerSecond:      cfg.ManagementTokenRatePerSecond,
+				ManagementTokenRateBurst:          cfg.ManagementTokenRateBurst,
+				ManagementTokenCacheTTL:           cfg.ManagementTokenCacheTTL,
+				ManagementTokenCacheMaxEntries:    cfg.ManagementTokenCacheMaxEntries,
+				ManagementMaxProjectTokens:        cfg.ManagementMaxProjectTokens,
+				ManagementMaxProjectAPIKeys:       cfg.ManagementMaxProjectAPIKeys,
+				CORSAllowedOrigins:                cfg.CORSAllowedOrigins,
+				CORSMaxProjectOrigins:             cfg.CORSMaxProjectOrigins,
+				LeaderboardMaxPerProject:          cfg.LeaderboardMaxPerProject,
+				FleetBackend:                      cfg.FleetBackend,
+				FleetAllocationMaxCapacity:        cfg.FleetAllocationMaxCapacity,
+				FleetMaxLiveAllocationsPerProject: cfg.FleetMaxLiveAllocationsPerProject,
+				AgonesProjectIsolation:            cfg.AgonesProjectIsolation,
+				FleetRegion:                       cfg.FleetRegion,
 			},
 		},
 		Players: players.Config{
@@ -1010,7 +1013,7 @@ func newDBPool(ctx context.Context, url string, maxConns, minConns int, cfg *con
 // The optional io.Closer is non-nil for plugin backends; the caller defers
 // Close() so the subprocess is reaped on shutdown. In-process backends
 // (agones) return a nil closer.
-func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
+func buildFleet(cfg *config.Config, pool *db.Pool, cipher *secretseal.Cipher, logger *slog.Logger) (*fleet.Manager, io.Closer, error) {
 	if !cfg.FeatureFleetEnabled {
 		logger.Warn("fleet disabled: FEATURE_FLEET_ENABLED=false; matchmaker will reject Allocate")
 		return nil, nil, nil
@@ -1021,14 +1024,15 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 	}
 
 	backend, err := fleetbuild.New(fleetbuild.Config{
-		Backend:       cfg.FleetBackend,
-		Region:        cfg.FleetRegion,
-		PluginDir:     cfg.FleetPluginDir,
-		AgonesNS:      cfg.AgonesNamespace,
-		AgonesKubecfg: cfg.AgonesKubeconfig,
-		K3sAPIURL:     cfg.K3sAPIURL,
-		K3sSAToken:    cfg.K3sSAToken,
-		K3sCACertB64:  cfg.K3sCACertB64,
+		Backend:                cfg.FleetBackend,
+		Region:                 cfg.FleetRegion,
+		PluginDir:              cfg.FleetPluginDir,
+		AgonesNS:               cfg.AgonesNamespace,
+		AgonesKubecfg:          cfg.AgonesKubeconfig,
+		AgonesProjectIsolation: cfg.AgonesProjectIsolation,
+		K3sAPIURL:              cfg.K3sAPIURL,
+		K3sSAToken:             cfg.K3sSAToken,
+		K3sCACertB64:           cfg.K3sCACertB64,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("fleet: %w", err)
@@ -1038,11 +1042,17 @@ func buildFleet(cfg *config.Config, pool *db.Pool, logger *slog.Logger) (*fleet.
 	if c, ok := backend.(io.Closer); ok {
 		closer = c
 	}
+	fleets := fleet.NewPostgresFleetStore(pool, cipher)
+	fleets.AgonesProjectIsolation = cfg.AgonesProjectIsolation
 	return fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool),
+		fleets,
 		backend,
-		fleet.ManagerOptions{Retries: 3},
+		fleet.ManagerOptions{
+			Retries:            3,
+			MaxCapacity:        cfg.FleetAllocationMaxCapacity,
+			MaxLiveAllocations: cfg.FleetMaxLiveAllocationsPerProject,
+		},
 	), closer, nil
 }
 

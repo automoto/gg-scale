@@ -132,7 +132,7 @@ func CreateLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID i
 		if _, err := recordRevision(ctx, q, 0, w); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "leaderboard.create", strconv.FormatInt(id, 10), s.auditPayload())
+		return actor.Audit(ctx, tx, tenantID, projectID, "leaderboard.create", strconv.FormatInt(id, 10), s.auditPayload())
 	})
 	return id, err
 }
@@ -247,7 +247,7 @@ func writeLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID, i
 		}
 		payload := s.auditPayload()
 		payload["revision"] = rev
-		return actor.audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(id, 10), payload)
+		return actor.Audit(ctx, tx, tenantID, projectID, action, strconv.FormatInt(id, 10), payload)
 	})
 	return rev, err
 }
@@ -264,7 +264,7 @@ func DeleteLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID, 
 		if n == 0 {
 			return pgx.ErrNoRows
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "leaderboard.delete", strconv.FormatInt(id, 10), nil)
+		return actor.Audit(ctx, tx, tenantID, projectID, "leaderboard.delete", strconv.FormatInt(id, 10), nil)
 	})
 }
 
@@ -291,7 +291,7 @@ func RestoreLeaderboard(ctx context.Context, pool *db.Pool, tenantID, projectID,
 		if err := checkLeaderboardLimit(ctx, q, projectID, 1); err != nil {
 			return err
 		}
-		return actor.audit(ctx, tx, tenantID, projectID, "leaderboard.restore", strconv.FormatInt(id, 10), nil)
+		return actor.Audit(ctx, tx, tenantID, projectID, "leaderboard.restore", strconv.FormatInt(id, 10), nil)
 	})
 }
 

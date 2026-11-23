@@ -115,6 +115,77 @@ func (q *Queries) GetFleetByName(ctx context.Context, arg GetFleetByNameParams) 
 	return i, err
 }
 
+const getProjectFleet = `-- name: GetProjectFleet :one
+SELECT id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
+FROM fleets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+`
+
+type GetProjectFleetParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+// A live or deleted fleet of one project. A row of another project is not found.
+func (q *Queries) GetProjectFleet(ctx context.Context, arg GetProjectFleetParams) (Fleet, error) {
+	row := q.db.QueryRow(ctx, getProjectFleet, arg.ProjectID, arg.ID)
+	var i Fleet
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Backend,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const listDeletedFleetsForProject = `-- name: ListDeletedFleetsForProject :many
+SELECT id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
+FROM fleets
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND deleted_at IS NOT NULL
+ORDER BY deleted_at DESC, id DESC
+`
+
+// Deleted fleets of a project, newest deletion first, for the restore list.
+func (q *Queries) ListDeletedFleetsForProject(ctx context.Context, projectID int64) ([]Fleet, error) {
+	rows, err := q.db.Query(ctx, listDeletedFleetsForProject, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Fleet
+	for rows.Next() {
+		var i Fleet
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ProjectID,
+			&i.Name,
+			&i.Backend,
+			&i.Config,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFleetsForProject = `-- name: ListFleetsForProject :many
 SELECT id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
 FROM fleets
@@ -156,44 +227,111 @@ func (q *Queries) ListFleetsForProject(ctx context.Context, projectID int64) ([]
 	return items, nil
 }
 
-const softDeleteFleet = `-- name: SoftDeleteFleet :exec
+const restoreProjectFleet = `-- name: RestoreProjectFleet :one
+UPDATE fleets
+SET deleted_at = NULL,
+    updated_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $1
+  AND id = $2
+  AND deleted_at IS NOT NULL
+RETURNING id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
+`
+
+type RestoreProjectFleetParams struct {
+	ProjectID int64
+	ID        int64
+}
+
+// Clears deleted_at. It fails with a unique violation when a live fleet of the
+// project has the same name.
+func (q *Queries) RestoreProjectFleet(ctx context.Context, arg RestoreProjectFleetParams) (Fleet, error) {
+	row := q.db.QueryRow(ctx, restoreProjectFleet, arg.ProjectID, arg.ID)
+	var i Fleet
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Backend,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const softDeleteProjectFleet = `-- name: SoftDeleteProjectFleet :one
 UPDATE fleets
 SET deleted_at = now(),
     updated_at = now()
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
-  AND id = $1
+  AND project_id = $1
+  AND id = $2
   AND deleted_at IS NULL
+RETURNING id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
 `
 
-func (q *Queries) SoftDeleteFleet(ctx context.Context, id int64) error {
-	_, err := q.db.Exec(ctx, softDeleteFleet, id)
-	return err
+type SoftDeleteProjectFleetParams struct {
+	ProjectID int64
+	ID        int64
 }
 
-const updateFleet = `-- name: UpdateFleet :exec
+func (q *Queries) SoftDeleteProjectFleet(ctx context.Context, arg SoftDeleteProjectFleetParams) (Fleet, error) {
+	row := q.db.QueryRow(ctx, softDeleteProjectFleet, arg.ProjectID, arg.ID)
+	var i Fleet
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Backend,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const updateProjectFleet = `-- name: UpdateProjectFleet :one
 UPDATE fleets
 SET name       = $1,
-    backend    = $2,
-    config     = $3,
+    config     = $2,
     updated_at = now()
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND project_id = $3
   AND id = $4
   AND deleted_at IS NULL
+RETURNING id, tenant_id, project_id, name, backend, config, created_at, updated_at, deleted_at
 `
 
-type UpdateFleetParams struct {
-	Name    string
-	Backend string
-	Config  []byte
-	ID      int64
+type UpdateProjectFleetParams struct {
+	Name      string
+	Config    []byte
+	ProjectID int64
+	ID        int64
 }
 
-func (q *Queries) UpdateFleet(ctx context.Context, arg UpdateFleetParams) error {
-	_, err := q.db.Exec(ctx, updateFleet,
+func (q *Queries) UpdateProjectFleet(ctx context.Context, arg UpdateProjectFleetParams) (Fleet, error) {
+	row := q.db.QueryRow(ctx, updateProjectFleet,
 		arg.Name,
-		arg.Backend,
 		arg.Config,
+		arg.ProjectID,
 		arg.ID,
 	)
-	return err
+	var i Fleet
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ProjectID,
+		&i.Name,
+		&i.Backend,
+		&i.Config,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"net/url"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,8 +49,7 @@ func (h *Handler) updateRemoteConfigHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	http.Redirect(w, r, projectSettingsPathTpl(tenantID, projectID)+queryFlash+
-		url.QueryEscape("Remote config saved."), http.StatusSeeOther)
+	redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashRemoteConfigSaved)
 }
 
 func (h *Handler) renderRemoteConfigError(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, raw string) {
