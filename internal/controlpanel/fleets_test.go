@@ -2,6 +2,7 @@ package controlpanel
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -346,4 +347,10 @@ func TestEditFleetPage_namespace_note(t *testing.T) {
 			assert.Equal(t, tc.isolation, strings.Contains(html, "This server uses AGONES_NAMESPACE. Leave this field empty"))
 		})
 	}
+}
+
+func TestFleetFormError_should_answer_409_with_the_setting_at_the_live_allocation_cap(t *testing.T) {
+	msg, status := fleetFormError("Allocate failed", fmt.Errorf("wrap: %w", fleet.ErrLiveAllocationLimit))
+
+	assert.Equal(t, []any{409, true}, []any{status, strings.Contains(msg, "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")}, msg)
 }

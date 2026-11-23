@@ -218,3 +218,15 @@ func TestAllocationWrite_should_cap_the_live_allocations_of_the_project(t *testi
 		})
 	}
 }
+
+func TestAllocationWrite_should_refuse_over_mcp_at_the_live_allocation_cap(t *testing.T) {
+	f := newFleetFixtureWithOptions(t, nil, fakeBackend{}, false, fleet.ManagerOptions{MaxCapacity: 5, MaxLiveAllocations: 1})
+	f.allocation(f.projectA, f.fleet(f.projectA, "alpha"), "eu", "ready")
+	tok := f.scopedToken(managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite)
+
+	res := f.call(tok, "allocate_server", map[string]any{"fleet": "alpha", "region": "eu"})
+
+	assert.Equal(t, []any{true, true, 1},
+		[]any{isError(res), strings.Contains(resultText(res), "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT"),
+			f.count(`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, f.projectA)}, resultText(res))
+}
