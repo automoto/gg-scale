@@ -559,8 +559,10 @@ This text is for the CHANGELOG section that is written when the release is tagge
   without it gets 403. Before, the 409 answers let a token without
   `players:pii` test whether an address belongs to a player. An existing
   token with `players:invite` and no `players:pii` can no longer invite or
-  link: make a new token with both. The invite result now always holds
-  `email`.
+  link: make a new token with both. Such a token shows `players:invite` as
+  inactive: `get_token` leaves it out of `active_scopes`, and the dashboard
+  token list says "players:invite inactive: the token does not have
+  players:pii". The invite result now always holds `email`.
 - SMTP mailer errors in the server logs name the SMTP step and the server
   reply code only (for example `mailer: RCPT: server replied 550`). They no
   longer hold the recipient address or the server reply text. The invite

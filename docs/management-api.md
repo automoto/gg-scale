@@ -97,8 +97,9 @@ The server checks it again on each request.
 | `fleet:write` | normal | manage fleets | `create_fleet`, `update_fleet`, `delete_fleet`, `restore_fleet` |
 | `allocations:write` | risky | allocate servers (stopping a server: also deallocate) | `allocate_server`, `deallocate_server` |
 
-A risky scope needs a read scope on the same token. The token page and the
-server refuse the token without it:
+A risky scope can need other scopes on the same token: a read scope, and for
+`players:invite` also `players:pii`. The token page and the server refuse the
+token without them:
 
 | Risky scope | Needs |
 |---|---|
@@ -112,7 +113,9 @@ whether an address belongs to a player of the Game Project: `link_player`
 answers 409 when another player has the address, and `invite_player` answers
 409 when an invite for the address is pending. The server also checks
 `players:pii` on each `invite_player` and `link_player` request. A token
-without it gets 403 before the address is used.
+without it gets 403 before the address is used. A token made before this rule
+with `players:invite` and without `players:pii` gets 403 on `invite_player`
+and `link_player`: make a new token with both scopes.
 
 `project_health_check` and `get_token` need no scope.
 
@@ -309,9 +312,12 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
 ### Rules for agents
 
 - Call `get_token` when a tool is missing or a call is refused. It shows the
-  scopes of the token and `active_scopes`, the scopes that the person who made
-  the token can still use. A scope in `scopes` but not in `active_scopes` is
-  inactive.
+  scopes of the token and `active_scopes`, the scopes that work now. A scope in
+  `scopes` but not in `active_scopes` is inactive for one of two causes: the
+  person who made the token cannot use it now, or the token does not have a
+  scope that it needs on each request (`players:invite` without
+  `players:pii`). The dashboard token list shows the second cause, for
+  example "players:invite inactive: the token does not have players:pii".
 - Each list operation takes `limit` and `cursor` and returns `next_cursor`.
   Send `next_cursor` as `cursor` to get the next page. The largest `limit` and
   the default are 100. A cursor that the list did not return answers 422.
@@ -454,7 +460,8 @@ Notes:
   the cache. A revoked token, a disabled Account Tenant or creator, and a
   deleted Game Project take effect within this time on each process. The
   expiry time, the creator's role, and the rate limit are checked on each
-  request.
+  request (for the creator's role, see the policy and grant windows in the
+  next item).
 - The creator check on each request uses the permission policy and the
   feature grants that each server process keeps in memory. Each process loads
   the policy again every 10 seconds, and keeps each feature grant decision for

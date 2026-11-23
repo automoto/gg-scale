@@ -286,6 +286,24 @@ func TestManagementTokens_list_should_count_scopes_the_creator_lost(t *testing.T
 	assert.Contains(t, body, "2 permissions inactive: creator lost access")
 }
 
+// A token made before players:invite needed players:pii has the scope, but
+// each invite call is refused. The list names that cause, not the creator.
+func TestManagementTokens_list_should_name_a_missing_request_scope(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, csrf, _ := p.member(t, "owner@example.com", "owner")
+	p.create(t, c, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersPII, managementtoken.ScopePlayersInvite}})
+	_, err := p.raw.Exec(context.Background(), `UPDATE management_tokens SET scopes = array_remove(scopes, $1) WHERE project_id = $2`,
+		managementtoken.ScopePlayersPII, p.project)
+	require.NoError(t, err)
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Equal(t, []bool{true, false}, []bool{
+		strings.Contains(body, "players:invite inactive: the token does not have players:pii"),
+		strings.Contains(body, "creator lost access"),
+	})
+}
+
 func TestManagementTokens_should_refuse_an_unknown_access_value(t *testing.T) {
 	p := newTokenPanel(t, true)
 	c, csrf, _ := p.member(t, "owner@example.com", "owner")

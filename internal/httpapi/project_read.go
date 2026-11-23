@@ -774,12 +774,13 @@ type projectToken struct {
 	ProjectName  string    `json:"project_name" example:"My Game"`
 	TenantID     int64     `json:"tenant_id" example:"2"`
 	Scopes       []string  `json:"scopes" doc:"The scopes of the token."`
-	ActiveScopes []string  `json:"active_scopes" doc:"The scopes of the token that the person who created it can still use now."`
+	ActiveScopes []string  `json:"active_scopes" doc:"The scopes of the token that work now. A scope is left out when the person who created the token cannot use it now, or when the token does not have a scope that it needs on each request (players:invite needs players:pii)."`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 
 // activeScopes returns the scopes of the token whose creator pair the creator
-// passes now, with the same check as the per-request creator check.
+// passes now, with the same check as the per-request creator check, less a
+// scope whose NeedsOnRequest scope is not active.
 func activeScopes(ctx context.Context, d Deps, p managementtoken.Principal) ([]string, error) {
 	out, err := managementtoken.AllowedScopes(d.RBAC, p.CreatedByUserID, p.TenantID, p.ProjectID, p.Scopes)
 	if err != nil {

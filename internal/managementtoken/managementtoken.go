@@ -120,8 +120,9 @@ var Scopes = []ScopePair{
 	{
 		Scope: ScopePlayersInvite, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
 		Label: "Invite and link players. Sends email.", Needs: ScopePlayersRead,
-		// The answer for an address that another player has is a 409, so it
-		// tells whether an address belongs to a player of the project.
+		// Two answers tell whether an address belongs to the project: the
+		// link 409 when another player has the address ("taken"), and the
+		// invite or link 409 when an invite for it is open ("pending").
 		NeedsOnRequest: ScopePlayersPII,
 	},
 	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
@@ -200,10 +201,12 @@ func ScopeNames() []string {
 }
 
 // AllowedScopes returns the scopes whose pair the creator passes now. It
-// skips a scope that is not in Scopes. Every caller that asks what a creator
-// may still use goes through it, so they use the same check.
+// skips a scope that is not in Scopes, and a scope whose NeedsOnRequest is
+// not in the result, because each request with it is refused. Every caller
+// that asks what a creator may still use goes through it, so they use the
+// same check.
 func AllowedScopes(authz *rbac.Authorizer, creatorID, tenantID, projectID int64, scopes []string) ([]string, error) {
-	out := []string{}
+	passed := []string{}
 	for _, name := range scopes {
 		sp, ok := Scope(name)
 		if !ok {
@@ -214,10 +217,30 @@ func AllowedScopes(authz *rbac.Authorizer, creatorID, tenantID, projectID int64,
 			return nil, err
 		}
 		if allowed {
+			passed = append(passed, name)
+		}
+	}
+	missing := MissingRequestScopes(passed)
+	out := []string{}
+	for _, name := range passed {
+		if !slices.ContainsFunc(missing, func(s ScopePair) bool { return s.Scope == name }) {
 			out = append(out, name)
 		}
 	}
 	return out, nil
+}
+
+// MissingRequestScopes returns the entry of each scope in scopes whose
+// NeedsOnRequest is not in scopes.
+func MissingRequestScopes(scopes []string) []ScopePair {
+	var out []ScopePair
+	for _, name := range scopes {
+		sp, ok := Scope(name)
+		if ok && sp.NeedsOnRequest != "" && !slices.Contains(scopes, sp.NeedsOnRequest) {
+			out = append(out, sp)
+		}
+	}
+	return out
 }
 
 // Principal is the authenticated token. It holds no dashboard session.

@@ -2839,7 +2839,7 @@ components:
       additionalProperties: false
       properties:
         active_scopes:
-          description: The scopes of the token that the person who created it can still use now.
+          description: The scopes of the token that work now. A scope is left out when the person who created the token cannot use it now, or when the token does not have a scope that it needs on each request (players:invite needs players:pii).
           items:
             type: string
           type:

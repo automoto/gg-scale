@@ -84,6 +84,40 @@ func TestScopes_risky_scopes_should_have_their_pair_and_dependency(t *testing.T)
 	}
 }
 
+func TestAllowedScopes(t *testing.T) {
+	authz, err := rbac.NewMemoryAuthorizer()
+	assert.NoError(t, err)
+	assert.NoError(t, authz.SetControlPanelMembershipRole(7, 1, "owner"))
+	cases := []struct {
+		name   string
+		scopes []string
+		want   []string
+	}{
+		{"should_drop_a_scope_whose_request_scope_is_missing",
+			[]string{ScopePlayersRead, ScopePlayersInvite}, []string{ScopePlayersRead}},
+		{"should_keep_a_scope_with_its_request_scope",
+			[]string{ScopePlayersRead, ScopePlayersPII, ScopePlayersInvite}, []string{ScopePlayersRead, ScopePlayersPII, ScopePlayersInvite}},
+		{"should_keep_each_scope_that_the_owner_can_give", ScopeNames(), ScopeNames()},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _ := AllowedScopes(authz, 7, 1, 42, c.scopes)
+
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func TestMissingRequestScopes_should_name_each_scope_without_its_request_scope(t *testing.T) {
+	got := MissingRequestScopes([]string{ScopePlayersRead, ScopePlayersInvite, ScopeKeysRevoke})
+
+	var names []string
+	for _, s := range got {
+		names = append(names, s.Scope)
+	}
+	assert.Equal(t, []string{ScopePlayersInvite}, names)
+}
+
 func TestScope_should_return_the_pair_of_the_scope(t *testing.T) {
 	got, ok := Scope(ScopeLeaderboardsWrite)
 

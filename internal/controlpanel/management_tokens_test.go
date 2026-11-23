@@ -336,6 +336,18 @@ func TestAccessWords_should_report_risky_access(t *testing.T) {
 	assert.Equal(t, []any{"Risky: " + scope, true}, []any{words, risky})
 }
 
+func TestRequestScopeText_should_name_the_scope_and_the_scope_it_needs(t *testing.T) {
+	got := requestScopeText([]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite})
+
+	assert.Equal(t, "players:invite inactive: the token does not have players:pii", got)
+}
+
+func TestRequestScopeText_should_be_empty_when_each_request_scope_is_there(t *testing.T) {
+	got := requestScopeText([]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII, managementtoken.ScopePlayersInvite})
+
+	assert.Empty(t, got)
+}
+
 func TestFeatureGate(t *testing.T) {
 	auth, err := rbac.NewMemoryAuthorizer()
 	require.NoError(t, err)

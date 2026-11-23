@@ -100,6 +100,15 @@ func TestProjectAPI_get_token_should_return_the_token_facts(t *testing.T) {
 			got.body["tenant_id"], got.body["scopes"], got.body["active_scopes"], got.body["expires_at"] != nil}, got.raw)
 }
 
+func TestProjectAPI_get_token_should_leave_out_a_scope_whose_request_scope_is_missing(t *testing.T) {
+	f := newFixture(t)
+
+	got := f.do(f.scopedToken("players:read", "players:invite"), http.MethodGet, "/v1/project/token", "")
+
+	assert.Equal(t, []any{http.StatusOK, []any{"players:read", "players:invite"}, []any{"players:read"}},
+		[]any{got.status, got.body["scopes"], got.body["active_scopes"]}, got.raw)
+}
+
 func TestProjectAPI_get_token_should_open_to_a_token_with_no_scopes(t *testing.T) {
 	f := newFixture(t)
 

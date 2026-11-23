@@ -91,6 +91,8 @@ type ManagementTokenRowView struct {
 	// each request with the token is refused.
 	Inactive bool
 	// LostScopes counts the scopes whose pair the creator no longer passes.
+	// A scope that is inactive because the token lacks the scope it needs
+	// on each request is named in Access instead.
 	LostScopes int
 }
 
@@ -416,19 +418,35 @@ func lostScopesText(n int) string {
 }
 
 // lostScopes counts the scopes whose pair the creator fails now, with the
-// same check as each request. A scope that is not in the table is skipped.
+// same check as each request. A scope that is not in the table is skipped,
+// and so is a scope that the token cannot use because it lacks the scope
+// that it needs on each request (requestScopeText names those).
 func (h *Handler) lostScopes(creatorID, tenantID, projectID int64, scopes []string) (int, error) {
 	allowed, err := managementtoken.AllowedScopes(h.rbac, creatorID, tenantID, projectID, scopes)
 	if err != nil {
 		return 0, err
 	}
-	known := 0
+	missing := managementtoken.MissingRequestScopes(scopes)
+	lost := 0
 	for _, name := range scopes {
-		if _, ok := managementtoken.Scope(name); ok {
-			known++
+		_, known := managementtoken.Scope(name)
+		if !known || slices.Contains(allowed, name) ||
+			slices.ContainsFunc(missing, func(s managementtoken.ScopePair) bool { return s.Scope == name }) {
+			continue
 		}
+		lost++
 	}
-	return known - len(allowed), nil
+	return lost, nil
+}
+
+// requestScopeText names each scope of the token that each request refuses
+// because the token does not have the scope that it needs, or "".
+func requestScopeText(scopes []string) string {
+	var parts []string
+	for _, sp := range managementtoken.MissingRequestScopes(scopes) {
+		parts = append(parts, sp.Scope+" inactive: the token does not have "+sp.NeedsOnRequest)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (h *Handler) managementTokensPage(w http.ResponseWriter, r *http.Request) {
@@ -501,6 +519,9 @@ func (h *Handler) managementTokensView(ctx context.Context, tenantID, projectID 
 			LostScopes:   lost,
 		}
 		v.Access, v.Risky = accessWords(row.Scopes)
+		if text := requestScopeText(row.Scopes); text != "" {
+			v.Access += " · " + text
+		}
 		if row.LastUsedAt.Valid {
 			v.LastUsedAt = &row.LastUsedAt.Time
 		}
