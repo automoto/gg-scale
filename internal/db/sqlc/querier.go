@@ -826,6 +826,9 @@ type Querier interface {
 	LockPlayerForFleetAllocation(ctx context.Context, playerID int64) error
 	LockPlayerPasswordReset(ctx context.Context, arg LockPlayerPasswordResetParams) error
 	LockPlayerVerification(ctx context.Context, arg LockPlayerVerificationParams) error
+	// Transaction-scoped advisory lock that serializes the live allocation cap
+	// check and the pending insert per project. Released on commit/rollback.
+	LockProjectForAllocationCap(ctx context.Context, projectID int64) error
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error

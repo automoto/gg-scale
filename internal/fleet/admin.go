@@ -401,9 +401,6 @@ func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAl
 		in.Capacity = 1
 	}
 	ctx = db.WithTenant(ctx, tenantID)
-	if err := checkLiveAllocations(ctx, m, in.Fleet.ProjectID); err != nil {
-		return nil, err
-	}
 	ctx = WithCommitHook(ctx, func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
 		return actor.Audit(ctx, tx, tenantID, in.Fleet.ProjectID, actionAllocate, strconv.FormatInt(int64(id), 10), map[string]any{
 			"fleet_id":   in.Fleet.ID,
@@ -420,25 +417,8 @@ func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAl
 		Region:    in.Region,
 		GameMode:  in.GameMode,
 		Capacity:  in.Capacity,
+		MaxLive:   m.opts.MaxLiveAllocations,
 	})
-}
-
-// checkLiveAllocations refuses a new allocation when the project already has
-// MaxLiveAllocations live allocations. The count and the insert are not in
-// one transaction, so parallel requests can go a few over the limit. That is
-// acceptable for a cost limit.
-func checkLiveAllocations(ctx context.Context, m *Manager, projectID int64) error {
-	if m.opts.MaxLiveAllocations <= 0 {
-		return nil
-	}
-	n, err := m.store.CountLive(ctx, projectID)
-	if err != nil {
-		return fmt.Errorf("fleet: count live allocations: %w", err)
-	}
-	if n >= int64(m.opts.MaxLiveAllocations) {
-		return ErrLiveAllocationLimit
-	}
-	return nil
 }
 
 // DeallocateServer stops the game server of an allocation of the project,

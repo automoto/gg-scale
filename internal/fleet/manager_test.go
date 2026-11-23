@@ -84,6 +84,9 @@ func newFakeStore() *fakeStore {
 func (s *fakeStore) InsertPending(_ context.Context, req fleet.AllocationRequest, backend string) (fleet.AllocationID, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if req.MaxLive > 0 && s.countLive(req.ProjectID) >= int64(req.MaxLive) {
+		return 0, fleet.ErrLiveAllocationLimit
+	}
 	s.next++
 	a := &fleet.Allocation{
 		ID:        s.next,
@@ -190,16 +193,15 @@ func (s *fakeStore) List(_ context.Context, projectID int64, includeTerminal boo
 	return matched[offset:end], total, nil
 }
 
-func (s *fakeStore) CountLive(_ context.Context, projectID int64) (int64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// countLive counts the live allocations of the project. The caller holds mu.
+func (s *fakeStore) countLive(projectID int64) int64 {
 	var n int64
 	for _, a := range s.allocations {
 		if a.ProjectID == projectID && !a.Status.IsTerminal() {
 			n++
 		}
 	}
-	return n, nil
+	return n
 }
 
 func (s *fakeStore) AppendEvent(_ context.Context, id fleet.AllocationID, status fleet.Status, address, errMessage string) error {

@@ -27,7 +27,9 @@ func NewPostgresStore(pool *db.Pool) *PostgresStore {
 }
 
 // InsertPending creates a row in state 'pending'. The caller is expected to
-// follow up with MarkReady or MarkFailed.
+// follow up with MarkReady or MarkFailed. When req.MaxLive is above 0, a
+// per-project lock holds the count and the insert in one transaction, so
+// parallel requests cannot pass the cap.
 func (s *PostgresStore) InsertPending(ctx context.Context, req AllocationRequest, backend string) (AllocationID, error) {
 	meta, err := encodeLabels(req.Labels)
 	if err != nil {
@@ -35,7 +37,20 @@ func (s *PostgresStore) InsertPending(ctx context.Context, req AllocationRequest
 	}
 	var id AllocationID
 	err = s.pool.Q(ctx, func(tx pgx.Tx) error {
-		row, qerr := sqlcgen.New(tx).CreatePendingAllocation(ctx, sqlcgen.CreatePendingAllocationParams{
+		q := sqlcgen.New(tx)
+		if req.MaxLive > 0 {
+			if err := q.LockProjectForAllocationCap(ctx, req.ProjectID); err != nil {
+				return err
+			}
+			n, err := q.CountAllocationsForProject(ctx, sqlcgen.CountAllocationsForProjectParams{ProjectID: req.ProjectID})
+			if err != nil {
+				return err
+			}
+			if n >= int64(req.MaxLive) {
+				return ErrLiveAllocationLimit
+			}
+		}
+		row, qerr := q.CreatePendingAllocation(ctx, sqlcgen.CreatePendingAllocationParams{
 			ProjectID: req.ProjectID,
 			FleetID:   &req.FleetID,
 			Backend:   backend,
@@ -187,18 +202,6 @@ func (s *PostgresStore) List(ctx context.Context, projectID int64, includeTermin
 		return nil, 0, err
 	}
 	return out, total, nil
-}
-
-// CountLive counts the allocations of the project that are not released or
-// failed.
-func (s *PostgresStore) CountLive(ctx context.Context, projectID int64) (int64, error) {
-	var n int64
-	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
-		var err error
-		n, err = sqlcgen.New(tx).CountAllocationsForProject(ctx, sqlcgen.CountAllocationsForProjectParams{ProjectID: projectID})
-		return err
-	})
-	return n, err
 }
 
 // AppendEvent inserts one row on the per-allocation ring buffer. The trim

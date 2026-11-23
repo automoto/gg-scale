@@ -437,6 +437,17 @@ func (q *Queries) ListAllocationsPageForProject(ctx context.Context, arg ListAll
 	return items, nil
 }
 
+const lockProjectForAllocationCap = `-- name: LockProjectForAllocationCap :exec
+SELECT pg_advisory_xact_lock(hashtextextended('fleet_live_alloc_cap', $1))
+`
+
+// Transaction-scoped advisory lock that serializes the live allocation cap
+// check and the pending insert per project. Released on commit/rollback.
+func (q *Queries) LockProjectForAllocationCap(ctx context.Context, projectID int64) error {
+	_, err := q.db.Exec(ctx, lockProjectForAllocationCap, projectID)
+	return err
+}
+
 const markAllocationFailed = `-- name: MarkAllocationFailed :exec
 UPDATE game_server_allocations
 SET status      = 'failed',

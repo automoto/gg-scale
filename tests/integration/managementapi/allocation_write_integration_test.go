@@ -5,6 +5,7 @@ package managementapi_test
 import (
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -217,6 +218,30 @@ func TestAllocationWrite_should_cap_the_live_allocations_of_the_project(t *testi
 				[]any{got.status, after, strings.Contains(got.detail(), "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")}, got.raw)
 		})
 	}
+}
+
+// Parallel requests must not pass the cap: the count and the insert are
+// in one locked transaction.
+func TestAllocationWrite_should_keep_the_live_allocation_cap_under_parallel_requests(t *testing.T) {
+	f := newFleetFixtureWithOptions(t, nil, fakeBackend{}, false, fleet.ManagerOptions{MaxCapacity: 5, MaxLiveAllocations: 2})
+	f.fleet(f.projectA, "alpha")
+	tok := f.scopedToken(managementtoken.ScopeAllocationsWrite)
+	statuses := make([]int, 12)
+	var wg sync.WaitGroup
+	for i := range statuses {
+		wg.Go(func() {
+			statuses[i] = f.do(tok, http.MethodPost, allocationsPath, `{"fleet":"alpha","region":"eu"}`).status
+		})
+	}
+	wg.Wait()
+
+	ok := 0
+	for _, s := range statuses {
+		if s == http.StatusOK {
+			ok++
+		}
+	}
+	assert.Equal(t, []any{2, 2}, []any{ok, f.count(`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, f.projectA)}, statuses)
 }
 
 func TestAllocationWrite_should_refuse_over_mcp_at_the_live_allocation_cap(t *testing.T) {

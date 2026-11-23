@@ -86,6 +86,11 @@ ORDER BY id DESC
 LIMIT sqlc.arg(lim)
 OFFSET sqlc.arg(off);
 
+-- name: LockProjectForAllocationCap :exec
+-- Transaction-scoped advisory lock that serializes the live allocation cap
+-- check and the pending insert per project. Released on commit/rollback.
+SELECT pg_advisory_xact_lock(hashtextextended('fleet_live_alloc_cap', sqlc.arg('project_id')));
+
 -- name: CountAllocationsForProject :one
 SELECT count(*)::bigint
 FROM game_server_allocations

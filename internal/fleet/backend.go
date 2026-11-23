@@ -115,6 +115,10 @@ type AllocationRequest struct {
 	GameMode string
 	Capacity int
 	Labels   map[string]string
+	// MaxLive, when above 0, is the largest number of live allocations of
+	// the project. The store refuses the pending insert at the cap with
+	// ErrLiveAllocationLimit. Backends ignore it.
+	MaxLive int
 }
 
 // Allocation is the manager's view of one game-server slot. BackendRef is
