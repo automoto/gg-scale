@@ -117,9 +117,12 @@ func TestAPIKeyType_spec_matches_router(t *testing.T) {
 			if op == nil || len(op.Security) == 0 || path == "/v1/ws" || path == "/v1/healthz" {
 				continue
 			}
-			// An API key ID of 1 can be a key of this test, and the token
-			// has keys:revoke, so no key path uses a real key ID.
-			url := srv.URL + pathParam.ReplaceAllString(strings.ReplaceAll(path, "{api_key_id}", "999999"), "1")
+			// An API key ID or player ID of 1 can be a row of this test, and
+			// the token has keys:revoke and players:write, so no path uses a
+			// real key or player ID. A disabled player 1 would make the
+			// storage routes that run after it answer 403.
+			fake := strings.NewReplacer("{api_key_id}", "999999", "{player_id}", "999999")
+			url := srv.URL + pathParam.ReplaceAllString(fake.Replace(path), "1")
 			if hasScheme(op, "ManagementToken") {
 				got := []int{statusFor(t, method, url, "key-type"), statusFor(t, method, url, "key-type-secret")}
 				assert.Equal(t, []int{http.StatusUnauthorized, http.StatusUnauthorized}, got,
