@@ -206,13 +206,24 @@ func (m *Manager) appendEvent(ctx context.Context, id AllocationID, status Statu
 
 // Deallocate releases the backend resource and marks the row shutdown.
 // Errors from the backend bubble up; the store update happens only on
-// backend success so we don't lose the ability to retry shutdown.
+// backend success so we don't lose the ability to retry shutdown. A pending
+// row with no backend ref and no resolution id names no backend resource
+// (the process stopped during the backend call), so it is released without a
+// backend call. If that call still finishes, MarkReady fails on the released
+// row and the manager frees the server.
 func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	a, err := m.store.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if a.Status == StatusShutdown || (a.Status == StatusFailed && a.Metadata["ggscale.dev/resolution-id"] == "") {
+		return nil
+	}
+	if a.Status == StatusPending && a.BackendRef == "" && a.Metadata["ggscale.dev/resolution-id"] == "" {
+		if err := m.store.Release(ctx, id); err != nil {
+			return err
+		}
+		m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
 		return nil
 	}
 	if a.Metadata["ggscale.dev/resolution-id"] != "" {

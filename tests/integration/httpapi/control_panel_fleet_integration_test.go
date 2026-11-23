@@ -59,8 +59,12 @@ func (s *stubBackend) Allocate(_ context.Context, _ fleet.AllocationRequest) (*f
 	}, nil
 }
 
-func (s *stubBackend) Deallocate(_ context.Context, _ fleet.AllocationID, _ string) error {
+// Deallocate fails for an empty ref, as the agones backend does.
+func (s *stubBackend) Deallocate(_ context.Context, _ fleet.AllocationID, ref string) error {
 	s.deallocateN.Add(1)
+	if ref == "" {
+		return errors.New("empty backend ref")
+	}
 	return nil
 }
 
@@ -755,4 +759,43 @@ func TestControlPanelFleet_should_refuse_server_set_agones_keys_when_isolation_i
 		map[string][]any{"create namespace": want, "create selector": want, "update namespace": want, "update selector": want, "rows": {1, "{}"}},
 		map[string][]any{"create namespace": got["create namespace"], "create selector": got["create selector"],
 			"update namespace": got["update namespace"], "update selector": got["update selector"], "rows": {rows, stored}})
+}
+
+// A pending row with no backend ref (the process stopped during the backend
+// call) is released without a backend call, so it stops counting against
+// the live allocation cap.
+func TestControlPanelFleet_deallocate_should_release_a_pending_row_with_no_backend_ref(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-pending")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+	backend := newStubBackend("agones")
+	srv, _ := newControlPanelFleetServerWithOptions(t, c, backend, nil, nil,
+		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10, MaxLiveAllocations: 1})
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
+	var stuck int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, region, status)
+		 SELECT tenant_id, project_id, id, backend, 'eu', 'pending' FROM fleets WHERE name = $1 RETURNING id`,
+		fleetName).Scan(&stuck))
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+	allocate := url.Values{"_csrf": {csrf}, "fleet": {fleetName}, "region": {"eu"}}
+
+	atCap := postFormWithCookie(t, base, allocate, cookie)
+	atCap.Body.Close()
+	stop := postFormWithCookie(t, base+"/"+strconv.FormatInt(stuck, 10)+"/deallocate",
+		url.Values{"_csrf": {csrf}, "confirm_id": {strconv.FormatInt(stuck, 10)}}, cookie)
+	stop.Body.Close()
+	var status string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT status::text FROM game_server_allocations WHERE id = $1`, stuck).Scan(&status))
+	start := postFormWithCookie(t, base, allocate, cookie)
+	start.Body.Close()
+
+	assert.Equal(t, []any{http.StatusConflict, http.StatusSeeOther, "shutdown", int64(0), http.StatusSeeOther},
+		[]any{atCap.StatusCode, stop.StatusCode, status, backend.deallocateN.Load(), start.StatusCode})
 }

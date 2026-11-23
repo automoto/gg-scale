@@ -594,3 +594,8 @@ This text is for the CHANGELOG section that is written when the release is tagge
   page and a change request for `fleet_agones_backend` show a warning. An
   allocation request for a fleet of another Game Project is now refused as
   not found.
+- A manual allocation that stays `pending` with no backend ref (the server
+  process stopped during the backend call) can now be deallocated on the
+  dashboard and with `deallocate_server`. It is released with no backend
+  call. Before, Agones refused it and the row counted against
+  `FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT` forever.
