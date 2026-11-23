@@ -350,6 +350,22 @@ Do the stages in order. Write failing tests first. After each stage:
 - [x] Release notes: read scopes (old tokens lose reads; make a new token), the new operations, and the changed rules.
 - [x] `openapi.yaml` (`make openapi`).
 
+### Follow-ups
+
+- [ ] One copy of a secret in MCP results. Today the result of
+  `create_secret_api_key` holds the key two times: in `content[0].text` and in
+  `structuredContent`. This is the form that the MCP spec (2025-06-18) asks
+  for: a tool that returns structured content should also return it as text,
+  for older clients. huma `mcp` (v2.41.0) always adds `structuredContent` to a
+  result whose body is a JSON object and has no per-tool option, so the copy
+  is documented in the tool description and in `docs/management-api.md`.
+  Fix it when huma gets a per-tool option (or send one upstream): leave out
+  `structuredContent` for tools whose result holds a secret, and keep the key
+  in the text only. Do not build an `/mcp` answer rewrite; it depends on
+  huma's answer format. Tests: the MCP result holds the key one time; the
+  integration tests in `tests/integration/managementapi/risky_keys_integration_test.go`
+  read the key from the text.
+
 ## Risks
 
 - **Tool count.** About 45 tools for a token with all scopes can use a large
