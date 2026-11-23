@@ -358,7 +358,8 @@ func (i *PlayerInviter) send(ctx context.Context, res PlayerInvite, m inviteMail
 		Body:            body,
 		ListUnsubscribe: unsubscribe,
 	}); err != nil {
-		slog.ErrorContext(ctx, "player invite mailer", "err", err, "invite_id", res.ID)
+		// The mailer error holds the SMTP step and reply code, not the address.
+		slog.ErrorContext(ctx, "player invite mailer", "err", err, "invite_id", res.ID, "domain", emailDomain(res.Email))
 	}
 }
 

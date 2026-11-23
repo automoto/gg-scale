@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"os"
 	"strings"
 	"time"
@@ -109,23 +110,23 @@ func (m *smtpMailer) sendSTARTTLSOrPlain(ctx context.Context, from string, to []
 	}
 	c, err := smtp.NewClient(conn, m.host)
 	if err != nil {
-		return fmt.Errorf("mailer: smtp.NewClient: %w", err)
+		return stepError("greeting", err)
 	}
 	defer func() { _ = c.Close() }()
 	if err := c.Hello(m.localName); err != nil {
-		return fmt.Errorf("mailer: HELO: %w", err)
+		return stepError("HELO", err)
 	}
 	if requireTLS {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return errors.New("mailer: server does not advertise STARTTLS (set SMTP_TLS=off to permit cleartext)")
 		}
 		if err := c.StartTLS(&tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12}); err != nil {
-			return fmt.Errorf("mailer: STARTTLS: %w", err)
+			return stepError("STARTTLS", err)
 		}
 	}
 	if m.auth != nil {
 		if err := c.Auth(m.auth); err != nil {
-			return fmt.Errorf("mailer: auth: %w", err)
+			return stepError("auth", err)
 		}
 	}
 	return writeMessage(c, from, to, body)
@@ -146,27 +147,29 @@ func (m *smtpMailer) sendImplicit(ctx context.Context, from string, to []string,
 	c, err := smtp.NewClient(conn, m.host)
 	if err != nil {
 		_ = conn.Close()
-		return fmt.Errorf("mailer: smtp.NewClient: %w", err)
+		return stepError("greeting", err)
 	}
 	defer func() { _ = c.Close() }()
 	if m.auth != nil {
 		if err := c.Auth(m.auth); err != nil {
-			return fmt.Errorf("mailer: auth: %w", err)
+			return stepError("auth", err)
 		}
 	}
 	return writeMessage(c, from, to, body)
 }
 
+// parseEnvelope returns the bare addresses. Its errors leave out the
+// parser text, which can quote the address.
 func parseEnvelope(m mailer.Message) (string, []string, error) {
 	from, err := mail.ParseAddress(m.From)
 	if err != nil {
-		return "", nil, fmt.Errorf("from address: %w", err)
+		return "", nil, errors.New("mailer: from address is not valid")
 	}
 	to := make([]string, 0, len(m.To))
 	for _, rcpt := range m.To {
 		parsed, err := mail.ParseAddress(rcpt)
 		if err != nil {
-			return "", nil, fmt.Errorf("to address %q: %w", rcpt, err)
+			return "", nil, errors.New("mailer: to address is not valid")
 		}
 		to = append(to, parsed.Address)
 	}
@@ -175,24 +178,42 @@ func parseEnvelope(m mailer.Message) (string, []string, error) {
 
 func writeMessage(c *smtp.Client, from string, to []string, body []byte) error {
 	if err := c.Mail(from); err != nil {
-		return fmt.Errorf("mailer: MAIL: %w", err)
+		return stepError("MAIL", err)
 	}
 	for _, rcpt := range to {
 		if err := c.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("mailer: RCPT %q: %w", rcpt, err)
+			return stepError("RCPT", err)
 		}
 	}
 	w, err := c.Data()
 	if err != nil {
-		return fmt.Errorf("mailer: DATA: %w", err)
+		return stepError("DATA", err)
 	}
 	if _, err := w.Write(body); err != nil {
-		return fmt.Errorf("mailer: write: %w", err)
+		return stepError("write", err)
 	}
 	if err := w.Close(); err != nil {
-		return fmt.Errorf("mailer: close: %w", err)
+		return stepError("close", err)
 	}
-	return c.Quit()
+	if err := c.Quit(); err != nil {
+		return stepError("QUIT", err)
+	}
+	return nil
+}
+
+// stepError names the SMTP step that failed. Of a server reply it keeps
+// only the code: the reply text can repeat an address (for example
+// "550 <a@example.org>: no such user"), and the error goes to the logs.
+func stepError(step string, err error) error {
+	var reply *textproto.Error
+	if errors.As(err, &reply) {
+		return fmt.Errorf("mailer: %s: server replied %d", step, reply.Code)
+	}
+	var malformed textproto.ProtocolError
+	if errors.As(err, &malformed) {
+		return fmt.Errorf("mailer: %s: malformed server reply", step)
+	}
+	return fmt.Errorf("mailer: %s: %w", step, err)
 }
 
 // buildRFC5322 sanitises every header field through webutil.SanitizeHeader.
@@ -212,7 +233,7 @@ func buildRFC5322(m mailer.Message) ([]byte, error) {
 	for _, rcpt := range m.To {
 		cleaned, err := webutil.SanitizeHeader(rcpt)
 		if err != nil {
-			return nil, fmt.Errorf("to header %q: %w", rcpt, err)
+			return nil, fmt.Errorf("to header: %w", err)
 		}
 		toClean = append(toClean, cleaned)
 	}
