@@ -745,3 +745,45 @@ func TestTenantCreate_should_refuse_a_bidi_key_label_and_accept_a_normal_one(t *
 	require.NoError(t, p.raw.QueryRow(context.Background(), `SELECT count(*) FROM tenants WHERE name IN ('bidi-co', 'good-co')`).Scan(&tenants))
 	assert.Equal(t, []int{http.StatusUnprocessableEntity, http.StatusOK, 1}, []int{bad.StatusCode, good.StatusCode, tenants})
 }
+
+func TestKeyRevealPages_should_send_no_store(t *testing.T) {
+	keysURL := func(p tokenPanel) string {
+		return p.srv.URL + pathControlPanel + "/tenants/" + strconv.FormatInt(p.tenantID, 10) + "/api-keys"
+	}
+	newKey := func(keyType string) func(t *testing.T, p tokenPanel) (*http.Response, string) {
+		return func(t *testing.T, p tokenPanel) (*http.Response, string) {
+			c, csrf, _ := p.member(t, "owner@example.com", "owner")
+			return tfPostForm(t, c, keysURL(p), url.Values{"_csrf": {csrf}, "label": {"k"}, "key_type": {keyType}, "project_id": {strconv.FormatInt(p.project, 10)}})
+		}
+	}
+	tests := []struct {
+		name   string
+		prefix string
+		post   func(t *testing.T, p tokenPanel) (*http.Response, string)
+	}{
+		{"secret api key", "ggs_", newKey("secret")},
+		{"publishable api key", "ggp_", newKey("publishable")},
+		{"tenant create", "ggs_", func(t *testing.T, p tokenPanel) (*http.Response, string) {
+			adminID := createPlatformAdminUser(t, p.raw, "root@example.com")
+			c, csrf := loginAsAdmin(t, p.srv, p.raw, adminID, "root@example.com")
+			return tfPostForm(t, c, p.srv.URL+pathControlPanel+"/tenants",
+				url.Values{"_csrf": {csrf}, "tenant_name": {"reveal-co"}, "project_name": {"game"}, "label": {"bootstrap"}})
+		}},
+		{"management token", "ggm_", func(t *testing.T, p tokenPanel) (*http.Response, string) {
+			c, csrf, _ := p.member(t, "owner@example.com", "owner")
+			return p.create(t, c, csrf, nil)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			p := newTokenPanel(t, true)
+
+			// Act
+			resp, body := tt.post(t, p)
+
+			// Assert
+			assert.Equal(t, []any{true, "no-store"}, []any{strings.Contains(body, tt.prefix), resp.Header.Get("Cache-Control")})
+		})
+	}
+}

@@ -571,6 +571,8 @@ func (h *Handler) createTenantHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, FormErrorFragment(msg))
 		return
 	}
+	// The page holds the key value: never cache it.
+	w.Header().Set("Cache-Control", "no-store")
 	webutil.Render(r, w, SignupSuccessPage(SignupSuccessView(result)))
 }
 
@@ -711,6 +713,8 @@ func (h *Handler) createAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusInternalServerError, nil, "api key create failed")
 		return
 	}
+	// The page holds the key value: never cache it.
+	w.Header().Set("Cache-Control", "no-store")
 	webutil.Render(r, w, APIKeyCreatedPage(SignupSuccessView{
 		TenantID: tenantID,
 		APIKeyID: result.APIKeyID,
@@ -907,7 +911,7 @@ func htmxRedirect(w http.ResponseWriter, r *http.Request, path string) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code
+	http.Redirect(w, r, path, http.StatusSeeOther) //nolint:gosec // each caller builds path from a constant prefix, parsed IDs, and a fixed flash code; redirectRateLimits takes its base from safeReturnPath
 }
 
 func parseTenantAndAPIKeyIDs(w http.ResponseWriter, r *http.Request) (int64, int64, bool) {
