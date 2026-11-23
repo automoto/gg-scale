@@ -216,6 +216,18 @@ func TestBackend_Deallocate_deletes_named_gameserver(t *testing.T) {
 	assert.Equal(t, "gs-42", fake.lastDeletedName)
 }
 
+// An empty ref (a row that stayed pending) names no GameServer, so there is
+// nothing to delete.
+func TestBackend_Deallocate_should_make_no_api_call_for_an_empty_ref(t *testing.T) {
+	fake := &fakeAPI{}
+	be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "ggscale"})
+	require.NoError(t, err)
+
+	err = be.Deallocate(context.Background(), 1, "")
+
+	assert.Equal(t, []any{nil, 0}, []any{err, fake.deleteCalls})
+}
+
 func TestBackend_Deallocate_treats_notfound_as_success(t *testing.T) {
 	fake := &fakeAPI{}
 	gv := schema.GroupResource{Group: "agones.dev", Resource: "gameservers"}

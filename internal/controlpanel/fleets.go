@@ -358,6 +358,8 @@ func fleetFormError(prefix string, err error) (string, int) {
 		return prefix + ": a fleet with that name already exists.", http.StatusConflict
 	case errors.Is(err, fleet.ErrLiveAllocationLimit):
 		return prefix + ": " + fleet.ErrLiveAllocationLimit.Error() + ".", http.StatusConflict
+	case errors.Is(err, fleet.ErrFleetBackendMismatch):
+		return prefix + ": the fleet backend does not match the server backend.", http.StatusConflict
 	}
 	return prefix + ".", http.StatusInternalServerError
 }

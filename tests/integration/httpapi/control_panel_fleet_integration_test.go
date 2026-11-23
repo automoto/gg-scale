@@ -59,12 +59,8 @@ func (s *stubBackend) Allocate(_ context.Context, _ fleet.AllocationRequest) (*f
 	}, nil
 }
 
-// Deallocate fails for an empty ref, as the agones backend does.
-func (s *stubBackend) Deallocate(_ context.Context, _ fleet.AllocationID, ref string) error {
+func (s *stubBackend) Deallocate(_ context.Context, _ fleet.AllocationID, _ string) error {
 	s.deallocateN.Add(1)
-	if ref == "" {
-		return errors.New("empty backend ref")
-	}
 	return nil
 }
 
@@ -770,8 +766,8 @@ func TestControlPanelFleet_should_refuse_server_set_agones_keys_when_isolation_i
 }
 
 // A pending row with no backend ref (the process stopped during the backend
-// call) is released without a backend call, so it stops counting against
-// the live allocation cap.
+// call) is released after its backend call, so it stops counting against the
+// live allocation cap.
 func TestControlPanelFleet_deallocate_should_release_a_pending_row_with_no_backend_ref(t *testing.T) {
 	c := startCluster(t)
 	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-pending")
@@ -804,7 +800,7 @@ func TestControlPanelFleet_deallocate_should_release_a_pending_row_with_no_backe
 	start := postFormWithCookie(t, base, allocate, cookie)
 	start.Body.Close()
 
-	assert.Equal(t, []any{http.StatusConflict, http.StatusSeeOther, "shutdown", int64(0), http.StatusSeeOther},
+	assert.Equal(t, []any{http.StatusConflict, http.StatusSeeOther, "shutdown", int64(1), http.StatusSeeOther},
 		[]any{atCap.StatusCode, stop.StatusCode, status, backend.deallocateN.Load(), start.StatusCode})
 }
 
@@ -846,6 +842,7 @@ func TestControlPanelFleet_post_handlers_should_refuse_a_tenant_admin_before_sho
 		{"deallocate_with_a_wrong_confirm_id", "/allocations/" + strconv.FormatInt(allocID, 10) + "/deallocate", url.Values{"confirm_id": {"0"}}},
 		{"fleet_update_with_a_field_error", "/fleets/" + strconv.FormatInt(pluginFleetID, 10), url.Values{"name": {""}, "config_key[]": {"api_token"}, "config_value[]": {""}}},
 		{"fleet_create_with_a_field_error", "/fleets", url.Values{"name": {""}, "backend": {"agones"}, "fleet_name": {"gs"}}},
+		{"fleet_delete", "/fleets/" + strconv.FormatInt(agonesFleetID, 10) + "/delete", url.Values{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -865,6 +862,10 @@ func TestControlPanelFleet_post_handlers_should_refuse_a_tenant_admin_before_sho
 			assert.Equal(t, []any{http.StatusForbidden, []string(nil)}, []any{resp.StatusCode, shown}, string(body))
 		})
 	}
+	var live int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM fleets WHERE tenant_id = $1 AND deleted_at IS NULL`, tenantID).Scan(&live))
+	assert.Equal(t, 2, live, "a refused delete must not delete the fleet")
 }
 
 // failingLookupStore is a fleet store whose name lookup fails with a marker.

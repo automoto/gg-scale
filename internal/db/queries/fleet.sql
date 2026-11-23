@@ -43,6 +43,17 @@ SET status      = 'shutdown',
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
+-- name: ReleasePendingAllocationWithoutRef :execrows
+-- 0 rows = the row is no longer pending with no ref (MarkAllocationReady won
+-- the race), so the caller must stop the server that the ref now names.
+UPDATE game_server_allocations
+SET status      = 'shutdown',
+    released_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND status = 'pending'
+  AND COALESCE(backend_ref, '') = '';
+
 -- name: GetAllocation :one
 SELECT id, tenant_id, project_id, fleet_id, backend, backend_ref, region, address,
        status::text AS status, metadata, requested_at, ready_at, released_at

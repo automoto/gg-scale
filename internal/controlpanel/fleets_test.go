@@ -354,3 +354,9 @@ func TestFleetFormError_should_answer_409_with_the_setting_at_the_live_allocatio
 
 	assert.Equal(t, []any{409, true}, []any{status, strings.Contains(msg, "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")}, msg)
 }
+
+func TestFleetFormError_should_answer_409_with_a_fixed_text_for_a_backend_mismatch(t *testing.T) {
+	msg, status := fleetFormError("Allocate failed", fmt.Errorf("%w: fleet %q wants %q", fleet.ErrFleetBackendMismatch, "name-marker", "plugin:x"))
+
+	assert.Equal(t, []any{409, "Allocate failed: the fleet backend does not match the server backend."}, []any{status, msg})
+}

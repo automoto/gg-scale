@@ -240,3 +240,31 @@ func TestManager_should_roll_back_the_ready_change_when_the_commit_hook_fails(t 
 	require.NoError(t, lerr)
 	assert.Equal(t, []any{true, 1, fleet.StatusFailed}, []any{err != nil, len(rows), rows[0].Status})
 }
+
+// ReleasePendingWithoutRef releases a row only while it is pending with no
+// backend ref. A row that MarkReady already changed stays as it is.
+func TestPostgresStore_ReleasePendingWithoutRef(t *testing.T) {
+	pool, tenantID, projectID := startMigratedDB(t)
+	ctx := db.WithTenant(context.Background(), tenantID)
+	store := fleet.NewPostgresStore(pool)
+	tmpl, err := fleet.NewPostgresFleetStore(pool, nil).CreateFleet(ctx, tenantID, fleet.FleetCreate{
+		ProjectID: projectID, Name: "release", Backend: "agones", Config: map[string]string{"fleet_name": "gs"},
+	}, actor)
+	require.NoError(t, err)
+	req := fleet.AllocationRequest{TenantID: tenantID, ProjectID: projectID, FleetID: tmpl.ID, Region: "local"}
+	pending, err := store.InsertPending(ctx, req, "agones")
+	require.NoError(t, err)
+	ready, err := store.InsertPending(ctx, req, "agones")
+	require.NoError(t, err)
+	require.NoError(t, store.MarkReady(ctx, ready, "ns/gs-1", "203.0.113.1:7777"))
+
+	releasedPending, errPending := store.ReleasePendingWithoutRef(ctx, pending)
+	releasedReady, errReady := store.ReleasePendingWithoutRef(ctx, ready)
+
+	p, err := store.Get(ctx, pending)
+	require.NoError(t, err)
+	r, err := store.Get(ctx, ready)
+	require.NoError(t, err)
+	assert.Equal(t, []any{true, nil, fleet.StatusShutdown, false, nil, fleet.StatusReady},
+		[]any{releasedPending, errPending, p.Status, releasedReady, errReady, r.Status})
+}

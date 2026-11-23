@@ -3,8 +3,6 @@
 package managementapi_test
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -233,19 +231,8 @@ func TestAllocationWrite_should_refuse_over_mcp_at_the_live_allocation_cap(t *te
 			f.count(`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, f.projectA)}, resultText(res))
 }
 
-// refBackend is fakeBackend whose Deallocate fails for an empty ref, as the
-// agones backend does.
-type refBackend struct{ fakeBackend }
-
-func (refBackend) Deallocate(_ context.Context, _ fleet.AllocationID, ref string) error {
-	if ref == "" {
-		return errors.New("empty backend ref")
-	}
-	return nil
-}
-
 func TestAllocationWrite_should_deallocate_a_pending_row_with_no_backend_ref(t *testing.T) {
-	f := newFleetFixtureWithOptions(t, nil, refBackend{}, false, fleet.ManagerOptions{MaxCapacity: 5, MaxLiveAllocations: 1})
+	f := newFleetFixtureWithOptions(t, nil, fakeBackend{}, false, fleet.ManagerOptions{MaxCapacity: 5, MaxLiveAllocations: 1})
 	fid := f.fleet(f.projectA, "alpha")
 	stuck := f.scalar(`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, region, status)
 		SELECT tenant_id, id, $2, 'agones', 'eu', 'pending' FROM projects WHERE id = $1 RETURNING id`, f.projectA, fid)

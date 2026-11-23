@@ -493,6 +493,26 @@ func (q *Queries) ReleaseAllocation(ctx context.Context, id int64) error {
 	return err
 }
 
+const releasePendingAllocationWithoutRef = `-- name: ReleasePendingAllocationWithoutRef :execrows
+UPDATE game_server_allocations
+SET status      = 'shutdown',
+    released_at = now()
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND id = $1
+  AND status = 'pending'
+  AND COALESCE(backend_ref, '') = ''
+`
+
+// 0 rows = the row is no longer pending with no ref (MarkAllocationReady won
+// the race), so the caller must stop the server that the ref now names.
+func (q *Queries) ReleasePendingAllocationWithoutRef(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, releasePendingAllocationWithoutRef, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAllocationStatus = `-- name: SetAllocationStatus :exec
 UPDATE game_server_allocations
 SET status = $2

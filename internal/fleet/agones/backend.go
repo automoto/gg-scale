@@ -247,9 +247,14 @@ func (b *Backend) resolveNamespace(tmplNamespace string) string {
 }
 
 // Deallocate deletes the GameServer CR; Agones reaps the underlying pod.
-// A "not found" delete is treated as success (idempotent shutdown).
+// A "not found" delete is treated as success (idempotent shutdown). An empty
+// ref (a row that stayed pending) names no GameServer, so there is nothing
+// to delete.
 func (b *Backend) Deallocate(ctx context.Context, _ fleet.AllocationID, backendRef string) error {
 	namespace, name := b.splitBackendRef(backendRef)
+	if name == "" {
+		return nil
+	}
 	if err := b.cfg.API.DeleteGameServer(ctx, namespace, name, metav1.DeleteOptions{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil

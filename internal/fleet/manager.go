@@ -19,6 +19,10 @@ type Store interface {
 	// MarkReady and Release must run the commit hook of ctx (see
 	// WithCommitHook) in the transaction of the row change.
 	Release(ctx context.Context, id AllocationID) error
+	// ReleasePendingWithoutRef releases the row only while it is pending
+	// with no backend ref, and reports whether it did. It runs the commit
+	// hook like Release.
+	ReleasePendingWithoutRef(ctx context.Context, id AllocationID) (bool, error)
 	Get(ctx context.Context, id AllocationID) (*Allocation, error)
 
 	// List returns the most recent allocations for a project. include=true
@@ -207,23 +211,17 @@ func (m *Manager) appendEvent(ctx context.Context, id AllocationID, status Statu
 // Deallocate releases the backend resource and marks the row shutdown.
 // Errors from the backend bubble up; the store update happens only on
 // backend success so we don't lose the ability to retry shutdown. A pending
-// row with no backend ref and no resolution id names no backend resource
-// (the process stopped during the backend call), so it is released without a
-// backend call. If that call still finishes, MarkReady fails on the released
-// row and the manager frees the server.
+// row with no backend ref (the process stopped during the backend call, or
+// the call still runs) is released only while it is still pending with no
+// ref. If MarkReady commits first, the row is read again and the server of
+// its ref is stopped before the release. If the release commits first,
+// MarkReady fails on the released row and the allocate frees the server.
 func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	a, err := m.store.Get(ctx, id)
 	if err != nil {
 		return err
 	}
 	if a.Status == StatusShutdown || (a.Status == StatusFailed && a.Metadata["ggscale.dev/resolution-id"] == "") {
-		return nil
-	}
-	if a.Status == StatusPending && a.BackendRef == "" && a.Metadata["ggscale.dev/resolution-id"] == "" {
-		if err := m.store.Release(ctx, id); err != nil {
-			return err
-		}
-		m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
 		return nil
 	}
 	if a.Metadata["ggscale.dev/resolution-id"] != "" {
@@ -259,6 +257,26 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	}
 	if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
 		return fmt.Errorf("fleet: backend deallocate: %w", err)
+	}
+	if a.Status == StatusPending && a.BackendRef == "" {
+		released, err := m.store.ReleasePendingWithoutRef(ctx, id)
+		if err != nil {
+			return err
+		}
+		if released {
+			m.appendEvent(ctx, id, StatusShutdown, "", "")
+			return nil
+		}
+		// MarkReady committed after the first read: the row now names a server.
+		if a, err = m.store.Get(ctx, id); err != nil {
+			return err
+		}
+		if a.Status.IsTerminal() {
+			return nil
+		}
+		if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
+			return fmt.Errorf("fleet: backend deallocate: %w", err)
+		}
 	}
 	if err := m.store.Release(ctx, id); err != nil {
 		return err
