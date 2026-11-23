@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -360,7 +361,7 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 			if err != nil {
 				return fmt.Errorf("insert player: %w", err)
 			}
-			if err := auditlog.Write(ctx, tx, id, "auth.signup", email, nil); err != nil {
+			if err := auditlog.Write(ctx, tx, id, "auth.signup", strconv.FormatInt(id, 10), nil); err != nil {
 				return err
 			}
 			return reservePlayerSlot(ctx, q, qc)
@@ -620,7 +621,7 @@ func authLogin(d Deps) func(context.Context, *loginInput) (*sessionOutput, error
 			if err := insertSession(ctx, tx, projectID, row.ID, refreshToken, now); err != nil {
 				return err
 			}
-			return auditlog.Write(ctx, tx, row.ID, "auth.login", in.Body.Email, nil)
+			return auditlog.Write(ctx, tx, row.ID, "auth.login", strconv.FormatInt(row.ID, 10), nil)
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(in.Body.Password))

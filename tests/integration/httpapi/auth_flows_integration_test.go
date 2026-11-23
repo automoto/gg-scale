@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -398,4 +399,25 @@ func TestDisable_credentialed_requires_password_and_admin_reenable_restores(t *t
 	require.NoError(t, err)
 	restored := loginPlayer(t, srv.URL, "pw", "gone@example.com", "supersecret")
 	assert.Equal(t, sess.PlayerID, restored.PlayerID)
+}
+
+// The auth audit rows name the player by id, so the audit log holds no
+// player address.
+func TestAuthAudit_should_name_the_player_by_id_not_by_email(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "pw")
+	srv, rec := newFullStackServer(t, c)
+	sess := signupVerifiedPlayer(t, srv.URL, "pw", rec, "audited@example.com", "supersecret")
+
+	var targets []string
+	for _, action := range []string{"auth.signup", "auth.login"} {
+		var target string
+		require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+			`SELECT coalesce(target, '') FROM audit_log WHERE action = $1 AND actor_user_id = $2`,
+			action, sess.PlayerID).Scan(&target))
+		targets = append(targets, target)
+	}
+
+	id := strconv.FormatInt(sess.PlayerID, 10)
+	assert.Equal(t, []string{id, id}, targets)
 }

@@ -494,3 +494,9 @@ This text is for the CHANGELOG section that is written when the release is tagge
   valid UTF-8 text`, for every API operation. An MCP tool call with such text
   in any argument gets a JSON-RPC invalid-params error with that message.
   Before, most fields stored the text with U+FFFD in its place.
+- The `auth.signup` and `auth.login` audit rows now name the player by its
+  id in `target`. Before, `target` held the player email. Old rows keep the
+  address.
+- The `create_secret_api_key` tool description and the docs now say that the
+  MCP result holds the key value two times (in the text and in
+  `structuredContent`).

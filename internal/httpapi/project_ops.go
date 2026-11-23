@@ -676,7 +676,8 @@ var projectOps = []projectOp{
 		tool: "create_secret_api_key",
 		description: "Returns a secret. Create a secret (ggs_) API key for this Game Project, for game servers and back-end " +
 			"tools only; never put it in a game client. The value is returned once: store it in a secret store and do not " +
-			"write it in logs or chat. Scopes are limited to the features this Game Project has.",
+			"write it in logs or chat. The result holds the value two times, in the text and in structuredContent: " +
+			"keep both out of logs. Scopes are limited to the features this Game Project has.",
 		scope: managementtoken.ScopeKeysSecret,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/secret-api-keys", OperationID: "createProjectSecretAPIKey",
