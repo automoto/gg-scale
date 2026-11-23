@@ -436,15 +436,23 @@ func (a clientsetAdapter) Ping(ctx context.Context) error {
 }
 
 // CleanupResolution removes all servers tagged by an interrupted allocation.
-func (b *Backend) CleanupResolution(ctx context.Context, id string, config map[string]string) error {
+// With ProjectIsolation on, it also selects by the ProjectLabel of projectID.
+func (b *Backend) CleanupResolution(ctx context.Context, projectID int64, id string, config map[string]string) error {
 	api, ok := b.cfg.API.(interface {
 		ListGameServers(context.Context, string, string) (*agonesv1.GameServerList, error)
 	})
 	if !ok {
 		return fleet.ErrUnsupported
 	}
+	selector := "ggscale.dev/resolution-id=" + id
+	if b.cfg.ProjectIsolation {
+		if projectID <= 0 {
+			return errors.New("agones: project isolation needs the project id of the allocation")
+		}
+		selector += "," + ProjectLabel + "=" + strconv.FormatInt(projectID, 10)
+	}
 	namespace := b.resolveNamespace(TemplateFromConfig(config).Namespace)
-	servers, err := api.ListGameServers(ctx, namespace, "ggscale.dev/resolution-id="+id)
+	servers, err := api.ListGameServers(ctx, namespace, selector)
 	if err != nil {
 		return err
 	}

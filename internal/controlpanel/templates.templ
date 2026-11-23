@@ -2472,6 +2472,9 @@ templ agonesFleetFields(vm NewFleetView) {
 	</label>
 	<label>
 		Namespace override
+		if vm.AgonesProjectIsolation {
+			<small class="muted">Agones project isolation is on. This server uses AGONES_NAMESPACE. Leave this field empty; a saved namespace is not used.</small>
+		}
 		<input name="namespace" value={ vm.Config["namespace"] } placeholder="(uses AGONES_NAMESPACE)"/>
 		@fieldError(vm.FieldErrors, "namespace")
 	</label>
@@ -3219,7 +3222,7 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dt>Agones project isolation</dt>
 				<dd>@boolBadge(vm.Snapshot.AgonesProjectIsolation)</dd>
 			</dl>
-			if vm.Snapshot.FleetBackend == "agones" && !vm.Snapshot.AgonesProjectIsolation {
+			if vm.Snapshot.FeatureFleetEnabled && vm.Snapshot.FleetBackend == "agones" && !vm.Snapshot.AgonesProjectIsolation {
 				<p role="alert">{ agonesIsolationOffWarning }</p>
 			}
 		</section>

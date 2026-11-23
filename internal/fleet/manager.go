@@ -218,7 +218,7 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 				if cfgErr != nil {
 					return cfgErr
 				}
-				cleanupErr = cleaner.CleanupResolution(ctx, a.Metadata["ggscale.dev/resolution-id"], cfg)
+				cleanupErr = cleaner.CleanupResolution(ctx, a.ProjectID, a.Metadata["ggscale.dev/resolution-id"], cfg)
 			case errors.Is(err, ErrFleetNotFound) && a.BackendRef != "":
 				// A deleted template must not strand a known backend resource.
 				cleanupErr = ErrUnsupported

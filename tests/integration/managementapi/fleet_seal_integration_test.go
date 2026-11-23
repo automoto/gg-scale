@@ -89,7 +89,7 @@ type cleanerBackend struct {
 
 func (b cleanerBackend) Name() string { return "plugin:demo" }
 
-func (b cleanerBackend) CleanupResolution(context.Context, string, map[string]string) error {
+func (b cleanerBackend) CleanupResolution(context.Context, int64, string, map[string]string) error {
 	*b.called = true
 	return nil
 }

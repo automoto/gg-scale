@@ -587,11 +587,30 @@ func TestManagerRetainsUnknownResolutionWithoutOptionalCleaner(t *testing.T) {
 
 type cleanupBackend struct {
 	*fakeBackend
-	cleanupErr error
+	cleanupErr     error
+	cleanupProject int64
 }
 
-func (b *cleanupBackend) CleanupResolution(context.Context, string, map[string]string) error {
+func (b *cleanupBackend) CleanupResolution(_ context.Context, projectID int64, _ string, _ map[string]string) error {
+	b.cleanupProject = projectID
 	return b.cleanupErr
+}
+
+func TestManagerResolutionCleanup_should_pass_the_project_of_the_allocation(t *testing.T) {
+	backend := &cleanupBackend{fakeBackend: &fakeBackend{name: "fake", allocateImpl: func(int) (*fleet.Allocation, error) {
+		return &fleet.Allocation{BackendRef: "ref-1", Address: "10.0.0.1:7777"}, nil
+	}}}
+	mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_cleanup"}
+	a, err := mgr.Allocate(t.Context(), req)
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	err = mgr.Deallocate(t.Context(), a.ID)
+
+	assert.Equal(t, []any{nil, req.ProjectID}, []any{err, backend.cleanupProject})
 }
 
 func TestManagerResolutionCleanupHandlesMissingFleetAndAuditsShutdown(t *testing.T) {

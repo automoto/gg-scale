@@ -756,19 +756,21 @@ func TestServerSettingsPage_should_show_the_allocation_max_capacity(t *testing.T
 func TestServerSettingsPage_agones_project_isolation(t *testing.T) {
 	cases := []struct {
 		name        string
+		fleetOn     bool
 		backend     string
 		isolation   bool
 		wantBadge   string
 		wantWarning bool
 	}{
-		{"should_warn_when_agones_runs_without_isolation", "agones", false, "badge-revoked\">off", true},
-		{"should_not_warn_when_isolation_is_on", "agones", true, "badge-active\">on", false},
-		{"should_not_warn_for_a_plugin_backend", "plugin:demo", false, "badge-revoked\">off", false},
+		{"should_warn_when_agones_runs_without_isolation", true, "agones", false, "badge-revoked\">off", true},
+		{"should_not_warn_when_isolation_is_on", true, "agones", true, "badge-active\">on", false},
+		{"should_not_warn_for_a_plugin_backend", true, "plugin:demo", false, "badge-revoked\">off", false},
+		{"should_not_warn_when_the_fleet_switch_is_off", false, "agones", false, "badge-revoked\">off", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			html := renderToString(t, ServerSettingsPage(ServerSettingsView{
-				Snapshot: ServerSettingsSnapshot{FleetBackend: tc.backend, AgonesProjectIsolation: tc.isolation},
+				Snapshot: ServerSettingsSnapshot{FeatureFleetEnabled: tc.fleetOn, FleetBackend: tc.backend, AgonesProjectIsolation: tc.isolation},
 			}))
 
 			assert.Equal(t, []bool{true, tc.wantWarning},

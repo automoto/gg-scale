@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"context"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -325,4 +326,24 @@ func TestEditFleetPage_should_ask_for_the_values_again_after_a_failed_save(t *te
 		Config: map[string]string{"api_token": ""}, Retry: true,
 	}))
 	assert.Contains(t, html, "Enter each value again")
+}
+
+func TestEditFleetPage_namespace_note(t *testing.T) {
+	cases := []struct {
+		name      string
+		isolation bool
+	}{
+		{"should_show_the_note_when_isolation_is_on", true},
+		{"should_not_show_the_note_when_isolation_is_off", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderToString(t, EditFleetPage(EditFleetView{
+				TenantID: 1, ProjectID: 2, FleetID: 3, Name: "f", Backend: "agones",
+				Config: map[string]string{"fleet_name": "gs", "namespace": "legacy"}, AgonesProjectIsolation: tc.isolation,
+			}))
+
+			assert.Equal(t, tc.isolation, strings.Contains(html, "This server uses AGONES_NAMESPACE. Leave this field empty"))
+		})
+	}
 }

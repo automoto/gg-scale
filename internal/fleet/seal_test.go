@@ -203,7 +203,7 @@ type recordingCleaner struct {
 	called bool
 }
 
-func (b *recordingCleaner) CleanupResolution(context.Context, string, map[string]string) error {
+func (b *recordingCleaner) CleanupResolution(context.Context, int64, string, map[string]string) error {
 	b.called = true
 	return nil
 }

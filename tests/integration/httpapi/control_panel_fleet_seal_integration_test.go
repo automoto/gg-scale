@@ -263,7 +263,7 @@ type cleanerStub struct {
 	called bool
 }
 
-func (b *cleanerStub) CleanupResolution(context.Context, string, map[string]string) error {
+func (b *cleanerStub) CleanupResolution(context.Context, int64, string, map[string]string) error {
 	b.called = true
 	return nil
 }

@@ -74,12 +74,13 @@ func (h *Handler) fleetsNewPage(w http.ResponseWriter, r *http.Request) {
 	}
 	session, _ := sessionFromContext(r.Context())
 	view := NewFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		BackendConfigured: h.fleetBackendName(),
-		Backend:           h.fleetBackendName(),
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Backend:                h.fleetBackendName(),
 	}
 	webutil.Render(r, w, NewFleetPage(view))
 }
@@ -104,6 +105,8 @@ func (h *Handler) fleetsNewFormFragment(w http.ResponseWriter, r *http.Request) 
 		TenantID:  tenantID,
 		ProjectID: projectID,
 		Backend:   backend,
+
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
 	}))
 }
 
@@ -134,16 +137,17 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		fieldErrors["backend"] = "Backend is required."
 	}
 	view := NewFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		BackendConfigured: h.fleetBackendName(),
-		Name:              name,
-		Backend:           backend,
-		Config:            fleetFormConfig(backend, cfg),
-		Retry:             true,
-		FieldErrors:       fieldErrors,
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Name:                   name,
+		Backend:                backend,
+		Config:                 fleetFormConfig(backend, cfg),
+		Retry:                  true,
+		FieldErrors:            fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -185,15 +189,16 @@ func (h *Handler) fleetsEditPage(w http.ResponseWriter, r *http.Request) {
 	}
 	session, _ := sessionFromContext(r.Context())
 	webutil.Render(r, w, EditFleetPage(EditFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		FleetID:           f.ID,
-		Name:              f.Name,
-		Backend:           f.Backend,
-		Config:            fleetFormConfig(f.Backend, f.Config),
-		BackendConfigured: h.fleetBackendName(),
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		FleetID:                f.ID,
+		Name:                   f.Name,
+		Backend:                f.Backend,
+		Config:                 fleetFormConfig(f.Backend, f.Config),
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
 	}))
 }
 
@@ -218,17 +223,18 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		fieldErrors["name"] = "Name is required."
 	}
 	view := EditFleetView{
-		UserEmail:         session.User.Email,
-		CSRFToken:         session.CSRFToken,
-		TenantID:          tenantID,
-		ProjectID:         projectID,
-		FleetID:           fleetID,
-		Name:              name,
-		Backend:           existing.Backend,
-		Config:            fleetFormConfig(existing.Backend, cfg),
-		BackendConfigured: h.fleetBackendName(),
-		Retry:             true,
-		FieldErrors:       fieldErrors,
+		UserEmail:              session.User.Email,
+		CSRFToken:              session.CSRFToken,
+		TenantID:               tenantID,
+		ProjectID:              projectID,
+		FleetID:                fleetID,
+		Name:                   name,
+		Backend:                existing.Backend,
+		Config:                 fleetFormConfig(existing.Backend, cfg),
+		BackendConfigured:      h.fleetBackendName(),
+		AgonesProjectIsolation: h.agonesProjectIsolation(),
+		Retry:                  true,
+		FieldErrors:            fieldErrors,
 	}
 	if len(fieldErrors) > 0 {
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -391,8 +397,7 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 // that the server sets when Agones project isolation is on. The fleet store
 // refuses the same keys; this check shows the error at the field.
 func (h *Handler) checkAgonesServerSetKeys(backend string, cfg, errs map[string]string) {
-	store := h.fleet.FleetAdmin()
-	if backend != "agones" || store == nil || !store.AgonesProjectIsolation {
+	if backend != "agones" || !h.agonesProjectIsolation() {
 		return
 	}
 	for k := range cfg {
@@ -405,6 +410,16 @@ func (h *Handler) checkAgonesServerSetKeys(backend string, cfg, errs map[string]
 		}
 		errs[field] = fleet.ErrAgonesServerSetKey.Error()
 	}
+}
+
+// agonesProjectIsolation reports whether the fleet store refuses the agones
+// keys that the server sets (AGONES_PROJECT_ISOLATION).
+func (h *Handler) agonesProjectIsolation() bool {
+	if h.fleet == nil {
+		return false
+	}
+	store := h.fleet.FleetAdmin()
+	return store != nil && store.AgonesProjectIsolation
 }
 
 func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]string) {

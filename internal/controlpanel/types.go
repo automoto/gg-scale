@@ -924,9 +924,11 @@ type NewFleetView struct {
 	Saved bool
 	// Retry marks a form shown again after a failed save: the typed plugin
 	// values are not shown, so they must be entered again.
-	Retry       bool
-	Error       string
-	FieldErrors map[string]string
+	Retry bool
+	// AgonesProjectIsolation shows the note that the server sets the namespace.
+	AgonesProjectIsolation bool
+	Error                  string
+	FieldErrors            map[string]string
 }
 
 // EditFleetView is the data rendered by /fleets/{id}.
@@ -941,9 +943,11 @@ type EditFleetView struct {
 	Config            map[string]string
 	BackendConfigured string
 	// Retry marks the form shown again after a failed save.
-	Retry       bool
-	Error       string
-	FieldErrors map[string]string
+	Retry bool
+	// AgonesProjectIsolation shows the note that the server sets the namespace.
+	AgonesProjectIsolation bool
+	Error                  string
+	FieldErrors            map[string]string
 }
 
 // DeallocateConfirmView is the data rendered by the type-the-ID confirm page.
@@ -1053,6 +1057,8 @@ func editToNewFleetView(vm EditFleetView) NewFleetView {
 		Saved:       true,
 		Retry:       vm.Retry,
 		FieldErrors: vm.FieldErrors,
+
+		AgonesProjectIsolation: vm.AgonesProjectIsolation,
 	}
 }
 

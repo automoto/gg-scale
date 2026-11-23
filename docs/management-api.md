@@ -233,7 +233,8 @@ the Game Project, as the dashboard pages do.
   config needs `fleet_name` and may have `namespace` and `selector.<label>`
   keys. With `AGONES_PROJECT_ISOLATION=true`, `namespace` and each
   `selector.ggscale.dev/` key are refused (422 with the message `Agones
-  project isolation is on: ...`); see "Agones project isolation" below. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
+  project isolation is on: ...`); see "Agones project isolation" below.
+  The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
   dashboard form has the same rule). Over the API, invalid UTF-8 in the JSON
   body answers 400 before this check (see Errors). `delete_fleet` hides the fleet
   from new allocations; live allocations and their history stay.
@@ -522,9 +523,10 @@ spec:
 ```
 
 Let the live matchmaker matches end before you turn it on. The cleanup of an
-interrupted match looks for its GameServers in `AGONES_NAMESPACE` only, so it
-does not find a GameServer that an older fleet config put in another
-namespace.
+interrupted match looks for its GameServers in `AGONES_NAMESPACE` only, and
+only for GameServers with the `ggscale.dev/project` label of the match's Game
+Project. So it does not find a GameServer that an older fleet config put in
+another namespace, or one that has no label.
 
 An Agones Fleet with no label, or with the label of another Game Project,
 does not allocate for that project. Put the Agones Fleets of all projects in

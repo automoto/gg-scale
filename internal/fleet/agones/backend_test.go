@@ -345,7 +345,7 @@ func TestCleanupResolutionFindsResourceWithoutSavedReference(t *testing.T) {
 	if !assert.NoError(t, err) {
 		return
 	}
-	assert.NoError(t, backend.CleanupResolution(context.Background(), "mm_recovery", nil))
+	assert.NoError(t, backend.CleanupResolution(context.Background(), 2, "mm_recovery", nil))
 	assert.Equal(t, "ggscale.dev/resolution-id=mm_recovery", api.selector)
 	assert.Equal(t, "orphan", api.lastDeletedName)
 }
@@ -413,8 +413,29 @@ func TestCleanupResolution_should_use_the_server_namespace_when_isolation_is_on(
 	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games", ProjectIsolation: true})
 	require.NoError(t, err)
 
-	err = backend.CleanupResolution(context.Background(), "mm_recovery", map[string]string{"namespace": "tenant-ns"})
+	err = backend.CleanupResolution(context.Background(), 2, "mm_recovery", map[string]string{"namespace": "tenant-ns"})
 
 	require.NoError(t, err)
 	assert.Equal(t, "games", api.listNamespace)
+}
+
+func TestCleanupResolution_should_select_by_the_project_label_when_isolation_is_on(t *testing.T) {
+	api := &recoveringAPI{}
+	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games", ProjectIsolation: true})
+	require.NoError(t, err)
+
+	err = backend.CleanupResolution(context.Background(), 2, "mm_recovery", nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "ggscale.dev/resolution-id=mm_recovery,ggscale.dev/project=2", api.selector)
+}
+
+func TestCleanupResolution_should_refuse_a_missing_project_when_isolation_is_on(t *testing.T) {
+	api := &recoveringAPI{}
+	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games", ProjectIsolation: true})
+	require.NoError(t, err)
+
+	err = backend.CleanupResolution(context.Background(), 0, "mm_recovery", nil)
+
+	assert.Equal(t, []any{true, "", ""}, []any{err != nil, api.selector, api.lastDeletedName})
 }

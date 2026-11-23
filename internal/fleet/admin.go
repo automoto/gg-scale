@@ -104,9 +104,15 @@ const ErrAgonesServerSetKey = InvalidError("Agones project isolation is on: the 
 
 // AgonesServerSetKey reports whether key is an agones config key that only
 // the server sets when Agones project isolation is on: namespace, and each
-// selector key with the ggscale.dev/ prefix.
+// selector key with the ggscale.dev/ prefix. Spaces around the key and the
+// label name do not change the result.
 func AgonesServerSetKey(key string) bool {
-	return key == "namespace" || strings.HasPrefix(strings.ToLower(key), selectorPrefix+"ggscale.dev/")
+	key = strings.TrimSpace(key)
+	if key == "namespace" {
+		return true
+	}
+	label, ok := strings.CutPrefix(key, selectorPrefix)
+	return ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(label)), "ggscale.dev/")
 }
 
 // checkServerSetKeys refuses the keys of AgonesServerSetKey in an agones
