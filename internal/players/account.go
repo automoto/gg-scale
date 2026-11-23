@@ -1040,7 +1040,7 @@ func (h *Handler) accountSessionFromRequest(r *http.Request) (accountSession, bo
 }
 
 func (h *Handler) clearAccountSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountSessionCookieName,
 		Value:    "",
 		Path:     "/v1/players",
@@ -1395,7 +1395,7 @@ func (h *Handler) setAccountVerifyCookie(w http.ResponseWriter, accountID uuid.U
 }
 
 func (h *Handler) clearAccountVerifyCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountVerifyCookieName,
 		Value:    "",
 		Path:     accountBasePath,
