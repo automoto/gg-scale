@@ -557,6 +557,9 @@ type PendingChangeRequestView struct {
 	Note        string
 	Requester   string
 	CreatedAt   time.Time
+	// Warning is shown above the approve button, for example for the agones
+	// backend grant while Agones project isolation is off.
+	Warning string
 }
 
 // ProjectSettingsView consolidates project-scoped configuration on one page.

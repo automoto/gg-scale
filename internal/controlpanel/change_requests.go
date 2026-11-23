@@ -392,7 +392,9 @@ func (h *Handler) changeRequestsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	reqs := make([]PendingChangeRequestView, 0, len(rows))
 	for _, row := range rows {
-		reqs = append(reqs, pendingChangeRequestView(row))
+		v := pendingChangeRequestView(row)
+		v.Warning = agonesGrantWarning(v, h.cfg.ServerSettings.AgonesProjectIsolation)
+		reqs = append(reqs, v)
 	}
 	webutil.Render(r, w, ChangeRequestsPage(ChangeRequestsView{
 		UserEmail: session.User.Email,
@@ -400,6 +402,22 @@ func (h *Handler) changeRequestsPage(w http.ResponseWriter, r *http.Request) {
 		Requests:  reqs,
 		Message:   flashMessage(r),
 	}))
+}
+
+// agonesIsolationOffWarning is shown where a platform admin can give the
+// fleet_agones_backend grant, and on the Server settings page, while
+// AGONES_PROJECT_ISOLATION is off.
+const agonesIsolationOffWarning = "Agones project isolation is off. Every Game Project with the fleet_agones_backend grant can allocate and delete the GameServers of the other Game Projects on this Agones cluster. Give that grant to one Game Project only, or set AGONES_PROJECT_ISOLATION=true and label the GameServer template of each Agones Fleet with ggscale.dev/project=<project id>."
+
+// agonesGrantWarning returns the warning for a request of the
+// fleet_agones_backend grant while Agones project isolation is off. The
+// submit form does not offer that grant, but approve applies an older
+// request that holds it.
+func agonesGrantWarning(v PendingChangeRequestView, isolation bool) string {
+	if isolation || v.Kind != changeKindFeature || v.Target != "fleet_agones_backend" {
+		return ""
+	}
+	return agonesIsolationOffWarning
 }
 
 func pendingChangeRequestView(row sqlcgen.ListPendingTenantChangeRequestsRow) PendingChangeRequestView {

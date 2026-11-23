@@ -492,7 +492,9 @@ is also true for `create_fleet` and `update_fleet` with `fleet:write`, and
 for matches that the matchmaker starts from that fleet. Do not give
 `fleet_agones_backend` to more than one Game Project on one cluster while the
 option is off. The server logs `Agones project isolation is off` at start
-when `FLEET_BACKEND=agones`, and the **Server settings** page shows a warning.
+when `FEATURE_FLEET_ENABLED=true` and `FLEET_BACKEND=agones`. The **Server
+settings** page and the **Change requests** page (on a request for
+`fleet_agones_backend`) show a warning.
 
 With `AGONES_PROJECT_ISOLATION=true`:
 
@@ -518,6 +520,11 @@ spec:
       labels:
         ggscale.dev/project: "12"
 ```
+
+Let the live matchmaker matches end before you turn it on. The cleanup of an
+interrupted match looks for its GameServers in `AGONES_NAMESPACE` only, so it
+does not find a GameServer that an older fleet config put in another
+namespace.
 
 An Agones Fleet with no label, or with the label of another Game Project,
 does not allocate for that project. Put the Agones Fleets of all projects in

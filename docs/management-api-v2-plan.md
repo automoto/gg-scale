@@ -586,6 +586,6 @@ This text is for the CHANGELOG section that is written when the release is tagge
   refuse a `namespace` key and each `selector.ggscale.dev/` key (422 over the
   API, a field error on the dashboard). Label the GameServer template of each
   Agones Fleet before you turn it on. When it is off and the backend is
-  agones, the server logs a warning at start and the **Server settings** page
-  shows a warning. An allocation request for a fleet of another Game Project
+  agones, the server logs a warning at start, and the **Server settings**
+  page and a change request for `fleet_agones_backend` show a warning. An allocation request for a fleet of another Game Project
   is now refused as not found.

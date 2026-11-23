@@ -3220,7 +3220,7 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>@boolBadge(vm.Snapshot.AgonesProjectIsolation)</dd>
 			</dl>
 			if vm.Snapshot.FleetBackend == "agones" && !vm.Snapshot.AgonesProjectIsolation {
-				<p role="alert">Agones project isolation is off. Every Game Project with the fleet_agones_backend grant can allocate and delete the GameServers of the other Game Projects on this Agones cluster. Give that grant to one Game Project only, or set AGONES_PROJECT_ISOLATION=true and label the GameServer template of each Agones Fleet with ggscale.dev/project=&lt;project id&gt;.</p>
+				<p role="alert">{ agonesIsolationOffWarning }</p>
 			}
 		</section>
 	}

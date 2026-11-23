@@ -35,6 +35,9 @@ templ ChangeRequestsPage(vm ChangeRequestsView) {
 								<dd>{ req.Note }</dd>
 							}
 						</dl>
+						if req.Warning != "" {
+							<p role="alert">{ req.Warning }</p>
+						}
 						<form method="post" action={ templ.URL("/v1/control-panel/admin/change-requests/" + stringFromInt(req.ID) + "/approve") } class="settings-form">
 							<input type="hidden" name="_csrf" value={ vm.CSRFToken }/>
 							<button type="submit" class="btn-inline">Approve &amp; apply</button>
