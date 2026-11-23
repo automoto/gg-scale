@@ -711,20 +711,22 @@ func TestManagerAllocate_plugin_backend_names(t *testing.T) {
 	}
 }
 
-// A row with no backend ref and no resolution id has no known backend
-// resource while it is pending (the process stopped during the backend
-// call), so deallocate releases it without a backend call. Every other row
-// still goes to the backend.
+// A pending row with no backend ref and no resolution id has no known
+// backend resource (the process stopped during the backend call), so
+// deallocate releases it without a backend call. Every other row still goes
+// to the backend, which here fails for an empty ref as agones does.
 func TestManager_Deallocate_backend_call_by_ref_and_status(t *testing.T) {
 	cases := []struct {
 		name       string
 		status     fleet.Status
 		ref        string
 		wantCalled bool
+		wantErr    bool
+		wantStatus fleet.Status
 	}{
-		{"should_release_a_pending_row_with_no_ref_without_the_backend", fleet.StatusPending, "", false},
-		{"should_call_the_backend_for_a_pending_row_with_a_ref", fleet.StatusPending, "ns/gs-1", true},
-		{"should_call_the_backend_for_a_ready_row_with_no_ref", fleet.StatusReady, "", true},
+		{"should_release_a_pending_row_with_no_ref_without_the_backend", fleet.StatusPending, "", false, false, fleet.StatusShutdown},
+		{"should_call_the_backend_for_a_pending_row_with_a_ref", fleet.StatusPending, "ns/gs-1", true, false, fleet.StatusShutdown},
+		{"should_call_the_backend_for_a_ready_row_with_no_ref", fleet.StatusReady, "", true, true, fleet.StatusReady},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -735,9 +737,6 @@ func TestManager_Deallocate_backend_call_by_ref_and_status(t *testing.T) {
 				}
 				return nil
 			}}
-			if tc.status == fleet.StatusReady {
-				backend.deallocateImpl = nil
-			}
 			mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
 			id, err := store.InsertPending(t.Context(), sampleReq(), backend.name)
 			require.NoError(t, err)
@@ -748,9 +747,23 @@ func TestManager_Deallocate_backend_call_by_ref_and_status(t *testing.T) {
 
 			a, getErr := store.Get(t.Context(), id)
 			require.NoError(t, getErr)
-			events, _ := store.ListEvents(t.Context(), id, 1)
-			assert.Equal(t, []any{nil, tc.wantCalled, fleet.StatusShutdown, []fleet.Event{{ID: 1, AllocationID: id, Status: fleet.StatusShutdown}}},
-				[]any{err, len(backend.deallocateIDs) == 1, a.Status, events})
+			assert.Equal(t, []any{tc.wantErr, tc.wantCalled, tc.wantStatus},
+				[]any{err != nil, len(backend.deallocateIDs) == 1, a.Status})
 		})
 	}
+}
+
+func TestManager_Deallocate_should_add_a_shutdown_event_for_a_pending_row_with_no_ref(t *testing.T) {
+	store := newFakeStore()
+	backend := &fakeBackend{name: "fake", deallocateImpl: func(context.Context, fleet.AllocationID, string) error {
+		return errors.New("backend must not be called")
+	}}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	id, err := store.InsertPending(t.Context(), sampleReq(), backend.name)
+	require.NoError(t, err)
+
+	require.NoError(t, mgr.Deallocate(t.Context(), id))
+
+	events, _ := store.ListEvents(t.Context(), id, 1)
+	assert.Equal(t, []fleet.Event{{ID: 1, AllocationID: id, Status: fleet.StatusShutdown}}, events)
 }
