@@ -909,8 +909,9 @@ type Querier interface {
 	// flipped to 'failed' this call so the caller can meter the
 	// attempts_exhausted failure counter without re-reading the rows.
 	ReleaseMatchmakerTickets(ctx context.Context, arg ReleaseMatchmakerTicketsParams) (int64, error)
-	// 0 rows = the row is no longer pending with no ref (MarkAllocationReady won
-	// the race), so the caller must stop the server that the ref now names.
+	// 0 rows = the row changed after the caller read it (MarkAllocationReady,
+	// MarkAllocationFailed or another release), so the caller reads it again and
+	// stops the server that a new ref names.
 	ReleasePendingAllocationWithoutRef(ctx context.Context, id int64) (int64, error)
 	// Counter mirror of ReserveTenantPlayerSlot for the delete-purge path: the
 	// caller passes how many non-soft-deleted players it hard-deleted in the same

@@ -113,8 +113,9 @@ func (s *PostgresStore) Release(ctx context.Context, id AllocationID) error {
 }
 
 // ReleasePendingWithoutRef marks the row 'shutdown' only while it is pending
-// with no backend ref. It reports false when the row changed first (MarkReady
-// won). The commit hook runs only when the row is released.
+// with no backend ref. It reports false when the row changed first
+// (MarkReady, MarkFailed or another release). The commit hook runs only when
+// the row is released.
 func (s *PostgresStore) ReleasePendingWithoutRef(ctx context.Context, id AllocationID) (bool, error) {
 	released := false
 	err := s.pool.Q(ctx, func(tx pgx.Tx) error {

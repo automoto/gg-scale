@@ -244,11 +244,7 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 			}
 		}
 		if cleanupErr == nil {
-			if err := m.store.Release(ctx, id); err != nil {
-				return err
-			}
-			m.appendEvent(ctx, id, StatusShutdown, a.Address, "")
-			return nil
+			return m.release(ctx, id, a)
 		}
 		if !errors.Is(cleanupErr, ErrUnsupported) || a.BackendRef == "" {
 			return fmt.Errorf("allocation %d requires resolution cleanup: %w", id, cleanupErr)
@@ -258,6 +254,14 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 	if err := m.backend.Deallocate(ctx, id, a.BackendRef); err != nil {
 		return fmt.Errorf("fleet: backend deallocate: %w", err)
 	}
+	return m.release(ctx, id, a)
+}
+
+// release marks the row shutdown after its backend resource is gone. A row
+// read as pending with no ref is released only while it stays so. If it
+// changed (MarkReady, MarkFailed or another release), it is read again once,
+// and the server of its new ref is stopped before the release.
+func (m *Manager) release(ctx context.Context, id AllocationID, a *Allocation) error {
 	if a.Status == StatusPending && a.BackendRef == "" {
 		released, err := m.store.ReleasePendingWithoutRef(ctx, id)
 		if err != nil {
@@ -267,7 +271,6 @@ func (m *Manager) Deallocate(ctx context.Context, id AllocationID) error {
 			m.appendEvent(ctx, id, StatusShutdown, "", "")
 			return nil
 		}
-		// MarkReady committed after the first read: the row now names a server.
 		if a, err = m.store.Get(ctx, id); err != nil {
 			return err
 		}

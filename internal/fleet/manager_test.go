@@ -819,3 +819,24 @@ func TestManager_Deallocate_should_stop_the_server_when_mark_ready_wins_the_race
 		})
 	}
 }
+
+// The resolution cleanup can miss a server that is labelled after its list.
+// When MarkReady commits between the read and the release, the row is read
+// again and the server of its new ref is stopped before the release.
+func TestManagerResolutionCleanup_should_stop_the_server_when_mark_ready_wins_the_race(t *testing.T) {
+	store := &staleGetStore{fakeStore: newFakeStore()}
+	backend := &cleanupBackend{fakeBackend: &fakeBackend{name: "fake"}}
+	mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock})
+	req := sampleReq()
+	req.Labels = map[string]string{"ggscale.dev/resolution-id": "mm_race"}
+	id, err := store.InsertPending(t.Context(), req, backend.name)
+	require.NoError(t, err)
+	require.NoError(t, store.MarkReady(t.Context(), id, "ns/gs-late", "203.0.113.1:7777"))
+
+	err = mgr.Deallocate(t.Context(), id)
+
+	a, getErr := store.fakeStore.Get(t.Context(), id)
+	require.NoError(t, getErr)
+	assert.Equal(t, []any{nil, []string{"ns/gs-late"}, fleet.StatusShutdown},
+		[]any{err, backend.deallocateRefs, a.Status})
+}

@@ -44,8 +44,9 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id = $1;
 
 -- name: ReleasePendingAllocationWithoutRef :execrows
--- 0 rows = the row is no longer pending with no ref (MarkAllocationReady won
--- the race), so the caller must stop the server that the ref now names.
+-- 0 rows = the row changed after the caller read it (MarkAllocationReady,
+-- MarkAllocationFailed or another release), so the caller reads it again and
+-- stops the server that a new ref names.
 UPDATE game_server_allocations
 SET status      = 'shutdown',
     released_at = now()

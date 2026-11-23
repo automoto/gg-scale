@@ -596,9 +596,12 @@ This text is for the CHANGELOG section that is written when the release is tagge
   not found.
 - A manual allocation that stays `pending` with no backend ref (the server
   process stopped during the backend call) can now be deallocated on the
-  dashboard and with `deallocate_server`. The Agones backend has nothing to
-  delete for an empty ref and answers success. Before, Agones refused it and
-  the row counted against `FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT` forever.
+  dashboard and with `deallocate_server`. An Agones deallocate of an
+  allocation with no backend ref now releases the row, because nothing names
+  a GameServer. If the server was made but its ref was never recorded, that
+  GameServer can stay behind; delete it in the cluster. Before, Agones
+  refused the deallocate and the row counted against
+  `FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT` forever.
 - A fleet backend mismatch on the dashboard allocate page answers 409 with a
   fixed text.
 - The dashboard fleet and allocation forms (create, update, delete, restore,
