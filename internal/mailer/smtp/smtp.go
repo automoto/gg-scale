@@ -260,6 +260,9 @@ func buildRFC5322(m mailer.Message) ([]byte, error) {
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(m.Body)
+	// The SMTP data writer turns each LF into CRLF and escapes a leading dot,
+	// but passes a bare CR. Some servers end a line on a bare CR, so a body
+	// with "\r.\r\n" could end the message early.
+	b.WriteString(strings.ReplaceAll(m.Body, "\r", ""))
 	return []byte(b.String()), nil
 }

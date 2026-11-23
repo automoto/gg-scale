@@ -152,3 +152,12 @@ func TestBuildRFC5322_should_not_quote_a_refused_recipient(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "secret.person")
 }
+
+func TestBuildRFC5322_should_drop_bare_cr_from_the_body(t *testing.T) {
+	msg := mailer.Message{From: "a@example.com", To: []string{"b@example.com"}, Subject: "s", Body: "a\r.\r\nb\rc"}
+
+	out, err := buildRFC5322(msg)
+
+	require.NoError(t, err)
+	assert.True(t, strings.HasSuffix(string(out), "\r\n\r\na.\nbc"), "body=%q", out)
+}
