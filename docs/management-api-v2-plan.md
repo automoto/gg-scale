@@ -451,7 +451,11 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - The dashboard fleet list has a **Restore** button for a deleted fleet.
 - Plugin fleet config values are now sealed at rest with the credential key
   (the key that seals the Steam Web API key). The keys stay plain. An older
-  row is sealed on its next update. After a rollback to an older release,
+  row is sealed on its next update. To seal the existing plugin fleets after
+  the upgrade, save each one once: open it on the dashboard and click **Save
+  changes** (empty values keep the stored ones), or call `update_fleet` with its name
+  only. Database backups made before that keep the plain values. After a
+  rollback to an older release,
   enter the plugin config again: the older release cannot read sealed values.
   When a sealed value does not open (the credential key was lost or
   changed), allocation, plugin cleanup, and an update that keeps the value
