@@ -197,8 +197,11 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		Fleets: h.loadFleetOptions(r.Context(), tenantID, projectID),
 	}
 	fieldErrors := map[string]string{}
-	if fleetName == "" {
+	switch {
+	case fleetName == "":
 		fieldErrors["fleet"] = "Fleet is required."
+	case !fleet.ValidText(fleetName):
+		fieldErrors["fleet"] = "Fleet is not valid or too long."
 	}
 	if region == "" {
 		fieldErrors["region"] = "Region is required."
@@ -218,8 +221,8 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if ferr != nil {
-		slog.ErrorContext(r.Context(), msgFleetLookupFailed, "err", ferr, "fleet", fleetName)
-		view.Error = "Fleet lookup failed: " + ferr.Error()
+		slog.ErrorContext(r.Context(), msgFleetLookupFailed, "err", ferr, "tenant", tenantID, "project", projectID)
+		view.Error = "Fleet lookup failed."
 		w.WriteHeader(http.StatusInternalServerError)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return
@@ -233,15 +236,8 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 	}, projectadmin.Actor{UserID: session.User.ID})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "manual allocate failed", "err", err, "tenant", tenantID, "project", projectID)
-		var invalid fleet.InvalidError
-		status := http.StatusInternalServerError
-		switch {
-		case errors.As(err, &invalid):
-			status = http.StatusUnprocessableEntity
-		case errors.Is(err, fleet.ErrLiveAllocationLimit):
-			status = http.StatusConflict
-		}
-		view.Error = "Allocate failed: " + err.Error()
+		var status int
+		view.Error, status = fleetFormError("Allocate failed", err)
 		w.WriteHeader(status)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
 		return

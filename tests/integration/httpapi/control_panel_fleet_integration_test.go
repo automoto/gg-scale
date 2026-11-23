@@ -128,18 +128,26 @@ func newControlPanelFleetServerWithCipher(t *testing.T, c *cluster, backend flee
 // with the given manager options.
 func newControlPanelFleetServerWithOptions(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *controlpanel.PluginSnapshot, cipher *secretseal.Cipher, opts fleet.ManagerOptions) (*httptest.Server, *fleet.Manager) {
 	t.Helper()
-	signer, err := auth.NewSigner([]byte(testSignerKey))
-	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
-	authorizer, err := rbac.NewAuthorizer(pool)
-	require.NoError(t, err)
-	t.Cleanup(authorizer.Close)
 	mgr := fleet.NewManager(
 		fleet.NewPostgresStore(pool),
 		fleet.NewPostgresFleetStore(pool, cipher),
 		backend,
 		opts,
 	)
+	return newControlPanelFleetServerWithManager(t, c, mgr, pluginInfo, cipher), mgr
+}
+
+// newControlPanelFleetServerWithManager serves the control panel with the
+// given fleet manager.
+func newControlPanelFleetServerWithManager(t *testing.T, c *cluster, mgr *fleet.Manager, pluginInfo func() *controlpanel.PluginSnapshot, cipher *secretseal.Cipher) *httptest.Server {
+	t.Helper()
+	signer, err := auth.NewSigner([]byte(testSignerKey))
+	require.NoError(t, err)
+	pool := db.NewPool(c.appPool)
+	authorizer, err := rbac.NewAuthorizer(pool)
+	require.NoError(t, err)
+	t.Cleanup(authorizer.Close)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
 		Commit:                "test",
@@ -160,7 +168,7 @@ func newControlPanelFleetServerWithOptions(t *testing.T, c *cluster, backend fle
 	})
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	return srv, mgr
+	return srv
 }
 
 func TestControlPanelFleet_list_then_allocate_then_appears_in_table(t *testing.T) {
@@ -855,6 +863,99 @@ func TestControlPanelFleet_post_handlers_should_refuse_a_tenant_admin_before_sho
 				}
 			}
 			assert.Equal(t, []any{http.StatusForbidden, []string(nil)}, []any{resp.StatusCode, shown}, string(body))
+		})
+	}
+}
+
+// failingLookupStore is a fleet store whose name lookup fails with a marker.
+type failingLookupStore struct{ fleet.FleetStore }
+
+func (failingLookupStore) GetByName(context.Context, int64, string) (*fleet.Fleet, error) {
+	return nil, errors.New("lookup-store-marker")
+}
+
+// failingInsertStore is an allocation store whose insert fails with a marker.
+type failingInsertStore struct{ fleet.Store }
+
+func (failingInsertStore) InsertPending(context.Context, fleet.AllocationRequest, string) (fleet.AllocationID, error) {
+	return 0, errors.New("insert-store-marker")
+}
+
+// newAllocateErrorServer serves the control panel for an owner with the
+// grants, on a manager built from the given stores. It returns the
+// allocations URL, the cookie, the CSRF value, and a live fleet name.
+func newAllocateErrorServer(t *testing.T, store func(*db.Pool) fleet.Store, fleets func(*db.Pool) fleet.FleetStore) (string, *http.Cookie, string, string) {
+	t.Helper()
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-alloc-error")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+	pool := db.NewPool(c.appPool)
+	mgr := fleet.NewManager(store(pool), fleets(pool), newStubBackend("agones"),
+		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10})
+	srv := newControlPanelFleetServerWithManager(t, c, mgr, nil, nil)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	name := seedFleetTemplate(t, c, tenantID, projectID, "agones")
+	return srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations", cookie, csrf, name
+}
+
+func postAllocate(t *testing.T, base string, cookie *http.Cookie, form url.Values) (int, string) {
+	t.Helper()
+	resp := postFormWithCookie(t, base, form, cookie)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	return resp.StatusCode, string(body)
+}
+
+// The allocate page shows a fixed text for an unknown error, never the
+// error text.
+func TestControlPanelFleet_allocate_should_not_show_store_error_text(t *testing.T) {
+	plainStore := func(p *db.Pool) fleet.Store { return fleet.NewPostgresStore(p) }
+	plainFleets := func(p *db.Pool) fleet.FleetStore { return fleet.NewPostgresFleetStore(p, nil) }
+	cases := []struct {
+		name   string
+		store  func(*db.Pool) fleet.Store
+		fleets func(*db.Pool) fleet.FleetStore
+		marker string
+	}{
+		{"should_hide_a_fleet_lookup_error", plainStore,
+			func(p *db.Pool) fleet.FleetStore { return failingLookupStore{plainFleets(p)} }, "lookup-store-marker"},
+		{"should_hide_an_allocate_error", func(p *db.Pool) fleet.Store { return failingInsertStore{plainStore(p)} },
+			plainFleets, "insert-store-marker"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base, cookie, csrf, name := newAllocateErrorServer(t, tc.store, tc.fleets)
+
+			status, body := postAllocate(t, base, cookie, url.Values{"_csrf": {csrf}, "fleet": {name}, "region": {"eu"}})
+
+			assert.Equal(t, []any{http.StatusInternalServerError, false}, []any{status, strings.Contains(body, tc.marker)}, body)
+		})
+	}
+}
+
+// A fleet name that is not valid text or is too long is a field error. It
+// never reaches the fleet lookup (the lookup here fails, so a 500 shows
+// that it ran).
+func TestControlPanelFleet_allocate_should_refuse_an_invalid_fleet_name_before_the_lookup(t *testing.T) {
+	base, cookie, csrf, _ := newAllocateErrorServer(t,
+		func(p *db.Pool) fleet.Store { return fleet.NewPostgresStore(p) },
+		func(p *db.Pool) fleet.FleetStore { return failingLookupStore{fleet.NewPostgresFleetStore(p, nil)} })
+	names := map[string]string{
+		"nul":          "fl\x00eet",
+		"invalid_utf8": "fl\xffeet",
+		"too_long":     strings.Repeat("x", fleet.MaxConfigKeyOrVal+1),
+	}
+	for label, name := range names {
+		t.Run(label, func(t *testing.T) {
+			status, body := postAllocate(t, base, cookie, url.Values{"_csrf": {csrf}, "fleet": {name}, "region": {"eu"}})
+
+			assert.Equal(t, []any{http.StatusUnprocessableEntity, true},
+				[]any{status, strings.Contains(body, `id="fleet-error">Fleet is not valid or too long.`)}, body)
 		})
 	}
 }

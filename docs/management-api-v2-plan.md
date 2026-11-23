@@ -604,3 +604,8 @@ This text is for the CHANGELOG section that is written when the release is tagge
   without it gets 403, also when the form has an error, and the answer shows
   no fleet or allocation data. Before, a form error showed the page with the
   fleets of the Game Project or the allocation.
+- The dashboard allocate page shows a fixed text when the fleet lookup or the
+  allocation fails for an unknown reason. The error is in the server log
+  only. A refused input and the live allocation limit keep their own text. A
+  fleet name that is not valid text (NUL, invalid UTF-8) or is longer than
+  256 bytes is now a form error (422) on the allocate page too.
