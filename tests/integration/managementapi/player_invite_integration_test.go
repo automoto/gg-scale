@@ -211,7 +211,8 @@ func TestPlayerInvite_tools_should_be_refused_without_players_pii(t *testing.T) 
 	invited := f.call(tok, "invite_player", map[string]any{"email": inviteTargetEmail})
 	linked := f.call(tok, "link_player", map[string]any{"player_id": id, "email": playerEmail})
 
-	assert.Equal(t, []any{true, true, true, true, 0, 0}, []any{isError(invited), isError(linked),
+	assert.Equal(t, []any{true, true, true, true, true, true, 0, 0}, []any{isError(invited), isError(linked),
+		strings.Contains(resultText(invited), `"status":403`), strings.Contains(resultText(linked), `"status":403`),
 		strings.Contains(resultDetail(invited), managementtoken.ScopePlayersPII), strings.Contains(resultDetail(linked), managementtoken.ScopePlayersPII),
 		len(rec.Snapshot()), f.count(`SELECT count(*) FROM player_invitations`)}, resultText(linked))
 }
