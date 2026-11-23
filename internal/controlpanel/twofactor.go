@@ -105,7 +105,7 @@ func (h *Handler) setTwoFactorPendingCookie(w http.ResponseWriter, user controlP
 		Email:     user.Email,
 		ExpiresAt: h.now().Add(twofactor.PendingTTL).Unix(),
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     twoFactorPendingCookieName,
 		Value:    value,
 		Path:     pathControlPanel,
@@ -117,7 +117,7 @@ func (h *Handler) setTwoFactorPendingCookie(w http.ResponseWriter, user controlP
 }
 
 func (h *Handler) clearTwoFactorPendingCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     twoFactorPendingCookieName,
 		Value:    "",
 		Path:     pathControlPanel,
@@ -202,7 +202,7 @@ func (h *Handler) mintTrustedDevice(ctx context.Context, w http.ResponseWriter, 
 	}); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     trustedDeviceCookieName,
 		Value:    token,
 		Path:     pathControlPanel,

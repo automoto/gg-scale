@@ -80,7 +80,7 @@ func (h *Handler) setAccountTwoFactorCookie(w http.ResponseWriter, accountID uui
 		Email:     email,
 		ExpiresAt: h.now().Add(twofactor.PendingTTL).Unix(),
 	})
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTwoFactorCookieName,
 		Value:    value,
 		Path:     accountBasePath,
@@ -92,7 +92,7 @@ func (h *Handler) setAccountTwoFactorCookie(w http.ResponseWriter, accountID uui
 }
 
 func (h *Handler) clearAccountTwoFactorCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTwoFactorCookieName,
 		Value:    "",
 		Path:     accountBasePath,
@@ -175,7 +175,7 @@ func (h *Handler) mintAccountTrustedDevice(ctx context.Context, w http.ResponseW
 	}); err != nil {
 		return err
 	}
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountTrustCookieName,
 		Value:    token,
 		Path:     accountBasePath,
