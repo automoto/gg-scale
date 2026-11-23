@@ -169,7 +169,7 @@ func dsnForDatabase(dsn, dbName string) (string, error) {
 	return u.String(), nil
 }
 
-// newFixture copies the migrated template into a fresh database database and serves the real router with the
+// newFixture copies the migrated template into a fresh database and serves the real router with the
 // management API switched on, over an app-role pool, so the token
 // middleware, row security, and grants apply as in production.
 func newFixture(t *testing.T) *fixture {
