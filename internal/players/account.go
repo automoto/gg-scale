@@ -1383,7 +1383,7 @@ func (h *Handler) setAccountVerifyCookie(w http.ResponseWriter, accountID uuid.U
 		ExpiresAt: expiresAt,
 		Email:     email,
 	}, h.verifySigningKey)
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     accountVerifyCookieName,
 		Value:    val,
 		Path:     accountBasePath,

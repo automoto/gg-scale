@@ -61,7 +61,7 @@ func (h *Handler) setVerifyPendingCookie(w http.ResponseWriter, p verifyPendingP
 		p.ExpiresAt = h.now().Add(verifyPendingTTL).Unix()
 	}
 	value := encodeVerifyCookie(p, h.verifyCookieKey())
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     verifyPendingCookieName,
 		Value:    value,
 		Path:     pathControlPanel,
@@ -73,7 +73,7 @@ func (h *Handler) setVerifyPendingCookie(w http.ResponseWriter, p verifyPendingP
 }
 
 func (h *Handler) clearVerifyPendingCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // Secure follows the CookieSecure config; HttpOnly and SameSite are set
 		Name:     verifyPendingCookieName,
 		Value:    "",
 		Path:     pathControlPanel,
