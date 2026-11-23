@@ -89,7 +89,7 @@ func (q *Queries) DenyTenantChangeRequest(ctx context.Context, arg DenyTenantCha
 }
 
 const getTenantChangeRequestByID = `-- name: GetTenantChangeRequestByID :one
-SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status
+SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status, review_reason
 FROM tenant_change_requests
 WHERE id = $1
 `
@@ -103,6 +103,7 @@ type GetTenantChangeRequestByIDRow struct {
 	RequestedLimit *int64
 	Note           string
 	Status         string
+	ReviewReason   *string
 }
 
 func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (GetTenantChangeRequestByIDRow, error) {
@@ -117,6 +118,7 @@ func (q *Queries) GetTenantChangeRequestByID(ctx context.Context, id int64) (Get
 		&i.RequestedLimit,
 		&i.Note,
 		&i.Status,
+		&i.ReviewReason,
 	)
 	return i, err
 }

@@ -304,7 +304,8 @@ func (i *PlayerInviter) create(ctx context.Context, tenantID, projectID int64, e
 	if err != nil {
 		return PlayerInvite{}, inviteMail{}, err
 	}
-	return PlayerInvite{ID: row.ID, Email: email, ExpiresAt: row.ExpiresAt.Time}, mail, nil
+	// The email and the answer use the address as stored on the invite.
+	return PlayerInvite{ID: row.ID, Email: row.Email, ExpiresAt: row.ExpiresAt.Time}, mail, nil
 }
 
 // checkLinkTarget refuses a player that is not in the project, and an

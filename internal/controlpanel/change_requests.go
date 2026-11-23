@@ -523,7 +523,7 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
-	h.sendChangeRequestDecisionEmail(r.Context(), applied, true, "")
+	h.sendChangeRequestDecisionEmail(r.Context(), applied, true)
 	h.reloadRBACPolicy(r.Context())
 	h.redirectChangeAdmin(w, r, flashRequestApproved)
 }
@@ -616,7 +616,7 @@ func (h *Handler) denyChangeRequestHandler(w http.ResponseWriter, r *http.Reques
 		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
-	h.sendChangeRequestDecisionEmail(r.Context(), req, false, reason)
+	h.sendChangeRequestDecisionEmail(r.Context(), req, false)
 	h.redirectChangeAdmin(w, r, flashRequestDenied)
 }
 
@@ -626,7 +626,7 @@ func (h *Handler) redirectChangeAdmin(w http.ResponseWriter, r *http.Request, co
 
 // sendChangeRequestDecisionEmail notifies the tenant's owner/admins of an
 // approve/deny outcome. Mirrors the signup decision emails.
-func (h *Handler) sendChangeRequestDecisionEmail(ctx context.Context, req sqlcgen.GetTenantChangeRequestByIDRow, approved bool, reason string) {
+func (h *Handler) sendChangeRequestDecisionEmail(ctx context.Context, req sqlcgen.GetTenantChangeRequestByIDRow, approved bool) {
 	if h.mailer == nil || h.cfg.MailFrom == "" {
 		return
 	}
@@ -642,13 +642,15 @@ func (h *Handler) sendChangeRequestDecisionEmail(ctx context.Context, req sqlcge
 	if len(emails) == 0 {
 		return
 	}
-	subject, body := changeRequestDecisionEmail(req, approved, reason)
+	subject, body := changeRequestDecisionEmail(req, approved)
 	if err := h.mailer.Send(ctx, mailer.Message{From: h.cfg.MailFrom, To: emails, Subject: subject, Body: body}); err != nil {
 		slog.ErrorContext(ctx, "change request: decision mailer", "err", err, "tenant_id", req.TenantID)
 	}
 }
 
-func changeRequestDecisionEmail(req sqlcgen.GetTenantChangeRequestByIDRow, approved bool, reason string) (subject, body string) {
+// changeRequestDecisionEmail builds the decision email. The deny reason
+// comes from the saved row, so the email shows what was stored.
+func changeRequestDecisionEmail(req sqlcgen.GetTenantChangeRequestByIDRow, approved bool) (subject, body string) {
 	what := "feature " + deref(req.Feature)
 	switch {
 	case req.Kind == changeKindTierUpgrade && req.RequestedTier != nil:
@@ -661,7 +663,7 @@ func changeRequestDecisionEmail(req sqlcgen.GetTenantChangeRequestByIDRow, appro
 			fmt.Sprintf("Your request (%s) was approved and applied to your Account Tenant.", what)
 	}
 	body = fmt.Sprintf("Your request (%s) was not approved at this time.", what)
-	if reason != "" {
+	if reason := deref(req.ReviewReason); reason != "" {
 		body += "\n\nReason: " + reason
 	}
 	return "About your ggscale change request", body

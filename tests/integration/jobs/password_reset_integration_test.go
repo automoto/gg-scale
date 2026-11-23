@@ -75,3 +75,30 @@ VALUES
 	assert.Equal(t, int64(1), players, "only the long-expired player token is swept")
 	assert.Equal(t, int64(1), controlPanel, "only the long-expired dashboard token is swept")
 }
+
+// The lookup ignores letter case, so the email goes to the address stored on
+// the account, not to the text that was typed.
+func TestSendPasswordResetEmail_should_send_to_the_stored_address(t *testing.T) {
+	cases := map[string]struct{ surface, insert string }{
+		"control panel": {jobs.PasswordResetSurfaceControlPanel,
+			`INSERT INTO control_panel_users (email, password_hash, email_verified_at) VALUES ('Stored@Example.test', '\x00'::bytea, now())`},
+		"player account": {jobs.PasswordResetSurfacePlayerAccount,
+			`INSERT INTO player_accounts (email, password_hash, email_verified_at) VALUES ('Stored@Example.test', '\x00'::bytea, now())`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			pool, raw := startJobsDB(t)
+			ctx := context.Background()
+			rec := &mailer.Recorder{}
+			deps := jobs.PasswordResetDeps{Pool: pool, Mailer: rec, MailFrom: "no-reply@example.test", BaseURL: "http://app.example.test"}
+			_, err := raw.Exec(ctx, c.insert)
+			require.NoError(t, err)
+
+			require.NoError(t, jobs.SendPasswordResetEmail(ctx, deps, c.surface, "stored@example.test"))
+
+			sent := rec.Snapshot()
+			require.Len(t, sent, 1)
+			assert.Equal(t, []string{"Stored@Example.test"}, sent[0].To)
+		})
+	}
+}
