@@ -419,3 +419,29 @@ func TestValidate_should_not_warn_when_probe_token_differs(t *testing.T) {
 
 	assert.NotContains(t, logs.String(), "RELAY_PROBE_TOKEN equals")
 }
+
+func TestValidate_agones_project_isolation_warning(t *testing.T) {
+	cases := []struct {
+		name      string
+		backend   string
+		isolation bool
+		want      bool
+	}{
+		{"should_warn_when_agones_runs_without_isolation", "agones", false, true},
+		{"should_not_warn_when_isolation_is_on", "agones", true, false},
+		{"should_not_warn_for_a_plugin_backend", "plugin:demo", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := captureDefaultLog(t)
+			c := baseProd()
+			c.FeatureFleetEnabled = true
+			c.FleetBackend = tc.backend
+			c.AgonesProjectIsolation = tc.isolation
+
+			require.NoError(t, c.Validate())
+
+			assert.Equal(t, tc.want, strings.Contains(logs.String(), "Agones project isolation is off"))
+		})
+	}
+}

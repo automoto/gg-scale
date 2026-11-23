@@ -108,6 +108,11 @@ type Config struct {
 	// name, selector labels) live on the fleet template, not in env vars.
 	AgonesNamespace  string `env:"AGONES_NAMESPACE" envDefault:"default"`
 	AgonesKubeconfig string `env:"AGONES_KUBECONFIG"`
+	// AgonesProjectIsolation pins every Agones allocation to
+	// AGONES_NAMESPACE and to GameServers labeled
+	// ggscale.dev/project=<project id>. Off by default, so a single-tenant
+	// cluster works with no labels.
+	AgonesProjectIsolation bool `env:"AGONES_PROJECT_ISOLATION" envDefault:"false"`
 
 	// k3s API auth via ServiceAccount + bearer token, for deployments where
 	// ggscale-server runs outside the cluster (e.g. as a Dokku app on a

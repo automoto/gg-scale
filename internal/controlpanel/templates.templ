@@ -2473,6 +2473,7 @@ templ agonesFleetFields(vm NewFleetView) {
 	<label>
 		Namespace override
 		<input name="namespace" value={ vm.Config["namespace"] } placeholder="(uses AGONES_NAMESPACE)"/>
+		@fieldError(vm.FieldErrors, "namespace")
 	</label>
 	<label>
 		Selector labels
@@ -3215,7 +3216,12 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
 				<dt>Allocation maximum capacity</dt>
 				<dd>{ stringFromInt(int64(vm.Snapshot.FleetAllocationMaxCapacity)) }</dd>
+				<dt>Agones project isolation</dt>
+				<dd>@boolBadge(vm.Snapshot.AgonesProjectIsolation)</dd>
 			</dl>
+			if vm.Snapshot.FleetBackend == "agones" && !vm.Snapshot.AgonesProjectIsolation {
+				<p role="alert">Agones project isolation is off. Every Game Project with the fleet_agones_backend grant can allocate and delete the GameServers of the other Game Projects on this Agones cluster. Give that grant to one Game Project only, or set AGONES_PROJECT_ISOLATION=true and label the GameServer template of each Agones Fleet with ggscale.dev/project=&lt;project id&gt;.</p>
+			}
 		</section>
 	}
 }

@@ -579,3 +579,13 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - `get_matchmaking_queue` refuses (422) a cursor text that it did not
   return, also when the text decodes to the same bytes (a changed last
   character or an added line break).
+- New setting `AGONES_PROJECT_ISOLATION` (default `false`). When it is
+  `true`, every Agones allocation (dashboard, `allocate_server`, and the
+  matchmaker) uses `AGONES_NAMESPACE` only and selects only GameServers with
+  the label `ggscale.dev/project=<project id>`. Fleet create and update then
+  refuse a `namespace` key and each `selector.ggscale.dev/` key (422 over the
+  API, a field error on the dashboard). Label the GameServer template of each
+  Agones Fleet before you turn it on. When it is off and the backend is
+  agones, the server logs a warning at start and the **Server settings** page
+  shows a warning. An allocation request for a fleet of another Game Project
+  is now refused as not found.

@@ -64,6 +64,7 @@ func (c *Config) Validate() error {
 	c.warnLowDBPool()
 	c.warnRequestTimeout()
 	c.warnSharedProbeToken()
+	c.warnAgonesProjectIsolation()
 	return nil
 }
 
@@ -335,6 +336,17 @@ func (c *Config) warnSharedProbeToken() {
 	if c.RelayProbeToken != "" && c.RelayProbeToken == c.LifecycleToken {
 		slog.Warn("RELAY_PROBE_TOKEN equals LIFECYCLE_TOKEN; give relay nodes their own LIFECYCLE_TOKEN",
 			"hint", "the probe sends RELAY_PROBE_TOKEN to every registered lifecycle_url, so relay hosts and platform admins would hold a token that drains the API servers")
+	}
+}
+
+// warnAgonesProjectIsolation flags an Agones fleet backend that runs
+// without project isolation. One server has one cluster, so a Game Project
+// with the agones grant can then allocate (and delete) the GameServers of
+// another Game Project.
+func (c *Config) warnAgonesProjectIsolation() {
+	if c.FeatureFleetEnabled && c.FleetBackend == "agones" && !c.AgonesProjectIsolation {
+		slog.Warn("Agones project isolation is off; do not give fleet_agones_backend to more than one Game Project on one Agones cluster",
+			"hint", "set AGONES_PROJECT_ISOLATION=true and label the GameServer template of each Agones Fleet with ggscale.dev/project=<project id>")
 	}
 }
 

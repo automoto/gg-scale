@@ -196,3 +196,68 @@ func TestFleetWrite_should_keep_the_plugin_config_out_of_a_validation_error(t *t
 	}
 	assert.Equal(t, []any{422, 422, []int{}}, []any{create.status, update.status, leaked}, strings.Join(outputs, "\n"))
 }
+
+// With Agones project isolation on, create_fleet and update_fleet refuse the
+// agones keys that the server sets, over HTTP and MCP, and write nothing.
+func TestFleetWrite_should_refuse_server_set_agones_keys_when_isolation_is_on(t *testing.T) {
+	f := newFleetFixtureWithStore(t, nil, fakeBackend{}, true)
+	fid := f.fleet(f.projectA, "alpha")
+	tok := f.scopedToken(managementtoken.ScopeFleetWrite)
+	path := fleetsPath + "/" + id(fid)
+	const msg = "Agones project isolation is on"
+	ns := map[string]any{"fleet_name": "gs", "namespace": "MARKNS"}
+	sel := map[string]any{"fleet_name": "gs", "selector.ggscale.dev/project": "MARKSEL"}
+
+	httpOut := []response{
+		f.do(tok, http.MethodPost, fleetsPath, `{"name":"x","backend":"agones","config":{"fleet_name":"gs","namespace":"MARKNS"}}`),
+		f.do(tok, http.MethodPost, fleetsPath, `{"name":"y","backend":"agones","config":{"fleet_name":"gs","selector.ggscale.dev/project":"MARKSEL"}}`),
+		f.do(tok, http.MethodPut, path, `{"config":{"fleet_name":"gs","namespace":"MARKNS"}}`),
+		f.do(tok, http.MethodPut, path, `{"config":{"fleet_name":"gs","selector.ggscale.dev/project":"MARKSEL"}}`),
+	}
+	mcpOut := []map[string]any{
+		f.call(tok, "create_fleet", map[string]any{"name": "x", "backend": "agones", "config": ns}),
+		f.call(tok, "create_fleet", map[string]any{"name": "y", "backend": "agones", "config": sel}),
+		f.call(tok, "update_fleet", map[string]any{"fleet_id": fid, "config": ns}),
+		f.call(tok, "update_fleet", map[string]any{"fleet_id": fid, "config": sel}),
+	}
+
+	got := []any{}
+	for _, r := range httpOut {
+		got = append(got, r.status, strings.Contains(r.detail(), msg), strings.Contains(r.raw, "MARK"))
+	}
+	for _, r := range mcpOut {
+		got = append(got, isError(r), strings.Contains(resultDetail(r), msg), strings.Contains(resultText(r), "MARK"))
+	}
+	got = append(got, f.count(`SELECT count(*) FROM fleets`), f.count(`SELECT count(*) FROM fleets WHERE config::text LIKE '%MARK%'`))
+	want := []any{}
+	for range httpOut {
+		want = append(want, 422, true, false)
+	}
+	for range mcpOut {
+		want = append(want, true, true, false)
+	}
+	want = append(want, 1, 0)
+	assert.Equal(t, want, got)
+}
+
+func TestFleetWrite_should_accept_other_agones_keys_and_a_rename_of_an_old_row_when_isolation_is_on(t *testing.T) {
+	f := newFleetFixtureWithStore(t, nil, fakeBackend{}, true)
+	old := f.scalar(`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		SELECT tenant_id, id, 'old', 'agones', '{"fleet_name":"gs","namespace":"legacy"}' FROM projects WHERE id = $1 RETURNING id`, f.projectA)
+	tok := f.scopedToken(managementtoken.ScopeFleetWrite)
+
+	created := f.do(tok, http.MethodPost, fleetsPath, `{"name":"x","backend":"agones","config":{"fleet_name":"gs","selector.zone":"eu"}}`)
+	renamed := f.do(tok, http.MethodPut, fleetsPath+"/"+id(old), `{"name":"old2"}`)
+	plugin := f.do(tok, http.MethodPost, fleetsPath, `{"name":"p","backend":"plugin:demo","config":{"namespace":"n"}}`)
+
+	assert.Equal(t, []int{200, 200, 200}, []int{created.status, renamed.status, plugin.status}, created.raw+renamed.raw+plugin.raw)
+}
+
+func TestFleetWrite_should_accept_a_namespace_when_isolation_is_off(t *testing.T) {
+	f := newFleetFixture(t)
+	tok := f.scopedToken(managementtoken.ScopeFleetWrite)
+
+	got := f.do(tok, http.MethodPost, fleetsPath, `{"name":"x","backend":"agones","config":{"fleet_name":"gs","namespace":"n","selector.ggscale.dev/project":"1"}}`)
+
+	assert.Equal(t, http.StatusOK, got.status, got.raw)
+}

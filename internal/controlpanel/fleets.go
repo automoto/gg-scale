@@ -126,6 +126,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.Form.Get("name"))
 	backend := strings.TrimSpace(r.Form.Get("backend"))
 	cfg, fieldErrors := parseFleetConfigForm(backend, r.Form)
+	h.checkAgonesServerSetKeys(backend, cfg, fieldErrors)
 	if name == "" {
 		fieldErrors["name"] = "Name is required."
 	}
@@ -207,6 +208,7 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 	session, _ := sessionFromContext(r.Context())
 	name := strings.TrimSpace(r.Form.Get("name"))
 	cfg, fieldErrors := parseFleetConfigForm(existing.Backend, r.Form)
+	h.checkAgonesServerSetKeys(existing.Backend, cfg, fieldErrors)
 	if fleet.ConfigIsSecret(existing.Backend) {
 		if err := keepStoredPluginValues(r.Context(), cfg, existing); err != nil {
 			fieldErrors["config_key"] = err.Error()
@@ -383,6 +385,26 @@ func parseAgonesFleetConfig(form url.Values) (map[string]string, map[string]stri
 		errs["fleet_name"] = err.Error()
 	}
 	return cfg, errs
+}
+
+// checkAgonesServerSetKeys adds a field error for each agones config key
+// that the server sets when Agones project isolation is on. The fleet store
+// refuses the same keys; this check shows the error at the field.
+func (h *Handler) checkAgonesServerSetKeys(backend string, cfg, errs map[string]string) {
+	store := h.fleet.FleetAdmin()
+	if backend != "agones" || store == nil || !store.AgonesProjectIsolation {
+		return
+	}
+	for k := range cfg {
+		if !fleet.AgonesServerSetKey(k) {
+			continue
+		}
+		field := "selector_key"
+		if k == "namespace" {
+			field = "namespace"
+		}
+		errs[field] = fleet.ErrAgonesServerSetKey.Error()
+	}
 }
 
 func parsePluginFleetConfig(form url.Values) (map[string]string, map[string]string) {

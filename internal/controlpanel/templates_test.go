@@ -753,6 +753,31 @@ func TestServerSettingsPage_should_show_the_allocation_max_capacity(t *testing.T
 	assert.Contains(t, html, "<dt>Allocation maximum capacity</dt><dd>100</dd>")
 }
 
+func TestServerSettingsPage_agones_project_isolation(t *testing.T) {
+	cases := []struct {
+		name        string
+		backend     string
+		isolation   bool
+		wantBadge   string
+		wantWarning bool
+	}{
+		{"should_warn_when_agones_runs_without_isolation", "agones", false, "badge-revoked\">off", true},
+		{"should_not_warn_when_isolation_is_on", "agones", true, "badge-active\">on", false},
+		{"should_not_warn_for_a_plugin_backend", "plugin:demo", false, "badge-revoked\">off", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+				Snapshot: ServerSettingsSnapshot{FleetBackend: tc.backend, AgonesProjectIsolation: tc.isolation},
+			}))
+
+			assert.Equal(t, []bool{true, tc.wantWarning},
+				[]bool{strings.Contains(html, "<dt>Agones project isolation</dt><dd><span class=\"badge "+tc.wantBadge),
+					strings.Contains(html, "Agones project isolation is off.")})
+		})
+	}
+}
+
 func TestTenantSettingsPage_should_render_feature_grants_as_table(t *testing.T) {
 	html := renderToString(t, TenantSettingsPage(TenantSettingsView{
 		TenantID:        1,

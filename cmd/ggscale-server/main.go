@@ -772,6 +772,7 @@ func run() error {
 				LeaderboardMaxPerProject:       cfg.LeaderboardMaxPerProject,
 				FleetBackend:                   cfg.FleetBackend,
 				FleetAllocationMaxCapacity:     cfg.FleetAllocationMaxCapacity,
+				AgonesProjectIsolation:         cfg.AgonesProjectIsolation,
 				FleetRegion:                    cfg.FleetRegion,
 			},
 		},
@@ -1022,14 +1023,15 @@ func buildFleet(cfg *config.Config, pool *db.Pool, cipher *secretseal.Cipher, lo
 	}
 
 	backend, err := fleetbuild.New(fleetbuild.Config{
-		Backend:       cfg.FleetBackend,
-		Region:        cfg.FleetRegion,
-		PluginDir:     cfg.FleetPluginDir,
-		AgonesNS:      cfg.AgonesNamespace,
-		AgonesKubecfg: cfg.AgonesKubeconfig,
-		K3sAPIURL:     cfg.K3sAPIURL,
-		K3sSAToken:    cfg.K3sSAToken,
-		K3sCACertB64:  cfg.K3sCACertB64,
+		Backend:                cfg.FleetBackend,
+		Region:                 cfg.FleetRegion,
+		PluginDir:              cfg.FleetPluginDir,
+		AgonesNS:               cfg.AgonesNamespace,
+		AgonesKubecfg:          cfg.AgonesKubeconfig,
+		AgonesProjectIsolation: cfg.AgonesProjectIsolation,
+		K3sAPIURL:              cfg.K3sAPIURL,
+		K3sSAToken:             cfg.K3sSAToken,
+		K3sCACertB64:           cfg.K3sCACertB64,
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("fleet: %w", err)
@@ -1039,9 +1041,11 @@ func buildFleet(cfg *config.Config, pool *db.Pool, cipher *secretseal.Cipher, lo
 	if c, ok := backend.(io.Closer); ok {
 		closer = c
 	}
+	fleets := fleet.NewPostgresFleetStore(pool, cipher)
+	fleets.AgonesProjectIsolation = cfg.AgonesProjectIsolation
 	return fleet.NewManager(
 		fleet.NewPostgresStore(pool),
-		fleet.NewPostgresFleetStore(pool, cipher),
+		fleets,
 		backend,
 		fleet.ManagerOptions{Retries: 3, MaxCapacity: cfg.FleetAllocationMaxCapacity},
 	), closer, nil

@@ -623,3 +623,35 @@ func TestLoad_should_refuse_fleet_allocation_max_capacity_of_zero(t *testing.T) 
 
 	assert.ErrorContains(t, err, "FLEET_ALLOCATION_MAX_CAPACITY")
 }
+
+func TestLoad_should_default_agones_project_isolation_to_off(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.False(t, cfg.AgonesProjectIsolation)
+}
+
+func TestLoad_should_read_agones_project_isolation(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "true")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+
+	assert.True(t, cfg.AgonesProjectIsolation)
+}
+
+func TestLoad_should_refuse_an_agones_project_isolation_that_is_not_a_bool(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("AGONES_PROJECT_ISOLATION", "maybe")
+
+	_, err := config.Load()
+
+	assert.ErrorContains(t, err, "AGONES_PROJECT_ISOLATION")
+}

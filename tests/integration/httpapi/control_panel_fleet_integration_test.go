@@ -632,3 +632,57 @@ func TestControlPanelFleet_delete_then_restore_lists_the_fleet_again_and_audits_
 	assert.Equal(t, []any{http.StatusSeeOther, true, http.StatusSeeOther, false, 2},
 		[]any{del.StatusCode, strings.Contains(deletedList, "/restore"), restore.StatusCode, strings.Contains(restoredList, "/restore"), audited})
 }
+
+// With Agones project isolation on, the dashboard refuses the agones keys
+// that the server sets, shows a field error, and writes nothing.
+func TestControlPanelFleet_should_refuse_server_set_agones_keys_when_isolation_is_on(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-isolation")
+	ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+	seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+	srv, mgr := newControlPanelFleetServer(t, c, newStubBackend("agones"), nil)
+	mgr.FleetAdmin().AgonesProjectIsolation = true
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+	name := seedFleetTemplate(t, c, tenantID, projectID, "agones")
+	var fleetID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT id FROM fleets WHERE tenant_id = $1 AND name = $2`, tenantID, name).Scan(&fleetID))
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10) + "/fleets"
+	forms := map[string]url.Values{
+		"create namespace": {"name": {"new-ns"}, "backend": {"agones"}, "fleet_name": {"gs"}, "namespace": {"other-ns"}},
+		"create selector":  {"name": {"new-sel"}, "backend": {"agones"}, "fleet_name": {"gs"}, "selector_key[]": {"ggscale.dev/project"}, "selector_value[]": {"99"}},
+		"update namespace": {"name": {name}, "fleet_name": {"gs"}, "namespace": {"other-ns"}},
+		"update selector":  {"name": {name}, "fleet_name": {"gs"}, "selector_key[]": {"ggscale.dev/project"}, "selector_value[]": {"99"}},
+	}
+
+	got := map[string][]any{}
+	for label, form := range forms {
+		form.Set("_csrf", csrf)
+		target := base
+		if strings.HasPrefix(label, "update") {
+			target = base + "/" + strconv.FormatInt(fleetID, 10)
+		}
+		resp := postFormWithCookie(t, target, form, cookie)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		resp.Body.Close()
+		field := `id="namespace-error"`
+		if strings.HasSuffix(label, "selector") {
+			field = `id="selector_key-error"`
+		}
+		got[label] = []any{resp.StatusCode, strings.Contains(string(body), field+">Agones project isolation is on")}
+	}
+	var rows int
+	var stored string
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT count(*), max(config::text) FROM fleets WHERE tenant_id = $1`, tenantID).Scan(&rows, &stored))
+
+	want := []any{http.StatusUnprocessableEntity, true}
+	assert.Equal(t,
+		map[string][]any{"create namespace": want, "create selector": want, "update namespace": want, "update selector": want, "rows": {1, "{}"}},
+		map[string][]any{"create namespace": got["create namespace"], "create selector": got["create selector"],
+			"update namespace": got["update namespace"], "update selector": got["update selector"], "rows": {rows, stored}})
+}

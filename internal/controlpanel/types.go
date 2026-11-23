@@ -109,6 +109,9 @@ type ServerSettingsSnapshot struct {
 	FleetRegion  string
 
 	FleetAllocationMaxCapacity int
+	// AgonesProjectIsolation mirrors AGONES_PROJECT_ISOLATION. When it is
+	// off and the backend is agones, the page shows a warning.
+	AgonesProjectIsolation bool
 }
 
 // Enabled reports whether the control panel should be mounted.

@@ -637,6 +637,18 @@ func TestManager_Allocate_should_refuse_a_deleted_fleet(t *testing.T) {
 	assert.ErrorIs(t, err, fleet.ErrFleetNotFound)
 }
 
+func TestManager_Allocate_should_refuse_a_fleet_of_another_project(t *testing.T) {
+	backend := &fakeBackend{name: "fake"}
+	fleets := newFakeFleetStoreSeed(backend.name)
+	fleets.byID[1].ProjectID = 3
+	store := newFakeStore()
+	mgr := fleet.NewManager(store, fleets, backend, fleet.ManagerOptions{Retries: 0, Clock: zeroClock})
+
+	_, err := mgr.Allocate(context.Background(), sampleReq())
+
+	assert.Equal(t, []any{true, 0, 0}, []any{errors.Is(err, fleet.ErrFleetNotFound), backend.allocateCalls, len(store.allocations)})
+}
+
 func TestManagerAllocate_plugin_backend_names(t *testing.T) {
 	cases := []struct {
 		name    string

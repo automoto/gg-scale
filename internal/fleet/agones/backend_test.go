@@ -27,6 +27,7 @@ type fakeAPI struct {
 	createCalls     int
 	deleteCalls     int
 	lastSpec        allocationv1.GameServerAllocationSpec
+	lastNamespace   string
 	lastDeletedName string
 	createResult    *allocationv1.GameServerAllocation
 	createErr       error
@@ -36,10 +37,11 @@ type fakeAPI struct {
 	pingErr         error
 }
 
-func (f *fakeAPI) CreateGameServerAllocation(_ context.Context, _ string, gsa *allocationv1.GameServerAllocation) (*allocationv1.GameServerAllocation, error) {
+func (f *fakeAPI) CreateGameServerAllocation(_ context.Context, namespace string, gsa *allocationv1.GameServerAllocation) (*allocationv1.GameServerAllocation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createCalls++
+	f.lastNamespace = namespace
 	f.lastSpec = gsa.Spec
 	if f.createErr != nil {
 		return nil, f.createErr
@@ -327,11 +329,13 @@ func TestAllocateLabelsResourceWithDurableResolution(t *testing.T) {
 
 type recoveringAPI struct {
 	fakeAPI
-	selector string
+	selector      string
+	listNamespace string
 }
 
-func (a *recoveringAPI) ListGameServers(_ context.Context, _, selector string) (*agonesv1.GameServerList, error) {
+func (a *recoveringAPI) ListGameServers(_ context.Context, namespace, selector string) (*agonesv1.GameServerList, error) {
 	a.selector = selector
+	a.listNamespace = namespace
 	return &agonesv1.GameServerList{Items: []agonesv1.GameServer{{ObjectMeta: metav1.ObjectMeta{Name: "orphan"}}}}, nil
 }
 
@@ -344,4 +348,73 @@ func TestCleanupResolutionFindsResourceWithoutSavedReference(t *testing.T) {
 	assert.NoError(t, backend.CleanupResolution(context.Background(), "mm_recovery", nil))
 	assert.Equal(t, "ggscale.dev/resolution-id=mm_recovery", api.selector)
 	assert.Equal(t, "orphan", api.lastDeletedName)
+}
+
+func TestBackend_Allocate_project_isolation(t *testing.T) {
+	cases := []struct {
+		name          string
+		isolation     bool
+		cfg           map[string]string
+		wantNamespace string
+		wantProject   string
+	}{
+		{"off uses the stored namespace and no project label", false, map[string]string{"namespace": "tenant-ns"}, "tenant-ns", ""},
+		{"off keeps a stored project selector", false, map[string]string{"selector.ggscale.dev/project": "99"}, "games", "99"},
+		{"on uses the server namespace and the project of the request", true, nil, "games", "2"},
+		{"on ignores a stored namespace of an old row", true, map[string]string{"namespace": "tenant-ns"}, "games", "2"},
+		{"on overrides a stored project selector of an old row", true, map[string]string{"selector.ggscale.dev/project": "99"}, "games", "2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeAPI{createResult: allocatedResult("gs-1", "10.0.0.5", 7654)}
+			be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "games", ProjectIsolation: tc.isolation})
+			require.NoError(t, err)
+			req := sampleReq()
+			for k, v := range tc.cfg {
+				req.Config[k] = v
+			}
+
+			_, err = be.Allocate(context.Background(), req)
+
+			require.NoError(t, err)
+			assert.Equal(t, []string{tc.wantNamespace, tc.wantProject},
+				[]string{fake.lastNamespace, fake.lastSpec.Selectors[0].MatchLabels[agonesbackend.ProjectLabel]})
+		})
+	}
+}
+
+func TestBackend_Allocate_should_refuse_a_request_without_a_project_when_isolation_is_on(t *testing.T) {
+	fake := &fakeAPI{createResult: allocatedResult("gs-1", "10.0.0.5", 7654)}
+	be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "games", ProjectIsolation: true})
+	require.NoError(t, err)
+	req := sampleReq()
+	req.ProjectID = 0
+
+	_, err = be.Allocate(context.Background(), req)
+
+	assert.Equal(t, []any{true, 0}, []any{err != nil, fake.createCalls})
+}
+
+func TestBackend_Allocate_backend_ref_should_name_the_server_namespace_when_isolation_is_on(t *testing.T) {
+	fake := &fakeAPI{createResult: allocatedResult("gs-1", "10.0.0.5", 7654)}
+	be, err := agonesbackend.New(agonesbackend.Config{API: fake, Namespace: "games", ProjectIsolation: true})
+	require.NoError(t, err)
+	req := sampleReq()
+	req.Config["namespace"] = "tenant-ns"
+
+	got, err := be.Allocate(context.Background(), req)
+
+	require.NoError(t, err)
+	assert.Equal(t, "games/gs-1", got.BackendRef)
+}
+
+func TestCleanupResolution_should_use_the_server_namespace_when_isolation_is_on(t *testing.T) {
+	api := &recoveringAPI{}
+	backend, err := agonesbackend.New(agonesbackend.Config{API: api, Namespace: "games", ProjectIsolation: true})
+	require.NoError(t, err)
+
+	err = backend.CleanupResolution(context.Background(), "mm_recovery", map[string]string{"namespace": "tenant-ns"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "games", api.listNamespace)
 }

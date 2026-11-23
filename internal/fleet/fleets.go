@@ -89,6 +89,9 @@ var ErrFleetNotFound = errors.New("fleet: fleet template not found")
 type PostgresFleetStore struct {
 	pool   *db.Pool
 	cipher *secretseal.Cipher
+	// AgonesProjectIsolation (AGONES_PROJECT_ISOLATION) makes CreateFleet
+	// and UpdateFleet refuse the agones config keys that the server sets.
+	AgonesProjectIsolation bool
 }
 
 // NewPostgresFleetStore returns a FleetStore bound to the given pool. cipher

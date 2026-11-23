@@ -98,6 +98,31 @@ func ValidateConfig(backend string, cfg map[string]string) error {
 
 const selectorPrefix = "selector."
 
+// ErrAgonesServerSetKey refuses an agones config key that the server sets
+// when Agones project isolation is on.
+const ErrAgonesServerSetKey = InvalidError("Agones project isolation is on: the server sets the namespace and the ggscale.dev/ selector labels. Remove the namespace key and each selector.ggscale.dev/ key.")
+
+// AgonesServerSetKey reports whether key is an agones config key that only
+// the server sets when Agones project isolation is on: namespace, and each
+// selector key with the ggscale.dev/ prefix.
+func AgonesServerSetKey(key string) bool {
+	return key == "namespace" || strings.HasPrefix(strings.ToLower(key), selectorPrefix+"ggscale.dev/")
+}
+
+// checkServerSetKeys refuses the keys of AgonesServerSetKey in an agones
+// config when Agones project isolation is on.
+func (s *PostgresFleetStore) checkServerSetKeys(backend string, cfg map[string]string) error {
+	if !s.AgonesProjectIsolation || backend != "agones" {
+		return nil
+	}
+	for k := range cfg {
+		if AgonesServerSetKey(k) {
+			return ErrAgonesServerSetKey
+		}
+	}
+	return nil
+}
+
 func validateName(name string) error {
 	if strings.TrimSpace(name) == "" {
 		return InvalidError("Name is required.")
@@ -164,6 +189,9 @@ func (s *PostgresFleetStore) CreateFleet(ctx context.Context, tenantID int64, in
 	if err := ValidateConfig(in.Backend, in.Config); err != nil {
 		return nil, err
 	}
+	if err := s.checkServerSetKeys(in.Backend, in.Config); err != nil {
+		return nil, err
+	}
 	cfg, err := encodeFleetConfig(s.cipher, in.Backend, in.Config)
 	if err != nil {
 		return nil, err
@@ -221,6 +249,9 @@ func (s *PostgresFleetStore) UpdateFleet(ctx context.Context, tenantID, projectI
 		}
 		if config != nil {
 			if err := ValidateConfig(cur.Backend, config); err != nil {
+				return err
+			}
+			if err := s.checkServerSetKeys(cur.Backend, config); err != nil {
 				return err
 			}
 		}

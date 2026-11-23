@@ -111,7 +111,10 @@ func (m *Manager) Allocate(ctx context.Context, req AllocationRequest) (*Allocat
 	if err != nil {
 		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, err)
 	}
-	if f.DeletedAt != nil {
+	// A fleet of another project never serves the request. The agones
+	// backend labels the allocation with req.ProjectID, so it must be the
+	// project of the fleet row.
+	if f.DeletedAt != nil || f.ProjectID != req.ProjectID {
 		return nil, fmt.Errorf("fleet: resolve fleet %d: %w", req.FleetID, ErrFleetNotFound)
 	}
 	if !BackendMatches(f.Backend, m.backend.Name()) {

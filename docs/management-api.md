@@ -231,7 +231,9 @@ the Game Project, as the dashboard pages do.
   and `-`, at most 64 characters, starting with a letter or digit. A bare `plugin` is
   also accepted: a fleet stored that way runs on any plugin backend. An agones
   config needs `fleet_name` and may have `namespace` and `selector.<label>`
-  keys. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
+  keys. With `AGONES_PROJECT_ISOLATION=true`, `namespace` and each
+  `selector.ggscale.dev/` key are refused (422 with the message `Agones
+  project isolation is on: ...`); see "Agones project isolation" below. The name is at most 256 bytes, valid UTF-8, no NUL (422 otherwise; the
   dashboard form has the same rule). Over the API, invalid UTF-8 in the JSON
   body answers 400 before this check (see Errors). `delete_fleet` hides the fleet
   from new allocations; live allocations and their history stay.
@@ -440,6 +442,7 @@ The feature is off by default. Set these environment variables:
 | `MANAGEMENT_MAX_PROJECT_API_KEYS` | `20` | `create_api_key` and `create_secret_api_key` are refused when the Game Project has this many active API keys. The dashboard is not limited by it. |
 | `MANAGEMENT_TOKEN_CACHE_MAX_ENTRIES` | `10000` | The most token checks that each server process keeps in the cache. |
 | `FLEET_ALLOCATION_MAX_CAPACITY` | `100` | The largest `capacity` of one manual allocation. It limits `allocate_server` and the dashboard allocation form. |
+| `AGONES_PROJECT_ISOLATION` | `false` | `true` ties each Agones allocation to its Game Project: see "Agones project isolation" below. |
 | `LEADERBOARD_MAX_PER_PROJECT` | `1000` | `create_leaderboard` and `restore_leaderboard` answer 409 when the Game Project has this many live leaderboards. The dashboard has the same limit. A platform admin can change it for one Account Tenant (quota axis `leaderboards`). |
 | `CORS_MAX_PROJECT_ORIGINS` | `20` | Origins for each Game Project, for `set_allowed_origins` and the dashboard form. |
 
@@ -476,3 +479,47 @@ Notes:
 - `/mcp` and `/v1/project` refuse a request that has an `Origin` header for a
   different host. Coding agents and scripts send no `Origin` header.
 - The platform admin **Server settings** page shows the current values.
+
+### Agones project isolation
+
+One server talks to one Agones cluster (`AGONES_NAMESPACE`,
+`AGONES_KUBECONFIG` or `K3S_*`). With `AGONES_PROJECT_ISOLATION=false` (the
+default), a fleet config can name any namespace, any Agones Fleet
+(`fleet_name`), and any selector label. So every Game Project with the
+`fleet_agones_backend` grant can allocate the GameServers of another Game
+Project on the cluster and then delete them with `deallocate_server`. This
+is also true for `create_fleet` and `update_fleet` with `fleet:write`, and
+for matches that the matchmaker starts from that fleet. Do not give
+`fleet_agones_backend` to more than one Game Project on one cluster while the
+option is off. The server logs `Agones project isolation is off` at start
+when `FLEET_BACKEND=agones`, and the **Server settings** page shows a warning.
+
+With `AGONES_PROJECT_ISOLATION=true`:
+
+- Every GameServerAllocation (dashboard, `allocate_server`, and the
+  matchmaker) is made in `AGONES_NAMESPACE`. A `namespace` stored in an
+  older fleet config is not used.
+- Its selector always has `ggscale.dev/project=<project id>`, with the id of
+  the Game Project of the fleet. The server sets it; a stored
+  `selector.ggscale.dev/project` of an older fleet cannot change it.
+- `create_fleet`, `update_fleet` and the dashboard fleet forms refuse a
+  `namespace` key and each `selector.ggscale.dev/` key. A rename with no
+  config is accepted for an older fleet that has a `namespace`.
+- `deallocate_server` and the status of an allocation use the GameServer
+  that the allocation took, as before.
+
+Before you turn it on, label the GameServer template of each Agones Fleet with
+the id of the Game Project that uses it. Quote the value in YAML:
+
+```yaml
+spec:
+  template:
+    metadata:
+      labels:
+        ggscale.dev/project: "12"
+```
+
+An Agones Fleet with no label, or with the label of another Game Project,
+does not allocate for that project. Put the Agones Fleets of all projects in
+`AGONES_NAMESPACE`. Only the cluster operator can set the label, so do not
+give a Game Project write access to the Agones Fleet objects.

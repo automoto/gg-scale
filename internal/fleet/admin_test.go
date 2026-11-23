@@ -55,6 +55,41 @@ func TestValidateConfig_should_accept_what_the_dashboard_form_allows(t *testing.
 	assert.NoError(t, fleet.ValidateConfig("agones", cfg))
 }
 
+func TestAgonesServerSetKey(t *testing.T) {
+	cases := []struct {
+		key  string
+		want bool
+	}{
+		{"namespace", true},
+		{"selector.ggscale.dev/project", true},
+		{"selector.ggscale.dev/other", true},
+		{"selector.GGSCALE.DEV/project", true},
+		{"fleet_name", false},
+		{"selector.zone", false},
+		{"selector.agones.dev/fleet", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			assert.Equal(t, tc.want, fleet.AgonesServerSetKey(tc.key))
+		})
+	}
+}
+
+func TestCreateFleet_should_refuse_a_server_set_agones_key_when_isolation_is_on(t *testing.T) {
+	for _, key := range []string{"namespace", "selector.ggscale.dev/project"} {
+		t.Run(key, func(t *testing.T) {
+			store := fleet.NewPostgresFleetStore(nil, nil)
+			store.AgonesProjectIsolation = true
+
+			_, err := store.CreateFleet(t.Context(), 1, fleet.FleetCreate{
+				ProjectID: 2, Name: "a", Backend: "agones", Config: map[string]string{"fleet_name": "gs", key: "SECRETVALUE"},
+			}, projectadmin.Actor{UserID: 1})
+
+			assert.Equal(t, []any{true, false}, []any{errors.Is(err, fleet.ErrAgonesServerSetKey), strings.Contains(err.Error(), "SECRETVALUE")})
+		})
+	}
+}
+
 func TestAllocateServer_should_refuse_bad_input_before_any_backend_call(t *testing.T) {
 	backend := &fakeBackend{name: "fake"}
 	mgr := fleet.NewManager(newFakeStore(), newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock, MaxCapacity: 10})
