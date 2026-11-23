@@ -179,6 +179,18 @@ func (s *fakeStore) List(_ context.Context, projectID int64, includeTerminal boo
 	return matched[offset:end], total, nil
 }
 
+func (s *fakeStore) CountLive(_ context.Context, projectID int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int64
+	for _, a := range s.allocations {
+		if a.ProjectID == projectID && !a.Status.IsTerminal() {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (s *fakeStore) AppendEvent(_ context.Context, id fleet.AllocationID, status fleet.Status, address, errMessage string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

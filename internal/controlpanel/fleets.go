@@ -354,6 +354,8 @@ func fleetFormError(prefix string, err error) (string, int) {
 		return prefix + ": " + invalid.Error(), http.StatusUnprocessableEntity
 	case errors.Is(err, fleet.ErrFleetNameTaken):
 		return prefix + ": a fleet with that name already exists.", http.StatusConflict
+	case errors.Is(err, fleet.ErrLiveAllocationLimit):
+		return prefix + ": " + fleet.ErrLiveAllocationLimit.Error() + ".", http.StatusConflict
 	}
 	return prefix + ".", http.StatusInternalServerError
 }

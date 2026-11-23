@@ -39,6 +39,13 @@ func newFleetFixtureWithCipher(t *testing.T, cipher *secretseal.Cipher, backend 
 // AGONES_PROJECT_ISOLATION switch of the fleet store.
 func newFleetFixtureWithStore(t *testing.T, cipher *secretseal.Cipher, backend fleet.Backend, isolation bool) *fixture {
 	t.Helper()
+	return newFleetFixtureWithOptions(t, cipher, backend, isolation, fleet.ManagerOptions{MaxCapacity: 5})
+}
+
+// newFleetFixtureWithOptions is newFleetFixtureWithStore with the given
+// manager options.
+func newFleetFixtureWithOptions(t *testing.T, cipher *secretseal.Cipher, backend fleet.Backend, isolation bool, opts fleet.ManagerOptions) *fixture {
+	t.Helper()
 	var pool *db.Pool
 	f := newFixtureWith(t, func(d *httpapi.Deps) {
 		d.ControlPanel.FleetEnabled = true
@@ -46,7 +53,7 @@ func newFleetFixtureWithStore(t *testing.T, cipher *secretseal.Cipher, backend f
 		d.CredentialCipher = cipher
 		store := fleet.NewPostgresFleetStore(pool, cipher)
 		store.AgonesProjectIsolation = isolation
-		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), store, backend, fleet.ManagerOptions{MaxCapacity: 5})
+		d.Fleet = fleet.NewManager(fleet.NewPostgresStore(pool), store, backend, opts)
 	})
 	f.exec(`INSERT INTO feature_grants (tenant_id, feature, enabled) VALUES
 		($1, 'dedicated_servers', true), ($1, 'fleet_agones_backend', true), ($1, 'fleet_plugin_backend', true)`, f.tenantA)

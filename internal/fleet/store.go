@@ -172,6 +172,18 @@ func (s *PostgresStore) List(ctx context.Context, projectID int64, includeTermin
 	return out, total, nil
 }
 
+// CountLive counts the allocations of the project that are not released or
+// failed.
+func (s *PostgresStore) CountLive(ctx context.Context, projectID int64) (int64, error) {
+	var n int64
+	err := s.pool.Q(ctx, func(tx pgx.Tx) error {
+		var err error
+		n, err = sqlcgen.New(tx).CountAllocationsForProject(ctx, sqlcgen.CountAllocationsForProjectParams{ProjectID: projectID})
+		return err
+	})
+	return n, err
+}
+
 // AppendEvent inserts one row on the per-allocation ring buffer. The trim
 // trigger keeps history bounded so callers don't need to prune.
 func (s *PostgresStore) AppendEvent(ctx context.Context, id AllocationID, status Status, address, errMessage string) error {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/managementtoken"
 )
 
@@ -175,4 +176,45 @@ func TestAllocationWrite_should_return_409_when_the_fleet_backend_does_not_match
 	got := f.do(tok, http.MethodPost, allocationsPath, `{"fleet":"alpha","region":"eu"}`)
 
 	assert.Equal(t, http.StatusConflict, got.status, got.raw)
+}
+
+func TestAllocationWrite_should_cap_the_live_allocations_of_the_project(t *testing.T) {
+	cases := []struct {
+		name       string
+		live       int
+		terminal   int
+		wantStatus int
+	}{
+		{"should_allocate_under_the_cap", 1, 0, http.StatusOK},
+		{"should_return_409_at_the_cap", 2, 0, http.StatusConflict},
+		{"should_not_count_terminal_allocations", 1, 2, http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFleetFixtureWithOptions(t, nil, fakeBackend{}, false, fleet.ManagerOptions{MaxCapacity: 5, MaxLiveAllocations: 2})
+			fid := f.fleet(f.projectA, "alpha")
+			for range tc.live {
+				f.allocation(f.projectA, fid, "eu", "ready")
+			}
+			for range tc.terminal {
+				f.exec(`UPDATE game_server_allocations SET released_at = now() WHERE id = $1`, f.allocation(f.projectA, fid, "eu", "shutdown"))
+			}
+			// Live allocations of another project do not count.
+			other := f.fleet(f.projectB, "beta")
+			f.allocation(f.projectB, other, "eu", "ready")
+			f.allocation(f.projectB, other, "eu", "ready")
+			before := f.count(`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, f.projectA)
+			tok := f.scopedToken(managementtoken.ScopeAllocationsWrite)
+
+			got := f.do(tok, http.MethodPost, allocationsPath, `{"fleet":"alpha","region":"eu"}`)
+
+			wantRows := before + 1
+			if tc.wantStatus == http.StatusConflict {
+				wantRows = before
+			}
+			after := f.count(`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, f.projectA)
+			assert.Equal(t, []any{tc.wantStatus, wantRows, tc.wantStatus == http.StatusConflict},
+				[]any{got.status, after, strings.Contains(got.detail(), "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")}, got.raw)
+		})
+	}
 }

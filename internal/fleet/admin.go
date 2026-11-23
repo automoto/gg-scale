@@ -354,6 +354,10 @@ func (s *PostgresFleetStore) RestoreFleet(ctx context.Context, tenantID, project
 	return out, nil
 }
 
+// ErrLiveAllocationLimit means the project already has the largest number
+// of live allocations that the server allows.
+var ErrLiveAllocationLimit = errors.New("this Game Project has the most live allocations that this server allows (FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT); deallocate a server first")
+
 // ServerAllocate is the input of AllocateServer. The fleet is a live fleet
 // of the project. A Capacity of 0 means 1.
 type ServerAllocate struct {
@@ -396,7 +400,11 @@ func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAl
 	if in.Capacity == 0 {
 		in.Capacity = 1
 	}
-	ctx = WithCommitHook(db.WithTenant(ctx, tenantID), func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
+	ctx = db.WithTenant(ctx, tenantID)
+	if err := checkLiveAllocations(ctx, m, in.Fleet.ProjectID); err != nil {
+		return nil, err
+	}
+	ctx = WithCommitHook(ctx, func(ctx context.Context, tx pgx.Tx, id AllocationID) error {
 		return actor.Audit(ctx, tx, tenantID, in.Fleet.ProjectID, actionAllocate, strconv.FormatInt(int64(id), 10), map[string]any{
 			"fleet_id":   in.Fleet.ID,
 			"fleet_name": in.Fleet.Name,
@@ -413,6 +421,24 @@ func AllocateServer(ctx context.Context, m *Manager, tenantID int64, in ServerAl
 		GameMode:  in.GameMode,
 		Capacity:  in.Capacity,
 	})
+}
+
+// checkLiveAllocations refuses a new allocation when the project already has
+// MaxLiveAllocations live allocations. The count and the insert are not in
+// one transaction, so parallel requests can go a few over the limit. That is
+// acceptable for a cost limit.
+func checkLiveAllocations(ctx context.Context, m *Manager, projectID int64) error {
+	if m.opts.MaxLiveAllocations <= 0 {
+		return nil
+	}
+	n, err := m.store.CountLive(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("fleet: count live allocations: %w", err)
+	}
+	if n >= int64(m.opts.MaxLiveAllocations) {
+		return ErrLiveAllocationLimit
+	}
+	return nil
 }
 
 // DeallocateServer stops the game server of an allocation of the project,

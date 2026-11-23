@@ -118,6 +118,49 @@ func TestAllocateServer_should_refuse_bad_input_before_any_backend_call(t *testi
 	}
 }
 
+func TestAllocateServer_should_cap_the_live_allocations_of_the_project(t *testing.T) {
+	cases := []struct {
+		name      string
+		seed      []fleet.Status
+		otherLive int
+		wantLimit bool
+	}{
+		{"should_allocate_under_the_cap", []fleet.Status{fleet.StatusReady}, 0, false},
+		{"should_refuse_at_the_cap", []fleet.Status{fleet.StatusReady, fleet.StatusPending}, 0, true},
+		{"should_not_count_terminal_allocations", []fleet.Status{fleet.StatusReady, fleet.StatusShutdown, fleet.StatusFailed}, 0, false},
+		{"should_not_count_another_project", []fleet.Status{fleet.StatusReady}, 3, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			for _, st := range tc.seed {
+				id, _ := store.InsertPending(t.Context(), fleet.AllocationRequest{ProjectID: 2}, "fake")
+				store.allocations[id].Status = st
+			}
+			for range tc.otherLive {
+				_, _ = store.InsertPending(t.Context(), fleet.AllocationRequest{ProjectID: 9}, "fake")
+			}
+			backend := &fakeBackend{name: "fake", allocateImpl: func(int) (*fleet.Allocation, error) {
+				return &fleet.Allocation{BackendRef: "ref", Address: "10.0.0.1:7777"}, nil
+			}}
+			mgr := fleet.NewManager(store, newFakeFleetStoreSeed(backend.name), backend, fleet.ManagerOptions{Clock: zeroClock, MaxLiveAllocations: 2})
+			f := &fleet.Fleet{ID: 1, ProjectID: 2, Name: "default", Backend: backend.name}
+
+			_, err := fleet.AllocateServer(t.Context(), mgr, 1, fleet.ServerAllocate{Fleet: f, Region: "eu"}, projectadmin.Actor{UserID: 1})
+
+			wantCalls := 1
+			if tc.wantLimit {
+				wantCalls = 0
+			}
+			assert.Equal(t, []any{tc.wantLimit, wantCalls}, []any{errors.Is(err, fleet.ErrLiveAllocationLimit), backend.allocateCalls}, "err=%v", err)
+		})
+	}
+}
+
+func TestAllocateServer_should_name_the_setting_in_the_limit_error(t *testing.T) {
+	assert.Contains(t, fleet.ErrLiveAllocationLimit.Error(), "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")
+}
+
 func TestValidateBackend(t *testing.T) {
 	cases := []struct {
 		name    string

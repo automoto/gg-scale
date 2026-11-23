@@ -433,6 +433,10 @@ This text is for the CHANGELOG section that is written when the release is tagge
   replaces the fixed 50 rows.
 - Add `FLEET_ALLOCATION_MAX_CAPACITY` (default `100`), the largest capacity of
   one manual allocation.
+- Add `FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT` (default `100`). A manual
+  allocation (`allocate_server` or the dashboard) is refused (409) when the
+  Game Project already has this many live allocations. The count holds the
+  matchmaker allocations too; the matchmaker is not refused by it.
 
 #### Changed
 

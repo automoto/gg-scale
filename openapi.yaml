@@ -6063,7 +6063,7 @@ paths:
       tags:
         - Project Management
     post:
-      description: Starts a game server from a live fleet and returns the allocation. This starts a billable server. The fleet is given by name. Answers 404 for a deleted fleet, an unknown fleet, or a fleet of another Game Project, and 403 when the backend of the fleet is not enabled for the Account Tenant. The request also needs the allocation allocate permission of the token creator.
+      description: Starts a game server from a live fleet and returns the allocation. This starts a billable server. The fleet is given by name. Answers 404 for a deleted fleet, an unknown fleet, or a fleet of another Game Project, and 403 when the backend of the fleet is not enabled for the Account Tenant. Answers 409 when the Game Project already has the most live allocations that the server allows (FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT). The request also needs the allocation allocate permission of the token creator.
       operationId: allocateProjectServer
       requestBody:
         content:

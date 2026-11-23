@@ -3219,6 +3219,8 @@ templ ServerSettingsPage(vm ServerSettingsView) {
 				<dd>{ orDash(vm.Snapshot.FleetRegion) }</dd>
 				<dt>Allocation maximum capacity</dt>
 				<dd>{ stringFromInt(int64(vm.Snapshot.FleetAllocationMaxCapacity)) }</dd>
+				<dt>Live allocations per Game Project</dt>
+				<dd>{ stringFromInt(int64(vm.Snapshot.FleetMaxLiveAllocationsPerProject)) }</dd>
 				<dt>Agones project isolation</dt>
 				<dd>@boolBadge(vm.Snapshot.AgonesProjectIsolation)</dd>
 			</dl>

@@ -234,8 +234,11 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		slog.ErrorContext(r.Context(), "manual allocate failed", "err", err, "tenant", tenantID, "project", projectID)
 		var invalid fleet.InvalidError
 		status := http.StatusInternalServerError
-		if errors.As(err, &invalid) {
+		switch {
+		case errors.As(err, &invalid):
 			status = http.StatusUnprocessableEntity
+		case errors.Is(err, fleet.ErrLiveAllocationLimit):
+			status = http.StatusConflict
 		}
 		view.Error = "Allocate failed: " + err.Error()
 		w.WriteHeader(status)

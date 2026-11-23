@@ -414,7 +414,8 @@ var projectOps = []projectOp{
 	{
 		tool: "allocate_server",
 		description: "Costs money. Starts a game server, which costs money while it runs. Takes fleet (the name of a live fleet), region, " +
-			"and optional game_mode and capacity (default 1). Returns the allocation. A deleted or unknown fleet answers 404.",
+			"and optional game_mode and capacity (default 1). Returns the allocation. A deleted or unknown fleet answers 404. " +
+			"Answers 409 when the Game Project already has the most live allocations that the server allows (FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT).",
 		scope:  managementtoken.ScopeAllocationsWrite,
 		pair:   rbac.ProjectAllocationObject,
 		action: rbac.ActionAllocate,
@@ -424,8 +425,9 @@ var projectOps = []projectOp{
 			Summary: "Start a game server",
 			Description: "Starts a game server from a live fleet and returns the allocation. This starts a billable server. " +
 				"The fleet is given by name. Answers 404 for a deleted fleet, an unknown fleet, or a fleet of another Game Project, " +
-				"and 403 when the backend of the fleet is not enabled for the Account Tenant. The request also needs the allocation " +
-				"allocate permission of the token creator.",
+				"and 403 when the backend of the fleet is not enabled for the Account Tenant. Answers 409 when the Game Project already " +
+				"has the most live allocations that the server allows (FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT). The request also needs " +
+				"the allocation allocate permission of the token creator.",
 		},
 		handler: projectHandler(allocateServer),
 	},

@@ -116,6 +116,14 @@ func newControlPanelFleetServer(t *testing.T, c *cluster, backend fleet.Backend,
 // credential cipher for the fleet store and the dashboard.
 func newControlPanelFleetServerWithCipher(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *controlpanel.PluginSnapshot, cipher *secretseal.Cipher) (*httptest.Server, *fleet.Manager) {
 	t.Helper()
+	return newControlPanelFleetServerWithOptions(t, c, backend, pluginInfo, cipher,
+		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10})
+}
+
+// newControlPanelFleetServerWithOptions is newControlPanelFleetServerWithCipher
+// with the given manager options.
+func newControlPanelFleetServerWithOptions(t *testing.T, c *cluster, backend fleet.Backend, pluginInfo func() *controlpanel.PluginSnapshot, cipher *secretseal.Cipher, opts fleet.ManagerOptions) (*httptest.Server, *fleet.Manager) {
+	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
 	require.NoError(t, err)
 	pool := db.NewPool(c.appPool)
@@ -126,7 +134,7 @@ func newControlPanelFleetServerWithCipher(t *testing.T, c *cluster, backend flee
 		fleet.NewPostgresStore(pool),
 		fleet.NewPostgresFleetStore(pool, cipher),
 		backend,
-		fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10},
+		opts,
 	)
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
@@ -220,6 +228,68 @@ func TestControlPanelFleet_allocate_should_refuse_a_capacity_above_the_limit_wit
 	defer resp.Body.Close()
 
 	assert.Equal(t, []any{http.StatusUnprocessableEntity, int64(0)}, []any{resp.StatusCode, backend.allocateN.Load()})
+}
+
+func TestControlPanelFleet_allocate_should_cap_the_live_allocations_of_the_project(t *testing.T) {
+	cases := []struct {
+		name       string
+		live       int
+		terminal   int
+		wantStatus int
+	}{
+		{"should_allocate_under_the_cap", 1, 0, http.StatusSeeOther},
+		{"should_refuse_at_the_cap_with_a_form_error", 2, 0, http.StatusConflict},
+		{"should_not_count_terminal_allocations", 1, 2, http.StatusSeeOther},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := startCluster(t)
+			tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-live-cap")
+			ownerID := seedControlPanelUser(t, c, "owner@example.com", "correct-horse-battery-staple", false)
+			seedControlPanelMembership(t, c, ownerID, tenantID, "owner")
+			seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureDedicatedServers)
+			seedFeatureGrant(t, c, tenantID, projectID, rbac.FeatureFleetAgonesBackend)
+			backend := newStubBackend("agones")
+			srv, _ := newControlPanelFleetServerWithOptions(t, c, backend, nil, nil,
+				fleet.ManagerOptions{Clock: func(int) time.Duration { return 0 }, MaxCapacity: 10, MaxLiveAllocations: 2})
+			cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "owner@example.com", "correct-horse-battery-staple")
+			fleetName := seedFleetTemplate(t, c, tenantID, projectID, backend.Name())
+			seed := func(n int, status string) {
+				for range n {
+					_, err := c.bootstrapPool.Exec(context.Background(),
+						`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, region, status, released_at)
+						 SELECT tenant_id, project_id, id, backend, 'eu', $2::allocation_status,
+						        CASE WHEN $2 = 'shutdown' THEN now() END
+						 FROM fleets WHERE name = $1`, fleetName, status)
+					require.NoError(t, err)
+				}
+			}
+			seed(tc.live, "ready")
+			seed(tc.terminal, "shutdown")
+			countRows := func() int {
+				var n int
+				require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+					`SELECT count(*) FROM game_server_allocations WHERE project_id = $1`, projectID).Scan(&n))
+				return n
+			}
+			before := countRows()
+			base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+				"/projects/" + strconv.FormatInt(projectID, 10) + "/allocations"
+
+			resp := postFormWithCookie(t, base, url.Values{"_csrf": {csrf}, "fleet": {fleetName}, "region": {"eu"}}, cookie)
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			refused := tc.wantStatus == http.StatusConflict
+			wantRows, wantCalls := before+1, int64(1)
+			if refused {
+				wantRows, wantCalls = before, 0
+			}
+			assert.Equal(t, []any{tc.wantStatus, wantCalls, wantRows, refused},
+				[]any{resp.StatusCode, backend.allocateN.Load(), countRows(), strings.Contains(string(body), "FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT")})
+		})
+	}
 }
 
 func TestControlPanelFleet_allocate_should_need_the_backend_grant(t *testing.T) {

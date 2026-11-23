@@ -25,6 +25,10 @@ type Store interface {
 	// includes terminal rows (shutdown/failed). offset is 0-based.
 	List(ctx context.Context, projectID int64, includeTerminal bool, limit, offset int) ([]*Allocation, int64, error)
 
+	// CountLive returns the number of live (not terminal) allocations of a
+	// project.
+	CountLive(ctx context.Context, projectID int64) (int64, error)
+
 	// AppendEvent persists one entry on the per-allocation ring buffer.
 	AppendEvent(ctx context.Context, id AllocationID, status Status, address, errMessage string) error
 
@@ -64,6 +68,10 @@ type ManagerOptions struct {
 	// MaxCapacity is the largest capacity that AllocateServer accepts. Zero
 	// means no limit.
 	MaxCapacity int
+	// MaxLiveAllocations is the largest number of live allocations that a
+	// project may have when AllocateServer starts a new one. Zero means no
+	// limit.
+	MaxLiveAllocations int
 }
 
 // Manager is the matchmaker-facing entry point to the fleet subsystem. One

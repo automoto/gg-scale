@@ -132,6 +132,8 @@ func fleetWriteError(err error) error {
 		return errProjectNotFound()
 	case errors.Is(err, fleet.ErrFleetNameTaken):
 		return huma.Error409Conflict("a fleet with that name already exists in this Game Project")
+	case errors.Is(err, fleet.ErrLiveAllocationLimit):
+		return huma.Error409Conflict(fleet.ErrLiveAllocationLimit.Error())
 	case errors.As(err, &invalid):
 		return huma.Error422UnprocessableEntity(invalid.Error())
 	}

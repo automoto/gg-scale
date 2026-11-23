@@ -103,6 +103,11 @@ type Config struct {
 	// FleetAllocationMaxCapacity is the largest capacity that one manual
 	// allocation (dashboard or management token) may ask for.
 	FleetAllocationMaxCapacity int `env:"FLEET_ALLOCATION_MAX_CAPACITY" envDefault:"100"`
+	// FleetMaxLiveAllocationsPerProject is the largest number of live
+	// allocations a project may have when a manual allocation (dashboard or
+	// management token) starts. Matchmaker allocations count but are not
+	// refused.
+	FleetMaxLiveAllocationsPerProject int `env:"FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT" envDefault:"100"`
 
 	// Agones fleet-backend host-wide tunables. Per-template values (fleet
 	// name, selector labels) live on the fleet template, not in env vars.

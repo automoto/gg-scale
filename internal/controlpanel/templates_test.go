@@ -753,6 +753,14 @@ func TestServerSettingsPage_should_show_the_allocation_max_capacity(t *testing.T
 	assert.Contains(t, html, "<dt>Allocation maximum capacity</dt><dd>100</dd>")
 }
 
+func TestServerSettingsPage_should_show_the_live_allocation_cap(t *testing.T) {
+	html := renderToString(t, ServerSettingsPage(ServerSettingsView{
+		Snapshot: ServerSettingsSnapshot{FleetMaxLiveAllocationsPerProject: 100},
+	}))
+
+	assert.Contains(t, html, "<dt>Live allocations per Game Project</dt><dd>100</dd>")
+}
+
 func TestServerSettingsPage_agones_project_isolation(t *testing.T) {
 	cases := []struct {
 		name        string
