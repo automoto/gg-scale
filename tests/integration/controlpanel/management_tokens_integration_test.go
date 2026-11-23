@@ -557,8 +557,8 @@ func TestManagementTokens_risky_scope_should_need_its_read_access(t *testing.T) 
 			[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}, false},
 		"keys": {"access_keys", "API keys", []string{managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret},
 			[]string{managementtoken.ScopeKeysRead, managementtoken.ScopeKeysRevoke, managementtoken.ScopeKeysSecret}, false},
-		"players:invite": {"access_players", "Players", []string{managementtoken.ScopePlayersInvite},
-			[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}, false},
+		"players:invite": {"access_players", "Players", []string{managementtoken.ScopePlayersPII, managementtoken.ScopePlayersInvite},
+			[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII, managementtoken.ScopePlayersInvite}, false},
 		"allocations:write": {"access_fleets", "Fleets", []string{managementtoken.ScopeAllocationsWrite},
 			[]string{managementtoken.ScopeFleetRead, managementtoken.ScopeAllocationsWrite}, true},
 	}
@@ -582,6 +582,32 @@ func TestManagementTokens_risky_scope_should_need_its_read_access(t *testing.T) 
 				given.StatusCode, p.onlyTokenScopes(t)})
 		})
 	}
+}
+
+// The invite answers can show whether an address belongs to a player, so
+// players:invite needs players:pii.
+func TestManagementTokens_players_invite_should_need_players_pii(t *testing.T) {
+	p := newTokenPanel(t, true)
+	client, csrf, _ := p.member(t, "owner@example.com", "owner")
+
+	refused, body := p.create(t, client, csrf, url.Values{"access_players": {"read"}, "risky": {managementtoken.ScopePlayersInvite}})
+	countAfterRefuse := p.tokenCount(t)
+	given, _ := p.create(t, client, csrf, url.Values{"access_players": {"read"},
+		"risky": {managementtoken.ScopePlayersInvite, managementtoken.ScopePlayersPII}})
+
+	assert.Equal(t, []any{http.StatusUnprocessableEntity, true, 0, http.StatusOK,
+		[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite, managementtoken.ScopePlayersPII}},
+		[]any{refused.StatusCode, strings.Contains(body, "Needs access to player email and display name. Give that access or uncheck the box."),
+			countAfterRefuse, given.StatusCode, p.onlyTokenScopes(t)})
+}
+
+func TestManagementTokens_page_should_show_the_invite_box_with_its_dependencies(t *testing.T) {
+	p := newTokenPanel(t, true)
+	c, _, _ := p.member(t, "owner@example.com", "owner")
+
+	_, body := tfGet(t, c, p.tokensURL())
+
+	assert.Contains(t, body, "Needs read access to Players and access to player email and display name")
 }
 
 func TestManagementTokens_page_should_show_the_pii_box_with_its_dependency(t *testing.T) {

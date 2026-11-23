@@ -451,13 +451,13 @@ type projectLinkPlayerInput struct {
 	Body projectInviteBody
 }
 
-// projectPlayerInvite is the result of an invite or a link. email is absent
-// unless the token has players:pii.
+// projectPlayerInvite is the result of an invite or a link. The scope of
+// both operations needs players:pii, so the result holds the address.
 type projectPlayerInvite struct {
 	InviteID  int64     `json:"invite_id" example:"12"`
 	PlayerID  *int64    `json:"player_id,omitempty" doc:"The player that the invite links. Absent for a plain invite." example:"42"`
 	ExpiresAt time.Time `json:"expires_at"`
-	Email     *string   `json:"email,omitempty" doc:"Text that was given as input. Only with the players:pii scope."`
+	Email     string    `json:"email" doc:"The address that was given as input, in lower case." example:"player@example.com"`
 }
 
 // invite sends an invite, or a link invite when playerID is set.
@@ -466,11 +466,7 @@ func invite(ctx context.Context, d Deps, p managementtoken.Principal, email stri
 	if err != nil {
 		return projectPlayerInvite{}, projectWriteError(err)
 	}
-	out := projectPlayerInvite{InviteID: res.ID, PlayerID: playerID, ExpiresAt: res.ExpiresAt}
-	if p.HasScope(managementtoken.ScopePlayersPII) {
-		out.Email = &res.Email
-	}
-	return out, nil
+	return projectPlayerInvite{InviteID: res.ID, PlayerID: playerID, ExpiresAt: res.ExpiresAt, Email: res.Email}, nil
 }
 
 func invitePlayer(ctx context.Context, d Deps, p managementtoken.Principal, in *projectInvitePlayerInput) (projectPlayerInvite, error) {

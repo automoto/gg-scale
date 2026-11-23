@@ -2378,7 +2378,9 @@ components:
       additionalProperties: false
       properties:
         email:
-          description: Text that was given as input. Only with the players:pii scope.
+          description: The address that was given as input, in lower case.
+          examples:
+            - player@example.com
           type: string
         expires_at:
           format: date-time
@@ -2397,6 +2399,7 @@ components:
       required:
         - invite_id
         - expires_at
+        - email
       type: object
     ProjectPlayerList:
       additionalProperties: false
@@ -7084,7 +7087,7 @@ paths:
         - Project Management
   /v1/project/players/invite:
     post:
-      description: Sends an invite email to the address and returns the invite. Answers 422 for an invalid address, 409 when an invite for it is pending, and 429 with Retry-After when the invite limit is used. The email address is in the result only with the players:pii scope.
+      description: Sends an invite email to the address and returns the invite. Answers 422 for an invalid address, 409 when an invite for it is pending, and 429 with Retry-After when the invite limit is used. The token also needs the players:pii scope (403 without it).
       operationId: inviteProjectPlayer
       requestBody:
         content:
@@ -7145,7 +7148,7 @@ paths:
         - Project Management
   /v1/project/players/{player_id}/delete-request:
     delete:
-      description: Ends the pending deletion of one player of the Game Project and returns the player. Answers 404 for a player of another Game Project and when no deletion is pending.
+      description: Ends the pending deletion of one player of the Game Project and returns the player. It also ends a deletion that the player asked for. Answers 404 for a player of another Game Project and when no deletion is pending.
       operationId: cancelProjectPlayerDelete
       parameters:
         - description: Player ID.
@@ -7249,7 +7252,7 @@ paths:
         - Project Management
   /v1/project/players/{player_id}/link:
     post:
-      description: Sends a link invite email for one player of the Game Project and returns the invite. When the invite is accepted, the address and its account are bound to the player; the accept fails when the player is linked to another account or has a different verified email. Answers 404 for a player of another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, and 429 with Retry-After when the invite limit is used.
+      description: Sends a link invite email for one player of the Game Project and returns the invite. When the invite is accepted, the address and its account are bound to the player; the accept fails when the player is linked to another account or has a different verified email. Answers 404 for a player of another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, and 429 with Retry-After when the invite limit is used. The token also needs the players:pii scope (403 without it).
       operationId: linkProjectPlayer
       parameters:
         - description: Player ID.

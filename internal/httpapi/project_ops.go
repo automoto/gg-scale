@@ -157,7 +157,8 @@ func (row projectOp) authorize(ctx context.Context, d Deps, p managementtoken.Pr
 }
 
 // requireScope refuses the request when the token does not have scope or
-// its creator does not pass the scope's pair.
+// its creator does not pass the scope's pair. A scope with NeedsOnRequest
+// needs that scope too.
 func requireScope(ctx context.Context, d Deps, p managementtoken.Principal, scope string) error {
 	if !p.HasScope(scope) {
 		return huma.Error403Forbidden(fmt.Sprintf(
@@ -167,7 +168,13 @@ func requireScope(ctx context.Context, d Deps, p managementtoken.Principal, scop
 	if !ok {
 		return serverError(ctx, "project management: unknown scope", errors.New(scope))
 	}
-	return requirePair(ctx, d, p, sp.Pair, sp.Action)
+	if err := requirePair(ctx, d, p, sp.Pair, sp.Action); err != nil {
+		return err
+	}
+	if sp.NeedsOnRequest == "" {
+		return nil
+	}
+	return requireScope(ctx, d, p, sp.NeedsOnRequest)
 }
 
 // requirePair refuses the request when the token's creator does not pass
@@ -766,14 +773,15 @@ var projectOps = []projectOp{
 		tool: "invite_player",
 		description: "Sends an email. Invite a player to this Game Project by email address. The address gets a link to accept the invite " +
 			"and set up a player account. The invite is limited in the same way as in the dashboard (each inviter in an hour, and the whole Game Project in a day), " +
-			"and answers 429 with Retry-After when the limit is used. The result has no address unless the token has players:pii.",
+			"and answers 429 with Retry-After when the limit is used. The token also needs the players:pii scope, because the answer " +
+			"can show that an invite for the address is pending.",
 		scope: managementtoken.ScopePlayersInvite,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/players/invite", OperationID: "inviteProjectPlayer",
 			Summary: "Invite a player",
 			Description: "Sends an invite email to the address and returns the invite. Answers 422 for an invalid address, 409 when an " +
-				"invite for it is pending, and 429 with Retry-After when the invite limit is used. The email address is in the result " +
-				"only with the players:pii scope.",
+				"invite for it is pending, and 429 with Retry-After when the invite limit is used. The token also needs the players:pii " +
+				"scope (403 without it).",
 		},
 		handler: projectHandler(invitePlayer),
 	},
@@ -782,7 +790,8 @@ var projectOps = []projectOp{
 		description: "Sends an email. Send a link invite to one player of this Game Project. When the invite is accepted, " +
 			"the address and its account are bound to the player. The accept fails when the player is linked to another account " +
 			"or has a different verified email. An open invite for the player is replaced. " +
-			"Limited in the same way as invite_player. The result has no address unless the token has players:pii.",
+			"Limited in the same way as invite_player. The token also needs the players:pii scope, because the answer can show " +
+			"that another player has the address.",
 		scope: managementtoken.ScopePlayersInvite,
 		op: huma.Operation{
 			Method: http.MethodPost, Path: "/v1/project/players/{player_id}/link", OperationID: "linkProjectPlayer",
@@ -791,7 +800,7 @@ var projectOps = []projectOp{
 				"the address and its account are bound to the player; the accept fails when the player is linked to another account " +
 				"or has a different verified email. Answers 404 for a player of " +
 				"another Game Project, 409 when another player has the address or an invite is pending, 422 for an invalid address, " +
-				"and 429 with Retry-After when the invite limit is used.",
+				"and 429 with Retry-After when the invite limit is used. The token also needs the players:pii scope (403 without it).",
 		},
 		handler: projectHandler(linkPlayer),
 	},
@@ -813,13 +822,13 @@ var projectOps = []projectOp{
 	{
 		tool: "cancel_player_delete",
 		description: "Cancel the pending deletion of one player of this Game Project, during the grace period. " +
-			"Answers 404 when the player has no pending deletion.",
+			"It also cancels a deletion that the player asked for. Answers 404 when the player has no pending deletion.",
 		scope: managementtoken.ScopePlayersWrite,
 		op: huma.Operation{
 			Method: http.MethodDelete, Path: "/v1/project/players/{player_id}/delete-request", OperationID: "cancelProjectPlayerDelete",
 			Summary: "Cancel the deletion of a player",
-			Description: "Ends the pending deletion of one player of the Game Project and returns the player. Answers 404 for a player " +
-				"of another Game Project and when no deletion is pending.",
+			Description: "Ends the pending deletion of one player of the Game Project and returns the player. It also ends a deletion " +
+				"that the player asked for. Answers 404 for a player of another Game Project and when no deletion is pending.",
 		},
 		handler: projectHandler(cancelProjectPlayerDelete),
 	},

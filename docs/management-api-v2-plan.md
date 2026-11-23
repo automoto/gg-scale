@@ -34,7 +34,7 @@ Made with the user on 2026-11-21.
 | Risky operations | An operation that cannot be undone, returns a secret, or sends email gets its own opt-in scope. Opt-in scopes are never in a preset. The token page shows them in a separate group with a warning. The operation runs at once (no approval step). |
 | Secrets | No operation returns a stored secret. One exception: `create_secret_api_key` returns the new key value one time, behind the opt-in scope `keys:secret`. A secret that a token writes (the Steam Web API key) is never returned. |
 | Player data | Without `players:pii`: player ID, external ID, status flags, and timestamps. With the opt-in scope `players:pii`: email and display name too, unchanged, in their own fields. The tool description says that these fields are text that players wrote. The client text filter is not used for them, because it hides almost every real email and name. |
-| Player delete | `request_player_delete` is allowed with `players:write`, because `cancel_player_delete` undoes it during `PLAYER_DELETE_GRACE_PERIOD`. This replaces the old "no player delete" rule. |
+| Player delete | `request_player_delete` is allowed with `players:write`, because `cancel_player_delete` undoes it during `PLAYER_DELETE_GRACE_PERIOD`. This replaces the old "no player delete" rule. `cancel_player_delete` also cancels a delete request that the player made, as the dashboard does; the player can ask again. |
 | Player ban | Out of the project token. A ban applies to the whole Account Tenant (through the linked player account). It goes to the tenant token stage. |
 | Fleets | Reads and fleet writes are in. Fleet delete gets a restore operation, so it can be undone. Allocate and deallocate are risky (opt-in scope `allocations:write`). All fleet operations need `FEATURE_FLEET_ENABLED` and the `dedicated_servers` feature grant, as in the dashboard. |
 | Tenant token | A later stage of this plan, with its own security review. Team role changes, token creation, and tenant disable/enable stay out, because a token must not change the rights of its creator or of the tenant. |
@@ -182,6 +182,7 @@ each resource and one radio group in each row:
 - Each risky box that needs another access says so, for example "Needs read
   access to Players". The server refuses the form when the dependency is
   missing: `players:pii` and `players:invite` need `players:read`;
+  `players:invite` also needs `players:pii`, checked on each request too;
   `allocations:write` needs `fleet:read`; `keys:revoke` needs `keys:read`.
 - The form sends `access_<resource>=none|read|write` and `risky=<scope>`. The
   server turns them into scopes and checks each Casbin pair, each feature
@@ -553,3 +554,19 @@ This text is for the CHANGELOG section that is written when the release is tagge
 - The platform audit rows for disabling and enabling a player account name the
   account by id only. They no longer hold the player email. Older rows keep
   their values.
+- `invite_player` and `link_player` now also need the `players:pii` scope.
+  The token page refuses `players:invite` without it, and each request
+  without it gets 403. Before, the 409 answers let a token without
+  `players:pii` test whether an address belongs to a player. An existing
+  token with `players:invite` and no `players:pii` can no longer invite or
+  link: make a new token with both. The invite result now always holds
+  `email`.
+- SMTP mailer errors in the server logs name the SMTP step and the server
+  reply code only (for example `mailer: RCPT: server replied 550`). They no
+  longer hold the recipient address or the server reply text. The invite
+  mail error log line also has the address domain.
+- The `cancel_player_delete` tool description and the docs now say that it
+  also cancels a delete request that the player made.
+- The docs now say that a role, permission, or feature grant that the token
+  creator loses can take up to 10 seconds (policy reload) or 5 seconds
+  (feature grant cache) to stop the token on each server process.

@@ -218,7 +218,7 @@ func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView
 		if s.Class != managementtoken.ClassRisky {
 			continue
 		}
-		box := RiskyBoxView{Scope: s.Scope, Label: s.Label, Needs: needsText(s.Needs), Reason: gates[s.Resource]}
+		box := RiskyBoxView{Scope: s.Scope, Label: s.Label, Needs: needsText(s), Reason: gates[s.Resource]}
 		if box.Reason == "" && !slices.Contains(grantable, s.Scope) {
 			box.Reason = reasonRole
 		}
@@ -227,17 +227,33 @@ func accessOptions(grantable []string, gates map[string]string) ([]AccessRowView
 	return rows, risky
 }
 
-// needsText returns "Needs read access to <row>" for the read scope a risky
-// scope needs, or "" when it needs none.
-func needsText(scope string) string {
-	if scope == "" {
+// needsText returns "Needs <access>" for the scopes that a risky scope
+// needs, or "" when it needs none.
+func needsText(sp managementtoken.ScopePair) string {
+	var access []string
+	for _, scope := range []string{sp.Needs, sp.NeedsOnRequest} {
+		if scope != "" {
+			access = append(access, accessText(scope))
+		}
+	}
+	if len(access) == 0 {
 		return ""
+	}
+	return "Needs " + strings.Join(access, " and ")
+}
+
+// accessText names the access that a needed scope gives: "read access to
+// <row>" for the read scope of a row, or "access to <noun>" for a risky
+// scope.
+func accessText(scope string) string {
+	if sp, _ := managementtoken.Scope(scope); sp.Noun != "" {
+		return "access to " + sp.Noun
 	}
 	res := managementtoken.Resources[slices.IndexFunc(managementtoken.Resources, func(r managementtoken.Resource) bool { return r.Read == scope })]
 	if res.Noun != "" {
-		return "Needs read access to " + res.Noun
+		return "read access to " + res.Noun
 	}
-	return "Needs read access to " + res.Label
+	return "read access to " + res.Label
 }
 
 // riskyNotice joins the labels of the risky boxes that are checked.
@@ -257,8 +273,10 @@ func riskyNotice(risky []RiskyBoxView) string {
 func missingDependency(scopes []string) string {
 	for _, v := range scopes {
 		sp, _ := managementtoken.Scope(v)
-		if sp.Needs != "" && !slices.Contains(scopes, sp.Needs) {
-			return sp.Label + " " + needsText(sp.Needs) + ". Give that access or uncheck the box."
+		for _, need := range []string{sp.Needs, sp.NeedsOnRequest} {
+			if need != "" && !slices.Contains(scopes, need) {
+				return sp.Label + " Needs " + accessText(need) + ". Give that access or uncheck the box."
+			}
 		}
 	}
 	return ""

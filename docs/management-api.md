@@ -90,7 +90,7 @@ The server checks it again on each request.
 | `players:read` | normal | manage players | `list_players`, `get_player` |
 | `players:pii` | risky | manage players | adds `email` and `display_name` to the player reads |
 | `players:write` | normal | manage players | `set_player_disabled`, `request_player_delete`, `cancel_player_delete` |
-| `players:invite` | risky | manage players | `invite_player`, `link_player` |
+| `players:invite` | risky | manage players | `invite_player`, `link_player` (they also need `players:pii`) |
 | `limits:read` | normal | manage the Game Project | `get_project_limits` |
 | `limits:write` | normal | manage the Game Project | `set_project_invite_limit`, `set_project_storage_limit` |
 | `fleet:read` | normal | read fleets (allocation reads: also read allocations) | `list_fleets`, `get_fleet`, `list_allocations`, `get_allocation`, `list_allocation_events` |
@@ -104,8 +104,15 @@ server refuse the token without it:
 |---|---|
 | `keys:revoke` | `keys:read` |
 | `players:pii` | `players:read` |
-| `players:invite` | `players:read` |
+| `players:invite` | `players:read` and `players:pii` |
 | `allocations:write` | `fleet:read` |
+
+`players:invite` needs `players:pii` because the invite answers can show
+whether an address belongs to a player of the Game Project: `link_player`
+answers 409 when another player has the address, and `invite_player` answers
+409 when an invite for the address is pending. The server also checks
+`players:pii` on each `invite_player` and `link_player` request. A token
+without it gets 403 before the address is used.
 
 `project_health_check` and `get_token` need no scope.
 
@@ -199,9 +206,10 @@ the Game Project, as the dashboard pages do.
   delete request is pending. `request_player_delete` disables the player, ends
   its sessions, and starts the grace period (`PLAYER_DELETE_GRACE_PERIOD`). It
   answers 409 when an administrator already requested it.
-  `cancel_player_delete` answers 404 when no request is pending. Each returns
-  the player. After the grace period, the purge removes the player data for
-  good.
+  `cancel_player_delete` answers 404 when no request is pending. It also
+  cancels a delete request that the player made, as the dashboard **Cancel
+  deletion** button does. The player can ask again. Each returns the player.
+  After the grace period, the purge removes the player data for good.
 - `update_api_key_label` and `update_api_key_features` change a key of this
   Game Project. A secret key needs permission to manage secret keys for the
   person who made the token. A feature can be added only when the Game Project
@@ -267,8 +275,8 @@ in Scopes).
 | `keys:secret` | `create_secret_api_key` | `POST /v1/project/secret-api-keys` | Returns a secret. The `ggs_` key value is in the result one time only. The MCP result holds the value two times: in the text (`content[0].text`) and in `structuredContent`. The MCP library adds `structuredContent` to each successful tool result and has no way to leave it out for one tool, so keep both parts out of agent logs. The value is never in `list_api_keys`, `get_token`, the audit log, or the server log. Needs permission to manage secret keys for the person who made the token. Same label, scope, and `MANAGEMENT_MAX_PROJECT_API_KEYS` rules as `create_api_key`. |
 | `steam:write` | `set_steam_auth` | `PUT /v1/project/steam-auth` | Cannot be undone: the old Web API key is lost. Takes `app_id` and `web_api_key` (input only; same checks as the dashboard). Leave `web_api_key` out to keep the stored key and change the App ID; this is refused when no key is stored. The key is sealed as in the dashboard and is never in a result, the audit log, or the server log. Returns the `get_steam_auth` shape. |
 | `steam:write` | `clear_steam_auth` | `DELETE /v1/project/steam-auth` | Cannot be undone: removes the App ID and the Web API key, and Steam sign-in stops. Returns the `get_steam_auth` shape. |
-| `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, the whole Game Project in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id` and `expires_at`, and `email` only with `players:pii`. The audit row has no address. Needs `players:read`. |
-| `players:invite` | `link_player` | `POST /v1/project/players/{player_id}/link` | Sends an email. Same as `invite_player`, for one existing player: when the invite is accepted, the address and its account are bound to that player, and an open invite for the player is replaced. The accept fails when the player is linked to another account or has a different verified email. 404 for a player of another Game Project, 409 when another player has the address. |
+| `players:invite` | `invite_player` | `POST /v1/project/players/invite` | Sends an email. Takes `email`. The address gets a link to accept the invite. Same invite limits as the dashboard (each inviter in an hour, the whole Game Project in a day; see `set_project_invite_limit`): the answer is 429 with `Retry-After` when the limit is used. 409 when an invite for the address is pending, 422 for an invalid address. The inviter in the email and in the limit is the person who made the token. The result has `invite_id`, `expires_at`, and `email`. The audit row has no address. Needs `players:read` and `players:pii` (403 without `players:pii`). |
+| `players:invite` | `link_player` | `POST /v1/project/players/{player_id}/link` | Sends an email. Same as `invite_player`, for one existing player: when the invite is accepted, the address and its account are bound to that player, and an open invite for the player is replaced. The accept fails when the player is linked to another account or has a different verified email. 404 for a player of another Game Project, 409 when another player has the address. Needs `players:read` and `players:pii`. |
 | `allocations:write` | `allocate_server` | `POST /v1/project/allocations` | Costs money: starts a billable game server. Takes `fleet` (the name of a live fleet), `region`, and optional `game_mode` and `capacity` (default 1). It cannot set labels or join data. `region` and `game_mode` are at most 256 bytes, no NUL; `capacity` is at most `FLEET_ALLOCATION_MAX_CAPACITY` (default 100); otherwise 422. Invalid UTF-8 in the body answers 400 (see Errors). 409 when the fleet backend is not the backend of the server. Returns the allocation (no labels or join data). 404 for a deleted, unknown, or other-project fleet; 403 when the backend of the fleet is not enabled. Needs `fleet:read`, the allocate permission for the person who made the token, and the `dedicated_servers` feature. The audit row `fleet.allocate.manual` is written in the same transaction that marks the allocation ready. |
 | `allocations:write` | `deallocate_server` | `POST /v1/project/allocations/{allocation_id}/deallocate` | Cannot be undone: stops the server and ends a live match. The request also needs the deallocate permission for the person who made the token. 404 for an allocation of another Game Project. An allocation that is already released is returned as it is, with no new audit row. The backend stops the server first, then the row and the audit row `fleet.deallocate.manual` commit together. Returns the allocation. |
 
@@ -291,7 +299,8 @@ Each risky tool description starts with its risk ("Cannot be undone.", "Sends an
   The Steam Web API key and the values of existing API keys are never
   returned. The only secret in a result is the new key from
   `create_secret_api_key`, one time. A player email and display name are
-  returned only with `players:pii`.
+  returned only with `players:pii` (the invite results hold the address that
+  you sent, and their scope needs `players:pii`).
 - Text that a game client sent in a matchmaking ticket, and the `region` of an
   allocation, is shown only when it is a short identifier (letters, digits,
   `_`, `-`, `.`, up to 64 bytes). Other text is replaced by a marker with its
@@ -446,6 +455,13 @@ Notes:
   deleted Game Project take effect within this time on each process. The
   expiry time, the creator's role, and the rate limit are checked on each
   request.
+- The creator check on each request uses the permission policy and the
+  feature grants that each server process keeps in memory. Each process loads
+  the policy again every 10 seconds, and keeps each feature grant decision for
+  5 seconds (both fixed in the code). So when the creator loses a role or a
+  permission, the token can keep it for up to 10 seconds on each process. When
+  a feature grant is turned off (for example `dedicated_servers`), the token
+  can keep it for up to 5 seconds.
 - Failed authentications use a per-IP bucket that `/mcp` and `/v1/project`
   share. Correct tokens never use it, so they keep working from an IP that
   sent bad tokens. Behind a load balancer, set `TRUSTED_PROXY_HEADER` and

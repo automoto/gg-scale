@@ -47,9 +47,19 @@ func TestScopes_risky_scopes_should_have_a_label_and_a_known_dependency(t *testi
 			continue
 		}
 		dep, ok := Scope(s.Needs)
+		onRequest, onRequestOK := Scope(s.NeedsOnRequest)
 		assert.NotEmpty(t, s.Label, s.Scope)
 		assert.True(t, s.Needs == "" || ok && dep.Class == ClassNormal, s.Scope)
+		assert.True(t, s.NeedsOnRequest == "" || onRequestOK && onRequest.Noun != "" && onRequest.NeedsOnRequest == "", s.Scope)
 	}
+}
+
+// players:invite and link answer 409 when another player has the address,
+// so they also need players:pii on each request.
+func TestScopes_players_invite_should_need_players_pii_on_each_request(t *testing.T) {
+	got, _ := Scope(ScopePlayersInvite)
+
+	assert.Equal(t, ScopePlayersPII, got.NeedsOnRequest)
 }
 
 // Each risky scope pins its class, creator pair, resource, and dependency.

@@ -96,7 +96,9 @@ func TestMissingDependency(t *testing.T) {
 	}{
 		"pii without players read":        {[]string{managementtoken.ScopePlayersPII}, "Needs read access to Players"},
 		"allocations without fleets read": {[]string{managementtoken.ScopeAllocationsWrite}, "Needs read access to Fleets"},
-		"invite without players read":     {[]string{managementtoken.ScopePlayersInvite}, "Needs read access to Players"},
+		"invite without players read":     {[]string{managementtoken.ScopePlayersInvite, managementtoken.ScopePlayersPII}, "Needs read access to Players"},
+		"invite without pii":              {[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersInvite}, "Needs access to player email and display name."},
+		"invite with read and pii":        {[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII, managementtoken.ScopePlayersInvite}, ""},
 		"revoke without keys read":        {[]string{managementtoken.ScopeKeysRevoke}, "Needs read access to API keys"},
 		"pii with players read":           {[]string{managementtoken.ScopePlayersRead, managementtoken.ScopePlayersPII}, ""},
 	}
@@ -263,7 +265,7 @@ func TestAccessOptions_should_build_the_risky_boxes_from_the_scope_table(t *test
 		managementtoken.ScopeKeysSecret:       "",
 		managementtoken.ScopeSteamWrite:       "",
 		managementtoken.ScopePlayersPII:       "Needs read access to Players",
-		managementtoken.ScopePlayersInvite:    "Needs read access to Players",
+		managementtoken.ScopePlayersInvite:    "Needs read access to Players and access to player email and display name",
 		managementtoken.ScopeAllocationsWrite: "Needs read access to Fleets",
 	}
 	_, risky := accessOptions(managementtoken.ScopeNames(), nil)

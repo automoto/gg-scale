@@ -356,6 +356,20 @@ func TestProjectHandler_should_name_the_missing_scope(t *testing.T) {
 		[]any{rec.Code, strings.Contains(rec.Body.String(), managementtoken.ScopeConfigWrite)})
 }
 
+func TestProjectHandler_should_return_403_when_the_scope_needs_another_scope_on_each_request(t *testing.T) {
+	rec := serveProbe(t, probeRow(managementtoken.ScopePlayersInvite, nil, "", nil), "owner", creatorToken(managementtoken.ScopePlayersInvite))
+
+	assert.Equal(t, []any{http.StatusForbidden, true},
+		[]any{rec.Code, strings.Contains(rec.Body.String(), managementtoken.ScopePlayersPII)})
+}
+
+func TestProjectHandler_should_permit_a_token_with_the_scope_and_the_scope_it_needs(t *testing.T) {
+	rec := serveProbe(t, probeRow(managementtoken.ScopePlayersInvite, nil, "", nil), "owner",
+		creatorToken(managementtoken.ScopePlayersInvite, managementtoken.ScopePlayersPII))
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestProjectHandler_should_permit_a_token_with_the_scope(t *testing.T) {
 	rec := serveProbe(t, probeRow(managementtoken.ScopeConfigWrite, nil, "", nil), "owner", creatorToken(managementtoken.ScopeConfigWrite))
 

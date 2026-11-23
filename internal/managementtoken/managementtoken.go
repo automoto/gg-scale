@@ -63,6 +63,13 @@ type ScopePair struct {
 	// Needs is a scope that the token must also have. The token page and
 	// the server refuse the scope without it.
 	Needs string
+	// NeedsOnRequest is one more scope that the token must have. The token
+	// page refuses the scope without it, as for Needs, and each request
+	// that uses the scope is refused without it too.
+	NeedsOnRequest string
+	// Noun names the scope in the text "Needs access to <Noun>" when it is
+	// the NeedsOnRequest of another scope.
+	Noun string
 }
 
 func projectObject(int64) string { return rbac.ObjectProject }
@@ -107,11 +114,15 @@ var Scopes = []ScopePair{
 	{
 		Scope: ScopePlayersPII, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
 		Label: "See player email and display name. They go into agent logs and to the AI model provider.", Needs: ScopePlayersRead,
+		Noun: "player email and display name",
 	},
 	{Scope: ScopePlayersWrite, Class: ClassNormal, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players"},
 	{
 		Scope: ScopePlayersInvite, Class: ClassRisky, Pair: rbac.ProjectPlayersObject, Action: rbac.ActionManage, Resource: "players",
 		Label: "Invite and link players. Sends email.", Needs: ScopePlayersRead,
+		// The answer for an address that another player has is a 409, so it
+		// tells whether an address belongs to a player of the project.
+		NeedsOnRequest: ScopePlayersPII,
 	},
 	{Scope: ScopeLimitsRead, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
 	{Scope: ScopeLimitsWrite, Class: ClassNormal, Pair: projectObject, Action: rbac.ActionManage, Resource: "limits"},
