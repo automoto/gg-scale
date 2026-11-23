@@ -95,14 +95,15 @@ func (h *Handler) requireProjectRead(objectFor func(int64) string) func(http.Han
 	}
 }
 
-func (h *Handler) requireControlPanelFleetMutation(w http.ResponseWriter, r *http.Request, tenantID, projectID int64, backend string) bool {
+// requireControlPanelFleetManage checks the fleet manage right and the
+// dedicated_servers feature. It needs no stored data, so the fleet POST
+// handlers run it before they load or show a fleet. The backend grant
+// (requireControlPanelBackendFeature) follows once the backend is known.
+func (h *Handler) requireControlPanelFleetManage(w http.ResponseWriter, r *http.Request, tenantID, projectID int64) bool {
 	if !h.requireControlPanelPermission(w, r, tenantID, rbac.ProjectFleetObject(projectID), rbac.ActionManage) {
 		return false
 	}
-	if !h.requireControlPanelFeature(w, r, tenantID, projectID, rbac.FeatureDedicatedServers) {
-		return false
-	}
-	return h.requireControlPanelBackendFeature(w, r, tenantID, projectID, backend)
+	return h.requireControlPanelFeature(w, r, tenantID, projectID, rbac.FeatureDedicatedServers)
 }
 
 // requireControlPanelBackendFeature checks the feature grant of a fleet

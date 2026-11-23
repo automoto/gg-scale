@@ -122,6 +122,9 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
 		return
 	}
+	if !h.requireControlPanelFleetManage(w, r, tenantID, projectID) {
+		return
+	}
 	if !webutil.ParseForm(w, r) {
 		return
 	}
@@ -154,7 +157,7 @@ func (h *Handler) fleetsCreateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, NewFleetPage(view))
 		return
 	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, backend) {
+	if !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, backend) {
 		return
 	}
 
@@ -241,9 +244,6 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 		webutil.Render(r, w, EditFleetPage(view))
 		return
 	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
-		return
-	}
 	if _, err := h.fleet.FleetAdmin().UpdateFleet(r.Context(), tenantID, projectID, fleetID, &name, cfg, projectadmin.Actor{UserID: session.User.ID}); err != nil {
 		if errors.Is(err, fleet.ErrFleetNotFound) {
 			http.NotFound(w, r)
@@ -263,11 +263,8 @@ func (h *Handler) fleetsUpdateHandler(w http.ResponseWriter, r *http.Request) {
 // keep their fleet_id reference; the control panel surfaces the (now-deleted)
 // name from the row.
 func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, existing, ok := h.projectFleet(w, r, false)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
 	if !ok {
-		return
-	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -286,11 +283,8 @@ func (h *Handler) fleetsDeleteHandler(w http.ResponseWriter, r *http.Request) {
 // fleetsRestoreHandler brings back a deleted template. A live template with
 // the same name blocks the restore.
 func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
-	tenantID, projectID, existing, ok := h.projectFleet(w, r, false)
+	tenantID, projectID, existing, ok := h.projectFleet(w, r, true)
 	if !ok {
-		return
-	}
-	if !h.requireControlPanelFleetMutation(w, r, tenantID, projectID, existing.Backend) {
 		return
 	}
 	session, _ := sessionFromContext(r.Context())
@@ -311,8 +305,10 @@ func (h *Handler) fleetsRestoreHandler(w http.ResponseWriter, r *http.Request) {
 
 // projectFleet parses the IDs of a fleet route and returns the fleet (live or
 // deleted) of the project. On failure it writes the answer and ok is false.
-// parseForm reads the form after the backend check and before the lookup.
-func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, parseForm bool) (tenantID, projectID int64, f *fleet.Fleet, ok bool) {
+// For a write (mutate) it checks the fleet manage right before the lookup, so
+// a role without it learns nothing about the fleet, then reads the form, and
+// checks the backend grant of the stored fleet after the lookup.
+func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, mutate bool) (tenantID, projectID int64, f *fleet.Fleet, ok bool) {
 	tenantID, projectID, ok = h.parseTenantAndProject(w, r)
 	if !ok {
 		return 0, 0, nil, false
@@ -325,7 +321,10 @@ func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, parseForm
 		http.Error(w, msgNoFleetBackend, http.StatusServiceUnavailable)
 		return 0, 0, nil, false
 	}
-	if parseForm && !webutil.ParseForm(w, r) {
+	if mutate && !h.requireControlPanelFleetManage(w, r, tenantID, projectID) {
+		return 0, 0, nil, false
+	}
+	if mutate && !webutil.ParseForm(w, r) {
 		return 0, 0, nil, false
 	}
 	f, err := h.fleet.Fleets().GetByID(db.WithTenant(r.Context(), tenantID), fleetID)
@@ -339,6 +338,9 @@ func (h *Handler) projectFleet(w http.ResponseWriter, r *http.Request, parseForm
 	}
 	if f.ProjectID != projectID {
 		http.NotFound(w, r)
+		return 0, 0, nil, false
+	}
+	if mutate && !h.requireControlPanelBackendFeature(w, r, tenantID, projectID, f.Backend) {
 		return 0, 0, nil, false
 	}
 	return tenantID, projectID, f, true

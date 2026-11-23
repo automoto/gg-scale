@@ -599,3 +599,8 @@ This text is for the CHANGELOG section that is written when the release is tagge
   dashboard and with `deallocate_server`. It is released with no backend
   call. Before, Agones refused it and the row counted against
   `FLEET_MAX_LIVE_ALLOCATIONS_PER_PROJECT` forever.
+- The dashboard fleet and allocation forms (create, update, delete, restore,
+  allocate, deallocate) check the fleet or allocation right first. A role
+  without it gets 403, also when the form has an error, and the answer shows
+  no fleet or allocation data. Before, a form error showed the page with the
+  fleets of the Game Project or the allocation.

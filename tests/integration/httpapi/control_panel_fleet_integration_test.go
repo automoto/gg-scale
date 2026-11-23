@@ -799,3 +799,62 @@ func TestControlPanelFleet_deallocate_should_release_a_pending_row_with_no_backe
 	assert.Equal(t, []any{http.StatusConflict, http.StatusSeeOther, "shutdown", int64(0), http.StatusSeeOther},
 		[]any{atCap.StatusCode, stop.StatusCode, status, backend.deallocateN.Load(), start.StatusCode})
 }
+
+// A tenant_admin passes the project:manage route gate but has no fleet or
+// allocation rights. Each POST handler must refuse it before it loads or
+// shows stored data, also on the form-error paths.
+func TestControlPanelFleet_post_handlers_should_refuse_a_tenant_admin_before_showing_stored_data(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "fleet-token-b1")
+	adminID := seedControlPanelUser(t, c, "admin@example.com", "correct-horse-battery-staple", false)
+	seedControlPanelMembership(t, c, adminID, tenantID, "admin")
+	for _, g := range []rbac.Feature{rbac.FeatureDedicatedServers, rbac.FeatureFleetAgonesBackend, rbac.FeatureFleetPluginBackend} {
+		seedFeatureGrant(t, c, tenantID, projectID, g)
+	}
+	srv, _ := newControlPanelFleetServer(t, c, newStubBackend("agones"), nil)
+	cookie, csrf := controlPanelLoginCookieAndCSRF(t, srv.URL, "admin@example.com", "correct-horse-battery-staple")
+	var agonesFleetID, pluginFleetID, allocID int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'agones-marker-fleet', 'agones', '{"fleet_name":"gs-marker"}') RETURNING id`,
+		tenantID, projectID).Scan(&agonesFleetID))
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO fleets (tenant_id, project_id, name, backend, config)
+		 VALUES ($1, $2, 'plugin-marker-fleet', 'plugin:markerbackend', '{"api_token":"token-marker"}') RETURNING id`,
+		tenantID, projectID).Scan(&pluginFleetID))
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`INSERT INTO game_server_allocations (tenant_id, project_id, fleet_id, backend, backend_ref, region, address, status)
+		 VALUES ($1, $2, $3, 'agones', 'ns-marker/gs-ref-marker', 'region-marker', '203.0.113.77:7777', 'ready') RETURNING id`,
+		tenantID, projectID, agonesFleetID).Scan(&allocID))
+	base := srv.URL + "/v1/control-panel/tenants/" + strconv.FormatInt(tenantID, 10) +
+		"/projects/" + strconv.FormatInt(projectID, 10)
+	markers := []string{"agones-marker-fleet", "plugin-marker-fleet", "markerbackend", "token-marker", "gs-ref-marker", "region-marker", "203.0.113.77"}
+	cases := []struct {
+		name string
+		path string
+		form url.Values
+	}{
+		{"allocate_with_an_empty_fleet", "/allocations", url.Values{"fleet": {""}, "region": {"eu"}}},
+		{"deallocate_with_a_wrong_confirm_id", "/allocations/" + strconv.FormatInt(allocID, 10) + "/deallocate", url.Values{"confirm_id": {"0"}}},
+		{"fleet_update_with_a_field_error", "/fleets/" + strconv.FormatInt(pluginFleetID, 10), url.Values{"name": {""}, "config_key[]": {"api_token"}, "config_value[]": {""}}},
+		{"fleet_create_with_a_field_error", "/fleets", url.Values{"name": {""}, "backend": {"agones"}, "fleet_name": {"gs"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.form.Set("_csrf", csrf)
+
+			resp := postFormWithCookie(t, base+tc.path, tc.form, cookie)
+			body, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			resp.Body.Close()
+
+			var shown []string
+			for _, m := range markers {
+				if strings.Contains(string(body), m) {
+					shown = append(shown, m)
+				}
+			}
+			assert.Equal(t, []any{http.StatusForbidden, []string(nil)}, []any{resp.StatusCode, shown}, string(body))
+		})
+	}
+}

@@ -177,6 +177,10 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 	if !webutil.ParseForm(w, r) {
 		return
 	}
+	// The check runs before the form-error page, which lists the fleets.
+	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionAllocate) {
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
 	fleetName := strings.TrimSpace(r.Form.Get("fleet"))
 	region := strings.TrimSpace(r.Form.Get("region"))
@@ -203,9 +207,6 @@ func (h *Handler) allocationsAllocateHandler(w http.ResponseWriter, r *http.Requ
 		view.FieldErrors = fieldErrors
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		webutil.Render(r, w, NewFleetAllocationPage(view))
-		return
-	}
-	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionAllocate) {
 		return
 	}
 
@@ -320,15 +321,16 @@ func (h *Handler) allocationsDeallocateHandler(w http.ResponseWriter, r *http.Re
 	if !webutil.ParseForm(w, r) {
 		return
 	}
+	// The check runs before the form-error page, which shows the allocation.
+	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
+		return
+	}
 	typed := strings.TrimSpace(r.Form.Get("confirm_id"))
 	if typed != strconv.FormatInt(allocID, 10) {
 		h.renderDeallocateError(w, r, tenantID, projectID, allocID, "Typed ID did not match. Type the allocation ID exactly to confirm.")
 		return
 	}
 
-	if !h.requireControlPanelAllocationMutation(w, r, tenantID, projectID, rbac.ActionDeallocate) {
-		return
-	}
 	session, _ := sessionFromContext(r.Context())
 	_, err := fleet.DeallocateServer(r.Context(), h.fleet, tenantID, projectID, fleet.AllocationID(allocID), projectadmin.Actor{UserID: session.User.ID})
 	if errors.Is(err, fleet.ErrNotFound) {
