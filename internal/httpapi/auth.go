@@ -331,7 +331,7 @@ func authSignup(d Deps) func(context.Context, *signupInput) (*struct{}, error) {
 		if err != nil {
 			return nil, serverError(ctx, "signup: salt", err)
 		}
-		codeHash := verifycode.Hash(salt, code)
+		codeHash := verifycode.HashCode(d.EmailVerifySigningKey, salt, code)
 		externalID, err := webutil.RandomHex("user_", 16)
 		if err != nil {
 			return nil, serverError(ctx, "signup: ext_id rand", err)
@@ -439,7 +439,7 @@ type challengeState struct {
 // restarts the lifetime budget once a lockout has expired — without it the
 // reserve below would re-trip the cap on the old count before the compare,
 // locking the account forever.
-func checkCodeChallenge(ctx context.Context, s challengeState, code string, now time.Time,
+func checkCodeChallenge(ctx context.Context, key []byte, s challengeState, code string, now time.Time,
 	reserve func(context.Context, int64, int32) (int32, error),
 	lock func(context.Context, int64, pgtype.Timestamptz) error,
 	clearLock func(context.Context, int64) error,
@@ -472,7 +472,7 @@ func checkCodeChallenge(ctx context.Context, s challengeState, code string, now 
 		}
 		return true, false, nil
 	}
-	if subtle.ConstantTimeCompare(verifycode.Hash(s.Salt, code), s.CodeHash) != 1 {
+	if subtle.ConstantTimeCompare(verifycode.HashCode(key, s.Salt, code), s.CodeHash) != 1 {
 		return false, true, nil
 	}
 	return false, false, nil
@@ -509,7 +509,7 @@ func authVerify(d Deps) func(context.Context, *verifyInput) (*verifyOutput, erro
 			// tx, handing an attacker unlimited guesses at the 10^6 code
 			// space. The 400/429 is raised from the flags after commit.
 			var cerr error
-			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, challengeState{
+			lockedAfterAttempt, badCode, cerr = checkCodeChallenge(ctx, d.EmailVerifySigningKey, challengeState{
 				ID:          row.ID,
 				CodeHash:    row.EmailVerificationCodeHash,
 				Salt:        row.EmailVerificationSalt,

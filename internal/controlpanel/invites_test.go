@@ -40,26 +40,6 @@ func TestGenerateInviteCode_url_safe(t *testing.T) {
 	}
 }
 
-func TestHashCode_deterministic_with_salt(t *testing.T) {
-	salt := []byte("0123456789abcdef")
-	h1 := hashCode(salt, "123456")
-	h2 := hashCode(salt, "123456")
-	assert.Equal(t, h1, h2)
-}
-
-func TestHashCode_different_salt_different_hash(t *testing.T) {
-	h1 := hashCode([]byte("aaaa"), "123456")
-	h2 := hashCode([]byte("bbbb"), "123456")
-	assert.NotEqual(t, h1, h2)
-}
-
-func TestHashCode_different_code_different_hash(t *testing.T) {
-	salt := []byte("salt")
-	h1 := hashCode(salt, "123456")
-	h2 := hashCode(salt, "654321")
-	assert.NotEqual(t, h1, h2)
-}
-
 func TestNewSalt_length(t *testing.T) {
 	s, err := newSalt()
 	require.NoError(t, err)

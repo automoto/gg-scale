@@ -212,7 +212,7 @@ func TestControlPanelInvite_accept_should_fail_when_revoke_commits_during_accept
 	_, err := c.bootstrapPool.Exec(context.Background(),
 		`INSERT INTO control_panel_invitations (email, tenant_id, role, code_hash, expires_at, invited_by_user_id)
 		 VALUES ('invitee@example.com', $1, 'tenant_admin', $2, now() + interval '1 day', $3)`,
-		tenantID, verifycode.Hash(nil, code), adminID)
+		tenantID, verifycode.HashToken(code), adminID)
 	require.NoError(t, err)
 	client := jarClient(t)
 	acceptURL := srv.URL + "/v1/control-panel/invite/accept"

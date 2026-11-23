@@ -578,7 +578,7 @@ func (h *Handler) accountSignup(w http.ResponseWriter, r *http.Request) {
 		displayPtr = &displayName
 	}
 
-	codeHash := verifycode.Hash(salt, code)
+	codeHash := verifycode.HashCode(h.verifySigningKey, salt, code)
 	var accountID pgtype.UUID
 	err = h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		row, qerr := sqlcgen.New(tx).CreatePlayerAccount(r.Context(), sqlcgen.CreatePlayerAccountParams{
@@ -825,7 +825,7 @@ func (h *Handler) startAccountVerification(ctx context.Context, accountID pgtype
 	if err != nil {
 		return err
 	}
-	codeHash := verifycode.Hash(salt, code)
+	codeHash := verifycode.HashCode(h.verifySigningKey, salt, code)
 	if err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).SetPlayerAccountVerificationCode(ctx, sqlcgen.SetPlayerAccountVerificationCodeParams{
 			ID:        accountID,
@@ -905,7 +905,7 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 			locked = true
 			return nil
 		}
-		expected := verifycode.Hash(state.EmailVerificationSalt, code)
+		expected := verifycode.HashCode(h.verifySigningKey, state.EmailVerificationSalt, code)
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
 			return errBadVerifyCode
 		}

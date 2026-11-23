@@ -147,7 +147,7 @@ func TestControlPanelLogin_SMTPRejectionRestoresPreviousCodeAndAllowsImmediateRe
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), 12)
 	require.NoError(t, err)
 	oldSalt := []byte("old-salt")
-	oldHash := verifycode.Hash(oldSalt, "123456")
+	oldHash := verifycode.HashCode([]byte(testEmailVerifySigningKey), oldSalt, "123456")
 	oldSent := time.Now().Add(-2 * time.Minute).UTC().Truncate(time.Microsecond)
 	_, err = c.bootstrapPool.Exec(context.Background(), `
 		INSERT INTO control_panel_users (
@@ -301,9 +301,9 @@ func TestVerificationCompensation_DoesNotClobberNewerConcurrentCode(t *testing.T
 	c := startCluster(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-horse-battery-staple"), 12)
 	require.NoError(t, err)
-	oldHash := verifycode.Hash([]byte("old-salt"), "123456")
-	failedHash := verifycode.Hash([]byte("failed-salt"), "234567")
-	newerHash := verifycode.Hash([]byte("newer-salt"), "345678")
+	oldHash := verifycode.HashCode([]byte(testEmailVerifySigningKey), []byte("old-salt"), "123456")
+	failedHash := verifycode.HashCode([]byte(testEmailVerifySigningKey), []byte("failed-salt"), "234567")
+	newerHash := verifycode.HashCode([]byte(testEmailVerifySigningKey), []byte("newer-salt"), "345678")
 	var userID int64
 	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(), `
 		INSERT INTO control_panel_users (

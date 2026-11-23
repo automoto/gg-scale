@@ -385,7 +385,7 @@ func (h *Handler) approveTenantSignupHandler(w http.ResponseWriter, r *http.Requ
 		webutil.InternalError(w, "tenant signup: invite code", err)
 		return
 	}
-	codeHash := verifycode.Hash(nil, code)
+	codeHash := verifycode.HashToken(code)
 	expires := h.now().Add(verifycode.InviteTTL)
 
 	var (
@@ -507,7 +507,7 @@ func (h *Handler) lookupSignupRequest(ctx context.Context, code string) (signupL
 	if code == "" {
 		return signupLookup{}, errInviteNotFound
 	}
-	codeHash := verifycode.Hash(nil, code)
+	codeHash := verifycode.HashToken(code)
 
 	var out signupLookup
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
@@ -573,7 +573,7 @@ func (h *Handler) acceptTenantSignup(ctx context.Context, in signupAcceptInput) 
 	if in.Code == "" {
 		return signupAcceptResult{}, errInviteNotFound
 	}
-	codeHash := verifycode.Hash(nil, in.Code)
+	codeHash := verifycode.HashToken(in.Code)
 
 	var out signupAcceptResult
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {

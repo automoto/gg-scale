@@ -284,7 +284,7 @@ func (i *PlayerInviter) create(ctx context.Context, tenantID, projectID int64, e
 		row, err = q.CreatePlayerInvitation(ctx, sqlcgen.CreatePlayerInvitationParams{
 			ProjectID:       projectID,
 			Email:           email,
-			CodeHash:        verifycode.Hash(nil, code),
+			CodeHash:        verifycode.HashToken(code),
 			ExpiresAt:       pgtype.Timestamptz{Time: expiresAt, Valid: true},
 			InvitedByUserID: actor.authzUserID(),
 			ProjectPlayerID: targetPlayer,

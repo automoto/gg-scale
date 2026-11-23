@@ -229,7 +229,7 @@ func seedApprovedSignup(t *testing.T, c *cluster, code, expiresIn string) {
 		`INSERT INTO tenant_signup_requests
 		   (email, requested_tenant_name, project_description, status, code_hash, code_expires_at)
 		 VALUES ('dev@example.com', 'Seeded Studio', 'A game.', 'approved', $1, now() + $2::interval)`,
-		verifycode.Hash(nil, code), expiresIn)
+		verifycode.HashToken(code), expiresIn)
 	require.NoError(t, err)
 }
 

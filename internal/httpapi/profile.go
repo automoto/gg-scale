@@ -218,7 +218,7 @@ func profilePatch(d Deps) func(context.Context, *profilePatchInput) (*profilePat
 			if salt, err = verifycode.NewSalt(); err != nil {
 				return nil, serverError(ctx, "profile patch: salt", err)
 			}
-			codeHash = verifycode.Hash(salt, code)
+			codeHash = verifycode.HashCode(d.EmailVerifySigningKey, salt, code)
 		}
 
 		// emailSent records whether the email branch actually re-issued a code,

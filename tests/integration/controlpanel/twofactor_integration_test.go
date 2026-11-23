@@ -293,7 +293,7 @@ func TestControlPanelTwoFactor_fullFlow(t *testing.T) {
 			`UPDATE control_panel_users
 			 SET email_verification_code_hash = $1, email_verification_salt = $2,
 			     email_verification_expires_at = now() + interval '15 minutes'
-			 WHERE id = $3`, verifycode.Hash(salt, "123456"), salt, verifyUserID)
+			 WHERE id = $3`, verifycode.HashCode([]byte(testEmailVerifySigningKey), salt, "123456"), salt, verifyUserID)
 		require.NoError(t, err)
 
 		resp, _ = tfPostForm(t, erin, srv.URL+"/v1/control-panel/verify", url.Values{"code": {"123456"}})

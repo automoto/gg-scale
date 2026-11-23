@@ -159,7 +159,7 @@ func (h *Handler) startVerification(ctx context.Context, userID int64, email str
 	if err != nil {
 		return fmt.Errorf("verify salt: %w", err)
 	}
-	codeHash := verifycode.Hash(salt, code)
+	codeHash := verifycode.HashCode(h.verifySigningKey, salt, code)
 	expiresAt := h.now().Add(verifycode.CodeTTL)
 	err = h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		return sqlcgen.New(tx).SetControlPanelUserVerificationCode(ctx, sqlcgen.SetControlPanelUserVerificationCodeParams{
@@ -266,7 +266,7 @@ func (h *Handler) confirmVerification(ctx context.Context, userID int64, code st
 		})
 		return errVerifyAccountLocked
 	}
-	expected := verifycode.Hash(state.EmailVerificationSalt, code)
+	expected := verifycode.HashCode(h.verifySigningKey, state.EmailVerificationSalt, code)
 	if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
 		return errBadVerifyCode
 	}

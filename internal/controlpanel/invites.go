@@ -12,7 +12,6 @@ var (
 	generateVerificationCode = verifycode.GenerateCode
 	generateInviteCode       = verifycode.GenerateInviteCode
 	newSalt                  = verifycode.NewSalt
-	hashCode                 = verifycode.Hash
 	canResendCode            = verifycode.CanResend
 	codeExpired              = verifycode.Expired
 	verifyAttemptsExhausted  = verifycode.AttemptsExhausted

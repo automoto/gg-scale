@@ -267,7 +267,7 @@ func TestPlayerAccountTwoFactor_fullFlow(t *testing.T) {
 			`UPDATE player_accounts
 			 SET email_verification_code_hash = $1, email_verification_salt = $2,
 			     email_verification_expires_at = now() + interval '15 minutes'
-			 WHERE email = $3`, verifycode.Hash(salt, "123456"), salt, accountEmail)
+			 WHERE email = $3`, verifycode.HashCode([]byte(testEmailVerifySigningKey), salt, "123456"), salt, accountEmail)
 		require.NoError(t, err)
 
 		resp, _ = tfPostForm(t, erin, srv.URL+accountBasePath+"/verify",

@@ -36,7 +36,7 @@ func (h *Handler) lookupInvite(ctx context.Context, code string) (lookupInviteRe
 	if code == "" {
 		return lookupInviteResult{}, errInviteNotFound
 	}
-	codeHash := verifycode.Hash(nil, code)
+	codeHash := verifycode.HashToken(code)
 
 	var out lookupInviteResult
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
@@ -111,7 +111,7 @@ func (h *Handler) acceptInvite(ctx context.Context, in acceptInviteInput) (accep
 	if in.Code == "" {
 		return acceptInviteResult{}, errInviteNotFound
 	}
-	codeHash := verifycode.Hash(nil, in.Code)
+	codeHash := verifycode.HashToken(in.Code)
 
 	var out acceptInviteResult
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
