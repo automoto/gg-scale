@@ -858,7 +858,9 @@ func encodeQueueCursor(cipher *secretseal.Cipher, c queueCursor) (string, error)
 func decodeQueueCursor(cipher *secretseal.Cipher, s string) (queueCursor, bool) {
 	var c queueCursor
 	sealed, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil || cipher == nil {
+	// The decoder ignores the unused bits of the last character and CR or LF,
+	// so other texts decode to the same bytes. Accept only the text we encode.
+	if err != nil || cipher == nil || base64.RawURLEncoding.EncodeToString(sealed) != s {
 		return queueCursor{}, false
 	}
 	raw, err := cipher.Decrypt(sealed)
