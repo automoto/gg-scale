@@ -77,6 +77,7 @@ func (s *Selector) Select(ctx context.Context, region string) (Selection, error)
 	if len(candidates) == 0 {
 		return Selection{}, ErrNoEligibleNodes
 	}
+	//nolint:gosec // G404: the shuffle only spreads load across relay nodes; no secret depends on it
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 	sel := Selection{Region: candidates[0].Region}
 	for _, n := range candidates {

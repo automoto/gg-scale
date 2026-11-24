@@ -51,11 +51,13 @@ func CSRFCookie(cfg CSRFConfig) func(http.Handler) http.Handler {
 			token := readCSRFCookie(r)
 			if token == "" && isSafeMethod(r.Method) {
 				token = mustMintCSRFToken()
-				http.SetCookie(w, &http.Cookie{
+				// Secure follows the caller's config: production requires it, and
+				// a zero-config local install runs on plain HTTP.
+				http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: see above
 					Name:     CSRFCookieName,
 					Value:    token,
 					Path:     cfg.Path,
-					HttpOnly: false, // page JS may need it for fetch()
+					HttpOnly: true, // pages get the token from the server, never from the cookie
 					Secure:   cfg.Secure,
 					SameSite: cfg.SameSite,
 				})

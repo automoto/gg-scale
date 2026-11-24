@@ -31,6 +31,19 @@ func TestCSRFCookieMintsOnSafeMethod(t *testing.T) {
 	assert.Equal(t, cookies[0].Value, ctxToken)
 }
 
+// Pages put the token in forms and hx-headers from the server, so no script
+// needs to read the cookie.
+func TestCSRFCookie_should_be_http_only(t *testing.T) {
+	h := webutil.CSRFCookie(webutil.CSRFConfig{Path: "/"})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.True(t, cookies[0].HttpOnly)
+}
+
 func TestRequireCSRFAcceptsMatchingFormField(t *testing.T) {
 	h := webutil.RequireCSRF(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

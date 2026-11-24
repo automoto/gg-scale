@@ -83,7 +83,9 @@ func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name s
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	http.ServeFileFS(w, r, fsys, root+"/"+name)
+	// fsys is an embedded fs.FS, which rejects any path outside its root, and
+	// ".." is refused above.
+	http.ServeFileFS(w, r, fsys, root+"/"+name) //nolint:gosec // G703: see above
 }
 
 // FaviconHandler serves the SVG icon at the conventional legacy URL.

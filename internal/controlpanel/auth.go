@@ -56,7 +56,9 @@ func (h *Handler) issueSession(ctx context.Context, w http.ResponseWriter, userI
 		return controlPanelSession{}, err
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	// Secure follows CONTROL_PANEL_COOKIE_SECURE: config.Validate requires it
+	// in production, and a zero-config local install runs on plain HTTP.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: see above
 		Name:     sessionCookieName,
 		Value:    refreshToken,
 		Path:     pathControlPanel,
@@ -73,7 +75,7 @@ func (h *Handler) issueSession(ctx context.Context, w http.ResponseWriter, userI
 }
 
 func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure follows CONTROL_PANEL_COOKIE_SECURE, as in issueSession
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     pathControlPanel,

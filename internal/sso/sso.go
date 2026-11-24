@@ -227,7 +227,9 @@ func (f *Flow) Start(w http.ResponseWriter, r *http.Request, provider, mode, act
 	if err != nil {
 		return fmt.Errorf("sso: state marshal: %w", err)
 	}
-	http.SetCookie(w, &http.Cookie{
+	// Secure comes from the caller's cookie config, which production requires;
+	// a zero-config local install runs on plain HTTP.
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: see above
 		Name:     f.CookieName,
 		Value:    signedcookie.Sign(f.Key, payload),
 		Path:     f.CookiePath,
@@ -253,7 +255,7 @@ func (f *Flow) Finish(w http.ResponseWriter, r *http.Request, provider string) (
 		return Pending{}, Identity{}, ErrUnknownProvider
 	}
 	cookie, cookieErr := r.Cookie(f.CookieName)
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure comes from the caller's cookie config, as in Start
 		Name:     f.CookieName,
 		Value:    "",
 		Path:     f.CookiePath,

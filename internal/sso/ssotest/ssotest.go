@@ -86,7 +86,9 @@ func (f *Fake) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Unlock()
 	redirect.RawQuery = out.Encode()
-	http.Redirect(w, r, redirect.String(), http.StatusFound)
+	// A fake identity provider for tests: it must send the browser to the
+	// redirect_uri it is given.
+	http.Redirect(w, r, redirect.String(), http.StatusFound) //nolint:gosec // G710: see above
 }
 
 func (f *Fake) token(w http.ResponseWriter, r *http.Request) {
