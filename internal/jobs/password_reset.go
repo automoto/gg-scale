@@ -120,9 +120,10 @@ func sendControlPanelPasswordReset(ctx context.Context, d PasswordResetDeps, ema
 	}
 
 	link := strings.TrimRight(d.BaseURL, "/") + "/v1/control-panel/reset-password?token=" + token
+	// The lookup ignores letter case; send to the address on the account.
 	return d.Mailer.Send(ctx, mailer.Message{
 		From:    d.MailFrom,
-		To:      []string{email},
+		To:      []string{row.Email},
 		Subject: "Reset your ggscale password",
 		Body: "A password reset was requested for your ggscale control panel account.\n\n" +
 			"Set a new password here: " + link + "\n\n" +
@@ -165,7 +166,7 @@ func sendPlayerAccountPasswordReset(ctx context.Context, d PasswordResetDeps, em
 	link := strings.TrimRight(d.BaseURL, "/") + "/v1/players/account/reset-password?token=" + token
 	return d.Mailer.Send(ctx, mailer.Message{
 		From:    d.MailFrom,
-		To:      []string{email},
+		To:      []string{row.Email},
 		Subject: "Reset your gg-scale account password",
 		Body: "A password reset was requested for your gg-scale account.\n\n" +
 			"Set a new password here: " + link + "\n\n" +

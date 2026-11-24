@@ -146,7 +146,7 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, created_at, expires_at
+RETURNING id, email::text AS email, created_at, expires_at
 `
 
 type CreatePlayerInvitationParams struct {
@@ -160,6 +160,7 @@ type CreatePlayerInvitationParams struct {
 
 type CreatePlayerInvitationRow struct {
 	ID        int64
+	Email     string
 	CreatedAt pgtype.Timestamptz
 	ExpiresAt pgtype.Timestamptz
 }
@@ -177,7 +178,12 @@ func (q *Queries) CreatePlayerInvitation(ctx context.Context, arg CreatePlayerIn
 		arg.ProjectPlayerID,
 	)
 	var i CreatePlayerInvitationRow
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.ExpiresAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
 	return i, err
 }
 

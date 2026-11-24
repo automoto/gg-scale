@@ -167,10 +167,18 @@ func TestTenantSettingsPage_renders_denied_reason(t *testing.T) {
 }
 
 func TestChangeRequestDecisionEmail_uses_account_tenant_name(t *testing.T) {
-	subject, body := changeRequestDecisionEmail(sqlcgen.GetTenantChangeRequestByIDRow{}, true, "")
+	subject, body := changeRequestDecisionEmail(sqlcgen.GetTenantChangeRequestByIDRow{}, true)
 
 	assert.Equal(t, "Your ggscale change request was approved", subject)
 	assert.Contains(t, body, "applied to your Account Tenant")
+}
+
+func TestChangeRequestDecisionEmail_should_use_the_saved_deny_reason(t *testing.T) {
+	reason := "not on this plan"
+
+	_, body := changeRequestDecisionEmail(sqlcgen.GetTenantChangeRequestByIDRow{ReviewReason: &reason}, false)
+
+	assert.Contains(t, body, "Reason: not on this plan")
 }
 
 func TestAgonesGrantWarning(t *testing.T) {

@@ -159,7 +159,7 @@ VALUES (
     sqlc.arg(invited_by_user_id),
     sqlc.narg(project_player_id)
 )
-RETURNING id, created_at, expires_at;
+RETURNING id, email::text AS email, created_at, expires_at;
 
 -- name: GetPlayerInvitationByCodeHash :one
 SELECT

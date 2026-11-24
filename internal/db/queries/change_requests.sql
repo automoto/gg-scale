@@ -37,7 +37,7 @@ WHERE r.status = 'pending'
 ORDER BY r.created_at ASC;
 
 -- name: GetTenantChangeRequestByID :one
-SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status
+SELECT id, tenant_id, kind, requested_tier, feature, requested_limit, note, status, review_reason
 FROM tenant_change_requests
 WHERE id = $1;
 
