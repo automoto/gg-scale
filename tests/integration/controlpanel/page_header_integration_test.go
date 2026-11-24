@@ -1,0 +1,73 @@
+//go:build integration
+
+// e2e:bucket a
+
+package controlpanel_test
+
+import (
+	"context"
+	"strconv"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestPageHeader_should_show_names_on_project_settings(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	// Act
+	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, projectA))
+
+	// Assert
+	assert.Contains(t, body, ">lb-test</a>")
+	assert.Contains(t, body, ">p1</a>")
+	assert.NotContains(t, body, "Game Project #")
+	assert.NotContains(t, body, `class="eyebrow"`)
+}
+
+func TestPageHeader_should_show_the_tenant_name_on_tenant_settings(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, _, _ := newLeaderboardServer(t)
+	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+
+	// Act
+	_, body := tfGet(t, admin, srv.URL+pathControlPanel+"/tenants/"+strconv.FormatInt(tenantID, 10)+"/settings")
+
+	// Assert
+	assert.Contains(t, body, ">lb-test</a>")
+	assert.NotContains(t, body, "Account Tenant #")
+}
+
+func TestPageHeader_should_not_show_a_project_name_from_another_tenant(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, _, _ := newLeaderboardServer(t)
+	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	var otherTenant int64
+	require.NoError(t, raw.QueryRow(context.Background(),
+		`INSERT INTO tenants (name) VALUES ('other-tenant') RETURNING id`).Scan(&otherTenant))
+	otherProject := createLeaderboardProject(t, raw, otherTenant, "other-secret")
+
+	// Act
+	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, otherProject))
+
+	// Assert
+	assert.NotContains(t, body, "other-secret")
+}
+
+func TestPageHeader_should_escape_the_names(t *testing.T) {
+	// Arrange
+	srv, raw, userID, tenantID, projectA, _ := newLeaderboardServer(t)
+	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
+	_, err := raw.Exec(context.Background(), `UPDATE projects SET name = '<b>x</b>' WHERE id = $1`, projectA)
+	require.NoError(t, err)
+
+	// Act
+	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, projectA))
+
+	// Assert
+	assert.Contains(t, body, "&lt;b&gt;x&lt;/b&gt;")
+	assert.NotContains(t, body, "<b>x</b>")
+}

@@ -139,6 +139,23 @@ templ fieldError(errs map[string]string, name string) {
 	}
 }
 
+// breadcrumb draws "Tenant / Project / " from the page scope, then the page
+// trail. Names that are missing from the scope are left out.
+templ breadcrumb() {
+	{{ s := pageScopeFromContext(ctx) }}
+	<nav class="breadcrumb" aria-label="Breadcrumb">
+		if s.TenantID > 0 {
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(s.TenantID) + "/projects") }>{ s.TenantName }</a>
+			{ " / " }
+		}
+		if s.ProjectID > 0 {
+			<a href={ templ.URL(projectSettingsPathTpl(s.TenantID, s.ProjectID)) }>{ s.ProjectName }</a>
+			{ " / " }
+		}
+		{ children... }
+	</nav>
+}
+
 // ssoButtons renders one plain form for each provider. The forms stay outside
 // the password form, because HTML forms cannot nest, and they carry no hx-
 // attribute: the browser itself must follow the redirect to the provider.
@@ -2803,12 +2820,12 @@ templ leaderboardSortOrderField(sortOrder string, fieldErrors map[string]string)
 
 templ TenantSettingsPage(vm TenantSettingsView) {
 	@appLayout("Account Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Settings</div>
+		@breadcrumb() {
+			Settings
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Account Tenant settings</p>
 				<h1>Settings</h1>
-				<p class="subtitle">{ vm.TenantName } — Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -3032,15 +3049,12 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 
 templ ProjectSettingsPage(vm ProjectSettingsView) {
 	@appLayout("Game Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Settings
-		</div>
+		@breadcrumb() {
+			Settings
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Game Project settings</p>
-				<h1>{ vm.ProjectName }</h1>
-				<p class="subtitle">Game Project #{ stringFromInt(vm.ProjectID) }</p>
+				<h1>Settings</h1>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -3291,12 +3305,11 @@ templ revisionHistory(csrf, action string, revs []RevisionView, note string) {
 
 templ ManagementTokensPage(vm ManagementTokensView) {
 	@appLayout("Management tokens — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Game Project settings</a> / Management tokens
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Settings</a> / Management tokens
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Game Project #{ stringFromInt(vm.ProjectID) }</p>
 				<h1>Management tokens</h1>
 				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) or a script find setup problems in this Game Project and, with write scopes, change remote config, leaderboards, publishable API keys, and browser origins. A token works for the MCP endpoint (<code>/mcp</code>) and for the <code>/v1/project</code> API. It works for this Game Project only, and never has more rights than the person who created it.</p>
 			</div>
