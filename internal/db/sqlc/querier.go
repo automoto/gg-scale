@@ -435,6 +435,7 @@ type Querier interface {
 	GetMatchmakingTicket(ctx context.Context, arg GetMatchmakingTicketParams) (GetMatchmakingTicketRow, error)
 	// Diagnostic read by primary key, scoped to one project.
 	GetMatchmakingTicketForTrace(ctx context.Context, arg GetMatchmakingTicketForTraceParams) (GetMatchmakingTicketForTraceRow, error)
+	GetPageScopeNames(ctx context.Context, arg GetPageScopeNamesParams) (GetPageScopeNamesRow, error)
 	// Single sign-on connections. Both tables are platform-global (no tenant
 	// RLS): every query here runs through db.Pool.BootstrapQ. The subject always
 	// comes from a verified provider round trip, never from client input.

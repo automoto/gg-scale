@@ -119,3 +119,11 @@ WHERE id = sqlc.arg(tenant_id);
 UPDATE tenants
 SET custom_token_public_key = sqlc.arg(public_key)
 WHERE id = sqlc.arg(tenant_id);
+
+-- name: GetPageScopeNames :one
+SELECT t.name AS tenant_name, p.name AS project_name
+FROM tenants t
+LEFT JOIN projects p
+  ON p.id = sqlc.arg(project_id) AND p.tenant_id = t.id AND p.deleted_at IS NULL
+WHERE t.id = sqlc.arg(tenant_id)
+  AND t.deleted_at IS NULL;
