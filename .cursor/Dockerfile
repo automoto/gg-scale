@@ -1,5 +1,5 @@
 ARG GO_VERSION=1.26.10
-ARG GOLANGCI_LINT_VERSION=v2.11.4
+ARG GOLANGCI_LINT_VERSION=v2.15.0
 
 FROM golang:${GO_VERSION}-bookworm AS go-toolchain
 FROM golangci/golangci-lint:${GOLANGCI_LINT_VERSION} AS lint-toolchain

@@ -270,7 +270,9 @@ func runConnectionWithClock(ctx context.Context, conn realtimeConnection, heartb
 				logger.Debug("realtime: ws read ended", "err", err)
 			}
 			cancel()
-			<-heartbeatErr
+			if hbErr := <-heartbeatErr; hbErr != nil && !errors.Is(hbErr, context.Canceled) {
+				logger.Debug("realtime: heartbeat ended", "err", hbErr)
+			}
 			return
 		}
 		// Inbound messages are currently ignored; lobby + chat handlers
