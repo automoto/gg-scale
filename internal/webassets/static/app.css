@@ -195,7 +195,7 @@ main.app-main {
   line-height: 1.15;
 }
 .page-header .subtitle { font-size: 0.9rem; opacity: 0.55; margin: 0.25rem 0 0; }
-.breadcrumb { font-size: 0.875rem; opacity: 0.45; margin-bottom: 0.5rem; }
+.breadcrumb { display: block; font-size: 0.875rem; opacity: 0.45; margin-bottom: 0.5rem; }
 .breadcrumb a { color: inherit; }
 .caption {
   font-family: var(--font-mono);

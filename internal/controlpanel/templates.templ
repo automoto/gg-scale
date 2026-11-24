@@ -1796,7 +1796,7 @@ templ FleetDetailPage(vm FleetDetailView) {
 		}
 		<div class="page-header">
 			<div>
-				<h1>#{ stringFromInt(vm.Allocation.ID) }</h1>
+				<h1>Allocation #{ stringFromInt(vm.Allocation.ID) }</h1>
 				<p class="subtitle">Backend <code>{ vm.Allocation.Backend }</code> — status <span class="badge badge-role">{ vm.Allocation.Status }</span></p>
 			</div>
 			if !allocationTerminal(vm.Allocation.Status) {

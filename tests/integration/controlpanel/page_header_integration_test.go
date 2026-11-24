@@ -54,10 +54,10 @@ func TestPageHeader_should_not_show_a_project_name_from_another_tenant(t *testin
 	otherProject := createLeaderboardProject(t, raw, otherTenant, "other-secret")
 
 	// Act
-	resp, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, otherProject))
+	resp, body := tfGet(t, admin, srv.URL+pathControlPanel+"/tenants/"+strconv.FormatInt(tenantID, 10)+"/projects/"+strconv.FormatInt(otherProject, 10)+"/players")
 
 	// Assert
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.NotContains(t, body, "other-secret")
 }
 

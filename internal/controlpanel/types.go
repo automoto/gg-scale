@@ -364,7 +364,6 @@ type RateLimitsView struct {
 	UserEmail       string
 	CSRFToken       string
 	TenantID        int64
-	TenantName      string
 	IsPlatformAdmin bool
 	// API HTTP limit (tenant-wide, platform-admin editable).
 	APIOverridden   bool

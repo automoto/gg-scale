@@ -898,3 +898,29 @@ func TestTemplates_should_not_show_ids_or_eyebrows_in_page_headers(t *testing.T)
 		}
 	}
 }
+
+func TestBreadcrumb_should_link_names_only_when_page_scope_is_set(t *testing.T) {
+	// Arrange
+	page := ProjectSettingsPage(ProjectSettingsView{TenantID: 1, ProjectID: 2})
+	scoped := withPageScope(context.Background(), pageScope{TenantID: 1, TenantName: "acme", ProjectID: 2, ProjectName: "game"})
+	render := func(ctx context.Context) string {
+		var buf bytes.Buffer
+		require.NoError(t, page.Render(ctx, &buf))
+		out := buf.String()
+		start := strings.Index(out, `<nav class="breadcrumb"`)
+		require.NotEqual(t, -1, start)
+		end := strings.Index(out[start:], "</nav>")
+		require.NotEqual(t, -1, end)
+		return out[start : start+end]
+	}
+
+	// Act
+	bare := render(context.Background())
+	named := render(scoped)
+
+	// Assert
+	assert.Contains(t, bare, "Settings")
+	assert.NotContains(t, bare, "<a ")
+	assert.Contains(t, named, `/tenants/1/projects">acme</a>`)
+	assert.Contains(t, named, `/projects/2/settings">game</a>`)
+}

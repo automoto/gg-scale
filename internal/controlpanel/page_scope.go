@@ -2,6 +2,7 @@ package controlpanel
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -80,6 +81,10 @@ func (h *Handler) loadPageScope(next http.Handler) http.Handler {
 			})
 			return err
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "page scope load failed", "err", err)
 			next.ServeHTTP(w, r)
