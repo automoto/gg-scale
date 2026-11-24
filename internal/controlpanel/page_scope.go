@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -26,12 +27,21 @@ type pageScope struct {
 }
 
 func withPageScope(ctx context.Context, s pageScope) context.Context {
-	return context.WithValue(ctx, pageScopeContextKey, s)
+	return withPageScopeLoader(ctx, func() pageScope { return s })
+}
+
+// withPageScopeLoader stores a loader that runs the first time a page reads
+// the scope. Redirects and fragments never read it, so they skip the lookup.
+func withPageScopeLoader(ctx context.Context, load func() pageScope) context.Context {
+	return context.WithValue(ctx, pageScopeContextKey, sync.OnceValue(load))
 }
 
 func pageScopeFromContext(ctx context.Context) pageScope {
-	s, _ := ctx.Value(pageScopeContextKey).(pageScope)
-	return s
+	load, ok := ctx.Value(pageScopeContextKey).(func() pageScope)
+	if !ok {
+		return pageScope{}
+	}
+	return load()
 }
 
 // projectIDFromRoutePath returns the project ID when the path starts with
@@ -62,8 +72,8 @@ func pageScopeIDs(r *http.Request) (tenantID, projectID int64) {
 	return tenantID, projectID
 }
 
-// loadPageScope loads the names that feed the page breadcrumb. A failed
-// lookup is logged and the page renders without names.
+// loadPageScope gives the request a loader for the names that feed the page
+// breadcrumb. The lookup runs only when a page draws the breadcrumb.
 func (h *Handler) loadPageScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenantID, projectID := pageScopeIDs(r)
@@ -72,29 +82,34 @@ func (h *Handler) loadPageScope(next http.Handler) http.Handler {
 			return
 		}
 		ctx := r.Context()
-		var names sqlcgen.GetPageScopeNamesRow
-		err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
-			var err error
-			names, err = sqlcgen.New(tx).GetPageScopeNames(ctx, sqlcgen.GetPageScopeNamesParams{
-				ProjectID: projectID,
-				TenantID:  tenantID,
-			})
-			return err
-		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "page scope load failed", "err", err)
-			next.ServeHTTP(w, r)
-			return
-		}
-		scope := pageScope{TenantID: tenantID, TenantName: names.TenantName}
-		if names.ProjectName != nil {
-			scope.ProjectID = projectID
-			scope.ProjectName = *names.ProjectName
-		}
-		next.ServeHTTP(w, r.WithContext(withPageScope(ctx, scope)))
+		load := func() pageScope { return h.lookupPageScope(ctx, tenantID, projectID) }
+		next.ServeHTTP(w, r.WithContext(withPageScopeLoader(ctx, load)))
 	})
+}
+
+// lookupPageScope reads the names. A failed lookup is logged and gives no
+// names, so the page still renders.
+func (h *Handler) lookupPageScope(ctx context.Context, tenantID, projectID int64) pageScope {
+	var names sqlcgen.GetPageScopeNamesRow
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+		var err error
+		names, err = sqlcgen.New(tx).GetPageScopeNames(ctx, sqlcgen.GetPageScopeNamesParams{
+			ProjectID: projectID,
+			TenantID:  tenantID,
+		})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return pageScope{}
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "page scope load failed", "err", err)
+		return pageScope{}
+	}
+	scope := pageScope{TenantID: tenantID, TenantName: names.TenantName}
+	if names.ProjectName != nil {
+		scope.ProjectID = projectID
+		scope.ProjectName = *names.ProjectName
+	}
+	return scope
 }

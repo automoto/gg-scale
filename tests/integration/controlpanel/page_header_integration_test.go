@@ -67,11 +67,15 @@ func TestPageHeader_should_escape_the_names(t *testing.T) {
 	admin, _ := loginAsAdmin(t, srv, raw, userID, "lb-admin@example.com")
 	_, err := raw.Exec(context.Background(), `UPDATE projects SET name = '<b>x</b>' WHERE id = $1`, projectA)
 	require.NoError(t, err)
+	_, err = raw.Exec(context.Background(), `UPDATE tenants SET name = '<i>t</i>' WHERE id = $1`, tenantID)
+	require.NoError(t, err)
 
 	// Act
 	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, projectA))
 
 	// Assert
-	assert.Contains(t, body, ">&lt;b&gt;x&lt;/b&gt;</a>")
+	assert.Contains(t, body, "/tenants/"+strconv.FormatInt(tenantID, 10)+`/projects">&lt;i&gt;t&lt;/i&gt;</a>`)
+	assert.Contains(t, body, "/projects/"+strconv.FormatInt(projectA, 10)+`/settings">&lt;b&gt;x&lt;/b&gt;</a>`)
 	assert.NotContains(t, body, "<b>x</b>")
+	assert.NotContains(t, body, "<i>t</i>")
 }

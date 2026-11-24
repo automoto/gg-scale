@@ -66,3 +66,17 @@ func TestPageScopeIDs_should_read_ids_through_the_tenant_route(t *testing.T) {
 func TestPageScopeFromContext_should_return_zero_without_scope(t *testing.T) {
 	assert.Equal(t, pageScope{}, pageScopeFromContext(context.Background()))
 }
+
+func TestPageScopeFromContext_should_load_names_only_when_read_and_only_once(t *testing.T) {
+	calls := 0
+	ctx := withPageScopeLoader(context.Background(), func() pageScope {
+		calls++
+		return pageScope{TenantID: 7, TenantName: "Acme Games"}
+	})
+	assert.Equal(t, 0, calls, "a request that draws no breadcrumb must not run the lookup")
+
+	first := pageScopeFromContext(ctx)
+	second := pageScopeFromContext(ctx)
+
+	assert.Equal(t, []any{1, "Acme Games", "Acme Games"}, []any{calls, first.TenantName, second.TenantName})
+}
