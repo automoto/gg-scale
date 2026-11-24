@@ -195,16 +195,8 @@ main.app-main {
   line-height: 1.15;
 }
 .page-header .subtitle { font-size: 0.9rem; opacity: 0.55; margin: 0.25rem 0 0; }
-.breadcrumb { font-size: 0.875rem; opacity: 0.45; margin-bottom: 0.5rem; }
+.breadcrumb { display: block; font-size: 0.875rem; opacity: 0.45; margin-bottom: 0.5rem; }
 .breadcrumb a { color: inherit; }
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 0.7rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.45;
-  margin: 0 0 0.25rem;
-}
 .caption {
   font-family: var(--font-mono);
   font-size: 0.7rem;

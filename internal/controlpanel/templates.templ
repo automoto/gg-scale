@@ -139,6 +139,23 @@ templ fieldError(errs map[string]string, name string) {
 	}
 }
 
+// breadcrumb draws "Tenant / Project / " from the page scope, then the page
+// trail. Names that are missing from the scope are left out.
+templ breadcrumb() {
+	{{ s := pageScopeFromContext(ctx) }}
+	<nav class="breadcrumb" aria-label="Breadcrumb">
+		if s.TenantID > 0 {
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(s.TenantID) + "/projects") }>{ s.TenantName }</a>
+			{ " / " }
+		}
+		if s.ProjectID > 0 {
+			<a href={ templ.URL(projectSettingsPathTpl(s.TenantID, s.ProjectID)) }>{ s.ProjectName }</a>
+			{ " / " }
+		}
+		{ children... }
+	</nav>
+}
+
 // ssoButtons renders one plain form for each provider. The forms stay outside
 // the password form, because HTML forms cannot nest, and they carry no hx-
 // attribute: the browser itself must follow the redirect to the provider.
@@ -355,11 +372,12 @@ templ NewTenantPage(vm NewTenantView) {
 
 templ ProjectsPage(vm ProjectsView) {
 	@appLayout("Game Projects — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Game Projects</div>
+		@breadcrumb() {
+			Game Projects
+		}
 		<div class="page-header">
 			<div>
 				<h1>Game Projects</h1>
-				<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/new") } role="button" class="btn-inline">+ New Game Project</a>
 		</div>
@@ -410,9 +428,9 @@ templ ProjectsPage(vm ProjectsView) {
 
 templ NewProjectPage(vm NewProjectView) {
 	@appLayout("New Game Project — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjects, TenantID: vm.TenantID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / New
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / New
+		}
 		<div class="page-header">
 			<div>
 				<h1>New Game Project</h1>
@@ -439,7 +457,6 @@ templ NewProjectPage(vm NewProjectView) {
 
 templ SignupSuccessPage(vm SignupSuccessView) {
 	<section class="color-block color-block--lime">
-		<p class="eyebrow">Account Tenant created</p>
 		<h2>Save your API key</h2>
 		<p class="reveal-warning">Store this API key now. It will not be shown again.</p>
 		<dl class="kv">
@@ -460,12 +477,11 @@ templ SignupSuccessPage(vm SignupSuccessView) {
 
 templ APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) {
 	@appLayout("API key created — ggscale", userEmail, csrfToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / Created
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / Created
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">API key created</p>
 				<h1>Save your API key</h1>
 				<p class="subtitle">Store this key now. It will not be shown again.</p>
 			</div>
@@ -487,9 +503,9 @@ templ APIKeyCreatedPage(vm SignupSuccessView, userEmail, csrfToken string) {
 
 templ NewAPIKeyPage(vm NewAPIKeyView) {
 	@appLayout("New API key — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> / <a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / New
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys") }>API keys</a> / New
+		}
 		<div class="page-header">
 			<div>
 				<h1>New API key</h1>
@@ -536,11 +552,12 @@ templ NewAPIKeyPage(vm NewAPIKeyView) {
 
 templ APIKeysPage(vm APIKeysView) {
 	@appLayout("API keys — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAPIKeys, TenantID: vm.TenantID}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / API keys</div>
+		@breadcrumb() {
+			API keys
+		}
 		<div class="page-header">
 			<div>
 				<h1>API keys</h1>
-				<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/api-keys/new") } role="button" class="btn-inline">+ New API key</a>
 		</div>
@@ -743,15 +760,12 @@ templ apiLimitCard(vm APILimitCardView) {
 
 templ RateLimitsPage(vm RateLimitsView) {
 	@appLayout("Rate limits — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navRateLimits, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Rate limits</div>
+		@breadcrumb() {
+			Rate limits
+		}
 		<div class="page-header">
 			<div>
 				<h1>Rate limits</h1>
-				if vm.TenantName != "" {
-					<p class="subtitle">{ vm.TenantName } — Account Tenant #{ stringFromInt(vm.TenantID) }</p>
-				} else {
-					<p class="subtitle">Account Tenant #{ stringFromInt(vm.TenantID) }</p>
-				}
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -906,7 +920,6 @@ templ HelpPage(vm HelpView) {
 	@appLayout("Help — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navHelp}) {
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Help</p>
 				<h1>Concepts &amp; quick start</h1>
 				<p class="subtitle">A 2-minute tour of how ggscale fits together.</p>
 			</div>
@@ -1166,12 +1179,12 @@ templ TwoFactorBackupCodesPage(vm TwoFactorBackupCodesView) {
 
 templ TeamPage(vm TeamView) {
 	@appLayout("Team — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTeam, TenantID: vm.TenantID, FleetEnabled: vm.FleetEnabled}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Team</div>
+		@breadcrumb() {
+			Team
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Team</p>
-				<h1>Account Tenant team</h1>
-				<p class="subtitle">Members of Account Tenant #{ stringFromInt(vm.TenantID) }.</p>
+				<h1>Team</h1>
 			</div>
 			<a href={ templ.URL(tenantTeamPath(vm.TenantID) + "/invite") } role="button" class="btn-inline">+ Invite teammate</a>
 		</div>
@@ -1258,13 +1271,11 @@ templ TeamPage(vm TeamView) {
 
 templ InviteTeamPage(vm InviteTeamView) {
 	@appLayout("Invite teammate — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTeam, TenantID: vm.TenantID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
+		@breadcrumb() {
 			<a href={ templ.URL(tenantTeamPath(vm.TenantID)) }>Team</a> / Invite
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Invite teammate</p>
 				<h1>Invite a teammate</h1>
 				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
 			</div>
@@ -1366,7 +1377,6 @@ templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
 		<div class="breadcrumb"><a href="/v1/control-panel/admin/team">Platform admins</a> / Invite</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Invite platform admin</p>
 				<h1>Invite a platform admin</h1>
 				<p class="subtitle">They will have full administrative access to every Account Tenant.</p>
 			</div>
@@ -1391,14 +1401,12 @@ templ InvitePlatformAdminPage(vm InvitePlatformAdminView) {
 
 templ PlayersPage(vm PlayersView) {
 	@appLayout("Players — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayers, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Players
-		</div>
+		@breadcrumb() {
+			Players
+		}
 		<div class="page-header">
 			<div>
 				<h1>Players</h1>
-				<p class="subtitle">Game players in Game Project #{ stringFromInt(vm.ProjectID) }.</p>
 			</div>
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players/invite") } role="button" class="btn-inline">+ Invite player</a>
 		</div>
@@ -1512,12 +1520,11 @@ templ LinkPlayerDialog(vm LinkPlayerView) {
 
 templ InvitePlayerPage(vm InvitePlayerView) {
 	@appLayout("Invite player — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayers, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
+		@breadcrumb() {
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / Invite
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Invite player</p>
 				<h1>Invite a player</h1>
 				<p class="subtitle">They get an email with a magic link valid for 3 days.</p>
 			</div>
@@ -1542,13 +1549,11 @@ templ InvitePlayerPage(vm InvitePlayerView) {
 
 templ PlayerDetailPage(vm PlayerDetailView) {
 	@appLayout("Player — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navPlayers, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
+		@breadcrumb() {
 			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects/" + stringFromInt(vm.ProjectID) + "/players") }>Players</a> / { vm.Player.Email }
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Player</p>
 				<h1>{ vm.Player.Email }</h1>
 				<p class="subtitle">External ID <code>{ vm.Player.ExternalID }</code></p>
 			</div>
@@ -1700,16 +1705,13 @@ templ AcceptInvitePage(vm AcceptInviteView) {
 
 templ FleetPage(vm FleetView) {
 	@appLayout("Fleet — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Fleet
-		</div>
+		@breadcrumb() {
+			Fleet
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Fleet</p>
 				<h1>Allocations</h1>
 				<p class="subtitle">
-					Game Project #{ stringFromInt(vm.ProjectID) } —
 					if vm.BackendName != "" {
 						backend <code>{ vm.BackendName }</code>
 					} else {
@@ -1789,15 +1791,12 @@ templ FleetTableFragment(vm FleetView) {
 
 templ FleetDetailPage(vm FleetDetailView) {
 	@appLayout("Allocation — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
-			#{ stringFromInt(vm.Allocation.ID) }
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / #{ stringFromInt(vm.Allocation.ID) }
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Allocation</p>
-				<h1>#{ stringFromInt(vm.Allocation.ID) }</h1>
+				<h1>Allocation #{ stringFromInt(vm.Allocation.ID) }</h1>
 				<p class="subtitle">Backend <code>{ vm.Allocation.Backend }</code> — status <span class="badge badge-role">{ vm.Allocation.Status }</span></p>
 			</div>
 			if !allocationTerminal(vm.Allocation.Status) {
@@ -1852,9 +1851,9 @@ templ FleetDetailFragment(vm FleetDetailView) {
 
 templ NewFleetAllocationPage(vm NewAllocationView) {
 	@appLayout("Manual allocate — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
+		@breadcrumb() {
 			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Manual allocate
-		</div>
+		}
 		<div class="page-header">
 			<div>
 				<h1>Manual allocate</h1>
@@ -1922,14 +1921,11 @@ templ NewFleetAllocationPage(vm NewAllocationView) {
 
 templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 	@appLayout("Deallocate — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navAllocations, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> /
-			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> /
-			Deallocate
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / <a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID) + "/" + stringFromInt(vm.Allocation.ID)) }>#{ stringFromInt(vm.Allocation.ID) }</a> / Deallocate
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Confirm</p>
 				<h1>Deallocate #{ stringFromInt(vm.Allocation.ID) }</h1>
 				<p class="subtitle">Type the allocation ID exactly to confirm — this stops the game server.</p>
 			</div>
@@ -1958,10 +1954,11 @@ templ DeallocateConfirmPage(vm DeallocateConfirmView) {
 
 templ FleetBackendsPage(vm FleetBackendsView) {
 	@appLayout("Backends — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, FleetEnabled: true}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Backends</div>
+		@breadcrumb() {
+			Backends
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Backends</p>
 				<h1>Fleet backends</h1>
 				<p class="subtitle">
 					Configured backend:
@@ -2003,15 +2000,13 @@ templ FleetBackendsPage(vm FleetBackendsView) {
 
 templ MatchmakerQueuePage(vm MatchmakerQueueView) {
 	@appLayout("Matchmaker — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navMatchmaker, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
+		@breadcrumb() {
 			<a href={ templ.URL(allocationsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleet</a> / Matchmaker
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Matchmaker</p>
 				<h1>Queue depth</h1>
-				<p class="subtitle">Tickets grouped by region, game mode, and status — Game Project #{ stringFromInt(vm.ProjectID) }.</p>
+				<p class="subtitle">Tickets grouped by region, game mode, and status.</p>
 			</div>
 		</div>
 		<section class="card"
@@ -2064,7 +2059,6 @@ templ PlatformPluginsPage(vm PlatformPluginsView) {
 		<div class="breadcrumb">Platform admin / Plugins</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Plugins</p>
 				<h1>Fleet plugin status</h1>
 				<p class="subtitle">Snapshot of the running fleet plugin subprocess.</p>
 			</div>
@@ -2247,7 +2241,6 @@ templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
 		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / <a href="/v1/control-panel/admin/player-accounts">Player accounts</a> / { vm.Email }</div>
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Player account</p>
 				<h1>{ vm.Email }</h1>
 				<p class="subtitle">
 					if vm.DisplayName != "" {
@@ -2317,16 +2310,14 @@ templ PlayerAccountDetailPage(vm PlayerAccountDetailView) {
 
 templ FleetsListPage(vm FleetsListView) {
 	@appLayout("Fleets — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Fleets
-		</div>
+		@breadcrumb() {
+			Fleets
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Fleets</p>
 				<h1>Fleet templates</h1>
 				<p class="subtitle">
-					Game Project #{ stringFromInt(vm.ProjectID) } — operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
+					Operator-defined recipes that allocations are drawn from. Configured backend: <code>{ vm.BackendConfigured }</code>.
 				</p>
 			</div>
 			if vm.Enabled {
@@ -2406,12 +2397,11 @@ templ FleetsListPage(vm FleetsListView) {
 
 templ NewFleetPage(vm NewFleetView) {
 	@appLayout("New fleet — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
+		@breadcrumb() {
 			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> / New
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Fleet</p>
 				<h1>New fleet template</h1>
 				<p class="subtitle">A template captures the recipe (image, port, probe, …) that future allocations use.</p>
 			</div>
@@ -2524,13 +2514,11 @@ templ pluginFleetFields(vm NewFleetView) {
 
 templ EditFleetPage(vm EditFleetView) {
 	@appLayout("Edit fleet — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navFleets, TenantID: vm.TenantID, ProjectID: vm.ProjectID, FleetEnabled: true}) {
-		<div class="breadcrumb">
-			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> /
-			<code>{ vm.Name }</code>
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL(fleetsBasePathTpl(vm.TenantID, vm.ProjectID)) }>Fleets</a> / <code>{ vm.Name }</code>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Fleet</p>
 				<h1>{ vm.Name }</h1>
 				<p class="subtitle">
 					Backend: <code>{ vm.Backend }</code>
@@ -2569,14 +2557,13 @@ templ EditFleetPage(vm EditFleetView) {
 
 templ LeaderboardsListPage(vm LeaderboardsListView) {
 	@appLayout("Leaderboards — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navLeaderboards, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Leaderboards
-		</div>
+		@breadcrumb() {
+			Leaderboards
+		}
 		<div class="page-header">
 			<div>
 				<h1>Leaderboards</h1>
-				<p class="subtitle">Game Project #{ stringFromInt(vm.ProjectID) } — score tables your game submits to and players read from.</p>
+				<p class="subtitle">Score tables your game submits to and players read from.</p>
 			</div>
 			<div class="actions-cell">
 				<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID) + "/new") } role="button" class="btn-inline">+ New leaderboard</a>
@@ -2715,12 +2702,11 @@ templ leaderboardFeatureFields(vm LeaderboardFormView, edit bool) {
 
 templ NewLeaderboardPage(vm LeaderboardFormView) {
 	@appLayout("New leaderboard — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navLeaderboards, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
+		@breadcrumb() {
 			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / New
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Leaderboard</p>
 				<h1>New leaderboard</h1>
 				<p class="subtitle">Names must be unique within the Game Project.</p>
 			</div>
@@ -2747,12 +2733,11 @@ templ NewLeaderboardPage(vm LeaderboardFormView) {
 
 templ EditLeaderboardPage(vm LeaderboardFormView) {
 	@appLayout("Edit leaderboard — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navLeaderboards, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
+		@breadcrumb() {
 			<a href={ templ.URL(leaderboardsBasePath(vm.TenantID, vm.ProjectID)) }>Leaderboards</a> / Edit
-		</div>
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Leaderboard</p>
 				<h1>Edit leaderboard</h1>
 			</div>
 		</div>
@@ -2803,12 +2788,12 @@ templ leaderboardSortOrderField(sortOrder string, fieldErrors map[string]string)
 
 templ TenantSettingsPage(vm TenantSettingsView) {
 	@appLayout("Account Tenant settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navTenantSettings, TenantID: vm.TenantID, IsPlatformAdmin: vm.IsPlatformAdmin}) {
-		<div class="breadcrumb"><a href="/v1/control-panel">Account Tenants</a> / Settings</div>
+		@breadcrumb() {
+			Settings
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Account Tenant settings</p>
 				<h1>Settings</h1>
-				<p class="subtitle">{ vm.TenantName } — Account Tenant #{ stringFromInt(vm.TenantID) }</p>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -3032,15 +3017,12 @@ templ TenantSettingsPage(vm TenantSettingsView) {
 
 templ ProjectSettingsPage(vm ProjectSettingsView) {
 	@appLayout("Game Project settings — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href="/v1/control-panel">Account Tenants</a> /
-			<a href={ templ.URL("/v1/control-panel/tenants/" + stringFromInt(vm.TenantID) + "/projects") }>Game Projects</a> / Settings
-		</div>
+		@breadcrumb() {
+			Settings
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Game Project settings</p>
-				<h1>{ vm.ProjectName }</h1>
-				<p class="subtitle">Game Project #{ stringFromInt(vm.ProjectID) }</p>
+				<h1>Settings</h1>
 			</div>
 		</div>
 		@flashSuccess(vm.Message)
@@ -3291,12 +3273,11 @@ templ revisionHistory(csrf, action string, revs []RevisionView, note string) {
 
 templ ManagementTokensPage(vm ManagementTokensView) {
 	@appLayout("Management tokens — ggscale", vm.UserEmail, vm.CSRFToken, AppNav{Active: navProjectSettings, TenantID: vm.TenantID, ProjectID: vm.ProjectID}) {
-		<div class="breadcrumb">
-			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Game Project settings</a> / Management tokens
-		</div>
+		@breadcrumb() {
+			<a href={ templ.URL(projectSettingsPathTpl(vm.TenantID, vm.ProjectID)) }>Settings</a> / Management tokens
+		}
 		<div class="page-header">
 			<div>
-				<p class="eyebrow">Game Project #{ stringFromInt(vm.ProjectID) }</p>
 				<h1>Management tokens</h1>
 				<p class="subtitle">Let a coding agent (Claude Code, Cursor, Codex) or a script find setup problems in this Game Project and, with write scopes, change remote config, leaderboards, publishable API keys, and browser origins. A token works for the MCP endpoint (<code>/mcp</code>) and for the <code>/v1/project</code> API. It works for this Game Project only, and never has more rights than the person who created it.</p>
 			</div>

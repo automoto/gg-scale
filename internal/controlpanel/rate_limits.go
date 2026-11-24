@@ -79,7 +79,6 @@ func (h *Handler) rateLimitsView(ctx context.Context, tenantID int64) (RateLimit
 		if err != nil {
 			return err
 		}
-		view.TenantName = facts.Name
 		clamped := tenant.ClampTier(int(facts.Tier))
 		defaults := ratelimit.LimitsForTier(clamped)
 		view.APIDefaultRate = defaults.RatePerSecond

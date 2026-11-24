@@ -154,6 +154,32 @@ func (q *Queries) EnableTenantByTenantAdmin(ctx context.Context, id int64) (int6
 	return result.RowsAffected(), nil
 }
 
+const getPageScopeNames = `-- name: GetPageScopeNames :one
+SELECT t.name AS tenant_name, p.name AS project_name
+FROM tenants t
+LEFT JOIN projects p
+  ON p.id = $1 AND p.tenant_id = t.id AND p.deleted_at IS NULL
+WHERE t.id = $2
+  AND t.deleted_at IS NULL
+`
+
+type GetPageScopeNamesParams struct {
+	ProjectID int64
+	TenantID  int64
+}
+
+type GetPageScopeNamesRow struct {
+	TenantName  string
+	ProjectName *string
+}
+
+func (q *Queries) GetPageScopeNames(ctx context.Context, arg GetPageScopeNamesParams) (GetPageScopeNamesRow, error) {
+	row := q.db.QueryRow(ctx, getPageScopeNames, arg.ProjectID, arg.TenantID)
+	var i GetPageScopeNamesRow
+	err := row.Scan(&i.TenantName, &i.ProjectName)
+	return i, err
+}
+
 const getTenantCustomTokenPublicKeyForControlPanel = `-- name: GetTenantCustomTokenPublicKeyForControlPanel :one
 SELECT custom_token_public_key
 FROM tenants

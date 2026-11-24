@@ -194,6 +194,7 @@ func New(d Deps) http.Handler {
 		r.Post("/account/sso/{provider}/unlink", h.ssoUnlink)
 		r.Route("/tenants/{tenantID}", func(r chi.Router) {
 			r.Use(h.requireTenantAccess(roleAdmin))
+			r.Use(h.loadPageScope)
 			r.Get("/projects", h.projectsPage)
 			r.Get("/projects/new", h.newProjectPage)
 			r.Post("/projects", h.createProjectHandler)
