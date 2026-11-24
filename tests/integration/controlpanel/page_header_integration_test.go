@@ -6,6 +6,7 @@ package controlpanel_test
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"testing"
 
@@ -22,8 +23,10 @@ func TestPageHeader_should_show_names_on_project_settings(t *testing.T) {
 	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, projectA))
 
 	// Assert
-	assert.Contains(t, body, ">lb-test</a>")
-	assert.Contains(t, body, ">p1</a>")
+	tenantLink := "/tenants/" + strconv.FormatInt(tenantID, 10) + `/projects">lb-test</a>`
+	projectLink := "/projects/" + strconv.FormatInt(projectA, 10) + `/settings">p1</a>`
+	assert.Contains(t, body, tenantLink)
+	assert.Contains(t, body, projectLink)
 	assert.NotContains(t, body, "Game Project #")
 	assert.NotContains(t, body, `class="eyebrow"`)
 }
@@ -37,7 +40,7 @@ func TestPageHeader_should_show_the_tenant_name_on_tenant_settings(t *testing.T)
 	_, body := tfGet(t, admin, srv.URL+pathControlPanel+"/tenants/"+strconv.FormatInt(tenantID, 10)+"/settings")
 
 	// Assert
-	assert.Contains(t, body, ">lb-test</a>")
+	assert.Contains(t, body, "/tenants/"+strconv.FormatInt(tenantID, 10)+`/projects">lb-test</a>`)
 	assert.NotContains(t, body, "Account Tenant #")
 }
 
@@ -51,9 +54,10 @@ func TestPageHeader_should_not_show_a_project_name_from_another_tenant(t *testin
 	otherProject := createLeaderboardProject(t, raw, otherTenant, "other-secret")
 
 	// Act
-	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, otherProject))
+	resp, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, otherProject))
 
 	// Assert
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 	assert.NotContains(t, body, "other-secret")
 }
 
@@ -68,6 +72,6 @@ func TestPageHeader_should_escape_the_names(t *testing.T) {
 	_, body := tfGet(t, admin, srv.URL+projectSettingsPath(tenantID, projectA))
 
 	// Assert
-	assert.Contains(t, body, "&lt;b&gt;x&lt;/b&gt;")
+	assert.Contains(t, body, ">&lt;b&gt;x&lt;/b&gt;</a>")
 	assert.NotContains(t, body, "<b>x</b>")
 }
