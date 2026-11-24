@@ -3,6 +3,7 @@ package controlpanel
 import (
 	"bytes"
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -706,13 +707,13 @@ func TestAppLayout_should_render_admin_menu_from_session_on_every_page(t *testin
 	assert.NotContains(t, buf.String(), `<li class="nav-section">Admin</li>`)
 }
 
-func TestRateLimitsPage_should_show_tenant_name(t *testing.T) {
-	html := renderToString(t, RateLimitsPage(RateLimitsView{
-		TenantID:   7,
-		TenantName: "Acme Games",
-	}))
+func TestRateLimitsPage_should_show_tenant_name_in_breadcrumb(t *testing.T) {
+	var buf bytes.Buffer
+	ctx := withPageScope(context.Background(), pageScope{TenantID: 7, TenantName: "Acme Games"})
 
-	assert.Contains(t, html, "Acme Games")
+	require.NoError(t, RateLimitsPage(RateLimitsView{TenantID: 7}).Render(ctx, &buf))
+
+	assert.Contains(t, buf.String(), `>Acme Games</a>`)
 }
 
 func TestServerSettingsPage_should_hide_mail_network_and_control_panel_rows(t *testing.T) {
@@ -884,4 +885,16 @@ func TestFleetsPage_should_scroll_the_deleted_fleets_table(t *testing.T) {
 
 	assert.Contains(t, html, `class="table-scroll"`)
 	assert.Contains(t, html, `deleted-table`)
+}
+
+func TestTemplates_should_not_show_ids_or_eyebrows_in_page_headers(t *testing.T) {
+	files := []string{"templates.templ", "change_request_templates.templ", "signup_templates.templ"}
+	for _, file := range files {
+		src, err := os.ReadFile(file)
+		require.NoError(t, err)
+
+		for _, banned := range []string{`class="eyebrow"`, "Game Project #{", "Account Tenant #{"} {
+			assert.NotContains(t, string(src), banned, file)
+		}
+	}
 }
