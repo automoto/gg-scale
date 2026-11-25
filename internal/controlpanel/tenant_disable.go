@@ -125,6 +125,7 @@ func (h *Handler) disableTenantHandler(w http.ResponseWriter, r *http.Request) {
 		h.redirectTenantSettings(w, r, tenantID, flashTenantAlreadyDisabled)
 		return
 	}
+	h.dropTenantCaches(tenantID)
 	h.redirectTenantSettings(w, r, tenantID, flashTenantDisabled)
 }
 
@@ -174,5 +175,6 @@ func (h *Handler) enableTenantHandler(w http.ResponseWriter, r *http.Request) {
 		h.redirectTenantSettings(w, r, tenantID, flashTenantNotReenabled)
 		return
 	}
+	h.dropTenantCaches(tenantID)
 	h.redirectTenantSettings(w, r, tenantID, flashTenantReenabled)
 }

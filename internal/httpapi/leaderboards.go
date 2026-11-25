@@ -20,13 +20,15 @@ import (
 	"github.com/automoto/gg-scale/internal/tenant"
 )
 
-// leaderboardTopTTL bounds how stale a memoised top-N reply may be. Short
+// defaultLeaderboardTopTTL is the default of LEADERBOARD_TOP_CACHE_TTL. The
+// TTL bounds how stale a memoised top-N reply may be. Short
 // enough that a fresh score appears within a frame budget; long enough that
 // hot leaderboards don't replay the same query on every request. It is also
 // the only bound on display_name staleness: a profile rename does not
 // invalidate these entries (it would have to enumerate every board the player
-// is on), it just waits out the TTL. A period reset relies on the same bound.
-const leaderboardTopTTL = 10 * time.Second
+// is on), it just waits out the TTL. A period reset needs no drop: the period
+// is part of the cache key.
+const defaultLeaderboardTopTTL = 10 * time.Second
 
 // leaderboardTopCachedLimit is the only limit value that gets memoised.
 // Caching every limit a caller might pass would leave us unable to
@@ -87,8 +89,10 @@ type leaderboardAroundMeOutput struct {
 	Body leaderboardAroundMeResult
 }
 
-func leaderboardTopCacheKey(tenantID, leaderboardID int64, limit int32) string {
-	return fmt.Sprintf("leaderboard:top:%d:%d:%d", tenantID, leaderboardID, limit)
+// leaderboardTopCacheKey has the period in it, so a period reset never
+// serves the top of the period before.
+func leaderboardTopCacheKey(tenantID, leaderboardID int64, period, limit int32) string {
+	return fmt.Sprintf("leaderboard:top:%d:%d:%d:%d", tenantID, leaderboardID, period, limit)
 }
 
 // registerLeaderboardReadRoutes registers the player-readable top/around-me
@@ -296,6 +300,7 @@ type scoreSubmission struct {
 // concurrent period reset can never split a submission across periods.
 func submitScoreToBoard(ctx context.Context, d Deps, boardID, projectID int64, sub scoreSubmission, gate func(q *sqlcgen.Queries) error) error {
 	tenantID, _ := db.TenantFromContext(ctx)
+	var period int32
 	err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		if gate != nil {
@@ -314,6 +319,7 @@ func submitScoreToBoard(ctx context.Context, d Deps, boardID, projectID int64, s
 			}
 			return err
 		}
+		period = board.CurrentPeriod
 		params := sqlcgen.SubmitScoreParams{
 			LeaderboardID: boardID,
 			PlayerID:      sub.playerID,
@@ -349,7 +355,7 @@ func submitScoreToBoard(ctx context.Context, d Deps, boardID, projectID int64, s
 	// fresh-query cost rather than serving a stale snapshot.
 	// Best-effort: on Delete failure the TTL still bounds staleness.
 	if d.Cache != nil {
-		_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, boardID, leaderboardTopCachedLimit))
+		_ = d.Cache.Delete(ctx, leaderboardTopCacheKey(tenantID, boardID, period, leaderboardTopCachedLimit))
 	}
 	return nil
 }
@@ -370,7 +376,7 @@ func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leader
 		}
 
 		cacheable := d.Cache != nil && limit == leaderboardTopCachedLimit
-		cacheKey := leaderboardTopCacheKey(tenantID, in.ID, limit)
+		cacheKey := leaderboardTopCacheKey(tenantID, in.ID, board.CurrentPeriod, limit)
 		if cacheable {
 			if raw, err := d.Cache.Get(ctx, cacheKey); err == nil {
 				var cached leaderboardTopResult
@@ -388,7 +394,7 @@ func leaderboardTop(d Deps) func(context.Context, *leaderboardTopInput) (*leader
 		if cacheable {
 			// Best-effort: a Set (or marshal) failure just costs a re-query.
 			if payload, merr := json.Marshal(leaderboardTopResult{Entries: entries}); merr == nil {
-				_ = d.Cache.Set(ctx, cacheKey, payload, leaderboardTopTTL)
+				_ = d.Cache.Set(ctx, cacheKey, payload, d.leaderboardTopTTL())
 			}
 		}
 

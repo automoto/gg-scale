@@ -22,16 +22,35 @@ import (
 //go:embed model.conf
 var modelFS embed.FS
 
-const defaultPolicyReloadInterval = 10 * time.Second
+// DefaultPolicyReloadInterval is the default of RBAC_POLICY_RELOAD_INTERVAL:
+// how often each app instance reloads the Casbin policy from Postgres. A role
+// change takes effect at once on the instance that served it and within this
+// time on every other instance.
+const DefaultPolicyReloadInterval = 10 * time.Second
 
-// featureGrantCacheTTL bounds per-(tenant, project, feature) caching of grant
-// decisions: an entitlement toggle takes effect within this window rather than
-// instantly. This staleness is intentional — feature grants gate paid infra
-// (relay, dedicated servers, fleet backends), not data access or emergency
-// revocation — and is consistent with the poll-based Casbin reload above. Beating
-// it across HA instances would require LISTEN/NOTIFY invalidation, not a longer or
-// shorter TTL.
-const featureGrantCacheTTL = 5 * time.Second
+// DefaultFeatureGrantCacheTTL is the default of FEATURE_GRANT_CACHE_TTL: how
+// long a grant decision is cached for each (tenant, project, feature). A grant
+// change takes effect at once on the instance that served it (see
+// InvalidateFeatureGrants) and within this time on every other instance.
+// Feature grants gate paid infra (relay, dedicated servers, fleet backends),
+// not data access.
+const DefaultFeatureGrantCacheTTL = 5 * time.Second
+
+// Options tune an Authorizer. A zero value uses the default.
+type Options struct {
+	PolicyReloadInterval time.Duration
+	FeatureGrantCacheTTL time.Duration
+}
+
+func (o Options) withDefaults() Options {
+	if o.PolicyReloadInterval <= 0 {
+		o.PolicyReloadInterval = DefaultPolicyReloadInterval
+	}
+	if o.FeatureGrantCacheTTL <= 0 {
+		o.FeatureGrantCacheTTL = DefaultFeatureGrantCacheTTL
+	}
+	return o
+}
 
 // ErrAuthorizerUnavailable is returned when a mutating RBAC operation is called
 // without a configured authorizer.
@@ -122,9 +141,13 @@ func featureDefault(feature Feature) bool {
 
 // Authorizer wraps the Casbin enforcer and feature-grant checks.
 type Authorizer struct {
-	enforcer         *casbin.SyncedEnforcer
-	pool             *db.Pool
-	featureCache     map[featureCacheKey]featureCacheEntry
+	enforcer     *casbin.SyncedEnforcer
+	pool         *db.Pool
+	featureCache map[featureCacheKey]featureCacheEntry
+	featureTTL   time.Duration
+	// featureDrops counts InvalidateFeatureGrants calls, so a grant read that
+	// was in flight during one does not store its result.
+	featureDrops     uint64
 	featureOverrides map[Feature]bool
 	featureMu        sync.Mutex
 }
@@ -152,17 +175,29 @@ type featureCacheEntry struct {
 	expiresAt time.Time
 }
 
-// NewAuthorizer loads persisted Casbin policy from Postgres.
+// NewAuthorizer loads persisted Casbin policy from Postgres with the default
+// Options.
 func NewAuthorizer(pool *db.Pool) (*Authorizer, error) {
+	return NewAuthorizerWithOptions(pool, Options{})
+}
+
+// NewAuthorizerWithOptions is NewAuthorizer with tuned cache times.
+func NewAuthorizerWithOptions(pool *db.Pool, opts Options) (*Authorizer, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("rbac: pool is required")
 	}
+	opts = opts.withDefaults()
 	e, err := newEnforcer(newAdapter(pool), true)
 	if err != nil {
 		return nil, err
 	}
-	e.StartAutoLoadPolicy(defaultPolicyReloadInterval)
-	return &Authorizer{enforcer: e, pool: pool, featureCache: make(map[featureCacheKey]featureCacheEntry)}, nil
+	e.StartAutoLoadPolicy(opts.PolicyReloadInterval)
+	return &Authorizer{
+		enforcer:     e,
+		pool:         pool,
+		featureCache: make(map[featureCacheKey]featureCacheEntry),
+		featureTTL:   opts.FeatureGrantCacheTTL,
+	}, nil
 }
 
 // NewMemoryAuthorizer builds an authorizer with the default policy in memory.
@@ -171,7 +206,11 @@ func NewMemoryAuthorizer() (*Authorizer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Authorizer{enforcer: e, featureCache: make(map[featureCacheKey]featureCacheEntry)}, nil
+	return &Authorizer{
+		enforcer:     e,
+		featureCache: make(map[featureCacheKey]featureCacheEntry),
+		featureTTL:   DefaultFeatureGrantCacheTTL,
+	}, nil
 }
 
 // Close stops background policy reload.
@@ -283,6 +322,7 @@ func (a *Authorizer) FeatureEnabled(ctx context.Context, tenantID, projectID int
 		a.featureMu.Unlock()
 		return entry.enabled, nil
 	}
+	drops := a.featureDrops
 	a.featureMu.Unlock()
 
 	var enabled bool
@@ -304,23 +344,47 @@ LIMIT 1`
 		return tx.QueryRow(ctx, query, tenantID, string(feature), projectID).Scan(&enabled)
 	})
 	if err == nil {
-		a.storeFeatureCache(key, enabled, now)
+		a.storeFeatureCache(key, enabled, now, drops)
 		return enabled, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		def := featureDefault(feature)
-		a.storeFeatureCache(key, def, now)
+		a.storeFeatureCache(key, def, now, drops)
 		return def, nil
 	}
 	return false, err
 }
 
-func (a *Authorizer) storeFeatureCache(key featureCacheKey, enabled bool, now time.Time) {
+// storeFeatureCache keeps a grant decision. drops is featureDrops from before
+// the database read: if a drop ran after it, the decision can be the one from
+// before the write, so it is not kept.
+func (a *Authorizer) storeFeatureCache(key featureCacheKey, enabled bool, now time.Time, drops uint64) {
 	a.featureMu.Lock()
 	defer a.featureMu.Unlock()
+	if a.featureDrops != drops {
+		return
+	}
 	a.featureCache[key] = featureCacheEntry{
 		enabled:   enabled,
-		expiresAt: now.Add(featureGrantCacheTTL),
+		expiresAt: now.Add(a.featureTTL),
+	}
+}
+
+// InvalidateFeatureGrants drops the cached grant decisions of a tenant. A
+// write path calls it after it commits a feature_grants change, so the change
+// takes effect at once on this process. Feature grants are not Casbin policy:
+// ReloadPolicy does not refresh them.
+func (a *Authorizer) InvalidateFeatureGrants(tenantID int64) {
+	if a == nil {
+		return
+	}
+	a.featureMu.Lock()
+	defer a.featureMu.Unlock()
+	a.featureDrops++
+	for k := range a.featureCache {
+		if k.tenantID == tenantID {
+			delete(a.featureCache, k)
+		}
 	}
 }
 

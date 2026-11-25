@@ -86,7 +86,8 @@ func TestLegacyFaviconRouteServesEmbeddedIcon(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Contains(t, resp.Header.Get("Content-Type"), "image/svg+xml")
-	assert.Contains(t, resp.Header.Get("Cache-Control"), "immutable")
+	// The URL has no version, so the browser must check the icon each time.
+	assert.Equal(t, "no-cache", resp.Header.Get("Cache-Control"))
 	assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
 	assert.NotEmpty(t, body)
 }

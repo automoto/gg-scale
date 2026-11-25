@@ -7,8 +7,6 @@ import (
 	"slices"
 	"sync"
 	"time"
-
-	"github.com/automoto/gg-scale/internal/projectadmin"
 )
 
 // originSet decides which browser origins may call the API and open the
@@ -19,6 +17,7 @@ type originSet struct {
 	env      []string
 	wildcard bool
 	load     func(context.Context) ([]string, error)
+	ttl      time.Duration
 	now      func() time.Time
 
 	mu       sync.Mutex
@@ -26,11 +25,12 @@ type originSet struct {
 	loadedAt time.Time
 }
 
-func newOriginSet(env []string, load func(context.Context) ([]string, error)) *originSet {
+func newOriginSet(env []string, load func(context.Context) ([]string, error), ttl time.Duration) *originSet {
 	return &originSet{
 		env:      env,
 		wildcard: slices.Contains(env, "*"),
 		load:     load,
+		ttl:      ttl,
 		now:      time.Now,
 	}
 }
@@ -49,13 +49,13 @@ func (s *originSet) allowed(ctx context.Context, origin string) bool {
 }
 
 // projectOrigins returns the cached project origins and reloads them when
-// they are older than projectadmin.OriginCacheTTL. The lock is held during the reload, so
+// they are older than the cache TTL. The lock is held during the reload, so
 // one host makes at most one query for each TTL, also when the query fails.
 // A failed reload keeps the last list.
 func (s *originSet) projectOrigins(ctx context.Context) map[string]bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.loadedAt.IsZero() && s.now().Sub(s.loadedAt) < projectadmin.OriginCacheTTL {
+	if !s.loadedAt.IsZero() && s.now().Sub(s.loadedAt) < s.ttl {
 		return s.projects
 	}
 	s.loadedAt = s.now()

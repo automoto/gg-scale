@@ -753,7 +753,7 @@ func projectHealthCheck(ctx context.Context, d Deps, p managementtoken.Principal
 			Server:  serverOrigins,
 			Project: projectOrigins,
 			Note: "A browser origin is accepted if the server list or the list of any Game Project has it. " +
-				"A change reaches each server within " + projectadmin.OriginCacheTTL.String() + ".",
+				"A change reaches each server within " + projectadmin.OriginCacheTTL(d.CORSOriginCacheTTL).String() + ".",
 		}
 		checks.SteamSignIn = &steamConfigured
 		checks.RemoteConfigBytes = &configBytes

@@ -133,7 +133,7 @@ type OverrideInvalidator interface {
 // Freshness has two layers: the write path calls Invalidate to drop a tenant's
 // entries immediately on the process that served the write, and the TTL bounds
 // staleness everywhere else. The cache is per-process with no cross-node
-// invalidation, so other app instances converge within DefaultOverrideCacheTTL
+// invalidation, so other app instances converge within the TTL
 // rather than instantly.
 type CachedOverrideStore struct {
 	inner OverrideStore
@@ -150,7 +150,7 @@ type overrideEntry struct {
 	expiresAt time.Time
 }
 
-// DefaultOverrideCacheTTL matches the feature-grant cache freshness.
+// DefaultOverrideCacheTTL is the default of RATE_LIMIT_OVERRIDE_CACHE_TTL.
 const DefaultOverrideCacheTTL = 5 * time.Second
 
 var _ OverrideInvalidator = (*CachedOverrideStore)(nil)

@@ -215,6 +215,8 @@ func (h *Handler) setTenantConnectionOverride(ctx context.Context, actorID, tena
 	if err != nil {
 		return err
 	}
+	// The key lookup returns the connection limits, so the key cache holds them.
+	h.dropTenantCaches(tenantID)
 	return nil
 }
 

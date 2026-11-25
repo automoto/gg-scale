@@ -208,7 +208,8 @@ func UpdateAPIKeyLabel(ctx context.Context, pool *db.Pool, authz *rbac.Authorize
 // UpdateAPIKeyFeatures sets the managed feature scopes of a key to desired.
 // A scope that is new on the key must be grantable. scope limits the keys it
 // may touch. Then it clears the key's rate limit bucket in store (nil for
-// none), so the next request uses the new scopes.
+// none). The caller drops the tenant from the API key cache, so the next
+// request on this process uses the new scopes.
 func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, store cache.Store, sw KeySwitches, tenantID int64, scope KeyScope, apiKeyID int64, desired []string, actor Actor) error {
 	if slices.ContainsFunc(desired, func(s string) bool { return !IsManagedKeyScope(s) }) {
 		return ErrInvalidKeyScope
@@ -254,8 +255,9 @@ func UpdateAPIKeyFeatures(ctx context.Context, pool *db.Pool, authz *rbac.Author
 
 // RevokeAPIKey revokes a key, removes its Casbin role, and writes the audit
 // row in one transaction. Then it reloads the policy and clears the key's
-// rate limit bucket in store (nil for none). scope limits the keys it may
-// touch. Authorization is as in authorizeAPIKey.
+// rate limit bucket in store (nil for none). The caller drops the tenant from
+// the API key cache, so the key stops at once on this process. scope limits
+// the keys it may touch. Authorization is as in authorizeAPIKey.
 func RevokeAPIKey(ctx context.Context, pool *db.Pool, authz *rbac.Authorizer, store cache.Store, tenantID int64, scope KeyScope, apiKeyID int64, actor Actor) error {
 	ctx = db.WithTenant(ctx, tenantID)
 	err := pool.Q(ctx, func(tx pgx.Tx) error {

@@ -154,6 +154,7 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 		h.redirectTenantSettings(w, r, tenantID, flashTierUnchanged)
 		return
 	}
+	h.dropTenantCaches(tenantID)
 	h.redirectTenantSettings(w, r, tenantID, flashTierChanged)
 }
 
@@ -239,7 +240,7 @@ func (h *Handler) updateTenantFeatureHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if changed {
-		h.reloadRBACPolicy(r.Context())
+		h.dropTenantCaches(tenantID)
 	}
 	switch {
 	case !changed && enable:
@@ -414,7 +415,7 @@ func (h *Handler) projectSettingsView(ctx context.Context, tenantID, projectID i
 	view.RemoteConfigRevisions = revisionViews(revs)
 	view.ManagementAPIEnabled = h.cfg.ManagementAPIEnabled
 	view.MaxAllowedOrigins = h.maxProjectOrigins()
-	view.OriginDelay = projectadmin.OriginCacheTTL.String()
+	view.OriginDelay = projectadmin.OriginCacheTTL(h.cfg.CORSOriginCacheTTL).String()
 	origins, err := projectadmin.AllowedOrigins(ctx, h.pool, tenantID, projectID)
 	if err != nil {
 		return ProjectSettingsView{}, err

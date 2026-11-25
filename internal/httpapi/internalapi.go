@@ -1,9 +1,6 @@
 package httpapi
 
 import (
-	"context"
-	"log/slog"
-
 	"github.com/go-chi/chi/v5"
 
 	"github.com/automoto/gg-scale/internal/entitlement"
@@ -19,25 +16,16 @@ func mountInternalAPI(r chi.Router, d Deps) {
 		return
 	}
 	r.Mount("/internal/entitlements", entitlement.New(entitlement.Deps{
-		Pool:       d.Pool,
-		Mailer:     d.Mailer,
-		MailFrom:   d.MailFrom,
-		Token:      d.EntitlementAPIToken,
-		Metrics:    d.Metrics,
-		ReloadRBAC: reloadRBACPolicy(d),
+		Pool:     d.Pool,
+		Mailer:   d.Mailer,
+		MailFrom: d.MailFrom,
+		Token:    d.EntitlementAPIToken,
+		Metrics:  d.Metrics,
+		// An apply changes the tier (held by the API key cache) and the
+		// feature grants. Both drops are safe on nil.
+		TenantChanged: func(tenantID int64) {
+			d.APIKeyCache.Invalidate(tenantID)
+			d.RBAC.InvalidateFeatureGrants(tenantID)
+		},
 	}))
-}
-
-// reloadRBACPolicy adapts the authorizer to the entitlement package's
-// callback: grant changes must refresh the casbin policy without waiting for
-// an unrelated reload. nil-safe for tests built without RBAC.
-func reloadRBACPolicy(d Deps) func(ctx context.Context) {
-	if d.RBAC == nil {
-		return nil
-	}
-	return func(ctx context.Context) {
-		if err := d.RBAC.ReloadPolicy(); err != nil {
-			slog.WarnContext(ctx, "rbac reload after entitlement apply", "err", err)
-		}
-	}
 }

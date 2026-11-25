@@ -178,3 +178,32 @@ func TestAttemptCap_blocks_over_cap_and_resets_with_the_period(t *testing.T) {
 	resp, body = submitScore(t, srv.URL, "k", token, boardID, map[string]int64{"score": 7})
 	assert.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
 }
+
+func TestLeaderboardTop_should_not_serve_the_old_period_from_cache_after_a_reset(t *testing.T) {
+	c := startCluster(t)
+	tenantID, projectID := seedTenantWithAPIKey(t, c.bootstrapPool, 2, "k")
+	boardID := seedLeaderboard(t, c, tenantID, projectID, "weekly-cup")
+	srv := newServerForCluster(t, c)
+	token, _ := anonymousLoginWithID(t, srv.URL, "k")
+	resp, body := submitScore(t, srv.URL, "k", token, boardID, map[string]int64{"score": 100})
+	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+	readTop := func() []leaderboardTopEntry {
+		t.Helper()
+		resp, body := authedReq(t, http.MethodGet,
+			fmt.Sprintf("%s/v1/leaderboards/%d/top", srv.URL, boardID), "k", token, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var out struct {
+			Entries []leaderboardTopEntry `json:"entries"`
+		}
+		require.NoError(t, json.Unmarshal(body, &out))
+		return out.Entries
+	}
+	require.Len(t, readTop(), 1, "this read caches the top of period 0")
+
+	// The reset job moves the board to the next period.
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE leaderboards SET current_period = current_period + 1 WHERE id = $1`, boardID)
+	require.NoError(t, err)
+
+	assert.Empty(t, readTop())
+}

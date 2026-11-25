@@ -59,9 +59,10 @@ type Deps struct {
 	// Token is the static bearer credential (from LoadToken).
 	Token   string
 	Metrics *observability.Metrics
-	// ReloadRBAC refreshes the casbin policy after a grant change (feature
-	// grants feed authorization). nil is a no-op.
-	ReloadRBAC func(ctx context.Context)
+	// TenantChanged is called after an apply that changed the tier or the
+	// feature grants of a tenant, so the server can drop what it caches for
+	// that tenant. nil is a no-op.
+	TenantChanged func(tenantID int64)
 }
 
 // New builds the entitlement API handler: GET and PUT /{tenantID}, both
@@ -216,8 +217,8 @@ func (h *handler) putEntitlements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.d.Metrics.EntitlementApply(observability.EntitlementChanged)
-	if h.d.ReloadRBAC != nil {
-		h.d.ReloadRBAC(r.Context())
+	if h.d.TenantChanged != nil {
+		h.d.TenantChanged(tenantID)
 	}
 	h.sendChangeEmail(r.Context(), tenantID, diff)
 	writeJSON(w, applyResponse{Changed: true, State: canonicalState(desired)})
