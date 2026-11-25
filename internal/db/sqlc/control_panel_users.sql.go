@@ -20,6 +20,9 @@ SET login_failures = login_failures + 1,
         ELSE locked_until
     END
 WHERE id = $3
+  -- No row while locked: the attempt is reserved before the password
+  -- compare, so requests in flight when the lock is set get no guess.
+  AND (locked_until IS NULL OR locked_until <= $4::timestamptz)
 RETURNING login_failures, locked_until
 `
 
@@ -27,6 +30,7 @@ type BumpControlPanelLoginFailureParams struct {
 	FailureLimit int32
 	LockoutUntil pgtype.Timestamptz
 	ID           int64
+	Now          pgtype.Timestamptz
 }
 
 type BumpControlPanelLoginFailureRow struct {
@@ -40,7 +44,12 @@ type BumpControlPanelLoginFailureRow struct {
 // and the lockout never fired. UPDATE...RETURNING serialises under the row
 // lock pgx already takes.
 func (q *Queries) BumpControlPanelLoginFailure(ctx context.Context, arg BumpControlPanelLoginFailureParams) (BumpControlPanelLoginFailureRow, error) {
-	row := q.db.QueryRow(ctx, bumpControlPanelLoginFailure, arg.FailureLimit, arg.LockoutUntil, arg.ID)
+	row := q.db.QueryRow(ctx, bumpControlPanelLoginFailure,
+		arg.FailureLimit,
+		arg.LockoutUntil,
+		arg.ID,
+		arg.Now,
+	)
 	var i BumpControlPanelLoginFailureRow
 	err := row.Scan(&i.LoginFailures, &i.LockedUntil)
 	return i, err

@@ -666,3 +666,49 @@ func TestBranchFollowup_player_quota_mixed_concurrency_is_tenant_wide(t *testing
 		`SELECT count(*) FROM project_players WHERE tenant_id = $1 AND deleted_at IS NULL`, tenantID).Scan(&count))
 	assert.Equal(t, branchPlayerLimit+1, count)
 }
+
+func TestCustomToken_should_take_one_player_slot_for_parallel_first_sign_ins(t *testing.T) {
+	c := startCluster(t)
+	tenantID, _ := seedTenantWithAPIKey(t, c.bootstrapPool, 0, "parallel-first")
+	priv := seedCustomTokenKey(t, c, tenantID)
+	srv, _ := newControlPanelAndPlayerServerWithLimiter(t, c, controlpanel.Config{Mount: true}, branchAllowAllLimiter{})
+	var before int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT player_count FROM tenants WHERE id = $1`, tenantID).Scan(&before))
+	body, err := json.Marshal(map[string]string{"token": signCustomToken(t, priv, "brand-new-player")})
+	require.NoError(t, err)
+
+	const parallel = 20
+	statuses := make([]int, parallel)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range parallel {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req, rerr := http.NewRequest(http.MethodPost, srv.URL+"/v1/auth/custom-token", bytes.NewReader(body))
+			if rerr != nil {
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer parallel-first")
+			resp, rerr := http.DefaultClient.Do(req)
+			if rerr != nil {
+				return
+			}
+			resp.Body.Close()
+			statuses[i] = resp.StatusCode
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, s := range statuses {
+		require.Equal(t, http.StatusOK, s, "sign-in %d", i)
+	}
+
+	var after int64
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT player_count FROM tenants WHERE id = $1`, tenantID).Scan(&after))
+	assert.Equal(t, before+1, after)
+}

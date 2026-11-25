@@ -195,3 +195,32 @@ FROM generate_series(1, 150) n`)
 	assert.Zero(t, left, "every due player drains across batches")
 	assert.Zero(t, count)
 }
+
+func TestSweepDuePlayerDeletes_should_lower_tenant_storage_usage(t *testing.T) {
+	_, raw := startJobsDB(t)
+	ctx := context.Background()
+	_, err := raw.Exec(ctx, `
+INSERT INTO tenants (id, name, player_count) VALUES (8201, 'purge-storage', 2);
+INSERT INTO projects (id, tenant_id, name) VALUES (8201, 8201, 'p');
+INSERT INTO project_players (id, tenant_id, project_id, external_id, disabled_at, delete_requested_at)
+VALUES (8211, 8201, 8201, 'due',  now() - interval '31 days', now() - interval '31 days'),
+       (8212, 8201, 8201, 'keep', NULL, NULL);
+INSERT INTO storage_objects (tenant_id, project_id, owner_user_id, key, value, deleted_at)
+VALUES (8201, 8201, 8211, 'live',    '{"a":"due-player-live"}', NULL),
+       (8201, 8201, 8211, 'deleted', '{"a":"due-player-soft-deleted"}', now() - interval '1 day'),
+       (8201, 8201, 8212, 'live',    '{"a":"kept"}', NULL);
+INSERT INTO tenant_storage_usage (tenant_id, total_bytes)
+SELECT 8201, sum(octet_length(value::text)) FROM storage_objects
+WHERE tenant_id = 8201 AND deleted_at IS NULL`)
+	require.NoError(t, err)
+	var keptBytes int64
+	require.NoError(t, raw.QueryRow(ctx,
+		`SELECT octet_length(value::text) FROM storage_objects WHERE owner_user_id = 8212`).Scan(&keptBytes))
+
+	require.NoError(t, jobs.SweepDuePlayerDeletes(ctx, appRolePool(t, raw), purgeGrace, time.Now()))
+
+	var totalBytes int64
+	require.NoError(t, raw.QueryRow(ctx,
+		`SELECT total_bytes FROM tenant_storage_usage WHERE tenant_id = 8201`).Scan(&totalBytes))
+	assert.Equal(t, keptBytes, totalBytes)
+}

@@ -1131,6 +1131,9 @@ type Querier interface {
 	// submission otherwise. Zero rows means the attempt cap blocked the write —
 	// the arbiter matched but the DO UPDATE WHERE refused it.
 	SubmitScore(ctx context.Context, arg SubmitScoreParams) (int64, error)
+	// Live (not soft-deleted) storage bytes owned by these players, measured like
+	// every other storage delta. The purge subtracts it before the row cascade.
+	SumLiveStorageBytesForPlayers(ctx context.Context, ids []int64) (int64, error)
 	// Idempotent: repeated unsubscribes are a no-op.
 	SuppressEmail(ctx context.Context, email string) error
 	// Release every claim whose lease has expired. Same accounting as
@@ -1197,7 +1200,9 @@ type Querier interface {
 	UpsertPlayerAccountTOTPPending(ctx context.Context, arg UpsertPlayerAccountTOTPPendingParams) (pgtype.UUID, error)
 	// Custom-token flow: find existing player with this external_id under
 	// (tenant, project) or create one. Idempotent across repeated calls.
-	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error)
+	// inserted is false when a parallel sign-in made the row first, so only one
+	// caller takes a player slot.
+	UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (UpsertPlayerByExternalIDRow, error)
 	UpsertPresence(ctx context.Context, arg UpsertPresenceParams) error
 	// Write one axis override. Platform-admin only (directly or via an approved
 	// change request); the axis CHECK constraint rejects unknown axes.

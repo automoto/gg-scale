@@ -861,7 +861,7 @@ func (h *Handler) restorePlayerAccountVerification(ctx context.Context, state sq
 }
 
 func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID, code string) error {
-	var locked bool
+	var locked, bad bool
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
 		state, err := q.GetPlayerAccountVerificationState(ctx, accountID)
@@ -907,7 +907,9 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 		}
 		expected := verifycode.HashCode(h.verifySigningKey, state.EmailVerificationSalt, code)
 		if subtle.ConstantTimeCompare(expected, state.EmailVerificationCodeHash) != 1 {
-			return errBadVerifyCode
+			// Commit so the reserved attempt counts.
+			bad = true
+			return nil
 		}
 		return q.MarkPlayerAccountVerified(ctx, accountID)
 	})
@@ -916,6 +918,9 @@ func (h *Handler) confirmAccountCode(ctx context.Context, accountID pgtype.UUID,
 	}
 	if locked {
 		return errVerifyAccountLocked
+	}
+	if bad {
+		return errBadVerifyCode
 	}
 	return nil
 }

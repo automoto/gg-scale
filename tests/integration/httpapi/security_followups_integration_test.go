@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/automoto/gg-scale/internal/auth"
 	"github.com/automoto/gg-scale/internal/controlpanel"
@@ -368,4 +369,96 @@ func getResponseWithCookie(t *testing.T, url string, cookie *http.Cookie) *http.
 	resp, err := noRedirectClient().Do(req)
 	require.NoError(t, err)
 	return resp
+}
+
+func postControlPanelLogin(srvURL, email, password string) (int, error) {
+	form := url.Values{"email": {email}, "password": {password}}
+	req, err := http.NewRequest(http.MethodPost, srvURL+"/v1/control-panel/login", strings.NewReader(form.Encode()))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		return 0, err
+	}
+	resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+func TestControlPanelLogin_should_stop_counting_once_locked(t *testing.T) {
+	c := startCluster(t)
+	const email = "lock-stops-count@example.com"
+	seedControlPanelUser(t, c, email, "correct-horse-battery-staple", false)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+
+	const concurrent = 20
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range concurrent {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = postControlPanelLogin(srv.URL, email, "wrong-password")
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	var failures int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT login_failures FROM control_panel_users WHERE email = $1`, email).Scan(&failures))
+	assert.Equal(t, 10, failures)
+}
+
+func TestControlPanelLogin_should_accept_the_correct_password_at_nine_failures(t *testing.T) {
+	c := startCluster(t)
+	const email = "nine-failures@example.com"
+	const password = "correct-horse-battery-staple"
+	seedControlPanelUser(t, c, email, password, false)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+	_, err := c.bootstrapPool.Exec(context.Background(),
+		`UPDATE control_panel_users SET login_failures = 9 WHERE email = $1`, email)
+	require.NoError(t, err)
+
+	_, err = postControlPanelLogin(srv.URL, email, password)
+	require.NoError(t, err)
+
+	var failures int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT login_failures FROM control_panel_users WHERE email = $1`, email).Scan(&failures))
+	assert.Equal(t, 0, failures)
+}
+
+func TestControlPanelLogin_should_reset_the_counter_when_the_client_disconnects_after_a_correct_password(t *testing.T) {
+	c := startCluster(t)
+	const email = "disconnect-after-login@example.com"
+	const password = "correct-horse-battery-staple"
+	seedControlPanelUser(t, c, email, password, false)
+	// A slow hash keeps bcrypt running when the client disconnects, after the
+	// attempt is counted and before the reset.
+	slowHash, err := bcrypt.GenerateFromPassword([]byte(password), 13)
+	require.NoError(t, err)
+	_, err = c.bootstrapPool.Exec(context.Background(),
+		`UPDATE control_panel_users SET password_hash = $1 WHERE email = $2`, slowHash, email)
+	require.NoError(t, err)
+	srv := newControlPanelIntegrationServer(t, c, controlpanel.DisabledBootstrap())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	form := url.Values{"email": {email}, "password": {password}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/control-panel/login", strings.NewReader(form.Encode()))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if resp, derr := noRedirectClient().Do(req); derr == nil {
+		resp.Body.Close()
+	}
+
+	assert.Eventually(t, func() bool {
+		var failures int
+		qerr := c.bootstrapPool.QueryRow(context.Background(),
+			`SELECT login_failures FROM control_panel_users WHERE email = $1`, email).Scan(&failures)
+		return qerr == nil && failures == 0
+	}, 30*time.Second, 100*time.Millisecond, "the counted attempt was not reset")
 }

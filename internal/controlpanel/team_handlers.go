@@ -228,6 +228,10 @@ func (h *Handler) removeMemberHandler(w http.ResponseWriter, r *http.Request) {
 		redirectFlash(w, r, tenantTeamPath(tenantID), flashRemoveSelf)
 		return
 	}
+	if errors.Is(err, errLastOwner) {
+		redirectFlash(w, r, tenantTeamPath(tenantID), flashLastOwner)
+		return
+	}
 	if err != nil {
 		http.Error(w, "remove failed", http.StatusInternalServerError)
 		return

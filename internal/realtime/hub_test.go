@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -143,4 +144,38 @@ func TestHubConcurrentRegisterAndSendIsSafe(t *testing.T) {
 		}(int64(i))
 	}
 	wg.Wait()
+}
+
+// slowCloseWriter blocks in Close until release is closed, like a socket
+// whose close handshake waits on a stuck peer.
+type slowCloseWriter struct {
+	fakeWriter
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *slowCloseWriter) Close() error {
+	close(s.entered)
+	<-s.release
+	return s.fakeWriter.Close()
+}
+
+func TestHubRegister_should_not_block_other_players_while_the_old_socket_closes(t *testing.T) {
+	h := realtime.NewHub()
+	old := &slowCloseWriter{entered: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { close(old.release) })
+	h.Register(1, 42, old)
+	h.Register(1, 7, &fakeWriter{})
+	go h.Register(1, 42, &fakeWriter{})
+	<-old.entered
+
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- h.Send(context.Background(), 1, 7, realtime.Message{Type: "x"}) }()
+
+	select {
+	case err := <-sendDone:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("Send to another player waited for the old socket to close")
+	}
 }

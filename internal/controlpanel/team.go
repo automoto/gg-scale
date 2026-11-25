@@ -25,6 +25,7 @@ var (
 	errInviteNotFound     = errors.New("control panel: invite not found")
 	errInviteExpired      = errors.New("control panel: invite expired")
 	errCannotRemoveSelf   = errors.New("control panel: cannot remove yourself")
+	errLastOwner          = errors.New("control panel: last owner")
 	errInvalidGrantRole   = errors.New("control panel: role is not grantable")
 	errMemberNotInTenant  = errors.New("control panel: user is not a member of this tenant")
 )
@@ -231,19 +232,40 @@ func (h *Handler) revokeInvite(ctx context.Context, actorID, tenantID, inviteID 
 func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, membershipID int64) error {
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		// Removals in one tenant run one at a time, so two owners cannot
+		// remove each other and leave the tenant with no owner. NO KEY UPDATE
+		// does not block the foreign-key checks of other writes in the tenant.
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE`, tenantID); err != nil {
+			return err
+		}
 		var targetUserID int64
+		var targetRole string
 		err := tx.QueryRow(ctx, `
-SELECT control_panel_user_id
+SELECT control_panel_user_id, role
 FROM control_panel_memberships
 WHERE id = $1
   AND tenant_id = $2
   AND control_panel_user_id <> $3`,
-			membershipID, tenantID, actorID).Scan(&targetUserID)
+			membershipID, tenantID, actorID).Scan(&targetUserID, &targetRole)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errCannotRemoveSelf
 		}
 		if err != nil {
 			return err
+		}
+		if targetRole == "owner" {
+			var otherOwners int
+			if err := tx.QueryRow(ctx, `
+SELECT count(*)
+FROM control_panel_memberships
+WHERE tenant_id = $1
+  AND role = 'owner'
+  AND id <> $2`, tenantID, membershipID).Scan(&otherOwners); err != nil {
+				return err
+			}
+			if otherOwners == 0 {
+				return errLastOwner
+			}
 		}
 		if h.rbac != nil {
 			if err := h.rbac.RemoveControlPanelRolesTx(ctx, tx, targetUserID, tenantID); err != nil {

@@ -232,7 +232,9 @@ VALUES (
 ON CONFLICT (tenant_id, project_id, external_id)
     WHERE deleted_at IS NULL
 DO UPDATE SET external_id = EXCLUDED.external_id
-RETURNING id;
+-- inserted is false when a parallel sign-in made the row first, so only one
+-- caller takes a player slot.
+RETURNING id, (xmax = 0) AS inserted;
 
 -- name: GetPlayerPasswordResetState :one
 -- Reset-request/confirm state read, keyed like login. Filters mirror

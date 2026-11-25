@@ -410,3 +410,20 @@ func (q *Queries) StorageUsageForWrite(ctx context.Context, arg StorageUsageForW
 	err := row.Scan(&i.TotalBytes, &i.OldBytes, &i.NewBytes)
 	return i, err
 }
+
+const sumLiveStorageBytesForPlayers = `-- name: SumLiveStorageBytesForPlayers :one
+SELECT COALESCE(SUM(octet_length(value::text)), 0)::bigint
+FROM storage_objects
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND owner_user_id = ANY($1::bigint[])
+  AND deleted_at IS NULL
+`
+
+// Live (not soft-deleted) storage bytes owned by these players, measured like
+// every other storage delta. The purge subtracts it before the row cascade.
+func (q *Queries) SumLiveStorageBytesForPlayers(ctx context.Context, ids []int64) (int64, error) {
+	row := q.db.QueryRow(ctx, sumLiveStorageBytesForPlayers, ids)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}

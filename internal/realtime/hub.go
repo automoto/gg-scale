@@ -61,11 +61,14 @@ func NewHub() *Hub {
 func (h *Hub) Register(tenantID, playerID int64, w Writer) func() {
 	k := connKey{tenantID, playerID}
 	h.mu.Lock()
-	if old, ok := h.writers[k]; ok {
-		_ = old.Close()
-	}
+	old, ok := h.writers[k]
 	h.writers[k] = w
 	h.mu.Unlock()
+	// Close after the unlock: a socket close can wait seconds on a stuck
+	// peer, and every other player's Send needs h.mu.
+	if ok {
+		_ = old.Close()
+	}
 	return func() {
 		h.mu.Lock()
 		if cur, ok := h.writers[k]; ok && cur == w {

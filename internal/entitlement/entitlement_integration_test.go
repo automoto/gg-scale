@@ -234,3 +234,59 @@ func TestLoadToken_generates_once_and_env_wins(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, strings.Repeat("b", 32), pinned, "env token overrides the stored one")
 }
+
+func TestEntitlementAPI_should_wait_for_the_tenant_row_lock_before_the_diff(t *testing.T) {
+	f := newEntitlementFixture(t)
+	require.Equal(t, http.StatusOK, f.put(t, "9001", `{"tier":2,"features":["p2p_relay"]}`).Code)
+	ctx := context.Background()
+	// NO KEY UPDATE conflicts with the FOR UPDATE that apply takes, but not
+	// with the foreign-key checks of the grant and audit writes.
+	holder, err := f.ownerPool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Rollback(ctx) })
+	_, err = holder.Exec(ctx, `SELECT 1 FROM tenants WHERE id = 9001 FOR NO KEY UPDATE`)
+	require.NoError(t, err)
+
+	done := make(chan int, 1)
+	go func() {
+		done <- doRequest(t, f.handler, http.MethodPut, "/9001", testToken, `{"tier":2,"features":[]}`).Code
+	}()
+	select {
+	case <-done:
+		t.Fatal("apply did not wait for the tenant row lock")
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, holder.Rollback(ctx))
+
+	select {
+	case code := <-done:
+		assert.Equal(t, http.StatusOK, code)
+	case <-time.After(5 * time.Second):
+		t.Fatal("apply did not finish after the lock was released")
+	}
+}
+
+func TestEntitlementAPI_should_not_wait_for_a_foreign_key_share_lock(t *testing.T) {
+	f := newEntitlementFixture(t)
+	require.Equal(t, http.StatusOK, f.put(t, "9001", `{"tier":2,"features":["p2p_relay"]}`).Code)
+	ctx := context.Background()
+	// KEY SHARE is what a foreign-key check on an insert that references the
+	// tenant holds, for example a change request that adds a feature grant.
+	holder, err := f.ownerPool.Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Rollback(ctx) })
+	_, err = holder.Exec(ctx, `SELECT 1 FROM tenants WHERE id = 9001 FOR KEY SHARE`)
+	require.NoError(t, err)
+
+	done := make(chan int, 1)
+	go func() {
+		done <- doRequest(t, f.handler, http.MethodPut, "/9001", testToken, `{"tier":2,"features":[]}`).Code
+	}()
+
+	select {
+	case code := <-done:
+		assert.Equal(t, http.StatusOK, code)
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply waited for a foreign-key share lock")
+	}
+}
