@@ -1,5 +1,7 @@
 //go:build integration
 
+// e2e:bucket a
+
 package controlpanel_test
 
 import (
