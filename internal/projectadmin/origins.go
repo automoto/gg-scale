@@ -17,9 +17,19 @@ import (
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 )
 
-// OriginCacheTTL is how long a saved origin list takes to reach each app
-// host: each host caches the origins of all projects for this long.
-const OriginCacheTTL = 30 * time.Second
+// DefaultOriginCacheTTL is the default of CORS_ORIGIN_CACHE_TTL: how long a
+// saved origin list takes to reach each app host. Each host caches the origins
+// of all projects for this long.
+const DefaultOriginCacheTTL = 30 * time.Second
+
+// OriginCacheTTL returns the configured origin cache time, or the default
+// when it is not set.
+func OriginCacheTTL(configured time.Duration) time.Duration {
+	if configured > 0 {
+		return configured
+	}
+	return DefaultOriginCacheTTL
+}
 
 // ErrInvalidOrigins wraps every origin validation failure. The wrapped
 // message is safe to show the person or the agent.

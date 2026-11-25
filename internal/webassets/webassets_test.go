@@ -36,7 +36,7 @@ func TestHandlerServesFonts(t *testing.T) {
 }
 
 func TestHandlerServesVersionedFaviconWithSecurityHeaders(t *testing.T) {
-	rec := get(t, "/favicon.svg?v=ignored")
+	rec := get(t, strings.TrimPrefix(webassets.URL("favicon.svg"), "/v1/assets"))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Header().Get("Content-Type"), "image/svg+xml")
@@ -65,4 +65,16 @@ func TestURL_leaves_unknown_assets_unversioned(t *testing.T) {
 func TestHandlerIgnoresVersionQuery(t *testing.T) {
 	rec := get(t, "/app.css?v=00000000")
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_should_not_send_immutable_when_version_does_not_match(t *testing.T) {
+	rec := get(t, "/app.css?v=00000000")
+
+	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+}
+
+func TestHandler_should_send_immutable_when_version_matches(t *testing.T) {
+	rec := get(t, strings.TrimPrefix(webassets.URL("app.css"), "/v1/assets"))
+
+	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
 }

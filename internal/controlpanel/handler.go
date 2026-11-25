@@ -40,9 +40,12 @@ var staticFS embed.FS
 // of seven positional params) keeps the call site readable as
 // dependencies grow.
 type Deps struct {
-	Pool    *db.Pool
-	Cache   cache.Store
-	Limiter ratelimit.Limiter
+	Pool  *db.Pool
+	Cache cache.Store
+	// APIKeyCache (may be nil) is the server's API key cache. A write that
+	// changes a key or its tenant drops the tenant's entries from it.
+	APIKeyCache *tenant.KeyCache
+	Limiter     ratelimit.Limiter
 	// RateLimitOverrides (may be nil) supplies per-tenant/project invite-limit
 	// overrides to the invite throttle.
 	RateLimitOverrides ratelimit.OverrideStore
@@ -105,6 +108,7 @@ type PluginSnapshot struct {
 type Handler struct {
 	pool             *db.Pool
 	cache            cache.Store
+	keyCache         *tenant.KeyCache
 	limiter          ratelimit.Limiter
 	overrides        ratelimit.OverrideStore
 	connectionEnvMax int64
@@ -387,6 +391,7 @@ func newHandler(d Deps) *Handler {
 	h := &Handler{
 		pool:                 d.Pool,
 		cache:                d.Cache,
+		keyCache:             d.APIKeyCache,
 		limiter:              d.Limiter,
 		overrides:            d.RateLimitOverrides,
 		connectionEnvMax:     d.ConnectionEnvMax,
@@ -420,7 +425,7 @@ func newHandler(d Deps) *Handler {
 }
 
 func (h *Handler) assetHandler(w http.ResponseWriter, r *http.Request) {
-	webassets.Serve(w, r, staticFS, "static")
+	webassets.Serve(w, r, staticFS, "static", controlPanelAssetVersions)
 }
 
 // writePlatformAudit records a control panel-user action in platform_audit_log —

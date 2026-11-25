@@ -305,7 +305,7 @@ func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal,
 		Origins:    now,
 		OldOrigins: old,
 		Note: "To undo, call set_allowed_origins with old_origins. Each server uses the new list within " +
-			projectadmin.OriginCacheTTL.String() + ".",
+			projectadmin.OriginCacheTTL(d.CORSOriginCacheTTL).String() + ".",
 	}, nil
 }
 
@@ -355,6 +355,7 @@ func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Princip
 	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, d.Cache, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)
 	}
+	d.APIKeyCache.Invalidate(p.TenantID)
 	return projectAPIKeyUpdated{Updated: true}, nil
 }
 
@@ -366,6 +367,7 @@ func revokeAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *
 	if err := projectadmin.RevokeAPIKey(ctx, d.Pool, d.RBAC, d.Cache, p.TenantID, projectKeyScope(p), in.APIKeyID, projectActor(p)); err != nil {
 		return projectAPIKeyRevoked{}, projectWriteError(err)
 	}
+	d.APIKeyCache.Invalidate(p.TenantID)
 	return projectAPIKeyRevoked{Revoked: true}, nil
 }
 

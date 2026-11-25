@@ -26,7 +26,7 @@ var _ Invalidator = (*CachedStore)(nil)
 var _ LimitStore = (*Store)(nil)
 var _ LimitStore = (*CachedStore)(nil)
 
-// DefaultCacheTTL matches the rate-limit override cache freshness.
+// DefaultCacheTTL is the default of STORAGE_LIMIT_CACHE_TTL.
 const DefaultCacheTTL = 5 * time.Second
 
 // CachedStore memoizes Resolve for a short TTL so the per-request storage write

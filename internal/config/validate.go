@@ -375,6 +375,13 @@ func (c *Config) checkFields() error {
 		{"DB_STATEMENT_TIMEOUT", c.DBStatementTimeout},
 		{"HTTP_REQUEST_TIMEOUT", c.HTTPRequestTimeout},
 		{"PLAYER_DELETE_GRACE_PERIOD", c.PlayerDeleteGracePeriod},
+		{"API_KEY_CACHE_TTL", c.APIKeyCacheTTL},
+		{"FEATURE_GRANT_CACHE_TTL", c.FeatureGrantCacheTTL},
+		{"RBAC_POLICY_RELOAD_INTERVAL", c.RBACPolicyReloadInterval},
+		{"RATE_LIMIT_OVERRIDE_CACHE_TTL", c.RateLimitOverrideCacheTTL},
+		{"STORAGE_LIMIT_CACHE_TTL", c.StorageLimitCacheTTL},
+		{"LEADERBOARD_TOP_CACHE_TTL", c.LeaderboardTopCacheTTL},
+		{"CORS_ORIGIN_CACHE_TTL", c.CORSOriginCacheTTL},
 	} {
 		if d.val <= 0 {
 			return fmt.Errorf("%s %q: must be a positive duration", d.name, d.val)

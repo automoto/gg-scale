@@ -119,7 +119,11 @@ func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenant
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	return projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.cache, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID})
+	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.cache, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
+		return err
+	}
+	h.dropTenantCaches(tenantID)
+	return nil
 }
 
 func (h *Handler) listProjects(ctx context.Context, tenantID int64) ([]ProjectOption, error) {
@@ -248,7 +252,11 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 	if tenantID <= 0 {
 		return errInvalidTenant
 	}
-	return projectadmin.RevokeAPIKey(ctx, h.pool, h.rbac, h.cache, tenantID, dashboardKeyScope, apiKeyID, projectadmin.Actor{UserID: actorID})
+	if err := projectadmin.RevokeAPIKey(ctx, h.pool, h.rbac, h.cache, tenantID, dashboardKeyScope, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
+		return err
+	}
+	h.dropTenantCaches(tenantID)
+	return nil
 }
 
 // TypeLabel renders the key type for the key table.

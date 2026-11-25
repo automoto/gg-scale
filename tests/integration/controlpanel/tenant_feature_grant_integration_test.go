@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,14 @@ import (
 // the admin feature-grant form is offered and its POST is accepted.
 func newFeatureGrantServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Pool, userID, tenantID int64) {
 	t.Helper()
+	srv, raw, _, userID, tenantID = newFeatureGrantServerWithAuthorizer(t)
+	return srv, raw, userID, tenantID
+}
+
+// newFeatureGrantServerWithAuthorizer also returns the authorizer the control
+// panel uses, so a test can read the grant decision the server would make.
+func newFeatureGrantServerWithAuthorizer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Pool, authorizer *rbac.Authorizer, userID, tenantID int64) {
+	t.Helper()
 	pool, raw := startTwoFactorDB(t)
 	ctx := context.Background()
 
@@ -34,7 +43,8 @@ func newFeatureGrantServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Poo
 	require.NoError(t, raw.QueryRow(ctx,
 		`INSERT INTO tenants (name) VALUES ('fg-test') RETURNING id`).Scan(&tenantID))
 
-	authorizer, err := rbac.NewAuthorizer(pool)
+	// A long grant TTL, so only a drop on write can change a cached decision.
+	authorizer, err := rbac.NewAuthorizerWithOptions(pool, rbac.Options{FeatureGrantCacheTTL: time.Hour})
 	require.NoError(t, err)
 	t.Cleanup(authorizer.Close)
 	noopMailer, err := mailer.New("noop", "", "", "", "noreply@test", "off")
@@ -51,7 +61,7 @@ func newFeatureGrantServer(t *testing.T) (srv *httptest.Server, raw *pgxpool.Poo
 	}))
 	srv = httptest.NewServer(root)
 	t.Cleanup(srv.Close)
-	return srv, raw, userID, tenantID
+	return srv, raw, authorizer, userID, tenantID
 }
 
 func featuresPath(tenantID int64) string {
@@ -145,4 +155,22 @@ func TestPlatformAdmin_feature_grant_rejects_unknown_feature(t *testing.T) {
 	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
 	_, found := featureGrantEnabled(t, raw, tenantID, "matchmaker")
 	assert.False(t, found)
+}
+
+func TestPlatformAdmin_feature_grant_takes_effect_at_once_on_the_serving_process(t *testing.T) {
+	srv, raw, authorizer, userID, tenantID := newFeatureGrantServerWithAuthorizer(t)
+	ctx := context.Background()
+	admin, csrf := loginAsAdmin(t, srv, raw, userID, "fg-admin@example.com")
+	// This read caches "not enabled" in the authorizer.
+	before, err := authorizer.FeatureEnabled(ctx, tenantID, 0, rbac.FeatureP2PRelay)
+	require.NoError(t, err)
+	require.False(t, before)
+
+	resp, _ := tfPostForm(t, admin, srv.URL+featuresPath(tenantID),
+		url.Values{"_csrf": {csrf}, "feature": {"p2p_relay"}, "enabled": {"on"}})
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+
+	after, err := authorizer.FeatureEnabled(ctx, tenantID, 0, rbac.FeatureP2PRelay)
+	require.NoError(t, err)
+	assert.True(t, after)
 }

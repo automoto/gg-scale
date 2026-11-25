@@ -71,6 +71,8 @@ type Config struct {
 	ManagementMaxProjectTokens int
 	// CORSMaxProjectOrigins mirrors CORS_MAX_PROJECT_ORIGINS; 0 uses 20.
 	CORSMaxProjectOrigins int
+	// CORSOriginCacheTTL mirrors CORS_ORIGIN_CACHE_TTL; 0 uses the default.
+	CORSOriginCacheTTL time.Duration
 	// ServerSettings is the redacted, read-only snapshot of server-wide (env)
 	// configuration shown on the platform-admin server settings page. Built in
 	// main.go so raw secrets are reduced to booleans before crossing into this

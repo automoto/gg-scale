@@ -523,8 +523,9 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 		h.redirectChangeAdmin(w, r, flashRequestHandled)
 		return
 	}
+	// Drop first: the email can be slow, and the change is already committed.
+	h.dropTenantCaches(applied.TenantID)
 	h.sendChangeRequestDecisionEmail(r.Context(), applied, true)
-	h.reloadRBACPolicy(r.Context())
 	h.redirectChangeAdmin(w, r, flashRequestApproved)
 }
 

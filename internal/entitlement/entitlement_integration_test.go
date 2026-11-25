@@ -47,7 +47,7 @@ type entitlementFixture struct {
 	appPool   *db.Pool
 	ownerPool *pgxpool.Pool
 	mails     *recorderMailer
-	reloads   *int
+	changed   *[]int64
 }
 
 func startEntitlementPostgres(t *testing.T) (*db.Pool, *pgxpool.Pool) {
@@ -104,17 +104,17 @@ func newEntitlementFixture(t *testing.T) entitlementFixture {
 	t.Helper()
 	appPool, owner := startEntitlementPostgres(t)
 	mails := &recorderMailer{}
-	reloads := 0
+	var changed []int64
 	h := New(Deps{
 		Pool:     appPool,
 		Mailer:   mails,
 		MailFrom: "noreply@ggscale.dev",
 		Token:    testToken,
-		ReloadRBAC: func(context.Context) {
-			reloads++
+		TenantChanged: func(tenantID int64) {
+			changed = append(changed, tenantID)
 		},
 	})
-	return entitlementFixture{handler: h, appPool: appPool, ownerPool: owner, mails: mails, reloads: &reloads}
+	return entitlementFixture{handler: h, appPool: appPool, ownerPool: owner, mails: mails, changed: &changed}
 }
 
 func (f entitlementFixture) put(t *testing.T, tenantID, body string) *httptest.ResponseRecorder {
@@ -174,7 +174,7 @@ func TestEntitlementAPI_applies_tier_and_features(t *testing.T) {
 	assert.Nil(t, rows[0].actorUserID, "service rows have no human actor")
 	assert.Contains(t, rows[0].payload, `"new_tier": 2`)
 	assert.Equal(t, 1, f.mails.count(), "one decision email for the change")
-	assert.Equal(t, 1, *f.reloads, "rbac policy reloaded after the grant change")
+	assert.Equal(t, []int64{9001}, *f.changed, "the caller is told once which tenant changed")
 }
 
 func TestEntitlementAPI_apply_is_idempotent(t *testing.T) {

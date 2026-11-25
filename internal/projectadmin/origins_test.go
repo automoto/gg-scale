@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -88,4 +89,12 @@ func TestNormalizeOrigin_invalid_origin_should_not_be_a_limit(t *testing.T) {
 	_, err := NormalizeOrigins([]string{"https://*.example"}, 20)
 
 	assert.False(t, errors.Is(err, ErrOriginLimit))
+}
+
+func TestOriginCacheTTL_should_use_the_default_when_unset(t *testing.T) {
+	assert.Equal(t, DefaultOriginCacheTTL, OriginCacheTTL(0))
+}
+
+func TestOriginCacheTTL_should_use_the_configured_time(t *testing.T) {
+	assert.Equal(t, 7*time.Second, OriginCacheTTL(7*time.Second))
 }

@@ -49,7 +49,7 @@ func newBadKeyMiddleware(t *testing.T, calls *int) http.Handler {
 	t.Cleanup(func() { _ = store.Close(context.Background()) })
 	limit := ratelimit.NewBadKeyLimiter(ratelimit.NewCacheLimiter(store), nil, prometheus.NewRegistry())
 	require.NotNil(t, limit)
-	lookup := tenant.NewCachedLookup(keyLookup(calls), tenant.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries)
+	lookup := tenant.NewKeyCache(keyLookup(calls), tenant.DefaultAPIKeyCacheTTL, tenant.APIKeyCacheMaxEntries).Lookup
 	return tenant.NewLimited(lookup, limit)(nopHandler())
 }
 

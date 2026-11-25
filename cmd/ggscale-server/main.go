@@ -493,7 +493,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	authorizer, err := rbac.NewAuthorizer(appPool)
+	authorizer, err := rbac.NewAuthorizerWithOptions(appPool, rbac.Options{
+		PolicyReloadInterval: cfg.RBACPolicyReloadInterval,
+		FeatureGrantCacheTTL: cfg.FeatureGrantCacheTTL,
+	})
 	if err != nil {
 		return fmt.Errorf("rbac: %w", err)
 	}
@@ -684,7 +687,9 @@ func run() error {
 	}
 
 	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
-		ratelimit.NewDBOverrideStore(appPool), ratelimit.DefaultOverrideCacheTTL)
+		ratelimit.NewDBOverrideStore(appPool), cfg.RateLimitOverrideCacheTTL)
+
+	keyCache := tenant.NewKeyCache(tenant.NewSQLLookup(pool), cfg.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
@@ -693,12 +698,13 @@ func run() error {
 		RequestTimeout:        cfg.HTTPRequestTimeout,
 		Pool:                  appPool,
 		ReadPool:              readPool,
-		Lookup:                tenant.NewCachedLookup(tenant.NewSQLLookup(pool), tenant.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries),
+		Lookup:                keyCache.Lookup,
+		APIKeyCache:           keyCache,
 		Limiter:               ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:    rateLimitOverrides,
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
 		DeleteGracePeriod:     cfg.PlayerDeleteGracePeriod,
-		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), storagelimit.DefaultCacheTTL),
+		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), cfg.StorageLimitCacheTTL),
 		ProxyTrust:            ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
 		Signer:                signer,
 		Mailer:                m,
@@ -747,6 +753,7 @@ func run() error {
 			ManagementMaxExpiryDays:    cfg.ManagementTokenMaxExpiryDays,
 			ManagementMaxProjectTokens: cfg.ManagementMaxProjectTokens,
 			CORSMaxProjectOrigins:      cfg.CORSMaxProjectOrigins,
+			CORSOriginCacheTTL:         cfg.CORSOriginCacheTTL,
 			SSOProviders: ssoProviders(cfg.ControlPanelBaseURL, "/v1/control-panel/sso",
 				cfg.ControlPanelSSOGoogleClientID, cfg.ControlPanelSSOGoogleClientSecret),
 			// Redacted read-only snapshot for the server settings page.
@@ -801,6 +808,8 @@ func run() error {
 		ManagementAuthFailureBurst:      float64(cfg.ManagementAuthFailureBurst),
 		ManagementMaxProjectAPIKeys:     int64(cfg.ManagementMaxProjectAPIKeys),
 		CORSMaxProjectOrigins:           cfg.CORSMaxProjectOrigins,
+		CORSOriginCacheTTL:              cfg.CORSOriginCacheTTL,
+		LeaderboardTopCacheTTL:          cfg.LeaderboardTopCacheTTL,
 		BillingHandoffKey:               billingHandoffKey,
 		Lifecycle:                       lc,
 		RealtimeDrain:                   realtimeDrain,

@@ -89,6 +89,37 @@ type Config struct {
 	// tenant (quota axis "leaderboards"). Default 1000.
 	LeaderboardMaxPerProject int `env:"LEADERBOARD_MAX_PER_PROJECT" envDefault:"1000"`
 
+	// Cache times. Each app instance has its own caches and PostgreSQL is
+	// the source of truth. A write takes effect at once on the instance that
+	// served it, and within the cache time on every other instance. Each
+	// value must be more than 0.
+	//
+	// APIKeyCacheTTL is how long an API key lookup is kept. It bounds how
+	// long a revoked key, a disabled tenant, or a changed scope, tier or
+	// connection limit stays in use on the other instances. Default 30s.
+	APIKeyCacheTTL time.Duration `env:"API_KEY_CACHE_TTL" envDefault:"30s"`
+	// FeatureGrantCacheTTL is how long a feature grant decision is kept.
+	// Default 5s.
+	FeatureGrantCacheTTL time.Duration `env:"FEATURE_GRANT_CACHE_TTL" envDefault:"5s"`
+	// RBACPolicyReloadInterval is how often each instance reloads the role
+	// policy. It bounds how long a role change (for example a removed team
+	// member) takes to reach the other instances. Default 10s.
+	RBACPolicyReloadInterval time.Duration `env:"RBAC_POLICY_RELOAD_INTERVAL" envDefault:"10s"`
+	// RateLimitOverrideCacheTTL is how long a rate limit override is kept.
+	// Default 5s.
+	RateLimitOverrideCacheTTL time.Duration `env:"RATE_LIMIT_OVERRIDE_CACHE_TTL" envDefault:"5s"`
+	// StorageLimitCacheTTL is how long a storage value size limit is kept.
+	// Default 5s.
+	StorageLimitCacheTTL time.Duration `env:"STORAGE_LIMIT_CACHE_TTL" envDefault:"5s"`
+	// LeaderboardTopCacheTTL is how long the default top-10 reply of a
+	// leaderboard is kept. A score submit drops it on the instance that
+	// served the submit. Default 10s.
+	LeaderboardTopCacheTTL time.Duration `env:"LEADERBOARD_TOP_CACHE_TTL" envDefault:"10s"`
+	// CORSOriginCacheTTL is how long each instance keeps the browser origins
+	// of all Game Projects. A saved origin list takes this long to apply.
+	// Default 30s.
+	CORSOriginCacheTTL time.Duration `env:"CORS_ORIGIN_CACHE_TTL" envDefault:"30s"`
+
 	// FleetBackend selects the fleet allocator: agones | plugin:<name>. Empty
 	// by default so fleets stay off until an operator opts in; only consulted
 	// when FeatureFleetEnabled is true.

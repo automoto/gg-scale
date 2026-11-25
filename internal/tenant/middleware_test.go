@@ -292,10 +292,10 @@ func bearerReq(token string) *http.Request {
 
 func TestNewLimited_should_not_call_lookup_when_limit_refuses_a_cache_miss(t *testing.T) {
 	limit := &fakeFailureLimiter{allow: false}
-	mw := tenant.NewLimited(tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+	mw := tenant.NewLimited(tenant.NewKeyCache(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
 		t.Fatal("lookup must not run when the limit refuses")
 		return nil, nil
-	}, time.Minute, 10), limit)
+	}, time.Minute, 10).Lookup, limit)
 
 	rr := httptest.NewRecorder()
 	mw(nopHandler()).ServeHTTP(rr, bearerReq("bad"))
@@ -341,9 +341,9 @@ func TestNewLimited_should_not_consult_limit_when_header_is_missing(t *testing.T
 
 func TestNewLimited_should_admit_cached_key_when_limit_refuses(t *testing.T) {
 	limit := &fakeFailureLimiter{allow: true}
-	lookup := tenant.NewCachedLookup(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
+	lookup := tenant.NewKeyCache(func(_ context.Context, _ []byte) (*tenant.APIKey, error) {
 		return &tenant.APIKey{ID: 1, TenantID: 1}, nil
-	}, time.Minute, 10)
+	}, time.Minute, 10).Lookup
 	mw := tenant.NewLimited(lookup, limit)
 	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), bearerReq("k"))
 	limit.allow = false

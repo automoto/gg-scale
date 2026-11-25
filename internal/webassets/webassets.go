@@ -60,7 +60,7 @@ func URL(name string) string {
 func Handler() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-		Serve(w, req, staticFS, "static")
+		Serve(w, req, staticFS, "static", versions)
 	})
 	return r
 }
@@ -68,20 +68,29 @@ func Handler() http.Handler {
 // Serve writes the chi "/*" wildcard asset from root inside fsys with the
 // shared cache and nosniff headers. The control panel's own JS assets are served
 // through it too, so the traversal guard and cache policy live in one place.
-func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string) {
+// versions maps each asset name to its content hash.
+func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string, versions map[string]string) {
 	name := chi.URLParam(r, "*")
-	ServeAsset(w, r, fsys, root, name)
+	ServeAsset(w, r, fsys, root, name, versions[name])
 }
 
-// ServeAsset writes a named embedded asset with the shared immutable cache and
-// nosniff policy. It is also used by the legacy /favicon.ico route, whose URL
-// does not carry chi's wildcard parameter.
-func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name string) {
+// ServeAsset writes a named embedded asset with the shared cache and nosniff
+// policy. It is also used by the legacy /favicon.ico route, whose URL does not
+// carry chi's wildcard parameter. version is the content hash of the asset.
+//
+// A request whose "v" query is not version gets no-cache: during a deploy an
+// older process can receive the URL of a newer build, and its bytes must not
+// be kept as immutable under that URL.
+func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name, version string) {
 	if name == "" || strings.Contains(name, "..") {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	cacheControl := "public, max-age=31536000, immutable"
+	if v := r.URL.Query().Get("v"); v != "" && v != version {
+		cacheControl = "no-cache"
+	}
+	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	// fsys is an embedded fs.FS, which rejects any path outside its root, and
 	// ".." is refused above.
@@ -91,6 +100,6 @@ func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name s
 // FaviconHandler serves the SVG icon at the conventional legacy URL.
 func FaviconHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ServeAsset(w, r, staticFS, "static", "favicon.svg")
+		ServeAsset(w, r, staticFS, "static", "favicon.svg", versions["favicon.svg"])
 	}
 }

@@ -174,7 +174,7 @@ func New(lookup Lookup) func(http.Handler) http.Handler {
 }
 
 // NewLimited is New with a per-client limit on unknown keys. The limit is
-// checked only when a NewCachedLookup misses, right before the database
+// checked only when a KeyCache lookup misses, right before the database
 // lookup: a key the cache holds is admitted even while its client is over
 // budget. With an uncached Lookup the limit never applies. A nil limit turns
 // it off.

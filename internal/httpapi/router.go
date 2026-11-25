@@ -123,7 +123,11 @@ type Deps struct {
 	// EmailVerifySigningKey signs verification cookies for both web surfaces.
 	EmailVerifySigningKey []byte
 	Cache                 cache.Store
-	Registry              *prometheus.Registry
+	// APIKeyCache is the cache behind Lookup, when Lookup is cached. Write
+	// paths that change a key or its tenant drop entries from it. nil is a
+	// no-op.
+	APIKeyCache *tenant.KeyCache
+	Registry    *prometheus.Registry
 	// Metrics carries the business/health counters. nil is a no-op (unit tests).
 	Metrics *observability.Metrics
 	RBAC    *rbac.Authorizer
@@ -219,6 +223,11 @@ type Deps struct {
 	// validation refuses 0 or less for both.
 	ManagementMaxProjectAPIKeys int64
 	CORSMaxProjectOrigins       int
+	// CORSOriginCacheTTL mirrors CORS_ORIGIN_CACHE_TTL and
+	// LeaderboardTopCacheTTL mirrors LEADERBOARD_TOP_CACHE_TTL. 0 uses the
+	// default.
+	CORSOriginCacheTTL     time.Duration
+	LeaderboardTopCacheTTL time.Duration
 
 	// EntitlementAPIToken, when non-empty, mounts the internal declarative
 	// entitlement API at /internal/entitlements behind this bearer token —
@@ -237,6 +246,14 @@ type Deps struct {
 	// origins is built by NewRouter from CORSAllowedOrigins and the project
 	// origin lists; it serves the CORS handler and the WebSocket upgrade.
 	origins *originSet
+}
+
+// leaderboardTopTTL is how long a memoised top-N reply is kept.
+func (d Deps) leaderboardTopTTL() time.Duration {
+	if d.LeaderboardTopCacheTTL > 0 {
+		return d.LeaderboardTopCacheTTL
+	}
+	return defaultLeaderboardTopTTL
 }
 
 func (d Deps) hasAuthDeps() bool {
@@ -304,7 +321,7 @@ func NewRouter(d Deps) http.Handler {
 			return nil, nil
 		}
 		return projectadmin.AllProjectOrigins(ctx, d.Pool)
-	})
+	}, projectadmin.OriginCacheTTL(d.CORSOriginCacheTTL))
 	r.Use(cors.Handler(cors.Options{
 		// AllowOriginFunc replaces AllowedOrigins: it covers the env list
 		// and the project lists.
@@ -375,6 +392,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Mount("/control-panel", controlpanel.New(controlpanel.Deps{
 				Pool:                 d.Pool,
 				Cache:                d.Cache,
+				APIKeyCache:          d.APIKeyCache,
 				Limiter:              d.Limiter,
 				RateLimitOverrides:   d.RateLimitOverrides,
 				ConnectionEnvMax:     d.RealtimeMaxPerTenant,

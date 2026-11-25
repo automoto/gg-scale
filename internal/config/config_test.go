@@ -676,3 +676,71 @@ func TestLoad_should_refuse_an_agones_project_isolation_that_is_not_a_bool(t *te
 
 	assert.ErrorContains(t, err, "AGONES_PROJECT_ISOLATION")
 }
+
+func TestLoad_should_default_the_cache_times(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+
+	// Act
+	cfg, err := config.Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, map[string]time.Duration{
+		"API_KEY_CACHE_TTL":             30 * time.Second,
+		"FEATURE_GRANT_CACHE_TTL":       5 * time.Second,
+		"RBAC_POLICY_RELOAD_INTERVAL":   10 * time.Second,
+		"RATE_LIMIT_OVERRIDE_CACHE_TTL": 5 * time.Second,
+		"STORAGE_LIMIT_CACHE_TTL":       5 * time.Second,
+		"LEADERBOARD_TOP_CACHE_TTL":     10 * time.Second,
+		"CORS_ORIGIN_CACHE_TTL":         30 * time.Second,
+	}, map[string]time.Duration{
+		"API_KEY_CACHE_TTL":             cfg.APIKeyCacheTTL,
+		"FEATURE_GRANT_CACHE_TTL":       cfg.FeatureGrantCacheTTL,
+		"RBAC_POLICY_RELOAD_INTERVAL":   cfg.RBACPolicyReloadInterval,
+		"RATE_LIMIT_OVERRIDE_CACHE_TTL": cfg.RateLimitOverrideCacheTTL,
+		"STORAGE_LIMIT_CACHE_TTL":       cfg.StorageLimitCacheTTL,
+		"LEADERBOARD_TOP_CACHE_TTL":     cfg.LeaderboardTopCacheTTL,
+		"CORS_ORIGIN_CACHE_TTL":         cfg.CORSOriginCacheTTL,
+	})
+}
+
+func TestLoad_should_read_a_cache_time_from_the_env(t *testing.T) {
+	// Arrange
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("API_KEY_CACHE_TTL", "7s")
+
+	// Act
+	cfg, err := config.Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.Equal(t, 7*time.Second, cfg.APIKeyCacheTTL)
+}
+
+func TestLoad_should_refuse_a_cache_time_of_zero(t *testing.T) {
+	for _, name := range []string{
+		"API_KEY_CACHE_TTL",
+		"FEATURE_GRANT_CACHE_TTL",
+		"RBAC_POLICY_RELOAD_INTERVAL",
+		"RATE_LIMIT_OVERRIDE_CACHE_TTL",
+		"STORAGE_LIMIT_CACHE_TTL",
+		"LEADERBOARD_TOP_CACHE_TTL",
+		"CORS_ORIGIN_CACHE_TTL",
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv(name, "0s")
+
+			// Act
+			_, err := config.Load()
+
+			// Assert
+			assert.ErrorContains(t, err, name)
+		})
+	}
+}
