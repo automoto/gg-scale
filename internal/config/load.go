@@ -150,6 +150,11 @@ func renameParseErrors(err error) error {
 			if name == "" {
 				name = pe.Name
 			}
+			if isCacheTime(name) {
+				// pe.Err quotes the value.
+				renamed = append(renamed, cacheTimeError(name))
+				continue
+			}
 			renamed = append(renamed, fmt.Errorf("%s: %w", name, pe.Err))
 			continue
 		}

@@ -740,7 +740,32 @@ func TestLoad_should_refuse_a_cache_time_of_zero(t *testing.T) {
 			_, err := config.Load()
 
 			// Assert
-			assert.ErrorContains(t, err, name+": must be a positive duration")
+			assert.EqualError(t, err, name+": must be a positive duration such as 30s")
+		})
+	}
+}
+
+func TestLoad_should_keep_a_malformed_cache_time_out_of_the_error(t *testing.T) {
+	for _, name := range []string{
+		"API_KEY_CACHE_TTL",
+		"FEATURE_GRANT_CACHE_TTL",
+		"RBAC_POLICY_RELOAD_INTERVAL",
+		"RATE_LIMIT_OVERRIDE_CACHE_TTL",
+		"STORAGE_LIMIT_CACHE_TTL",
+		"LEADERBOARD_TOP_CACHE_TTL",
+		"CORS_ORIGIN_CACHE_TTL",
+	} {
+		t.Run(name, func(t *testing.T) {
+			// Arrange
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv(name, "pasted-secret")
+
+			// Act
+			_, err := config.Load()
+
+			// Assert
+			assert.EqualError(t, err, name+": must be a positive duration such as 30s")
 		})
 	}
 }

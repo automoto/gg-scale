@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -357,6 +358,39 @@ func (c *Config) warnLowDBPool() {
 	}
 }
 
+type durationSetting struct {
+	name string
+	val  time.Duration
+}
+
+// cacheTimes returns the cache time settings.
+func (c *Config) cacheTimes() []durationSetting {
+	return []durationSetting{
+		{"API_KEY_CACHE_TTL", c.APIKeyCacheTTL},
+		{"FEATURE_GRANT_CACHE_TTL", c.FeatureGrantCacheTTL},
+		{"RBAC_POLICY_RELOAD_INTERVAL", c.RBACPolicyReloadInterval},
+		{"RATE_LIMIT_OVERRIDE_CACHE_TTL", c.RateLimitOverrideCacheTTL},
+		{"STORAGE_LIMIT_CACHE_TTL", c.StorageLimitCacheTTL},
+		{"LEADERBOARD_TOP_CACHE_TTL", c.LeaderboardTopCacheTTL},
+		{"CORS_ORIGIN_CACHE_TTL", c.CORSOriginCacheTTL},
+	}
+}
+
+func isCacheTime(envName string) bool {
+	return slices.ContainsFunc((&Config{}).cacheTimes(), func(d durationSetting) bool {
+		return d.name == envName
+	})
+}
+
+// cacheTimeError is the startup error for a cache time that is zero, negative
+// or not a duration. It has no value: the name tells the operator what to
+// fix, a value put in API_KEY_CACHE_TTL by mistake can be a key, and CodeQL
+// reports a value read from a field such as APIKey... as a secret in the
+// startup log.
+func cacheTimeError(envName string) error {
+	return fmt.Errorf("%s: must be a positive duration such as 30s", envName)
+}
+
 // checkFields runs the single-field range and enum checks that the hand-written
 // setter closures used to perform. It is called only from Load, never from
 // Validate: Validate is exercised by tests with sparse configs whose
@@ -381,22 +415,9 @@ func (c *Config) checkFields() error {
 		}
 	}
 
-	for _, d := range []struct {
-		name string
-		val  time.Duration
-	}{
-		{"API_KEY_CACHE_TTL", c.APIKeyCacheTTL},
-		{"FEATURE_GRANT_CACHE_TTL", c.FeatureGrantCacheTTL},
-		{"RBAC_POLICY_RELOAD_INTERVAL", c.RBACPolicyReloadInterval},
-		{"RATE_LIMIT_OVERRIDE_CACHE_TTL", c.RateLimitOverrideCacheTTL},
-		{"STORAGE_LIMIT_CACHE_TTL", c.StorageLimitCacheTTL},
-		{"LEADERBOARD_TOP_CACHE_TTL", c.LeaderboardTopCacheTTL},
-		{"CORS_ORIGIN_CACHE_TTL", c.CORSOriginCacheTTL},
-	} {
-		// The message has no value: CodeQL reports a value read from a field
-		// such as APIKey... as a secret in the startup log.
+	for _, d := range c.cacheTimes() {
 		if d.val <= 0 {
-			return fmt.Errorf("%s: must be a positive duration", d.name)
+			return cacheTimeError(d.name)
 		}
 	}
 

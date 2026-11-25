@@ -21,8 +21,8 @@ func get(t *testing.T, path string) *httptest.ResponseRecorder {
 }
 
 func TestHandlerServesSharedStylesheets(t *testing.T) {
-	for _, name := range []string{"/pico.min.css", "/app.css"} {
-		rec := get(t, name)
+	for _, name := range []string{"pico.min.css", "app.css"} {
+		rec := get(t, strings.TrimPrefix(webassets.URL(name), "/v1/assets"))
 		require.Equal(t, http.StatusOK, rec.Code, name)
 		assert.Contains(t, rec.Header().Get("Content-Type"), "text/css", name)
 		assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable", name)
@@ -77,4 +77,21 @@ func TestHandler_should_send_immutable_when_version_matches(t *testing.T) {
 	rec := get(t, strings.TrimPrefix(webassets.URL("app.css"), "/v1/assets"))
 
 	assert.Contains(t, rec.Header().Get("Cache-Control"), "immutable")
+}
+
+func TestHandler_should_send_no_cache_when_request_has_no_version(t *testing.T) {
+	rec := get(t, "/fonts/inter-variable.woff2")
+
+	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+}
+
+func TestHandler_should_answer_not_modified_when_the_browser_copy_is_current(t *testing.T) {
+	etag := get(t, "/fonts/inter-variable.woff2").Header().Get("ETag")
+	req := httptest.NewRequest(http.MethodGet, "/fonts/inter-variable.woff2", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec := httptest.NewRecorder()
+
+	webassets.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotModified, rec.Code)
 }

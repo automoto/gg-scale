@@ -78,17 +78,22 @@ func Serve(w http.ResponseWriter, r *http.Request, fsys fs.FS, root string, vers
 // policy. It is also used by the legacy /favicon.ico route, whose URL does not
 // carry chi's wildcard parameter. version is the content hash of the asset.
 //
-// A request whose "v" query is not version gets no-cache: during a deploy an
-// older process can receive the URL of a newer build, and its bytes must not
-// be kept as immutable under that URL.
+// Only a request whose "v" query equals version gets the immutable header.
+// During a deploy an older process can receive the URL of a newer build, and
+// a URL with no "v" (a font in the stylesheet, /favicon.ico) stays the same
+// across builds. Both get no-cache, and the ETag makes the browser's check a
+// 304 with no body while the bytes are the same.
 func ServeAsset(w http.ResponseWriter, r *http.Request, fsys fs.FS, root, name, version string) {
 	if name == "" || strings.Contains(name, "..") {
 		http.NotFound(w, r)
 		return
 	}
-	cacheControl := "public, max-age=31536000, immutable"
-	if v := r.URL.Query().Get("v"); v != "" && v != version {
-		cacheControl = "no-cache"
+	cacheControl := "no-cache"
+	if version != "" && r.URL.Query().Get("v") == version {
+		cacheControl = "public, max-age=31536000, immutable"
+	}
+	if version != "" {
+		w.Header().Set("ETag", `"`+version+`"`)
 	}
 	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
