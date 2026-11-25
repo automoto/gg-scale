@@ -855,16 +855,14 @@ func signInExternalPlayer(ctx context.Context, tx pgx.Tx, projectID int64, exter
 		if err := checkPlayerQuotaSnapshot(qc); err != nil {
 			return 0, 0, err
 		}
-		playerID, err = q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
+		row, err := q.UpsertPlayerByExternalID(ctx, sqlcgen.UpsertPlayerByExternalIDParams{
 			ProjectID: projectID, ExternalID: externalID,
 		})
 		if err != nil {
 			return 0, 0, fmt.Errorf("upsert player: %w", err)
 		}
-		// A lost upsert race (concurrent create of the same external_id)
-		// reserves a slot for a player that already counted; the rare
-		// over-count only under-admits later.
-		created = true
+		playerID = row.ID
+		created = row.Inserted
 	default:
 		return 0, 0, fmt.Errorf("find player: %w", err)
 	}

@@ -153,8 +153,19 @@ func purgeOneBatch(ctx context.Context, tx pgx.Tx, cutoff pgtype.Timestamptz) (i
 	if err := q.DeletePlayerGameSessionSignals(ctx, ids); err != nil {
 		return 0, err
 	}
+	// The cascade removes the players' storage objects, so take their live
+	// bytes off the tenant storage counter in the same transaction.
+	freed, err := q.SumLiveStorageBytesForPlayers(ctx, ids)
+	if err != nil {
+		return 0, err
+	}
 	if _, err := q.HardDeletePlayers(ctx, ids); err != nil {
 		return 0, err
+	}
+	if freed > 0 {
+		if err := q.ApplyTenantStorageDelta(ctx, -freed); err != nil {
+			return 0, err
+		}
 	}
 	if slotsHeld > 0 {
 		if err := q.ReleaseTenantPlayerSlots(ctx, slotsHeld); err != nil {

@@ -242,6 +242,24 @@ func (h *Handler) applyInviteRoles(ctx context.Context, tx pgx.Tx, q *sqlcgen.Qu
 	if row.Role == roleInviteTenantMember {
 		membershipRole = roleMember
 	}
+	// An invite never grants owner, so the membership upsert below demotes an
+	// owner who accepts one. Refuse that for the last owner.
+	if err := lockTenantOwners(ctx, tx, *row.TenantID); err != nil {
+		return err
+	}
+	var currentID int64
+	var currentRole string
+	err := tx.QueryRow(ctx,
+		`SELECT id, role FROM control_panel_memberships WHERE tenant_id = $1 AND control_panel_user_id = $2`,
+		*row.TenantID, userID).Scan(&currentID, &currentRole)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err == nil && currentRole == roleOwner {
+		if err := requireOtherOwner(ctx, tx, *row.TenantID, currentID); err != nil {
+			return err
+		}
+	}
 	if _, err := q.CreateControlPanelMembership(ctx, sqlcgen.CreateControlPanelMembershipParams{
 		ControlPanelUserID: userID,
 		TenantID:           *row.TenantID,

@@ -228,3 +228,63 @@ func seedVerifiedPlayerAccount(t *testing.T, c *cluster, email, password string)
 		 VALUES ($1, $2, now())`, email, hash)
 	require.NoError(t, err)
 }
+
+// signUpUnverifiedPlayerAccount signs up an account and returns the client
+// that holds the verify cookie, the account base URL, and the emailed code.
+func signUpUnverifiedPlayerAccount(t *testing.T, email string) (*http.Client, string, string, *cluster) {
+	t.Helper()
+	c := startCluster(t)
+	srv, rec := newControlPanelAndPlayerServer(t, c)
+	client := jarClient(t)
+	base := srv.URL + "/v1/players/account"
+	csrf := getPlayerCSRF(t, client, base+"/signup")
+	resp, err := client.PostForm(base+"/signup", url.Values{
+		"_csrf": {csrf}, "email": {email}, "password": {"correct-horse-battery-staple"}, "display_name": {"Player"},
+	})
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.NotEmpty(t, rec.Sent)
+	codeMatch := sixDigitRe.FindStringSubmatch(rec.Sent[len(rec.Sent)-1].Body)
+	require.Len(t, codeMatch, 2, "no verification code in email body")
+	return client, base, codeMatch[1], c
+}
+
+func wrongCode(code string) string {
+	if code == "000000" {
+		return "111111"
+	}
+	return "000000"
+}
+
+func postAccountVerifyCode(t *testing.T, client *http.Client, base, code string) int {
+	t.Helper()
+	csrf := getPlayerCSRF(t, client, base+"/verify")
+	resp, err := client.PostForm(base+"/verify", url.Values{"_csrf": {csrf}, "code": {code}})
+	require.NoError(t, err)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestPlayerAccount_should_count_a_wrong_verify_code(t *testing.T) {
+	const email = "wrong-code-once@example.com"
+	client, base, code, c := signUpUnverifiedPlayerAccount(t, email)
+
+	postAccountVerifyCode(t, client, base, wrongCode(code))
+
+	var attempts int
+	require.NoError(t, c.bootstrapPool.QueryRow(context.Background(),
+		`SELECT email_verification_attempts FROM player_accounts WHERE email = $1`, email).Scan(&attempts))
+	assert.Equal(t, 1, attempts)
+}
+
+func TestPlayerAccount_should_refuse_the_correct_code_after_five_wrong_codes(t *testing.T) {
+	client, base, code, _ := signUpUnverifiedPlayerAccount(t, "wrong-code-five@example.com")
+	for range 5 {
+		postAccountVerifyCode(t, client, base, wrongCode(code))
+	}
+
+	status := postAccountVerifyCode(t, client, base, code)
+
+	assert.Equal(t, http.StatusTooManyRequests, status)
+}

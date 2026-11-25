@@ -154,6 +154,9 @@ SET login_failures = login_failures + 1,
         ELSE locked_until
     END
 WHERE id = sqlc.arg(id)
+  -- No row while locked: the attempt is reserved before the password
+  -- compare, so requests in flight when the lock is set get no guess.
+  AND (locked_until IS NULL OR locked_until <= sqlc.arg(now)::timestamptz)
 RETURNING login_failures, locked_until;
 
 -- name: CreateControlPanelPasswordReset :exec

@@ -78,6 +78,7 @@ const (
 	flashInviteRevoked           flashCode = "invite_revoked"
 	flashRolesUpdated            flashCode = "roles_updated"
 	flashRemoveSelf              flashCode = "remove_self"
+	flashLastOwner               flashCode = "last_owner"
 	flashMemberRemoved           flashCode = "member_removed"
 	flashLeaderboardCreated      flashCode = "leaderboard_created"
 	flashLeaderboardUpdated      flashCode = "leaderboard_updated"
@@ -181,6 +182,7 @@ var flashMessages = map[flashCode]string{ //nolint:gosec // page message texts, 
 	flashInviteRevoked:          "Invite revoked.",
 	flashRolesUpdated:           "Roles updated.",
 	flashRemoveSelf:             "You can't remove yourself; ask another admin.",
+	flashLastOwner:              "You can't remove the last owner.",
 	flashMemberRemoved:          "Member removed.",
 	flashLeaderboardCreated:     "Leaderboard created.",
 	flashLeaderboardUpdated:     "Leaderboard updated.",

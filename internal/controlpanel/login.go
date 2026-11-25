@@ -1,6 +1,7 @@
 package controlpanel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -244,11 +245,18 @@ func (h *Handler) authenticate(r *http.Request, email, password string) (control
 	if row.LockedUntil.Valid && h.now().Before(row.LockedUntil.Time) {
 		return controlPanelUser{}, errLockedAccount
 	}
-	if !webutil.PasswordMatches(row.PasswordHash, dummyControlPanelBcryptHash, password) {
-		return controlPanelUser{}, h.recordLoginFailure(r, row)
+	// Count the attempt before the compare; a successful login resets it.
+	if err := h.reserveLoginAttempt(r, row); err != nil {
+		return controlPanelUser{}, err
 	}
-	if err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
-		return sqlcgen.New(tx).RecordControlPanelLoginSuccess(r.Context(), row.ID)
+	if !webutil.PasswordMatches(row.PasswordHash, dummyControlPanelBcryptHash, password) {
+		return controlPanelUser{}, errInvalidCredentials
+	}
+	// The attempt is already counted, so reset it even when the client has
+	// gone: a cancelled reset would leave a failure for a correct password.
+	resetCtx := context.WithoutCancel(r.Context())
+	if err := h.pool.BootstrapQ(resetCtx, func(tx pgx.Tx) error {
+		return sqlcgen.New(tx).RecordControlPanelLoginSuccess(resetCtx, row.ID)
 	}); err != nil {
 		return controlPanelUser{}, err
 	}
@@ -260,23 +268,27 @@ func (h *Handler) authenticate(r *http.Request, email, password string) (control
 
 var errVerifyRequired = errors.New("control panel: verify required")
 
-func (h *Handler) recordLoginFailure(r *http.Request, row sqlcgen.GetControlPanelUserByEmailRow) error {
+// reserveLoginAttempt counts one login attempt, or returns errLockedAccount
+// when the account is locked.
+func (h *Handler) reserveLoginAttempt(r *http.Request, row sqlcgen.GetControlPanelUserByEmailRow) error {
 	// Compute the lockout-until timestamp the SQL CASE branches on. The
 	// branch only fires when the increment would tip the row over
 	// loginFailureLimit, so the value is only consulted at that boundary.
-	lockoutUntil := pgtype.Timestamptz{Time: h.now().Add(loginLockoutPeriod), Valid: true}
+	now := h.now()
+	lockoutUntil := pgtype.Timestamptz{Time: now.Add(loginLockoutPeriod), Valid: true}
 	err := h.pool.BootstrapQ(r.Context(), func(tx pgx.Tx) error {
 		_, err := sqlcgen.New(tx).BumpControlPanelLoginFailure(r.Context(), sqlcgen.BumpControlPanelLoginFailureParams{
 			ID:           row.ID,
 			FailureLimit: int32(loginFailureLimit),
 			LockoutUntil: lockoutUntil,
+			Now:          pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		return err
 	})
-	if err != nil {
-		return err
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errLockedAccount
 	}
-	return errInvalidCredentials
+	return err
 }
 
 func mustGenerateControlPanelDummyHash() []byte {

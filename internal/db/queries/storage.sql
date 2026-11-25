@@ -133,3 +133,12 @@ WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
   AND id > sqlc.arg(cursor_id)
 ORDER BY id ASC
 LIMIT sqlc.arg(row_limit);
+
+-- name: SumLiveStorageBytesForPlayers :one
+-- Live (not soft-deleted) storage bytes owned by these players, measured like
+-- every other storage delta. The purge subtracts it before the row cascade.
+SELECT COALESCE(SUM(octet_length(value::text)), 0)::bigint
+FROM storage_objects
+WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
+  AND owner_user_id = ANY(sqlc.arg(ids)::bigint[])
+  AND deleted_at IS NULL;

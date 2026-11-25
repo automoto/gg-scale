@@ -232,6 +232,20 @@ func (h *handler) apply(ctx context.Context, tenantID int64, desired State) (sta
 	tctx := db.WithTenant(ctx, tenantID)
 	err := h.d.Pool.Q(tctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
+		// Lock the tenant row so a parallel apply cannot diff against the
+		// same old state. NO KEY UPDATE, not UPDATE: it must not wait for the
+		// share lock that a foreign-key check on a feature grant insert holds.
+		tag, err := tx.Exec(tctx, `
+SELECT 1 FROM tenants
+WHERE id = current_setting('app.tenant_id', true)::bigint
+  AND deleted_at IS NULL
+FOR NO KEY UPDATE`)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return errTenantNotFound
+		}
 		current, _, err := loadStateTx(tctx, q, tenantID)
 		if err != nil {
 			return err

@@ -926,7 +926,7 @@ VALUES (
 ON CONFLICT (tenant_id, project_id, external_id)
     WHERE deleted_at IS NULL
 DO UPDATE SET external_id = EXCLUDED.external_id
-RETURNING id
+RETURNING id, (xmax = 0) AS inserted
 `
 
 type UpsertPlayerByExternalIDParams struct {
@@ -934,11 +934,18 @@ type UpsertPlayerByExternalIDParams struct {
 	ExternalID string
 }
 
+type UpsertPlayerByExternalIDRow struct {
+	ID       int64
+	Inserted bool
+}
+
 // Custom-token flow: find existing player with this external_id under
 // (tenant, project) or create one. Idempotent across repeated calls.
-func (q *Queries) UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (int64, error) {
+// inserted is false when a parallel sign-in made the row first, so only one
+// caller takes a player slot.
+func (q *Queries) UpsertPlayerByExternalID(ctx context.Context, arg UpsertPlayerByExternalIDParams) (UpsertPlayerByExternalIDRow, error) {
 	row := q.db.QueryRow(ctx, upsertPlayerByExternalID, arg.ProjectID, arg.ExternalID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i UpsertPlayerByExternalIDRow
+	err := row.Scan(&i.ID, &i.Inserted)
+	return i, err
 }
