@@ -47,6 +47,9 @@ func (h *Handler) updateAllowedOriginsHandler(w http.ResponseWriter, r *http.Req
 		webutil.InternalError(w, "allowed origins: update", err)
 		return
 	}
+	if h.originsChanged != nil {
+		h.originsChanged()
+	}
 	redirectFlash(w, r, projectSettingsPathTpl(tenantID, projectID), flashOriginsSaved)
 }
 

@@ -392,6 +392,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Mount("/control-panel", controlpanel.New(controlpanel.Deps{
 				Pool:                 d.Pool,
 				Cache:                d.Cache,
+				ManagementTokenCache: tokenDeps.Cache,
+				OriginsChanged:       d.origins.drop,
 				APIKeyCache:          d.APIKeyCache,
 				Limiter:              d.Limiter,
 				RateLimitOverrides:   d.RateLimitOverrides,

@@ -407,7 +407,7 @@ func (a *Authorizer) SetControlPanelMembershipRoleTx(ctx context.Context, tx pgx
 }
 
 // GrantableControlPanelRole reports whether role is an à-la-carte control panel role a
-// tenant admin may grant on top of a user's membership role. These coexist
+// tenant owner may grant on top of a user's membership role. These coexist
 // with the membership role rather than replacing it.
 func GrantableControlPanelRole(role string) bool {
 	switch role {

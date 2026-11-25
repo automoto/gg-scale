@@ -19,12 +19,14 @@ func (h *Handler) reloadRBACPolicy(ctx context.Context) {
 
 // dropTenantCaches drops what this process caches for a tenant: its API keys
 // (they carry the revoked flag, the scopes, the tier, the tenant disabled flag
-// and the connection limits) and its feature grants. A write that changes one
-// of these calls it after the commit, so the change takes effect at once on
-// this process. Other app instances converge within the cache TTLs.
+// and the connection limits), its feature grants, and the management token
+// checks (they carry the tenant disabled flag). A write that changes one of
+// these calls it after the commit, so the change takes effect at once on this
+// process. Other app instances converge within the cache TTLs.
 func (h *Handler) dropTenantCaches(tenantID int64) {
 	h.keyCache.Invalidate(tenantID)
 	h.rbac.InvalidateFeatureGrants(tenantID)
+	h.tokenCache.Invalidate()
 }
 
 // requireFleetFeature is route middleware for the dedicated-server fleet

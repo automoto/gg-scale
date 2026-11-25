@@ -155,7 +155,7 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 	}
 	sum := sha256.Sum256([]byte(token))
 	now := a.d.Now()
-	row, cached := a.d.Cache.get(sum, now)
+	row, cached, drops := a.d.Cache.get(sum, now)
 	if !cached {
 		var aerr *authError
 		if row, aerr = a.lookup(ctx, sum); aerr != nil {
@@ -204,7 +204,7 @@ func (a authenticator) authenticate(r *http.Request) (Principal, *authError) {
 
 	// Only a request that passed every check is cached.
 	if !cached {
-		a.d.Cache.put(sum, row, now)
+		a.d.Cache.put(sum, row, now, drops)
 	}
 
 	// Only a request that is let through counts as a use, at most one write

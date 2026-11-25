@@ -300,7 +300,7 @@ func TestProjectAPI_attempt_cap_should_answer_422_above_the_int32_range(t *testi
 	}
 }
 
-func TestProjectAPI_cached_token_should_work_after_revoke_until_the_cache_time_ends(t *testing.T) {
+func TestProjectAPI_cached_token_should_work_after_a_revoke_on_another_server_until_the_cache_time_ends(t *testing.T) {
 	// Arrange
 	f := newFixtureWith(t, func(d *httpapi.Deps) { d.ManagementTokenCacheTTL, d.ManagementTokenCacheMaxEntries = time.Hour, 100 })
 	tok, id := f.token(f.tenantA, f.projectA, f.ownerID, readScopes, time.Hour)
@@ -745,4 +745,23 @@ func TestProjectAPI_token_should_not_reach_another_project(t *testing.T) {
 	got := f.do(tok, http.MethodGet, "/v1/project/remote-config", "")
 
 	assert.Equal(t, map[string]any{}, got.body["config"], got.raw)
+}
+
+func TestProjectAPI_set_allowed_origins_should_allow_the_origin_at_once(t *testing.T) {
+	// Arrange
+	f := newFixtureWith(t, func(d *httpapi.Deps) { d.CORSAllowedOrigins = []string{"https://app.example"} })
+	const origin = "https://web-build.example"
+	preflight := func() string {
+		return f.do("", http.MethodOptions, "/v1/config", "",
+			"Origin", origin, "Access-Control-Request-Method", http.MethodGet).header.Get("Access-Control-Allow-Origin")
+	}
+	require.Empty(t, preflight(), "the empty list must be loaded, and cached, before the write")
+	set := f.do(f.scopedToken("origins:write"), http.MethodPut, "/v1/project/allowed-origins", `{"origins":["`+origin+`"]}`)
+	require.Equal(t, http.StatusOK, set.status, set.raw)
+
+	// Act
+	got := preflight()
+
+	// Assert
+	assert.Equal(t, origin, got)
 }

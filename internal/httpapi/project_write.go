@@ -297,6 +297,7 @@ func setAllowedOrigins(ctx context.Context, d Deps, p managementtoken.Principal,
 	if err != nil {
 		return projectAllowedOrigins{}, projectWriteError(err)
 	}
+	d.origins.drop()
 	now, err := projectadmin.AllowedOrigins(ctx, d.Pool, p.TenantID, p.ProjectID)
 	if err != nil {
 		return projectAllowedOrigins{}, err

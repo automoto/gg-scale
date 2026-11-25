@@ -52,6 +52,23 @@ func TestOriginSet_should_reload_after_ttl(t *testing.T) {
 	assert.True(t, s.allowed(context.Background(), "https://new.example"))
 }
 
+func TestOriginSet_should_reload_at_once_after_drop(t *testing.T) {
+	list := []string{}
+	s := newOriginSet(nil, func(context.Context) ([]string, error) { return list, nil }, time.Hour)
+	s.allowed(context.Background(), "https://new.example")
+	list = []string{"https://new.example"}
+
+	s.drop()
+
+	assert.True(t, s.allowed(context.Background(), "https://new.example"))
+}
+
+func TestOriginSet_drop_should_do_nothing_on_a_nil_set(t *testing.T) {
+	var s *originSet
+
+	assert.NotPanics(t, s.drop)
+}
+
 func TestOriginSet_should_keep_last_list_when_reload_fails(t *testing.T) {
 	fail := false
 	s := newOriginSet(nil, func(context.Context) ([]string, error) {

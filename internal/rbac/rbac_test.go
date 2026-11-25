@@ -283,6 +283,17 @@ func TestFleetOperator_coexists_with_membership_role(t *testing.T) {
 	assert.True(t, has)
 }
 
+func TestFleetOperator_should_read_fleets(t *testing.T) {
+	a := newAuthorizer(t)
+	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "admin"))
+	require.NoError(t, a.AddControlPanelRole(42, 7, rbac.RoleFleetOperator))
+
+	read, err := a.CanControlPanel(42, 7, rbac.ProjectFleetObject(99), rbac.ActionRead)
+
+	require.NoError(t, err)
+	assert.True(t, read, "the Fleets pages need fleet read")
+}
+
 func TestFleetOperator_revoke_leaves_membership(t *testing.T) {
 	a := newAuthorizer(t)
 	require.NoError(t, a.SetControlPanelMembershipRole(42, 7, "member"))

@@ -812,8 +812,36 @@ func TestInviteTeamPage_should_explain_roles_at_selection(t *testing.T) {
 
 	assert.Contains(t, html, ">Tenant admin</option>")
 	assert.Contains(t, html, ">Tenant member</option>")
-	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
+	assert.Contains(t, html, "Tenant admins manage the Game Projects, API keys, players, and settings")
 	assert.Contains(t, html, "Tenant members can sign in but cannot open Account Tenant pages")
+}
+
+func TestInviteTeamPage_should_say_only_an_owner_manages_the_team(t *testing.T) {
+	html := renderToString(t, InviteTeamPage(InviteTeamView{TenantID: 1}))
+
+	assert.Contains(t, html, "Only an owner can invite and remove teammates")
+}
+
+func TestHelpPage_should_say_only_an_owner_manages_the_team(t *testing.T) {
+	html := renderToString(t, HelpPage(HelpView{}))
+
+	assert.Contains(t, html, "Only an owner can invite and remove teammates")
+}
+
+func TestRoleExplanation_should_say_only_an_owner_manages_the_team(t *testing.T) {
+	h := &Handler{cfg: Config{BaseURL: "https://example.com"}}
+
+	admin := h.roleExplanation(roleInviteTenantAdmin)
+
+	assert.Contains(t, admin, "Only an owner can invite and remove teammates")
+}
+
+func TestRoleExplanation_should_send_a_member_to_the_owner_for_the_admin_role(t *testing.T) {
+	h := &Handler{cfg: Config{BaseURL: "https://example.com"}}
+
+	member := h.roleExplanation(roleInviteTenantMember)
+
+	assert.Contains(t, member, "Ask the tenant owner for the admin role")
 }
 
 func TestHelpPage_should_document_team_roles(t *testing.T) {
@@ -823,7 +851,7 @@ func TestHelpPage_should_document_team_roles(t *testing.T) {
 	assert.Contains(t, html, "<dt>Account Tenant</dt>")
 	assert.Contains(t, html, "<dt>Game Project</dt>")
 	assert.Contains(t, html, "<dt>Tenant admin</dt>")
-	assert.Contains(t, html, "Tenant admins manage everything in the Account Tenant")
+	assert.Contains(t, html, "Tenant admins manage the Game Projects, API keys, players, and settings")
 	assert.Contains(t, html, "Tenant members can sign in but cannot open Account Tenant pages")
 }
 
@@ -834,7 +862,7 @@ func TestRoleExplanation_uses_resource_names_and_preserves_role_names(t *testing
 	member := h.roleExplanation(roleInviteTenantMember)
 
 	assert.Contains(t, admin, "As a tenant admin")
-	assert.Contains(t, admin, "in the Account Tenant: Game Projects")
+	assert.Contains(t, admin, "the Game Projects, API keys, players, and settings of the Account Tenant")
 	assert.Contains(t, member, "As a tenant member")
 	assert.Contains(t, member, "cannot open Account Tenant pages")
 }
