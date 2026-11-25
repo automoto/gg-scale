@@ -67,6 +67,7 @@ p, role:analyst, *, project:*:players, read
 p, role:analyst, *, project:*:allocation, read
 p, role:analyst, *, project:*:matchmaker, read
 
+p, role:fleet_operator, *, project:*:fleet, read
 p, role:fleet_operator, *, project:*:fleet, manage
 p, role:fleet_operator, *, project:*:allocation, read
 p, role:fleet_operator, *, project:*:allocation, allocate

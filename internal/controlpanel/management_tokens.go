@@ -737,5 +737,6 @@ func (h *Handler) managementTokenRevokeHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, "revoke failed", http.StatusInternalServerError)
 		return
 	}
+	h.tokenCache.Invalidate()
 	redirectFlash(w, r, managementTokensPath(tenantID, projectID), flashManagementTokenRevoked)
 }

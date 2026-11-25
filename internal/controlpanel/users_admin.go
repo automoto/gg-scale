@@ -200,6 +200,8 @@ func (h *Handler) toggleControlPanelUserDisabled(w http.ResponseWriter, r *http.
 		return
 	}
 
+	// A cached token check skips the creator-disabled check.
+	h.tokenCache.Invalidate()
 	if mirroredPlatformAdmin {
 		h.reloadRBACPolicy(r.Context())
 	}

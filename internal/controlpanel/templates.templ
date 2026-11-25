@@ -954,11 +954,11 @@ templ HelpPage(vm HelpView) {
 			<p class="card-subtitle">What a teammate can do depends on the role their invite carries.</p>
 			<dl class="concept-list">
 				<dt>Tenant admin</dt>
-				<dd>Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.</dd>
+				<dd>Tenant admins manage the Game Projects, API keys, players, and settings of the Account Tenant. Only an owner can invite and remove teammates.</dd>
 				<dt>Tenant member</dt>
 				<dd>Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.</dd>
 				<dt>Tenant owner</dt>
-				<dd>Like a tenant admin, plus owner-only actions on the Account Tenant itself. The user who creates an Account Tenant is its owner.</dd>
+				<dd>Like a tenant admin, plus the team and other owner-only actions on the Account Tenant. The user who creates an Account Tenant is its owner.</dd>
 			</dl>
 		</section>
 		<section class="card">
@@ -1297,7 +1297,7 @@ templ InviteTeamPage(vm InviteTeamView) {
 					</select>
 					@fieldError(vm.FieldErrors, "role")
 					<small id="role-help">
-						Tenant admins manage everything in the Account Tenant: Game Projects, API keys, players, team, and settings.
+						Tenant admins manage the Game Projects, API keys, players, and settings of the Account Tenant. Only an owner can invite and remove teammates.
 						Tenant members can sign in but cannot open Account Tenant pages. Invite anyone who needs to see Game Projects or players as a tenant admin.
 					</small>
 				</label>

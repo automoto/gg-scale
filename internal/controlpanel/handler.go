@@ -18,6 +18,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/fleet"
 	"github.com/automoto/gg-scale/internal/mailer"
+	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/observability"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
@@ -45,7 +46,13 @@ type Deps struct {
 	// APIKeyCache (may be nil) is the server's API key cache. A write that
 	// changes a key or its tenant drops the tenant's entries from it.
 	APIKeyCache *tenant.KeyCache
-	Limiter     ratelimit.Limiter
+	// ManagementTokenCache (may be nil) is the server's management token
+	// cache. A token revoke or a tenant write drops it.
+	ManagementTokenCache *managementtoken.Cache
+	// OriginsChanged (may be nil) runs after a saved browser origin list, so
+	// the API router reloads its CORS origins at once.
+	OriginsChanged func()
+	Limiter        ratelimit.Limiter
 	// RateLimitOverrides (may be nil) supplies per-tenant/project invite-limit
 	// overrides to the invite throttle.
 	RateLimitOverrides ratelimit.OverrideStore
@@ -109,6 +116,8 @@ type Handler struct {
 	pool             *db.Pool
 	cache            cache.Store
 	keyCache         *tenant.KeyCache
+	tokenCache       *managementtoken.Cache
+	originsChanged   func()
 	limiter          ratelimit.Limiter
 	overrides        ratelimit.OverrideStore
 	connectionEnvMax int64
@@ -392,6 +401,8 @@ func newHandler(d Deps) *Handler {
 		pool:                 d.Pool,
 		cache:                d.Cache,
 		keyCache:             d.APIKeyCache,
+		tokenCache:           d.ManagementTokenCache,
+		originsChanged:       d.OriginsChanged,
 		limiter:              d.Limiter,
 		overrides:            d.RateLimitOverrides,
 		connectionEnvMax:     d.ConnectionEnvMax,

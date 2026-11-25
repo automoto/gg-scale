@@ -33,10 +33,10 @@ const (
 	keyCacheEntitlementToken = "entitlement-token-0123456789abcdef"
 )
 
-// newKeyCacheServer builds the API and the control panel on one API key
-// cache, as the server does. The key and grant TTLs are long, so only a drop
-// on write can change a cached result. lookups counts the key reads that
-// reach the database.
+// newKeyCacheServer builds the API, the management API, and the control
+// panel on one set of caches, as the server does. The key, grant, management
+// token, and origin cache times are long, so only a drop on write can change
+// a cached result. lookups counts the key reads that reach the database.
 func newKeyCacheServer(t *testing.T, c *cluster) (srv *httptest.Server, lookups *atomic.Int64, authorizer *rbac.Authorizer) {
 	t.Helper()
 	signer, err := auth.NewSigner([]byte(testSignerKey))
@@ -53,20 +53,26 @@ func newKeyCacheServer(t *testing.T, c *cluster) (srv *httptest.Server, lookups 
 		return inner(ctx, hash)
 	}, time.Hour, 100)
 	srv = httptest.NewServer(httpapi.NewRouter(httpapi.Deps{
-		Version:               "v1",
-		Commit:                "test",
-		Pool:                  pool,
-		Lookup:                keys.Lookup,
-		APIKeyCache:           keys,
-		Limiter:               ratelimit.NewCacheLimiter(c.cache),
-		Signer:                signer,
-		Cache:                 c.cache,
-		RBAC:                  authorizer,
-		Mailer:                &mailer.Recorder{},
-		EmailVerifySigningKey: []byte(testEmailVerifySigningKey),
-		ControlPanel:          controlpanel.Config{Mount: true, MailFrom: "noreply@ggscale.test"},
-		ControlPanelBootstrap: controlpanel.DisabledBootstrap(),
-		EntitlementAPIToken:   keyCacheEntitlementToken,
+		Version:                        "v1",
+		Commit:                         "test",
+		Pool:                           pool,
+		Lookup:                         keys.Lookup,
+		APIKeyCache:                    keys,
+		Limiter:                        ratelimit.NewCacheLimiter(c.cache),
+		Signer:                         signer,
+		Cache:                          c.cache,
+		RBAC:                           authorizer,
+		Mailer:                         &mailer.Recorder{},
+		EmailVerifySigningKey:          []byte(testEmailVerifySigningKey),
+		ControlPanel:                   controlpanel.Config{Mount: true, MailFrom: "noreply@ggscale.test", ManagementAPIEnabled: true},
+		ControlPanelBootstrap:          controlpanel.DisabledBootstrap(),
+		EntitlementAPIToken:            keyCacheEntitlementToken,
+		CORSAllowedOrigins:             []string{"https://app.example"},
+		ManagementAPIEnabled:           true,
+		ManagementTokenRatePerSecond:   1000,
+		ManagementTokenBurst:           1000,
+		ManagementTokenCacheTTL:        time.Hour,
+		ManagementTokenCacheMaxEntries: 100,
 	}))
 	t.Cleanup(srv.Close)
 	return srv, lookups, authorizer
@@ -101,6 +107,7 @@ type keyCacheWriteFixture struct {
 	srv      *httptest.Server
 	lookups  *atomic.Int64
 	tenantID int64
+	userID   int64
 	// post sends a control panel form as the fixture user and returns the
 	// status. path starts after /v1/control-panel.
 	post func(path string, form url.Values) int
@@ -135,7 +142,7 @@ func newKeyCacheWriteFixtureFor(t *testing.T, c *cluster, tenantID int64, token 
 		defer resp.Body.Close()
 		return resp.StatusCode
 	}
-	return keyCacheWriteFixture{c: c, srv: srv, lookups: lookups, tenantID: tenantID, post: post}
+	return keyCacheWriteFixture{c: c, srv: srv, lookups: lookups, tenantID: tenantID, userID: userID, post: post}
 }
 
 func TestAPIKeyCache_should_refuse_a_cached_key_at_once_after_revoke(t *testing.T) {

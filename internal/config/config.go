@@ -63,8 +63,8 @@ type Config struct {
 	ManagementTokenRateBurst     int `env:"MANAGEMENT_TOKEN_RATE_BURST" envDefault:"20"`
 	// ManagementTokenCacheTTL is how long each app instance keeps a
 	// successful token check. A revoked token, or a disabled tenant or
-	// creator, takes effect within this time. 0 turns the cache off.
-	// Default 2s.
+	// creator, takes effect at once on the instance that served the write
+	// and within this time on the others. 0 turns the cache off. Default 2s.
 	ManagementTokenCacheTTL time.Duration `env:"MANAGEMENT_TOKEN_CACHE_TTL" envDefault:"2s"`
 	// ManagementTokenCacheMaxEntries is the most token checks each app
 	// instance keeps. When the cache is full, the entry that ends first is

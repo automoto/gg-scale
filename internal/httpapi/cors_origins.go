@@ -70,3 +70,16 @@ func (s *originSet) projectOrigins(ctx context.Context) map[string]bool {
 	}
 	return s.projects
 }
+
+// drop makes the next origin check reload the project origins. A write path
+// calls it after it commits an origin list, so the change takes effect at
+// once on this host. A reload in flight holds the lock, so drop waits for it
+// and the reload after the write reads the new list.
+func (s *originSet) drop() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loadedAt = time.Time{}
+}
