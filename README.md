@@ -12,11 +12,17 @@ If you prefer a managed service, run your game on ggscale Cloud and leave the ho
 
 ## Documentation
 
-Full documentation is in the [ggscale wiki](https://github.com/automoto/gg-scale/wiki): architecture, features, API routes, and onboarding guides.
+Full documentation is at [docs.ggscale.com](https://docs.ggscale.com/wiki/Home/): architecture, features, API routes, and onboarding guides.
 
-The [HTTP API reference](https://automoto.github.io/ggscale-api-docs/) is generated from [`openapi.yaml`](openapi.yaml).
+The [HTTP API reference](https://docs.ggscale.com/api/) is generated from [`openapi.yaml`](openapi.yaml).
 
-Operators running relay nodes or rolling deploys should read [Relay Operations](https://github.com/automoto/gg-scale/wiki/Relay-Operations), [Process Lifecycle](https://github.com/automoto/gg-scale/wiki/Process-Lifecycle), and [Operator Tokens](https://github.com/automoto/gg-scale/wiki/Operator-Tokens) in the wiki. Developers changing `/v1` routes should read [OpenAPI spec generation](docs/openapi-generation.md).
+To let a coding agent read the guides and the API reference, connect it to the public docs server. It needs no token.
+
+```sh
+claude mcp add --transport http ggscale-docs https://docs.ggscale.com/mcp
+```
+
+Operators running relay nodes or rolling deploys should read [Relay Operations](https://docs.ggscale.com/wiki/Relay-Operations/), [Process Lifecycle](https://docs.ggscale.com/wiki/Process-Lifecycle/), and [Operator Tokens](https://docs.ggscale.com/wiki/Operator-Tokens/) in the docs. Developers changing `/v1` routes should read [OpenAPI spec generation](docs/openapi-generation.md).
 
 For more technical detail, ask DeepWiki:
 
@@ -49,7 +55,7 @@ The health check returns `"status": "ok"` with the server version and commit, an
 2. Open `http://localhost:8080/v1/control-panel/setup`, create the first platform admin, and sign in.
 3. Create an Account Tenant, a Game Project, and a publishable API key. Your game client sends the publishable key on every call as `Authorization: Bearer <api_key>`. Create a secret key only for a game server or backend, and never ship it in a game.
 
-The [wiki onboarding guide](https://github.com/automoto/gg-scale/wiki) covers the rest.
+The [onboarding guide](https://docs.ggscale.com/wiki/onboarding/) covers the rest.
 
 ## Common commands
 
