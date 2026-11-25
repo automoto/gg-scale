@@ -69,6 +69,7 @@ const (
 	noticeLinked        = "linked"
 	noticeAlreadyLinked = "already_linked"
 	noticeNameTaken     = "name_taken"
+	noticeLastOwner     = "last_owner"
 	noticeFailed        = "failed"
 )
 
@@ -82,6 +83,7 @@ var ssoNotices = map[string]ssoNotice{
 	noticeProviderTaken: {text: "Your account already has an account of this provider linked. Unlink it first."},
 	noticeLinkSession:   {text: "Sign in, then start the link again."},
 	noticeNameTaken:     {text: "That Account Tenant name is no longer available. Contact your platform admin."},
+	noticeLastOwner:     {text: msgInviteLastOwner},
 	noticeFailed:        {text: "Could not complete the sign-in. Try again."},
 	noticeLinked:        {text: "Provider account linked.", success: true},
 	noticeAlreadyLinked: {text: "This provider account is already linked.", success: true},
@@ -435,6 +437,8 @@ func acceptNotice(err error) string {
 		return noticeSubjectTaken
 	case errors.Is(err, errSignupNameTaken):
 		return noticeNameTaken
+	case errors.Is(err, errLastOwner):
+		return noticeLastOwner
 	case errors.Is(err, errInviteExpired), errors.Is(err, errInviteNotFound), errors.Is(err, errInviteForDisabledAccount):
 		return ""
 	default:

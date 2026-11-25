@@ -380,6 +380,9 @@ func (h *Handler) acceptInviteHandler(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errInviteForDisabledAccount):
 			view.Error = "This account has been disabled. Contact your platform admin."
 			status = http.StatusForbidden
+		case errors.Is(err, errLastOwner):
+			view.Error = msgInviteLastOwner
+			status = http.StatusConflict
 		default:
 			slog.ErrorContext(r.Context(), "accept invite", "err", err)
 			view.Error = "Could not accept invite."

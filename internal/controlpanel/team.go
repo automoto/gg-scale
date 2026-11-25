@@ -30,6 +30,10 @@ var (
 	errMemberNotInTenant  = errors.New("control panel: user is not a member of this tenant")
 )
 
+// msgInviteLastOwner is shown when the last owner tries to accept an invite,
+// which would change their role.
+const msgInviteLastOwner = "You are the last owner of this Account Tenant, so you cannot accept an invite that changes your role."
+
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -232,10 +236,7 @@ func (h *Handler) revokeInvite(ctx context.Context, actorID, tenantID, inviteID 
 func (h *Handler) removeMember(ctx context.Context, actorID int64, tenantID, membershipID int64) error {
 	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		q := sqlcgen.New(tx)
-		// Removals in one tenant run one at a time, so two owners cannot
-		// remove each other and leave the tenant with no owner. NO KEY UPDATE
-		// does not block the foreign-key checks of other writes in the tenant.
-		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE`, tenantID); err != nil {
+		if err := lockTenantOwners(ctx, tx, tenantID); err != nil {
 			return err
 		}
 		var targetUserID int64
@@ -253,18 +254,9 @@ WHERE id = $1
 		if err != nil {
 			return err
 		}
-		if targetRole == "owner" {
-			var otherOwners int
-			if err := tx.QueryRow(ctx, `
-SELECT count(*)
-FROM control_panel_memberships
-WHERE tenant_id = $1
-  AND role = 'owner'
-  AND id <> $2`, tenantID, membershipID).Scan(&otherOwners); err != nil {
+		if targetRole == roleOwner {
+			if err := requireOtherOwner(ctx, tx, tenantID, membershipID); err != nil {
 				return err
-			}
-			if otherOwners == 0 {
-				return errLastOwner
 			}
 		}
 		if h.rbac != nil {
@@ -293,6 +285,32 @@ WHERE tenant_id = $1
 		return err
 	}
 	h.reloadRBACPolicy(ctx)
+	return nil
+}
+
+// lockTenantOwners makes membership changes that can drop an owner run one at
+// a time in a tenant, so two of them cannot each leave the other as the last
+// owner. NO KEY UPDATE does not block the foreign-key checks of other writes.
+func lockTenantOwners(ctx context.Context, tx pgx.Tx, tenantID int64) error {
+	_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE`, tenantID)
+	return err
+}
+
+// requireOtherOwner returns errLastOwner when membershipID is the tenant's
+// only owner. Call it after lockTenantOwners.
+func requireOtherOwner(ctx context.Context, tx pgx.Tx, tenantID, membershipID int64) error {
+	var otherOwners int
+	if err := tx.QueryRow(ctx, `
+SELECT count(*)
+FROM control_panel_memberships
+WHERE tenant_id = $1
+  AND role = 'owner'
+  AND id <> $2`, tenantID, membershipID).Scan(&otherOwners); err != nil {
+		return err
+	}
+	if otherOwners == 0 {
+		return errLastOwner
+	}
 	return nil
 }
 

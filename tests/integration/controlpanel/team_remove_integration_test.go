@@ -22,12 +22,14 @@ import (
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/rbac"
 	"github.com/automoto/gg-scale/internal/secretseal"
+	"github.com/automoto/gg-scale/internal/verifycode"
 )
 
 type teamOwner struct {
 	client       *http.Client
 	csrf         string
 	membershipID int64
+	userID       int64
 }
 
 func addTeamOwner(t *testing.T, p tokenPanel, email string) teamOwner {
@@ -37,7 +39,7 @@ func addTeamOwner(t *testing.T, p tokenPanel, email string) teamOwner {
 	require.NoError(t, p.raw.QueryRow(context.Background(),
 		`INSERT INTO control_panel_memberships (control_panel_user_id, tenant_id, role)
 		 VALUES ($1, $2, 'owner') RETURNING id`, userID, p.tenantID).Scan(&membershipID))
-	return teamOwner{client: c, csrf: csrf, membershipID: membershipID}
+	return teamOwner{client: c, csrf: csrf, membershipID: membershipID, userID: userID}
 }
 
 // secondPanelServer mounts the control panel again on the same database with
@@ -133,4 +135,27 @@ func TestTeamRemove_should_not_wait_for_a_foreign_key_share_lock(t *testing.T) {
 	finished := removeWhileLocked(t, "FOR KEY SHARE")
 
 	assert.True(t, finished, "removal waited for a foreign-key share lock")
+}
+
+func TestInviteAccept_should_not_demote_the_last_owner(t *testing.T) {
+	p := newTokenPanel(t, false)
+	const email = "sole-owner@example.com"
+	const code = "sole-owner-member-invite"
+	owner := addTeamOwner(t, p, email)
+	_, err := p.raw.Exec(context.Background(),
+		`INSERT INTO control_panel_invitations (email, tenant_id, role, code_hash, expires_at, invited_by_user_id)
+		 VALUES ($1, $2, 'tenant_member', $3, $4, $5)`,
+		email, p.tenantID, verifycode.HashToken(code), time.Now().Add(time.Hour), owner.userID)
+	require.NoError(t, err)
+	acceptURL := p.srv.URL + pathControlPanel + "/invite/accept"
+	browser := newBrowser(t)
+	form := acceptForm(t, browser, acceptURL, code)
+	form.Set("password", tfTestPassword)
+
+	tfPostForm(t, browser, acceptURL, form)
+
+	var role string
+	require.NoError(t, p.raw.QueryRow(context.Background(),
+		`SELECT role FROM control_panel_memberships WHERE id = $1`, owner.membershipID).Scan(&role))
+	assert.Equal(t, "owner", role)
 }
