@@ -7,7 +7,7 @@ GG Scale is an open source platform for multiplayer games. It provides the featu
 2. Networking - peer-to-peer relays, robust APIs, real-time connections using WebSockets
 3. Data storage - game project settings, cloud saves, leaderboards, object storage (coming soon)
 4. Management - a control panel, API and MCP for managing your projects and the platform itself
-5. Dedicated servers (beta) - a flexible fleet backend that allows you to provision and manage virtual machines or containers using plugins for supported backend providers like Kubernetes, OpenStack and AWS
+5. Dedicated servers (beta) - a flexible fleet backend that allows you to provision and manage virtual machines or containers using Agones on Kubernetes, or a plugin interface for other backend providers such as OpenStack (planned) and AWS (planned)
 
 <img src="docs/dashboard.png" alt="ggscale control panel" width="600">
 
