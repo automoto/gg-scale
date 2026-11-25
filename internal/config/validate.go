@@ -375,6 +375,16 @@ func (c *Config) checkFields() error {
 		{"DB_STATEMENT_TIMEOUT", c.DBStatementTimeout},
 		{"HTTP_REQUEST_TIMEOUT", c.HTTPRequestTimeout},
 		{"PLAYER_DELETE_GRACE_PERIOD", c.PlayerDeleteGracePeriod},
+	} {
+		if d.val <= 0 {
+			return fmt.Errorf("%s %q: must be a positive duration", d.name, d.val)
+		}
+	}
+
+	for _, d := range []struct {
+		name string
+		val  time.Duration
+	}{
 		{"API_KEY_CACHE_TTL", c.APIKeyCacheTTL},
 		{"FEATURE_GRANT_CACHE_TTL", c.FeatureGrantCacheTTL},
 		{"RBAC_POLICY_RELOAD_INTERVAL", c.RBACPolicyReloadInterval},
@@ -383,8 +393,10 @@ func (c *Config) checkFields() error {
 		{"LEADERBOARD_TOP_CACHE_TTL", c.LeaderboardTopCacheTTL},
 		{"CORS_ORIGIN_CACHE_TTL", c.CORSOriginCacheTTL},
 	} {
+		// The message has no value: CodeQL reports a value read from a field
+		// such as APIKey... as a secret in the startup log.
 		if d.val <= 0 {
-			return fmt.Errorf("%s %q: must be a positive duration", d.name, d.val)
+			return fmt.Errorf("%s: must be a positive duration", d.name)
 		}
 	}
 

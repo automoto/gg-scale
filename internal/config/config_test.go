@@ -740,7 +740,7 @@ func TestLoad_should_refuse_a_cache_time_of_zero(t *testing.T) {
 			_, err := config.Load()
 
 			// Assert
-			assert.ErrorContains(t, err, name)
+			assert.ErrorContains(t, err, name+": must be a positive duration")
 		})
 	}
 }
