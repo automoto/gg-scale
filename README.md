@@ -1,34 +1,37 @@
-# ggscale
+# GG Scale
+[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/automoto/gg-scale)
 
-ggscale is an open source backend for multiplayer games. It has player accounts and auth, game sessions and lobbies, matchmaking and parties, peer-to-peer relay, dedicated servers (beta), cloud saves, leaderboards, friends, and a control panel to manage it all.
+GG Scale is an open source platform for multiplayer games. It provides the features you need to build an online game:
+
+1. Authentication and social - player accounts, friends, game sessions, lobbies, matchmaking, parties and chat (coming soon)
+2. Networking - peer-to-peer relays, robust APIs, real-time connections using WebSockets
+3. Data storage - game project settings, cloud saves, leaderboards, object storage (coming soon)
+4. Management - a control panel, API and MCP for managing your projects and the platform itself
+5. Dedicated servers (beta) - a flexible fleet backend that allows you to provision and manage virtual machines or containers using Agones on Kubernetes, or a plugin interface for other backend providers such as OpenStack (planned) and AWS (planned)
 
 <img src="docs/dashboard.png" alt="ggscale control panel" width="600">
 
-## ggscale Cloud
+## GG Scale Cloud
 
-If you prefer a managed service, run your game on ggscale Cloud and leave the hosting to us.
+If you prefer a managed service, run your game on GG Scale Cloud and leave the hosting to us.
 
-**[Try ggscale Cloud →](https://ggscale.com)**
+**[Try GG Scale Cloud →](https://ggscale.com)**
 
 ## Documentation
 
 Full documentation is at [docs.ggscale.com](https://docs.ggscale.com/wiki/Home/): architecture, features, API routes, and onboarding guides.
 
-The [HTTP API reference](https://docs.ggscale.com/api/) is generated from [`openapi.yaml`](openapi.yaml).
+The [HTTP API reference](https://docs.ggscale.com/api/) is generated from our OpenAPI Specification [`openapi.yaml`](openapi.yaml).
 
-To let a coding agent read the guides and the API reference, connect it to the public docs server. It needs no token.
+Connect your coding agent to the public docs MCP server so it can read the guides and the API reference:
 
 ```sh
 claude mcp add --transport http ggscale-docs https://docs.ggscale.com/mcp
 ```
 
-Operators running relay nodes or rolling deploys should read [Relay Operations](https://docs.ggscale.com/wiki/Relay-Operations/), [Process Lifecycle](https://docs.ggscale.com/wiki/Process-Lifecycle/), and [Operator Tokens](https://docs.ggscale.com/wiki/Operator-Tokens/) in the docs. Developers changing `/v1` routes should read [OpenAPI spec generation](docs/openapi-generation.md).
-
-For more technical detail, ask DeepWiki:
-
-[![DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/automoto/gg-scale)
-
 ## SDKs
+
+GG Scale provides a robust API that you can use from your preferred programming language or game engine. We also provide SDKs for convenience:
 
 - Go: [ggscale-go](https://github.com/automoto/ggscale-go)
 - C# (Unity, MonoGame, Godot): [gg-scale-sdk-C-Sharp](https://github.com/automoto/gg-scale-sdk-C-Sharp)
@@ -55,7 +58,7 @@ The health check returns `"status": "ok"` with the server version and commit, an
 2. Open `http://localhost:8080/v1/control-panel/setup`, create the first platform admin, and sign in.
 3. Create an Account Tenant, a Game Project, and a publishable API key. Your game client sends the publishable key on every call as `Authorization: Bearer <api_key>`. Create a secret key only for a game server or backend, and never ship it in a game.
 
-The [onboarding guide](https://docs.ggscale.com/wiki/onboarding/) covers the rest.
+The [onboarding guide](https://docs.ggscale.com/wiki/onboarding/) has more information.
 
 ## Common commands
 
@@ -73,6 +76,4 @@ Run `make help` for the full list.
 
 ## Contributing and license
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). ggscale is licensed under the [GNU GPL v3](LICENSE).
-
-Copyright (C) 2026 Build W Solutions Foundation. See [NOTICE](NOTICE).
+See [CONTRIBUTING.md](CONTRIBUTING.md). GG Scale is licensed under the [GNU GPL v3](LICENSE). See [NOTICE](NOTICE).
