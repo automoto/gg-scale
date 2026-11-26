@@ -13,14 +13,13 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 const (
 	maxGameSessionSignalBytes = 65536
 	maxSignalsPerMinute       = 30
 )
-
-var errSignalRateLimited = errors.New("game session signal rate limited")
 
 // gameSessionSignalRequest carries one negotiation signal. The field
 // constraints are declared as huma struct tags so they appear in the
@@ -92,6 +91,13 @@ func validateSignalPayloadSize(payload string) error {
 	return nil
 }
 
+func signalLimits(share float64) ratelimit.Limits {
+	return ratelimit.ScaleLimits(ratelimit.Limits{
+		RatePerSecond: maxSignalsPerMinute / 60.0,
+		Burst:         maxSignalsPerMinute,
+	}, share)
+}
+
 func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendInput) (*gameSessionSignalSendOutput, error) {
 	return func(ctx context.Context, in *gameSessionSignalSendInput) (*gameSessionSignalSendOutput, error) {
 		if err := validateSignalPayloadSize(in.Body.Payload); err != nil {
@@ -107,6 +113,18 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 		projectID, ok := db.ProjectFromContext(ctx)
 		if !ok {
 			return nil, huma.Error400BadRequest("api key has no project pin")
+		}
+		// The process-local bucket replaces the advisory lock and COUNT query.
+		// Game sessions are not pinned to an API instance, so RATE_LIMIT_SHARE
+		// divides the combined limit across the instances serving them.
+		limits := signalLimits(d.rateLimitShare())
+		decision, lerr := d.Limiter.Allow(ctx,
+			fmt.Sprintf("game_session_signal:%s:%d", in.ID, fromID), limits.RatePerSecond, limits.Burst)
+		if lerr != nil {
+			return nil, serverError(ctx, "game session signal limit", lerr)
+		}
+		if !decision.Allowed {
+			return nil, huma.Error429TooManyRequests("signal rate limit exceeded")
 		}
 		var signalID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
@@ -125,21 +143,6 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 			if active != 2 {
 				return errGameSessionForbidden
 			}
-			// Serialize this player's concurrent sends so the count+insert
-			// can't race past the per-minute cap under READ COMMITTED.
-			if qerr := q.LockSignalRate(ctx, fromID); qerr != nil {
-				return qerr
-			}
-			recent, qerr := q.CountRecentGameSessionSignals(ctx, sqlcgen.CountRecentGameSessionSignalsParams{
-				SessionID:    in.ID,
-				FromPlayerID: fromID,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			if recent >= maxSignalsPerMinute {
-				return errSignalRateLimited
-			}
 			signalID, qerr = q.InsertGameSessionSignal(ctx, sqlcgen.InsertGameSessionSignalParams{
 				SessionID:     in.ID,
 				FromPlayerID:  fromID,
@@ -153,8 +156,6 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 		switch {
 		case errors.Is(err, errGameSessionForbidden):
 			return nil, huma.Error404NotFound("not found")
-		case errors.Is(err, errSignalRateLimited):
-			return nil, huma.Error429TooManyRequests("signal rate limit exceeded")
 		case err != nil:
 			return nil, serverError(ctx, "game session signal send", err)
 		}

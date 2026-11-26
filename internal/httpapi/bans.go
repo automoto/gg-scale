@@ -18,6 +18,26 @@ import (
 // tenant; a missing row (deleted / cross-tenant player) maps to ErrRevoked.
 type epochValidator struct{ pool *db.Pool }
 
+// NewSessionEpochCache builds the shared cache used by authentication and the
+// write paths that revoke sessions.
+func NewSessionEpochCache(pool *db.Pool) *playerauth.CachedEpochValidator {
+	return playerauth.NewCachedEpochValidator(epochValidator{pool: pool}, playerauth.DefaultEpochCacheTTL)
+}
+
+func playerEpochValidator(d Deps) playerauth.EpochValidator {
+	if d.SessionEpochs != nil {
+		return d.SessionEpochs
+	}
+	return epochValidator{pool: d.Pool}
+}
+
+func (d Deps) rateLimitShare() float64 {
+	if d.RateLimitShare <= 0 {
+		return 1
+	}
+	return d.RateLimitShare
+}
+
 func (e epochValidator) CurrentEpoch(ctx context.Context, playerID int64) (int64, error) {
 	var epoch int32
 	err := e.pool.Q(ctx, func(tx pgx.Tx) error {

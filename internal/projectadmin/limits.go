@@ -143,9 +143,7 @@ func SetInviteLimits(ctx context.Context, pool *db.Pool, overrides ratelimit.Ove
 	if err != nil {
 		return err
 	}
-	if inv, ok := overrides.(ratelimit.OverrideInvalidator); ok {
-		inv.Invalidate(tenantID)
-	}
+	ratelimit.InvalidateOverrides(ctx, overrides, tenantID)
 	return nil
 }
 

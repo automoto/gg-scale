@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/automoto/gg-scale/internal/cacheinvalidation"
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 )
@@ -126,22 +128,38 @@ type OverrideInvalidator interface {
 	Invalidate(tenantID int64)
 }
 
+// OverrideNotifyInvalidator also publishes the eviction to other instances.
+type OverrideNotifyInvalidator interface {
+	InvalidateAndNotify(ctx context.Context, tenantID int64)
+}
+
+// InvalidateOverrides evicts locally and uses LISTEN/NOTIFY when configured.
+func InvalidateOverrides(ctx context.Context, store OverrideStore, tenantID int64) {
+	if inv, ok := store.(OverrideNotifyInvalidator); ok {
+		inv.InvalidateAndNotify(ctx, tenantID)
+		return
+	}
+	if inv, ok := store.(OverrideInvalidator); ok {
+		inv.Invalidate(tenantID)
+	}
+}
+
 // CachedOverrideStore memoizes an OverrideStore for a short TTL so the
 // per-request middleware doesn't hit Postgres on every call. Mirrors the
 // feature-grant cache in internal/rbac.
 //
-// Freshness has two layers: the write path calls Invalidate to drop a tenant's
-// entries immediately on the process that served the write, and the TTL bounds
-// staleness everywhere else. The cache is per-process with no cross-node
-// invalidation, so other app instances converge within the TTL
-// rather than instantly.
+// Freshness has three layers: the write path evicts locally and publishes a
+// notification, other listeners evict on receipt, and the TTL plus a 60-second
+// full-eviction fallback bound staleness when a notification is lost.
 type CachedOverrideStore struct {
-	inner OverrideStore
-	ttl   time.Duration
-	now   func() time.Time
+	inner    OverrideStore
+	ttl      time.Duration
+	now      func() time.Time
+	notifier cacheinvalidation.Notifier
 
 	mu    sync.Mutex
 	cache map[string]overrideEntry
+	drops uint64
 }
 
 type overrideEntry struct {
@@ -168,6 +186,13 @@ func NewCachedOverrideStore(inner OverrideStore, ttl time.Duration) *CachedOverr
 	}
 }
 
+// WithNotifier configures cross-instance invalidation. Set it during startup,
+// before serving requests.
+func (c *CachedOverrideStore) WithNotifier(notifier cacheinvalidation.Notifier) *CachedOverrideStore {
+	c.notifier = notifier
+	return c
+}
+
 // APILimit implements OverrideStore with caching.
 func (c *CachedOverrideStore) APILimit(ctx context.Context, tenantID int64) (Limits, bool, error) {
 	key := "api:" + strconv.FormatInt(tenantID, 10)
@@ -191,6 +216,7 @@ func (c *CachedOverrideStore) Invalidate(tenantID int64) {
 	invitePrefix := "invite:" + id + ":"
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.drops++
 	delete(c.cache, apiKey)
 	for k := range c.cache {
 		if strings.HasPrefix(k, invitePrefix) {
@@ -199,9 +225,31 @@ func (c *CachedOverrideStore) Invalidate(tenantID int64) {
 	}
 }
 
+// InvalidateAndNotify evicts locally before publishing to other instances.
+// Notification failure is non-fatal: the TTL and slow fallback remain active.
+func (c *CachedOverrideStore) InvalidateAndNotify(ctx context.Context, tenantID int64) {
+	c.Invalidate(tenantID)
+	if c.notifier == nil {
+		return
+	}
+	event := cacheinvalidation.Event{Kind: cacheinvalidation.KindRateLimitOverride, TenantID: tenantID}
+	if err := cacheinvalidation.Notify(ctx, c.notifier, event); err != nil {
+		slog.WarnContext(ctx, "rate-limit override cache notification failed; TTL and fallback remain active", "error", err)
+	}
+}
+
+// InvalidateAll drops every entry on this process for the fallback sweep.
+func (c *CachedOverrideStore) InvalidateAll() {
+	c.mu.Lock()
+	clear(c.cache)
+	c.drops++
+	c.mu.Unlock()
+}
+
 func (c *CachedOverrideStore) get(key string, load func() (Limits, bool, error)) (Limits, bool, error) {
 	now := c.now()
 	c.mu.Lock()
+	drops := c.drops
 	if e, ok := c.cache[key]; ok && now.Before(e.expiresAt) {
 		c.mu.Unlock()
 		return e.limits, e.found, nil
@@ -213,6 +261,10 @@ func (c *CachedOverrideStore) get(key string, load func() (Limits, bool, error))
 		return Limits{}, false, err
 	}
 	c.mu.Lock()
+	if c.drops != drops {
+		c.mu.Unlock()
+		return limits, found, nil
+	}
 	c.cache[key] = overrideEntry{limits: limits, found: found, expiresAt: now.Add(c.ttl)}
 	c.mu.Unlock()
 	return limits, found, nil

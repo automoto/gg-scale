@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/automoto/gg-scale/internal/entitlement"
@@ -23,8 +25,8 @@ func mountInternalAPI(r chi.Router, d Deps) {
 		Metrics:  d.Metrics,
 		// An apply changes the tier (held by the API key cache) and the
 		// feature grants. Both drops are safe on nil.
-		TenantChanged: func(tenantID int64) {
-			d.APIKeyCache.Invalidate(tenantID)
+		TenantChanged: func(ctx context.Context, tenantID int64) {
+			d.APIKeyCache.InvalidateAndNotify(ctx, tenantID)
 			d.RBAC.InvalidateFeatureGrants(tenantID)
 		},
 	}))

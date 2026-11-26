@@ -62,7 +62,7 @@ type Deps struct {
 	// TenantChanged is called after an apply that changed the tier or the
 	// feature grants of a tenant, so the server can drop what it caches for
 	// that tenant. nil is a no-op.
-	TenantChanged func(tenantID int64)
+	TenantChanged func(ctx context.Context, tenantID int64)
 }
 
 // New builds the entitlement API handler: GET and PUT /{tenantID}, both
@@ -218,7 +218,7 @@ func (h *handler) putEntitlements(w http.ResponseWriter, r *http.Request) {
 	}
 	h.d.Metrics.EntitlementApply(observability.EntitlementChanged)
 	if h.d.TenantChanged != nil {
-		h.d.TenantChanged(tenantID)
+		h.d.TenantChanged(r.Context(), tenantID)
 	}
 	h.sendChangeEmail(r.Context(), tenantID, diff)
 	writeJSON(w, applyResponse{Changed: true, State: canonicalState(desired)})

@@ -122,7 +122,7 @@ func (h *Handler) updateAPIKeyManagedScopes(ctx context.Context, actorID, tenant
 	if err := projectadmin.UpdateAPIKeyFeatures(ctx, h.pool, h.rbac, h.cache, h.keySwitches(), tenantID, dashboardKeyScope, apiKeyID, desired, projectadmin.Actor{UserID: actorID}); err != nil {
 		return err
 	}
-	h.dropTenantCaches(tenantID)
+	h.dropTenantCaches(ctx, tenantID)
 	return nil
 }
 
@@ -255,7 +255,7 @@ func (h *Handler) revokeAPIKey(ctx context.Context, actorID, tenantID, apiKeyID 
 	if err := projectadmin.RevokeAPIKey(ctx, h.pool, h.rbac, h.cache, tenantID, dashboardKeyScope, apiKeyID, projectadmin.Actor{UserID: actorID}); err != nil {
 		return err
 	}
-	h.dropTenantCaches(tenantID)
+	h.dropTenantCaches(ctx, tenantID)
 	return nil
 }
 

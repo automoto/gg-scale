@@ -216,7 +216,7 @@ func (h *Handler) setTenantConnectionOverride(ctx context.Context, actorID, tena
 		return err
 	}
 	// The key lookup returns the connection limits, so the key cache holds them.
-	h.dropTenantCaches(tenantID)
+	h.dropTenantCaches(ctx, tenantID)
 	return nil
 }
 
@@ -255,7 +255,7 @@ func (h *Handler) setTenantAPIOverride(ctx context.Context, actorID, tenantID in
 	if err != nil {
 		return err
 	}
-	h.invalidateOverrides(tenantID)
+	h.invalidateOverrides(ctx, tenantID)
 	return nil
 }
 
@@ -309,17 +309,14 @@ func (h *Handler) setTenantRecipientInviteOverride(ctx context.Context, actorID,
 	if err != nil {
 		return err
 	}
-	h.invalidateOverrides(tenantID)
+	h.invalidateOverrides(ctx, tenantID)
 	return nil
 }
 
-// invalidateOverrides drops the tenant's cached overrides so a just-written
-// change takes effect immediately on this process (other cluster nodes converge
-// within the cache TTL). No-op when the store doesn't cache.
-func (h *Handler) invalidateOverrides(tenantID int64) {
-	if inv, ok := h.overrides.(ratelimit.OverrideInvalidator); ok {
-		inv.Invalidate(tenantID)
-	}
+// invalidateOverrides drops the tenant's cached overrides locally and notifies
+// every other instance. A missing cache is a no-op.
+func (h *Handler) invalidateOverrides(ctx context.Context, tenantID int64) {
+	ratelimit.InvalidateOverrides(ctx, h.overrides, tenantID)
 }
 
 // rlNum formats a limit for display without trailing zeros.

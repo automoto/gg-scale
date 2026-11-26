@@ -154,7 +154,7 @@ func (h *Handler) updateTenantTierHandler(w http.ResponseWriter, r *http.Request
 		h.redirectTenantSettings(w, r, tenantID, flashTierUnchanged)
 		return
 	}
-	h.dropTenantCaches(tenantID)
+	h.dropTenantCaches(r.Context(), tenantID)
 	h.redirectTenantSettings(w, r, tenantID, flashTierChanged)
 }
 
@@ -240,7 +240,7 @@ func (h *Handler) updateTenantFeatureHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if changed {
-		h.dropTenantCaches(tenantID)
+		h.dropTenantCaches(r.Context(), tenantID)
 	}
 	switch {
 	case !changed && enable:

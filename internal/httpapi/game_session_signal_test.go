@@ -25,3 +25,15 @@ func TestValidateSignalPayloadSize_acceptsWithinBounds(t *testing.T) {
 	assert.NoError(t, validateSignalPayloadSize("v=0"))
 	assert.NoError(t, validateSignalPayloadSize(strings.Repeat("x", maxGameSessionSignalBytes)))
 }
+
+func TestSignalLimits_should_scale_for_cross_instance_game_sessions(t *testing.T) {
+	// Arrange
+	share := 0.5
+
+	// Act
+	limits := signalLimits(share)
+
+	// Assert
+	assert.Equal(t, 0.25, limits.RatePerSecond)
+	assert.Equal(t, 15.0, limits.Burst)
+}

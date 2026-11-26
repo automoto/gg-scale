@@ -30,3 +30,10 @@ func LimitsForTier(t tenant.Tier) Limits {
 		return Limits{RatePerSecond: 250, Burst: 2500}
 	}
 }
+
+// ScaleLimits divides a combined limit across instances. Both dimensions must
+// move together: scaling only the refill rate would leave one instance's burst
+// able to exceed its assigned share.
+func ScaleLimits(limits Limits, share float64) Limits {
+	return Limits{RatePerSecond: limits.RatePerSecond * share, Burst: limits.Burst * share}
+}

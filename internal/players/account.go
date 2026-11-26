@@ -1300,7 +1300,7 @@ func (h *Handler) accountProjectDeleteCancel(w http.ResponseWriter, r *http.Requ
 // tenant scope. An already-pending request (0 rows) is a benign double
 // submit, also when another surface won the race.
 func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid.UUID, lp LinkedProject) error {
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
 			return err
 		}
@@ -1324,6 +1324,10 @@ func (h *Handler) requestProjectPlayerDelete(ctx context.Context, accountID uuid
 		return auditlog.Write(ctx, tx, lp.PlayerID, "account.player.delete_request", "",
 			map[string]any{"scheduled_purge_at": ts.Time.Add(h.deleteGrace())})
 	})
+	if err == nil {
+		h.sessionEpochs.Invalidate(ctx, lp.PlayerID)
+	}
+	return err
 }
 
 // cancelProjectPlayerDelete clears a pending delete request under the
@@ -1353,7 +1357,7 @@ func (h *Handler) cancelProjectPlayerDelete(ctx context.Context, accountID uuid.
 // account guard inside UnlinkPlayerFromAccount makes a lost race (admin
 // re-linked meanwhile, or a double submit) a no-op rather than an error.
 func (h *Handler) unlinkProjectPlayer(ctx context.Context, accountID uuid.UUID, lp LinkedProject) error {
-	return h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
+	err := h.pool.BootstrapQ(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", strconv.FormatInt(lp.TenantID, 10)); err != nil {
 			return err
 		}
@@ -1371,6 +1375,10 @@ func (h *Handler) unlinkProjectPlayer(ctx context.Context, accountID uuid.UUID, 
 		})
 		return err
 	})
+	if err == nil {
+		h.sessionEpochs.Invalidate(ctx, lp.PlayerID)
+	}
+	return err
 }
 
 // --- verify-pending cookie (account variant) -------------------------------

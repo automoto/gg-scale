@@ -478,6 +478,7 @@ func (h *Handler) playerToggleDisableHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "update failed", http.StatusInternalServerError)
 		return
 	}
+	h.sessionEpochs.Invalidate(r.Context(), playerID)
 	code := flashPlayerDisabled
 	if enable {
 		code = flashPlayerReenabled
@@ -525,6 +526,7 @@ func (h *Handler) playerRequestDeleteHandler(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "delete request failed", http.StatusInternalServerError)
 		return
 	}
+	h.sessionEpochs.Invalidate(r.Context(), playerID)
 	target := pathTenantsPrefix + strconv.FormatInt(tenantID, 10) +
 		"/projects/" + strconv.FormatInt(projectID, 10) +
 		"/players/" + strconv.FormatInt(playerID, 10)
@@ -696,6 +698,7 @@ func (h *Handler) playerToggleBanHandler(w http.ResponseWriter, r *http.Request)
 		webutil.InternalError(w, "player ban toggle", err)
 		return
 	}
+	h.sessionEpochs.InvalidateTenant(r.Context(), tenantID)
 	if ban {
 		h.metrics.BanIssued(observability.BanScopeTenant)
 	}

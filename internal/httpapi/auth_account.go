@@ -160,6 +160,7 @@ func changePassword(d Deps) func(context.Context, *changePasswordInput) (*struct
 		if err != nil {
 			return nil, serverError(ctx, "change password: tx", err)
 		}
+		d.SessionEpochs.Invalidate(ctx, me)
 		return nil, nil
 	}
 }
@@ -205,6 +206,7 @@ func disablePlayer(d Deps) func(context.Context, *disableInput) (*struct{}, erro
 		if err != nil {
 			return nil, serverError(ctx, "disable: tx", err)
 		}
+		d.SessionEpochs.Invalidate(ctx, me)
 		return nil, nil
 	}
 }
@@ -258,6 +260,7 @@ func requestPlayerDelete(d Deps) func(context.Context, *disableInput) (*deleteRe
 		if err != nil {
 			return nil, serverError(ctx, "delete request: tx", err)
 		}
+		d.SessionEpochs.Invalidate(ctx, me)
 		return out, nil
 	}
 }

@@ -703,6 +703,7 @@ func authRefresh(d Deps) func(context.Context, *refreshInput) (*sessionOutput, e
 						return err
 					}
 					reuseDetected = true
+					playerID = row.PlayerID
 					return auditlog.Write(ctx, tx, row.PlayerID, "auth.refresh_reuse", "", nil)
 				}
 				return errSessionRevoked
@@ -739,6 +740,7 @@ func authRefresh(d Deps) func(context.Context, *refreshInput) (*sessionOutput, e
 			return nil, serverError(ctx, "refresh: tx", err)
 		}
 		if reuseDetected {
+			d.SessionEpochs.Invalidate(ctx, playerID)
 			return nil, huma.Error401Unauthorized("invalid refresh")
 		}
 
@@ -753,6 +755,7 @@ func authRefresh(d Deps) func(context.Context, *refreshInput) (*sessionOutput, e
 func authLogout(d Deps) func(context.Context, *logoutInput) (*struct{}, error) {
 	return func(ctx context.Context, in *logoutInput) (*struct{}, error) {
 		hash := sha256.Sum256([]byte(in.Body.RefreshToken))
+		var loggedOutPlayerID int64
 		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			playerID, err := q.RevokeSessionByRefreshHash(ctx, hash[:])
@@ -765,10 +768,14 @@ func authLogout(d Deps) func(context.Context, *logoutInput) (*struct{}, error) {
 				}
 				return err
 			}
+			loggedOutPlayerID = playerID
 			return auditlog.Write(ctx, tx, playerID, "auth.logout", "", nil)
 		})
 		if err != nil {
 			return nil, serverError(ctx, "logout: tx", err)
+		}
+		if loggedOutPlayerID > 0 {
+			d.SessionEpochs.Invalidate(ctx, loggedOutPlayerID)
 		}
 		return nil, nil
 	}

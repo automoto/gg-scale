@@ -28,6 +28,7 @@ import (
 	"github.com/automoto/gg-scale/internal/billing"
 	"github.com/automoto/gg-scale/internal/cache/instrument"
 	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/cacheinvalidation"
 	"github.com/automoto/gg-scale/internal/config"
 	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/db"
@@ -423,10 +424,10 @@ func run() error {
 	}
 
 	// Cacheable reads and request token buckets are deliberately process-local.
-	// Managed production currently runs one web process per service region, so
-	// the API-key bucket is the regional bucket. Horizontal web scaling requires
-	// a distributed API limiter (or an explicitly divided per-process quota)
-	// before the published regional API envelope remains exact.
+	// RATE_LIMIT_SHARE assigns each instance part of the combined East+West
+	// tier envelope, so horizontal scaling does not multiply the published
+	// limit. LISTEN/NOTIFY propagates invalidations; TTLs and a 60-second
+	// fallback bound staleness when a notification is lost.
 	store := instrument.New(memory.New(), registry)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -687,9 +688,19 @@ func run() error {
 	}
 
 	rateLimitOverrides := ratelimit.NewCachedOverrideStore(
-		ratelimit.NewDBOverrideStore(appPool), cfg.RateLimitOverrideCacheTTL)
-
-	keyCache := tenant.NewKeyCache(tenant.NewSQLLookup(pool), cfg.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries)
+		ratelimit.NewDBOverrideStore(appPool), cfg.RateLimitOverrideCacheTTL).WithNotifier(appPool)
+	keyCache := tenant.NewKeyCache(tenant.NewSQLLookup(pool), cfg.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries).WithNotifier(appPool)
+	sessionEpochs := httpapi.NewSessionEpochCache(appPool).WithNotifier(appPool)
+	go cacheinvalidation.Run(appCtx, appPool, cacheinvalidation.Handler{
+		APIKeys:      keyCache.Invalidate,
+		Overrides:    rateLimitOverrides.Invalidate,
+		PlayerEpochs: sessionEpochs.Evict,
+		TenantEpochs: sessionEpochs.EvictTenant,
+	}, func() {
+		keyCache.InvalidateAll()
+		rateLimitOverrides.InvalidateAll()
+		sessionEpochs.InvalidateAll()
+	})
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
@@ -700,6 +711,8 @@ func run() error {
 		ReadPool:              readPool,
 		Lookup:                keyCache.Lookup,
 		APIKeyCache:           keyCache,
+		SessionEpochs:         sessionEpochs,
+		RateLimitShare:        cfg.RateLimitShare,
 		Limiter:               ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:    rateLimitOverrides,
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,

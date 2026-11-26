@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"slices"
@@ -120,6 +121,14 @@ func (c *Config) checkFeatureSwitches() error {
 	}
 	if !c.EntitlementAPIEnabled && c.EntitlementAPIToken != "" {
 		return fmt.Errorf("ENTITLEMENT_API_TOKEN set while ENTITLEMENT_API_ENABLED is false; enable the API or clear the token")
+	}
+	return nil
+}
+
+// checkRateLimitShare bounds the instance's fraction of a combined tier limit.
+func (c *Config) checkRateLimitShare() error {
+	if c.RateLimitShare <= 0 || c.RateLimitShare > 1 || math.IsNaN(c.RateLimitShare) || math.IsInf(c.RateLimitShare, 0) {
+		return fmt.Errorf("RATE_LIMIT_SHARE must be greater than 0 and at most 1")
 	}
 	return nil
 }
@@ -396,6 +405,9 @@ func cacheTimeError(envName string) error {
 // Validate: Validate is exercised by tests with sparse configs whose
 // zero-valued durations and counts would trip the positivity checks below.
 func (c *Config) checkFields() error {
+	if err := c.checkRateLimitShare(); err != nil {
+		return err
+	}
 	for _, d := range []struct {
 		name string
 		val  time.Duration

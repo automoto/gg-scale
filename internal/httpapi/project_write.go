@@ -356,7 +356,7 @@ func updateAPIKeyFeatures(ctx context.Context, d Deps, p managementtoken.Princip
 	if err := projectadmin.UpdateAPIKeyFeatures(ctx, d.Pool, d.RBAC, d.Cache, sw, p.TenantID, projectKeyScope(p), in.APIKeyID, in.Body.Scopes, projectActor(p)); err != nil {
 		return projectAPIKeyUpdated{}, projectWriteError(err)
 	}
-	d.APIKeyCache.Invalidate(p.TenantID)
+	d.APIKeyCache.InvalidateAndNotify(ctx, p.TenantID)
 	return projectAPIKeyUpdated{Updated: true}, nil
 }
 
@@ -368,7 +368,7 @@ func revokeAPIKey(ctx context.Context, d Deps, p managementtoken.Principal, in *
 	if err := projectadmin.RevokeAPIKey(ctx, d.Pool, d.RBAC, d.Cache, p.TenantID, projectKeyScope(p), in.APIKeyID, projectActor(p)); err != nil {
 		return projectAPIKeyRevoked{}, projectWriteError(err)
 	}
-	d.APIKeyCache.Invalidate(p.TenantID)
+	d.APIKeyCache.InvalidateAndNotify(ctx, p.TenantID)
 	return projectAPIKeyRevoked{Revoked: true}, nil
 }
 
@@ -390,12 +390,18 @@ func playerWriteResult(ctx context.Context, d Deps, p managementtoken.Principal,
 
 func setPlayerDisabled(ctx context.Context, d Deps, p managementtoken.Principal, in *projectSetPlayerDisabledInput) (projectPlayer, error) {
 	err := projectadmin.SetPlayerDisabled(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID, in.Body.Disabled, time.Now(), projectActor(p))
+	if err == nil {
+		d.SessionEpochs.Invalidate(ctx, in.PlayerID)
+	}
 	return playerWriteResult(ctx, d, p, in.PlayerID, err)
 }
 
 func requestProjectPlayerDelete(ctx context.Context, d Deps, p managementtoken.Principal, in *ProjectPlayerPath) (projectPlayer, error) {
 	_, err := projectadmin.RequestPlayerDelete(ctx, d.Pool, p.TenantID, p.ProjectID, in.PlayerID,
 		deleteGrace(d), projectActor(p))
+	if err == nil {
+		d.SessionEpochs.Invalidate(ctx, in.PlayerID)
+	}
 	return playerWriteResult(ctx, d, p, in.PlayerID, err)
 }
 

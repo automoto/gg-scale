@@ -22,9 +22,10 @@ func (h *Handler) reloadRBACPolicy(ctx context.Context) {
 // and the connection limits), its feature grants, and the management token
 // checks (they carry the tenant disabled flag). A write that changes one of
 // these calls it after the commit, so the change takes effect at once on this
-// process. Other app instances converge within the cache TTLs.
-func (h *Handler) dropTenantCaches(tenantID int64) {
-	h.keyCache.Invalidate(tenantID)
+// process. LISTEN/NOTIFY evicts the key on other instances; cache TTLs and the
+// slow fallback cover a lost notification.
+func (h *Handler) dropTenantCaches(ctx context.Context, tenantID int64) {
+	h.keyCache.InvalidateAndNotify(ctx, tenantID)
 	h.rbac.InvalidateFeatureGrants(tenantID)
 	h.tokenCache.Invalidate()
 }

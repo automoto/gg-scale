@@ -84,6 +84,13 @@ type Deps struct {
 	ReadPool *db.Pool
 	Lookup   tenant.Lookup
 	Limiter  ratelimit.Limiter
+	// RateLimitShare scales per-tier defaults, API overrides, token-route
+	// limits, and game-session signal buckets for this instance. Zero uses 1
+	// in tests; production configuration requires a value in (0, 1].
+	RateLimitShare float64
+	// SessionEpochs is the shared epoch cache used by player authentication
+	// and by writes that must evict it. nil keeps uncached validation in tests.
+	SessionEpochs *playerauth.CachedEpochValidator
 	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
 	// overrides. Wrap the DB store in a CachedOverrideStore.
 	RateLimitOverrides ratelimit.OverrideStore
@@ -280,6 +287,14 @@ func panicRecover() func(http.Handler) http.Handler {
 
 // NewRouter builds the ggscale-server HTTP handler.
 func NewRouter(d Deps) http.Handler {
+	share := d.rateLimitShare()
+	tokenIPLimits := d.TokenIPLimits
+	if tokenIPLimits == nil {
+		tokenIPLimits = ratelimit.TokenIPLimitsForTier
+	}
+	d.TokenIPLimits = func(t tenant.Tier) ratelimit.Limits {
+		return ratelimit.ScaleLimits(tokenIPLimits(t), share)
+	}
 	reg := d.Registry
 	if reg == nil {
 		reg = prometheus.NewRegistry()
@@ -395,6 +410,7 @@ func NewRouter(d Deps) http.Handler {
 				ManagementTokenCache: tokenDeps.Cache,
 				OriginsChanged:       d.origins.drop,
 				APIKeyCache:          d.APIKeyCache,
+				SessionEpochs:        d.SessionEpochs,
 				Limiter:              d.Limiter,
 				RateLimitOverrides:   d.RateLimitOverrides,
 				ConnectionEnvMax:     d.RealtimeMaxPerTenant,
@@ -421,6 +437,7 @@ func NewRouter(d Deps) http.Handler {
 				Mailer:               d.Mailer,
 				MailFrom:             d.MailFrom,
 				Config:               d.Players,
+				SessionEpochs:        d.SessionEpochs,
 				Limiter:              d.Limiter,
 				ProxyTrust:           d.ProxyTrust,
 				Registry:             reg,
@@ -459,7 +476,7 @@ func NewRouter(d Deps) http.Handler {
 			}
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg)))
-				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
+				r.Use(ratelimit.NewWithShare(d.Limiter, d.RateLimitOverrides, reg, share))
 				registerRemoteConfig(groupAPI(r, humaCfg), d)
 
 				// /v1/auth/* — tenant-scoped, player-anonymous (api_key
@@ -517,7 +534,7 @@ func NewRouter(d Deps) http.Handler {
 
 				// Player authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
-					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
+					r.Use(playerauth.New(d.Signer, playerEpochValidator(d)))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 
 					if d.Matchmaker != nil {

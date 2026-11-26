@@ -66,6 +66,16 @@ func APIKeyBucketKey(apiKeyID int64) string {
 // is registered on reg so callers control the registry — useful for tests
 // and for keeping the production registry isolated from package globals.
 func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(http.Handler) http.Handler {
+	return NewWithShare(lim, overrides, reg, 1)
+}
+
+// NewWithShare is New with this instance's share of the combined tier limit.
+// A zero share preserves New's default for tests and partially built routers;
+// production configuration rejects zero.
+func NewWithShare(lim Limiter, overrides OverrideStore, reg prometheus.Registerer, share float64) func(http.Handler) http.Handler {
+	if share <= 0 || math.IsNaN(share) || math.IsInf(share, 0) {
+		share = 1
+	}
 	throttled := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "ggscale_ratelimit_throttled_total",
@@ -102,6 +112,7 @@ func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(h
 					limits = o
 				}
 			}
+			limits = ScaleLimits(limits, share)
 			bucket := bucketKey(key.ID, routeClassDefault)
 			decision, err := lim.Allow(r.Context(), bucket, limits.RatePerSecond, limits.Burst)
 			if err != nil {

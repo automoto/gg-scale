@@ -22,6 +22,7 @@ import (
 	"github.com/automoto/gg-scale/internal/db"
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/ratelimit"
 	"github.com/automoto/gg-scale/internal/signedcookie"
 	"github.com/automoto/gg-scale/internal/sso"
@@ -69,6 +70,8 @@ type Deps struct {
 	Mailer   mailer.Mailer
 	MailFrom string
 	Config   Config
+	// SessionEpochs is evicted after account-driven player deletion and unlink.
+	SessionEpochs *playerauth.CachedEpochValidator
 	// Limiter and Registry may be nil — typically only in unit tests.
 	// When nil the per-IP auth rate limiter is skipped; production
 	// callers always supply both.
@@ -92,12 +95,13 @@ type Deps struct {
 
 // Handler owns player UI HTTP routes.
 type Handler struct {
-	pool     *db.Pool
-	mailer   mailer.Mailer
-	mailFrom string
-	cfg      Config
-	now      func() time.Time
-	metrics  *observability.Metrics
+	pool          *db.Pool
+	mailer        mailer.Mailer
+	mailFrom      string
+	cfg           Config
+	sessionEpochs *playerauth.CachedEpochValidator
+	now           func() time.Time
+	metrics       *observability.Metrics
 	// verifySigningKey signs the short-lived verify-pending cookie and is shared
 	// across processes and the control panel.
 	verifySigningKey     []byte
@@ -213,6 +217,7 @@ func newHandler(d Deps) *Handler {
 		mailer:               d.Mailer,
 		mailFrom:             d.MailFrom,
 		cfg:                  d.Config,
+		sessionEpochs:        d.SessionEpochs,
 		now:                  time.Now,
 		metrics:              d.Metrics,
 		verifySigningKey:     append([]byte(nil), d.VerifySigningKey...),

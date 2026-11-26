@@ -13,6 +13,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestLoad_should_reject_an_out_of_range_rate_limit_share(t *testing.T) {
+	for _, value := range []string{"0", "-0.5", "1.5", "NaN"} {
+		t.Run(value, func(t *testing.T) {
+			// Arrange
+			clearEnv(t)
+			t.Setenv("DATABASE_URL", "postgres://localhost/test")
+			t.Setenv("RATE_LIMIT_SHARE", value)
+
+			// Act
+			_, err := config.Load()
+
+			// Assert
+			assert.ErrorContains(t, err, "RATE_LIMIT_SHARE")
+		})
+	}
+}
+
 func TestLoad_returns_error_when_required_var_missing(t *testing.T) {
 	clearEnv(t)
 
@@ -33,6 +50,7 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Equal(t, "info", cfg.LogLevel)
 	assert.Equal(t, "dev", cfg.Env)
 	assert.Equal(t, "local", cfg.AppRegion)
+	assert.Equal(t, 1.0, cfg.RateLimitShare)
 	assert.True(t, cfg.ControlPanelEnabled)
 	assert.Empty(t, cfg.ControlPanelBootstrapTokenFile)
 	assert.False(t, cfg.ControlPanelCookieSecure)
@@ -570,7 +588,7 @@ func parseEnvFileKeys(content string) []string {
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{
-		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "APP_REGION", "LOG_LEVEL", "ENV",
+		"DATABASE_URL", "DATABASE_URL_FILE", "HTTP_ADDR", "APP_REGION", "RATE_LIMIT_SHARE", "LOG_LEVEL", "ENV",
 		"PARTY_ENQUEUE_ENABLED",
 		"PARTY_CODE_IP_MAX_FAILURES", "PARTY_CODE_PLAYER_MAX_FAILURES", "PARTY_CODE_COOLDOWN",
 		"JWT_SIGNING_KEY", "JWT_SIGNING_KEY_FILE",

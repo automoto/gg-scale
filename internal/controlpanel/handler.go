@@ -20,6 +20,7 @@ import (
 	"github.com/automoto/gg-scale/internal/mailer"
 	"github.com/automoto/gg-scale/internal/managementtoken"
 	"github.com/automoto/gg-scale/internal/observability"
+	"github.com/automoto/gg-scale/internal/playerauth"
 	"github.com/automoto/gg-scale/internal/projectadmin"
 	"github.com/automoto/gg-scale/internal/quota"
 	"github.com/automoto/gg-scale/internal/ratelimit"
@@ -46,6 +47,8 @@ type Deps struct {
 	// APIKeyCache (may be nil) is the server's API key cache. A write that
 	// changes a key or its tenant drops the tenant's entries from it.
 	APIKeyCache *tenant.KeyCache
+	// SessionEpochs is evicted after player bans, disables, and deletion writes.
+	SessionEpochs *playerauth.CachedEpochValidator
 	// ManagementTokenCache (may be nil) is the server's management token
 	// cache. A token revoke or a tenant write drops it.
 	ManagementTokenCache *managementtoken.Cache
@@ -116,6 +119,7 @@ type Handler struct {
 	pool             *db.Pool
 	cache            cache.Store
 	keyCache         *tenant.KeyCache
+	sessionEpochs    *playerauth.CachedEpochValidator
 	tokenCache       *managementtoken.Cache
 	originsChanged   func()
 	limiter          ratelimit.Limiter
@@ -401,6 +405,7 @@ func newHandler(d Deps) *Handler {
 		pool:                 d.Pool,
 		cache:                d.Cache,
 		keyCache:             d.APIKeyCache,
+		sessionEpochs:        d.SessionEpochs,
 		tokenCache:           d.ManagementTokenCache,
 		originsChanged:       d.OriginsChanged,
 		limiter:              d.Limiter,

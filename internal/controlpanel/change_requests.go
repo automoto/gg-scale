@@ -524,7 +524,7 @@ func (h *Handler) approveChangeRequestHandler(w http.ResponseWriter, r *http.Req
 		return
 	}
 	// Drop first: the email can be slow, and the change is already committed.
-	h.dropTenantCaches(applied.TenantID)
+	h.dropTenantCaches(r.Context(), applied.TenantID)
 	h.sendChangeRequestDecisionEmail(r.Context(), applied, true)
 	h.redirectChangeAdmin(w, r, flashRequestApproved)
 }

@@ -3,14 +3,17 @@ package tenant
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/automoto/gg-scale/internal/cacheinvalidation"
 )
 
 // DefaultAPIKeyCacheTTL is the default of API_KEY_CACHE_TTL: how long a cached
 // key lookup is served. A revoked key, a disabled tenant, or a changed tier or
-// scope takes effect at once on the app instance that served the write (see
-// KeyCache.Invalidate) and within this time on every other instance.
+// scope is evicted on the writing instance and on LISTEN/NOTIFY recipients; the
+// TTL and 60-second fallback cover a lost notification.
 const DefaultAPIKeyCacheTTL = 30 * time.Second
 
 // APIKeyCacheMaxEntries bounds the cache size. When it is full, one entry is
@@ -27,10 +30,11 @@ type keyCacheEntry struct {
 // lookup errors are not cached. A nil KeyCache caches nothing and its
 // Invalidate does nothing.
 type KeyCache struct {
-	inner Lookup
-	ttl   time.Duration
-	max   int
-	now   func() time.Time
+	inner    Lookup
+	ttl      time.Duration
+	max      int
+	now      func() time.Time
+	notifier cacheinvalidation.Notifier
 
 	mu      sync.Mutex
 	entries map[string]keyCacheEntry
@@ -45,6 +49,13 @@ func NewKeyCache(inner Lookup, ttl time.Duration, maxEntries int) *KeyCache {
 		ttl = DefaultAPIKeyCacheTTL
 	}
 	return &KeyCache{inner: inner, ttl: ttl, max: maxEntries, now: time.Now, entries: make(map[string]keyCacheEntry)}
+}
+
+// WithNotifier configures cross-instance invalidation. Set it during startup,
+// before serving requests.
+func (c *KeyCache) WithNotifier(notifier cacheinvalidation.Notifier) *KeyCache {
+	c.notifier = notifier
+	return c
 }
 
 // Lookup implements the Lookup signature with caching.
@@ -83,11 +94,10 @@ func (c *KeyCache) Lookup(ctx context.Context, keyHash []byte) (*APIKey, error) 
 	return copyKey(key)
 }
 
-// Invalidate drops the cached keys of a tenant. A write path calls it after
-// its commit when it changes what a lookup returns: a key revoke or scope
-// change, a tenant disable or enable, a tier change, or a connection limit
-// change. It acts on this process only; other app instances converge within
-// the TTL.
+// Invalidate drops the cached keys of a tenant on this process. A write path
+// calls InvalidateAndNotify after its commit when it changes what a lookup
+// returns: a key revoke or scope change, a tenant disable or enable, a tier
+// change, or a connection limit change.
 func (c *KeyCache) Invalidate(tenantID int64) {
 	if c == nil {
 		return
@@ -102,7 +112,34 @@ func (c *KeyCache) Invalidate(tenantID int64) {
 	}
 }
 
-// copyKey hands each caller its own APIKey: Admit writes to the one it gets.
+// InvalidateAndNotify evicts locally before publishing to other instances.
+// Notification failure is non-fatal: the TTL and slow fallback remain active.
+func (c *KeyCache) InvalidateAndNotify(ctx context.Context, tenantID int64) {
+	if c == nil {
+		return
+	}
+	c.Invalidate(tenantID)
+	if c.notifier == nil {
+		return
+	}
+	event := cacheinvalidation.Event{Kind: cacheinvalidation.KindAPIKey, TenantID: tenantID}
+	if err := cacheinvalidation.Notify(ctx, c.notifier, event); err != nil {
+		slog.WarnContext(ctx, "API key cache notification failed; TTL and fallback remain active", "error", err)
+	}
+}
+
+// InvalidateAll drops every entry on this process for the fallback sweep.
+func (c *KeyCache) InvalidateAll() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	clear(c.entries)
+	c.drops++
+	c.mu.Unlock()
+}
+
+// copyKey hands each caller its own APIKey; callers must not mutate it.
 func copyKey(k *APIKey) (*APIKey, error) {
 	if k == nil {
 		return nil, ErrUnknownKey

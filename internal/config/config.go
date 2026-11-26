@@ -18,6 +18,9 @@ type Config struct {
 	// instances in one load-balancer pool use the same value; different regions
 	// must use different values.
 	AppRegion string `env:"APP_REGION" envDefault:"local"`
+	// RateLimitShare is this instance's share of the combined cross-region
+	// per-tier rate and burst. It must be greater than 0 and at most 1.
+	RateLimitShare float64 `env:"RATE_LIMIT_SHARE" envDefault:"1.0"`
 
 	// HTTPRequestTimeout bounds how long a non-streaming request may run before
 	// the middleware cancels its context and returns 503 + Retry-After. It must
@@ -89,9 +92,9 @@ type Config struct {
 	// tenant (quota axis "leaderboards"). Default 1000.
 	LeaderboardMaxPerProject int `env:"LEADERBOARD_MAX_PER_PROJECT" envDefault:"1000"`
 
-	// Cache times. Each app instance has its own caches and PostgreSQL is
-	// the source of truth. A write takes effect at once on the instance that
-	// served it, and within the cache time on every other instance. Each
+	// Cache times. Each app instance has its own caches and PostgreSQL is the
+	// source of truth. Writes evict locally and publish LISTEN/NOTIFY events;
+	// cache times and a 60-second fallback cover a lost notification. Each
 	// value must be more than 0.
 	//
 	// APIKeyCacheTTL is how long an API key lookup is kept. It bounds how

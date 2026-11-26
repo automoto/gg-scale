@@ -149,6 +149,21 @@ func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 	assert.Equal(t, lim.keys[0], lim.keys[2])
 }
 
+func TestMiddleware_scales_tier_limits_by_instance_share(t *testing.T) {
+	// Arrange
+	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+	mw := ratelimit.NewWithShare(lim, nil, prometheus.NewRegistry(), 0.5)
+
+	// Act
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier1})
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), req)
+
+	// Assert
+	require.Len(t, lim.rates, 1)
+	assert.Equal(t, 500.0, lim.rates[0])
+	assert.Equal(t, 5000.0, lim.bursts[0])
+}
+
 func TestMiddleware_applies_tenant_override_independently_to_each_api_key(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 	overrides := &countingOverrides{

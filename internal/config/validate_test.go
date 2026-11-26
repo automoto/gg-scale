@@ -17,6 +17,7 @@ func baseProd() *config.Config {
 	return &config.Config{
 		Env:                            "production",
 		AppRegion:                      "us-east",
+		RateLimitShare:                 1,
 		DatabaseURL:                    "postgres://ggscale_app_login@db/ggscale",
 		DBMigrateURL:                   "postgres://ggscale_owner@db/ggscale",
 		DBMaxConns:                     10,

@@ -110,7 +110,7 @@ func newEntitlementFixture(t *testing.T) entitlementFixture {
 		Mailer:   mails,
 		MailFrom: "noreply@ggscale.dev",
 		Token:    testToken,
-		TenantChanged: func(tenantID int64) {
+		TenantChanged: func(_ context.Context, tenantID int64) {
 			changed = append(changed, tenantID)
 		},
 	})
