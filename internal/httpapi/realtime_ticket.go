@@ -137,10 +137,10 @@ func realtimeTicketAuth(d Deps) func(http.Handler) http.Handler {
 // routes. The ticket path authenticates first, then runs the same two
 // limiters (per API key, then per player).
 func realtimeRoute(d Deps, ws http.Handler, reg prometheus.Registerer) http.HandlerFunc {
-	limited := ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
+	limited := ratelimit.New(d.Limiter, d.RateLimitOverrides, reg, d.RateLimitShare)(
 		ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))
 	byHeaders := tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg))(
-		ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
+		ratelimit.New(d.Limiter, d.RateLimitOverrides, reg, d.RateLimitShare)(
 			playerauth.New(d.Signer, epochValidator{d.Pool})(
 				ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))))
 	byTicket := realtimeTicketAuth(d)(limited)

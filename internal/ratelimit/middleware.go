@@ -65,7 +65,9 @@ func APIKeyBucketKey(apiKeyID int64) string {
 // The throttled counter (ggscale_ratelimit_throttled_total{tier,route_class})
 // is registered on reg so callers control the registry — useful for tests
 // and for keeping the production registry isolated from package globals.
-func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(http.Handler) http.Handler {
+// share scales both axes of the per-API-key bucket after resolving tier
+// defaults or tenant overrides. Burst always retains at least one token.
+func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer, share float64) func(http.Handler) http.Handler {
 	throttled := prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "ggscale_ratelimit_throttled_total",
@@ -102,6 +104,8 @@ func New(lim Limiter, overrides OverrideStore, reg prometheus.Registerer) func(h
 					limits = o
 				}
 			}
+			limits.RatePerSecond *= share
+			limits.Burst = math.Max(1, limits.Burst*share)
 			bucket := bucketKey(key.ID, routeClassDefault)
 			decision, err := lim.Allow(r.Context(), bucket, limits.RatePerSecond, limits.Burst)
 			if err != nil {

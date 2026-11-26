@@ -50,7 +50,7 @@ func reqWithKey(key tenant.APIKey) *http.Request {
 func TestMiddleware_passes_through_when_decision_allowed(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
@@ -63,7 +63,7 @@ func TestMiddleware_passes_through_when_decision_allowed(t *testing.T) {
 func TestMiddleware_returns_429_with_retry_after_and_json_body_when_denied(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: false, RetryAfter: 250 * time.Millisecond}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
@@ -84,7 +84,7 @@ func TestMiddleware_returns_429_with_retry_after_and_json_body_when_denied(t *te
 func TestMiddleware_increments_throttled_counter_on_denial(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: false, RetryAfter: 100 * time.Millisecond}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	for i := 0; i < 3; i++ {
 		rr := httptest.NewRecorder()
@@ -108,7 +108,7 @@ func TestMiddleware_increments_throttled_counter_on_denial(t *testing.T) {
 func TestMiddleware_returns_500_on_limiter_error(t *testing.T) {
 	lim := &fakeLimiter{err: errors.New("redis down")}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	rr := httptest.NewRecorder()
 	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
@@ -120,7 +120,7 @@ func TestMiddleware_returns_500_on_limiter_error(t *testing.T) {
 func TestMiddleware_returns_500_when_no_api_key_in_context(t *testing.T) {
 	lim := &fakeLimiter{}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/x", nil)
@@ -133,7 +133,7 @@ func TestMiddleware_returns_500_when_no_api_key_in_context(t *testing.T) {
 func TestMiddleware_keys_bucket_by_api_key_id(t *testing.T) {
 	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 
 	for _, id := range []int64{42, 43, 42} {
 		rr := httptest.NewRecorder()
@@ -155,7 +155,7 @@ func TestMiddleware_applies_tenant_override_independently_to_each_api_key(t *tes
 		apiLimit: ratelimit.Limits{RatePerSecond: 25_000, Burst: 250_000},
 		apiFound: true,
 	}
-	mw := ratelimit.New(lim, overrides, prometheus.NewRegistry())
+	mw := ratelimit.New(lim, overrides, prometheus.NewRegistry(), 1.0)
 
 	for _, id := range []int64{42, 43} {
 		rr := httptest.NewRecorder()
@@ -168,6 +168,83 @@ func TestMiddleware_applies_tenant_override_independently_to_each_api_key(t *tes
 	assert.Equal(t, []float64{250_000, 250_000}, lim.bursts)
 	require.Len(t, lim.keys, 2)
 	assert.NotEqual(t, lim.keys[0], lim.keys[1], "each API key receives an independent custom bucket")
+}
+
+func TestMiddleware_scales_tier_defaults_and_overrides_by_share(t *testing.T) {
+	tests := []struct {
+		name      string
+		tier      tenant.Tier
+		overrides ratelimit.OverrideStore
+		wantRate  float64
+		wantBurst float64
+	}{
+		{name: "tier 0", tier: tenant.Tier0, wantRate: 125, wantBurst: 1250},
+		{name: "tier 1", tier: tenant.Tier1, wantRate: 500, wantBurst: 5000},
+		{name: "tier 2", tier: tenant.Tier2, wantRate: 2500, wantBurst: 25000},
+		{name: "tier 3", tier: tenant.Tier3, wantRate: 5000, wantBurst: 50000},
+		{
+			name: "tenant override",
+			tier: tenant.Tier0,
+			overrides: &countingOverrides{
+				apiLimit: ratelimit.Limits{RatePerSecond: 25000, Burst: 250000},
+				apiFound: true,
+			},
+			wantRate:  12500,
+			wantBurst: 125000,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+			mw := ratelimit.New(lim, tc.overrides, prometheus.NewRegistry(), 0.5)
+			req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tc.tier})
+
+			// Act
+			mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), req)
+
+			// Assert
+			require.Len(t, lim.rates, 1)
+			require.Len(t, lim.bursts, 1)
+			assert.Equal(t, tc.wantRate, lim.rates[0])
+			assert.Equal(t, tc.wantBurst, lim.bursts[0])
+		})
+	}
+}
+
+func TestMiddleware_share_one_preserves_tier_limits(t *testing.T) {
+	// Arrange
+	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+	mw := ratelimit.New(lim, nil, prometheus.NewRegistry(), 1.0)
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier2})
+	want := ratelimit.LimitsForTier(tenant.Tier2)
+
+	// Act
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), req)
+
+	// Assert
+	require.Len(t, lim.rates, 1)
+	require.Len(t, lim.bursts, 1)
+	assert.Equal(t, want.RatePerSecond, lim.rates[0])
+	assert.Equal(t, want.Burst, lim.bursts[0])
+}
+
+func TestMiddleware_clamps_scaled_burst_to_one(t *testing.T) {
+	// Arrange
+	lim := &fakeLimiter{decision: ratelimit.Decision{Allowed: true}}
+	overrides := &countingOverrides{
+		apiLimit: ratelimit.Limits{RatePerSecond: 100, Burst: 1},
+		apiFound: true,
+	}
+	mw := ratelimit.New(lim, overrides, prometheus.NewRegistry(), 0.01)
+	req := reqWithKey(tenant.APIKey{ID: 1, TenantID: 5, Tier: tenant.Tier0})
+
+	// Act
+	mw(nopHandler()).ServeHTTP(httptest.NewRecorder(), req)
+
+	// Assert
+	require.Len(t, lim.bursts, 1)
+	assert.Equal(t, 1.0, lim.bursts[0])
 }
 
 func TestTierLimits_ladder_values_per_class(t *testing.T) {

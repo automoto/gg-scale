@@ -105,6 +105,10 @@ type Config struct {
 	// policy. It bounds how long a role change (for example a removed team
 	// member) takes to reach the other instances. Default 10s.
 	RBACPolicyReloadInterval time.Duration `env:"RBAC_POLICY_RELOAD_INTERVAL" envDefault:"10s"`
+	// RateLimitShare scales only per-API-key tier defaults and tenant overrides
+	// on this host, including sustained rate and burst. Valid values are greater
+	// than 0 and at most 1. Default 1 preserves the full per-key limits.
+	RateLimitShare float64 `env:"RATE_LIMIT_SHARE" envDefault:"1.0"`
 	// RateLimitOverrideCacheTTL is how long a rate limit override is kept.
 	// Default 5s.
 	RateLimitOverrideCacheTTL time.Duration `env:"RATE_LIMIT_OVERRIDE_CACHE_TTL" envDefault:"5s"`

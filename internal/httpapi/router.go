@@ -87,6 +87,9 @@ type Deps struct {
 	// RateLimitOverrides (may be nil) supplies per-tenant/project rate-limit
 	// overrides. Wrap the DB store in a CachedOverrideStore.
 	RateLimitOverrides ratelimit.OverrideStore
+	// RateLimitShare scales only per-API-key rates and bursts. Zero uses 1 so
+	// zero-value fixtures retain the full limits; production config rejects 0.
+	RateLimitShare float64
 	// TokenIPLimits (may be nil) overrides the tier→per-IP bucket derivation
 	// for the token auth routes; nil uses ratelimit.TokenIPLimitsForTier.
 	TokenIPLimits func(tenant.Tier) ratelimit.Limits
@@ -280,6 +283,9 @@ func panicRecover() func(http.Handler) http.Handler {
 
 // NewRouter builds the ggscale-server HTTP handler.
 func NewRouter(d Deps) http.Handler {
+	if d.RateLimitShare == 0 {
+		d.RateLimitShare = 1
+	}
 	reg := d.Registry
 	if reg == nil {
 		reg = prometheus.NewRegistry()
@@ -459,7 +465,7 @@ func NewRouter(d Deps) http.Handler {
 			}
 			r.Group(func(r chi.Router) {
 				r.Use(tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg)))
-				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg))
+				r.Use(ratelimit.New(d.Limiter, d.RateLimitOverrides, reg, d.RateLimitShare))
 				registerRemoteConfig(groupAPI(r, humaCfg), d)
 
 				// /v1/auth/* — tenant-scoped, player-anonymous (api_key

@@ -68,7 +68,7 @@ func TestCacheLimiter_isolates_buckets_by_key(t *testing.T) {
 func TestRatelimit_fairness_under_load_does_not_starve_other_tenants(t *testing.T) {
 	lim := ratelimit.NewCacheLimiter(memory.New())
 	reg := prometheus.NewRegistry()
-	mw := ratelimit.New(lim, nil, reg)
+	mw := ratelimit.New(lim, nil, reg, 1.0)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

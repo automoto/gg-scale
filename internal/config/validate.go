@@ -396,6 +396,10 @@ func cacheTimeError(envName string) error {
 // Validate: Validate is exercised by tests with sparse configs whose
 // zero-valued durations and counts would trip the positivity checks below.
 func (c *Config) checkFields() error {
+	if !(c.RateLimitShare > 0 && c.RateLimitShare <= 1.0) {
+		return fmt.Errorf("RATE_LIMIT_SHARE: must be greater than 0 and at most 1.0")
+	}
+
 	for _, d := range []struct {
 		name string
 		val  time.Duration

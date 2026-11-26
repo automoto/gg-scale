@@ -10,6 +10,8 @@ import (
 	"github.com/automoto/gg-scale/internal/config"
 	"github.com/automoto/gg-scale/internal/httpapi"
 	"github.com/automoto/gg-scale/internal/relaynode"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +44,20 @@ func TestParseMigrateArgs(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestRegisterRateLimitShare_exposes_configured_value(t *testing.T) {
+	// Arrange
+	reg := prometheus.NewRegistry()
+
+	// Act
+	gauge := registerRateLimitShare(reg, 0.5)
+
+	// Assert
+	assert.Equal(t, 0.5, testutil.ToFloat64(gauge))
+	count, err := testutil.GatherAndCount(reg, "ggscale_ratelimit_share")
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestMigrationURLUsesElevatedCredentialWhenConfigured(t *testing.T) {

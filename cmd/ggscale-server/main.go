@@ -370,6 +370,16 @@ func relayHealthMux(rc *config.RelayConfig, srv *relay.Server, lc *lifecycle.Con
 	return mux, nil
 }
 
+func registerRateLimitShare(reg prometheus.Registerer, share float64) prometheus.Gauge {
+	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "ggscale_ratelimit_share",
+		Help: "Configured fraction of per-API-key rate limits available on this host.",
+	})
+	reg.MustRegister(gauge)
+	gauge.Set(share)
+	return gauge
+}
+
 func run() error {
 	cfg, err := config.Load()
 	if err != nil {
@@ -378,6 +388,7 @@ func run() error {
 
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
+	logger.Info("rate limiting configured", "share", cfg.RateLimitShare)
 	quota.SetLeaderboardsPerProject(int64(cfg.LeaderboardMaxPerProject))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -392,6 +403,7 @@ func run() error {
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(collectors.NewGoCollector())
 	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+	registerRateLimitShare(registry, cfg.RateLimitShare)
 	metrics := observability.NewMetrics(registry)
 	observability.RegisterBuildInfo(registry, release, buildCommit())
 
@@ -423,10 +435,10 @@ func run() error {
 	}
 
 	// Cacheable reads and request token buckets are deliberately process-local.
-	// Managed production currently runs one web process per service region, so
-	// the API-key bucket is the regional bucket. Horizontal web scaling requires
-	// a distributed API limiter (or an explicitly divided per-process quota)
-	// before the published regional API envelope remains exact.
+	// RATE_LIMIT_SHARE scales only per-API-key rates and bursts on each web host;
+	// set it to 1/host-count so horizontally scaled hosts share the published
+	// regional API envelope without a distributed limiter. Scaled bursts retain
+	// at least one request, and all other limiters keep their configured values.
 	store := instrument.New(memory.New(), registry)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -702,6 +714,7 @@ func run() error {
 		APIKeyCache:           keyCache,
 		Limiter:               ratelimit.NewCacheLimiter(store),
 		RateLimitOverrides:    rateLimitOverrides,
+		RateLimitShare:        cfg.RateLimitShare,
 		StorageMaxValueBytes:  cfg.StorageMaxValueBytes,
 		DeleteGracePeriod:     cfg.PlayerDeleteGracePeriod,
 		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), cfg.StorageLimitCacheTTL),
