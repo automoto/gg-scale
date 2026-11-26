@@ -93,3 +93,5 @@ also the rollback. So every migration must keep the previous release working.
 
 Use GitHub Issues. Include reproduction steps, the version (`git rev-parse HEAD`),
 and relevant logs (`docker compose logs ggscale-server`).
+
+Integration and end-to-end tests require Docker and run in CI.
