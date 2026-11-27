@@ -7,10 +7,11 @@ import (
 	"time"
 )
 
-// DefaultAPIKeyCacheTTL is the default of API_KEY_CACHE_TTL: how long a cached
-// key lookup is served. A revoked key, a disabled tenant, or a changed tier or
-// scope takes effect at once on the app instance that served the write (see
-// KeyCache.Invalidate) and within this time on every other instance.
+// DefaultAPIKeyCacheTTL is the default of API_KEY_CACHE_TTL, the fallback
+// freshness bound for cached key lookups. A revoked key, a disabled tenant, or
+// a changed tier or scope takes effect at once on the app instance that served
+// the write (see KeyCache.Invalidate). LISTEN/NOTIFY normally converges other
+// instances in about a second; the TTL applies if a notification is missed.
 const DefaultAPIKeyCacheTTL = 30 * time.Second
 
 // APIKeyCacheMaxEntries bounds the cache size. When it is full, one entry is
@@ -86,8 +87,9 @@ func (c *KeyCache) Lookup(ctx context.Context, keyHash []byte) (*APIKey, error) 
 // Invalidate drops the cached keys of a tenant. A write path calls it after
 // its commit when it changes what a lookup returns: a key revoke or scope
 // change, a tenant disable or enable, a tier change, or a connection limit
-// change. It acts on this process only; other app instances converge within
-// the TTL.
+// change. It acts directly on this process only; LISTEN/NOTIFY normally
+// converges other app instances in about a second, with the TTL as fallback if
+// a notification is missed.
 func (c *KeyCache) Invalidate(tenantID int64) {
 	if c == nil {
 		return
@@ -114,7 +116,7 @@ func (c *KeyCache) InvalidateAll() {
 	c.mu.Unlock()
 }
 
-// copyKey hands each caller its own APIKey: *** writes to the one it gets.
+// copyKey hands each caller its own APIKey: Admit writes to the one it gets.
 func copyKey(k *APIKey) (*APIKey, error) {
 	if k == nil {
 		return nil, ErrUnknownKey

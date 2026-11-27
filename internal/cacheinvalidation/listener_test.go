@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,6 +34,17 @@ type fakeEpochs struct {
 
 func (f *fakeEpochs) Invalidate(playerID int64) { f.players = append(f.players, playerID) }
 func (f *fakeEpochs) SetHealthy(healthy bool)   { f.healthy = append(f.healthy, healthy) }
+
+func TestNewMetrics_should_reuse_collectors_from_the_same_registry(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	first := newMetrics(registry)
+
+	second := newMetrics(registry)
+
+	assert.Same(t, first.ready, second.ready)
+	assert.Same(t, first.notifications, second.notifications)
+	assert.Same(t, first.reconnects, second.reconnects)
+}
 
 func TestListener_should_route_each_cache_notification(t *testing.T) {
 	keys := &fakeKeys{}

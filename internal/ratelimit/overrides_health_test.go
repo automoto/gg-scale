@@ -60,6 +60,20 @@ func TestCachedOverrideStore_should_flush_and_use_five_seconds_when_down(t *test
 	assert.Equal(t, 3, loader.calls)
 }
 
+func TestCachedOverrideStore_should_cap_disconnected_ttl_at_configured_ttl(t *testing.T) {
+	loader := &overrideLoader{}
+	cache := NewCachedOverrideStore(loader, 2*time.Second)
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	cache.now = func() time.Time { return now }
+	cache.SetHealthy(false)
+	_, _, _ = cache.APILimit(context.Background(), 1)
+
+	now = now.Add(2 * time.Second)
+	_, _, _ = cache.APILimit(context.Background(), 1)
+
+	assert.Equal(t, 2, loader.calls)
+}
+
 func TestCachedOverrideStore_should_flush_on_reconnect(t *testing.T) {
 	loader := &overrideLoader{}
 	cache := NewCachedOverrideStore(loader, DefaultOverrideCacheTTL)

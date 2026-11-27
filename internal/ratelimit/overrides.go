@@ -230,7 +230,7 @@ func (c *CachedOverrideStore) get(key string, load func() (Limits, bool, error))
 	c.mu.Lock()
 	healthy := c.healthy
 	generation := c.generation
-	ttl := fallbackOverrideCacheTTL
+	ttl := min(c.ttl, fallbackOverrideCacheTTL)
 	if healthy {
 		ttl = c.ttl
 	}

@@ -175,45 +175,27 @@ func newMetrics(reg prometheus.Registerer) metrics {
 	if reg == nil {
 		return metrics{}
 	}
-	ready := prometheus.NewGauge(prometheus.GaugeOpts{
+	ready := registerCollector(reg, prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "ggscale_cache_invalidation_ready",
 		Help: "1 while the primary-DB cache-invalidation LISTEN connection is ready.",
-	})
-	registerGauge(reg, ready)
-	notifications := prometheus.NewCounterVec(prometheus.CounterOpts{
+	}))
+	notifications := registerCollector(reg, prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "ggscale_cache_invalidation_notifications_total",
 		Help: "Cache invalidation notifications processed by kind and result.",
-	}, []string{"kind", "result"})
-	registerCounterVec(reg, notifications)
-	reconnects := prometheus.NewCounter(prometheus.CounterOpts{
+	}, []string{"kind", "result"}))
+	reconnects := registerCollector(reg, prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "ggscale_cache_invalidation_reconnects_total",
 		Help: "Cache invalidation listener disconnects followed by a reconnect attempt.",
-	})
-	return metrics{ready: ready, notifications: notifications, reconnects: registerCounter(reg, reconnects)}
+	}))
+	return metrics{ready: ready, notifications: notifications, reconnects: reconnects}
 }
 
-func registerGauge(reg prometheus.Registerer, gauge prometheus.Gauge) {
-	if err := reg.Register(gauge); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-			panic(err)
-		}
-	}
-}
-
-func registerCounterVec(reg prometheus.Registerer, counter *prometheus.CounterVec) {
-	if err := reg.Register(counter); err != nil {
-		if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
-			panic(err)
-		}
-	}
-}
-
-func registerCounter(reg prometheus.Registerer, counter prometheus.Counter) prometheus.Counter {
-	if err := reg.Register(counter); err != nil {
+func registerCollector[T prometheus.Collector](reg prometheus.Registerer, collector T) T {
+	if err := reg.Register(collector); err != nil {
 		if already, ok := err.(prometheus.AlreadyRegisteredError); ok {
-			return already.ExistingCollector.(prometheus.Counter)
+			return already.ExistingCollector.(T)
 		}
 		panic(err)
 	}
-	return counter
+	return collector
 }
