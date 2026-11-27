@@ -6375,7 +6375,7 @@ paths:
         - Project Management
   /v1/project/api-keys/{api_key_id}/revoke:
     post:
-      description: Revokes an API key of the Game Project. This cannot be undone. New requests with the key are refused at once on the server that handles this call, and on each other server within the API key cache time (API_KEY_CACHE_TTL, default 30s). Answers 404 for a key of another Game Project, a key with no Game Project, or a key that is already revoked. Answers 403 when the person who created the token may not manage keys of that type.
+      description: Revokes an API key of the Game Project. This cannot be undone. New requests with the key are refused at once on the server that handles this call, and normally within one second on every other server. If cache invalidation is unavailable, API_KEY_CACHE_TTL (default 30s) bounds the fallback delay. Answers 404 for a key of another Game Project, a key with no Game Project, or a key that is already revoked. Answers 403 when the person who created the token may not manage keys of that type.
       operationId: revokeProjectAPIKey
       parameters:
         - description: API key ID.

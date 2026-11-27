@@ -1,0 +1,6 @@
+DROP TRIGGER rate_limit_overrides_cache_invalidation ON rate_limit_overrides;
+DROP TRIGGER connection_limit_overrides_cache_invalidation ON connection_limit_overrides;
+DROP TRIGGER tenants_cache_invalidation ON tenants;
+DROP TRIGGER api_keys_cache_invalidation ON api_keys;
+DROP TRIGGER project_players_cache_invalidation ON project_players;
+DROP FUNCTION ggscale_cache_invalidation_notify();

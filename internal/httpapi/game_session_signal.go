@@ -4,23 +4,67 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
 	"github.com/automoto/gg-scale/internal/playerauth"
+	"github.com/automoto/gg-scale/internal/ratelimit"
 )
 
 const (
 	maxGameSessionSignalBytes = 65536
 	maxSignalsPerMinute       = 30
+	// Match the burst to the sustained per-minute allowance so a large session
+	// can exchange its initial offers without an artificial ten-signal ceiling.
+	signalBurst         = maxSignalsPerMinute
+	signalRatePerSecond = maxSignalsPerMinute / 60.0
 )
 
-var errSignalRateLimited = errors.New("game session signal rate limited")
+type signalMetrics struct {
+	throttled    prometheus.Counter
+	refundErrors prometheus.Counter
+}
+
+func newSignalMetrics(reg *prometheus.Registry) signalMetrics {
+	if reg == nil {
+		return signalMetrics{}
+	}
+	return signalMetrics{
+		throttled:    registerSignalCounter(reg, "ggscale_game_session_signal_throttled_total", "Game-session signal sends refused by the in-memory sender limit."),
+		refundErrors: registerSignalCounter(reg, "ggscale_game_session_signal_refund_errors_total", "Failed refunds after a debited game-session signal send failed."),
+	}
+}
+
+func registerSignalCounter(reg prometheus.Registerer, name, help string) prometheus.Counter {
+	counter := prometheus.NewCounter(prometheus.CounterOpts{Name: name, Help: help})
+	if err := reg.Register(counter); err != nil {
+		if already, ok := err.(prometheus.AlreadyRegisteredError); ok {
+			return already.ExistingCollector.(prometheus.Counter)
+		}
+		panic(err)
+	}
+	return counter
+}
+
+func signalRateLimited(retryAfter time.Duration) error {
+	retrySeconds := int(math.Ceil(retryAfter.Seconds()))
+	if retrySeconds < 1 {
+		retrySeconds = 1
+	}
+	return huma.ErrorWithHeaders(
+		huma.Error429TooManyRequests("signal rate limit exceeded"),
+		http.Header{"Retry-After": []string{strconv.Itoa(retrySeconds)}},
+	)
+}
 
 // gameSessionSignalRequest carries one negotiation signal. The field
 // constraints are declared as huma struct tags so they appear in the
@@ -93,6 +137,7 @@ func validateSignalPayloadSize(payload string) error {
 }
 
 func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendInput) (*gameSessionSignalSendOutput, error) {
+	metrics := newSignalMetrics(d.Registry)
 	return func(ctx context.Context, in *gameSessionSignalSendInput) (*gameSessionSignalSendOutput, error) {
 		if err := validateSignalPayloadSize(in.Body.Payload); err != nil {
 			return nil, huma.Error400BadRequest(err.Error())
@@ -108,8 +153,24 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 		if !ok {
 			return nil, huma.Error400BadRequest("api key has no project pin")
 		}
+
+		// Debit before opening a transaction: a throttled send performs no
+		// Postgres work. Player IDs are globally unique, so this bucket applies
+		// per sender across sessions without an advisory lock or history count.
+		bucket := fmt.Sprintf("ratelimit:signal:%d", fromID)
+		decision, err := d.Limiter.Allow(ctx, bucket, signalRatePerSecond, signalBurst)
+		if err != nil {
+			return nil, serverError(ctx, "game session signal rate limit", err)
+		}
+		if !decision.Allowed {
+			if metrics.throttled != nil {
+				metrics.throttled.Inc()
+			}
+			return nil, signalRateLimited(decision.RetryAfter)
+		}
+
 		var signalID int64
-		err := d.Pool.Q(ctx, func(tx pgx.Tx) error {
+		err = d.Pool.Q(ctx, func(tx pgx.Tx) error {
 			q := sqlcgen.New(tx)
 			active, qerr := q.CountActiveSignalMembers(ctx, sqlcgen.CountActiveSignalMembersParams{
 				SessionID: in.ID,
@@ -125,21 +186,6 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 			if active != 2 {
 				return errGameSessionForbidden
 			}
-			// Serialize this player's concurrent sends so the count+insert
-			// can't race past the per-minute cap under READ COMMITTED.
-			if qerr := q.LockSignalRate(ctx, fromID); qerr != nil {
-				return qerr
-			}
-			recent, qerr := q.CountRecentGameSessionSignals(ctx, sqlcgen.CountRecentGameSessionSignalsParams{
-				SessionID:    in.ID,
-				FromPlayerID: fromID,
-			})
-			if qerr != nil {
-				return qerr
-			}
-			if recent >= maxSignalsPerMinute {
-				return errSignalRateLimited
-			}
 			signalID, qerr = q.InsertGameSessionSignal(ctx, sqlcgen.InsertGameSessionSignalParams{
 				SessionID:     in.ID,
 				FromPlayerID:  fromID,
@@ -150,11 +196,21 @@ func gameSessionSignalSend(d Deps) func(context.Context, *gameSessionSignalSendI
 			})
 			return qerr
 		})
+		if err != nil {
+			// The send did not commit, so restore its token. Use a non-cancelled
+			// context because a request deadline may be the failure being undone.
+			if refunder, ok := d.Limiter.(ratelimit.Refunder); ok {
+				if refundErr := refunder.Refund(context.WithoutCancel(ctx), bucket, signalRatePerSecond, signalBurst); refundErr != nil {
+					if metrics.refundErrors != nil {
+						metrics.refundErrors.Inc()
+					}
+					slog.ErrorContext(ctx, "game session signal rate-limit refund", "err", refundErr, "player_id", fromID)
+				}
+			}
+		}
 		switch {
 		case errors.Is(err, errGameSessionForbidden):
 			return nil, huma.Error404NotFound("not found")
-		case errors.Is(err, errSignalRateLimited):
-			return nil, huma.Error429TooManyRequests("signal rate limit exceeded")
 		case err != nil:
 			return nil, serverError(ctx, "game session signal send", err)
 		}

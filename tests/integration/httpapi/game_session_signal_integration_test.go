@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -88,4 +89,70 @@ func TestGameSessionSignals_rejectNonMembers(t *testing.T) {
 		"to_player_id": hostID, "negotiation_id": "neg-1", "kind": "answer", "payload": "v=0",
 	})
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+}
+
+func sendTestSignal(t *testing.T, srvURL, sessionID, key, token string, toPlayerID int64, sequence int) (*http.Response, []byte) {
+	t.Helper()
+	return authedReq(t, http.MethodPost,
+		fmt.Sprintf("%s/v1/game-session/%s/signals", srvURL, sessionID), key, token, map[string]any{
+			"to_player_id": toPlayerID, "negotiation_id": fmt.Sprintf("neg-%d", sequence),
+			"kind": "offer", "payload": "v=0",
+		})
+}
+
+func TestGameSessionSignals_should_throttle_burst_before_db_insert(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "signal-burst")
+	srv := newServerForCluster(t, c)
+	hostToken, _ := anonymousLoginWithID(t, srv.URL, "signal-burst")
+	guestToken, guestID := anonymousLoginWithID(t, srv.URL, "signal-burst")
+	sess := createSession(t, srv.URL, "signal-burst", hostToken, 2)
+	resp, body := authedReq(t, http.MethodPost,
+		fmt.Sprintf("%s/v1/game-session/%s/join", srv.URL, sess.SessionID), "signal-burst", guestToken,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+
+	for i := range 30 {
+		resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-burst", hostToken, guestID, i)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+	}
+	resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-burst", hostToken, guestID, 30)
+
+	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
+	retry, err := strconv.Atoi(resp.Header.Get("Retry-After"))
+	require.NoError(t, err)
+	assert.Positive(t, retry)
+	var stored int
+	require.NoError(t, c.bootstrapPool.QueryRow(t.Context(),
+		`SELECT count(*) FROM game_session_signal WHERE session_id = $1`, sess.SessionID).Scan(&stored))
+	assert.Equal(t, 30, stored)
+}
+
+func TestGameSessionSignals_should_refund_tokens_for_failed_sends(t *testing.T) {
+	c := startCluster(t)
+	seedTenantWithAPIKey(t, c.bootstrapPool, 0, "signal-refund")
+	srv := newServerForCluster(t, c)
+	hostToken, _ := anonymousLoginWithID(t, srv.URL, "signal-refund")
+	guestToken, guestID := anonymousLoginWithID(t, srv.URL, "signal-refund")
+	sess := createSession(t, srv.URL, "signal-refund", hostToken, 2)
+
+	// The recipient has not joined, so every send fails with 404 after taking
+	// a token. Refunds must leave the complete burst available afterwards.
+	for i := range 10 {
+		resp, body := sendTestSignal(t, srv.URL, sess.SessionID, "signal-refund", hostToken, guestID, i)
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
+	}
+	resp, body := authedReq(t, http.MethodPost,
+		fmt.Sprintf("%s/v1/game-session/%s/join", srv.URL, sess.SessionID), "signal-refund", guestToken,
+		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+	for i := range 30 {
+		resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-refund", hostToken, guestID, 100+i)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+	}
+
+	var stored int
+	require.NoError(t, c.bootstrapPool.QueryRow(t.Context(),
+		`SELECT count(*) FROM game_session_signal WHERE session_id = $1`, sess.SessionID).Scan(&stored))
+	assert.Equal(t, 30, stored)
 }

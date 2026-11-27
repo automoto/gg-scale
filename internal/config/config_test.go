@@ -40,6 +40,19 @@ func TestLoad_uses_defaults_when_optional_vars_missing(t *testing.T) {
 	assert.Empty(t, cfg.FleetBackend)
 	assert.False(t, cfg.FeatureFleetEnabled)
 	assert.False(t, cfg.FeatureP2PRelayEnabled)
+	assert.Equal(t, 60*time.Second, cfg.RateLimitOverrideCacheTTL)
+	assert.Equal(t, 30*time.Second, cfg.SessionEpochCacheTTL)
+}
+
+func TestLoad_allows_session_epoch_cache_to_be_disabled(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/test")
+	t.Setenv("SESSION_EPOCH_CACHE_TTL", "0s")
+
+	cfg, err := config.Load()
+
+	require.NoError(t, err)
+	assert.Zero(t, cfg.SessionEpochCacheTTL)
 }
 
 func TestLoad_feature_switches_parse_true(t *testing.T) {
@@ -691,7 +704,8 @@ func TestLoad_should_default_the_cache_times(t *testing.T) {
 		"API_KEY_CACHE_TTL":             30 * time.Second,
 		"FEATURE_GRANT_CACHE_TTL":       5 * time.Second,
 		"RBAC_POLICY_RELOAD_INTERVAL":   10 * time.Second,
-		"RATE_LIMIT_OVERRIDE_CACHE_TTL": 5 * time.Second,
+		"RATE_LIMIT_OVERRIDE_CACHE_TTL": 60 * time.Second,
+		"SESSION_EPOCH_CACHE_TTL":       30 * time.Second,
 		"STORAGE_LIMIT_CACHE_TTL":       5 * time.Second,
 		"LEADERBOARD_TOP_CACHE_TTL":     10 * time.Second,
 		"CORS_ORIGIN_CACHE_TTL":         30 * time.Second,
@@ -700,6 +714,7 @@ func TestLoad_should_default_the_cache_times(t *testing.T) {
 		"FEATURE_GRANT_CACHE_TTL":       cfg.FeatureGrantCacheTTL,
 		"RBAC_POLICY_RELOAD_INTERVAL":   cfg.RBACPolicyReloadInterval,
 		"RATE_LIMIT_OVERRIDE_CACHE_TTL": cfg.RateLimitOverrideCacheTTL,
+		"SESSION_EPOCH_CACHE_TTL":       cfg.SessionEpochCacheTTL,
 		"STORAGE_LIMIT_CACHE_TTL":       cfg.StorageLimitCacheTTL,
 		"LEADERBOARD_TOP_CACHE_TTL":     cfg.LeaderboardTopCacheTTL,
 		"CORS_ORIGIN_CACHE_TTL":         cfg.CORSOriginCacheTTL,
