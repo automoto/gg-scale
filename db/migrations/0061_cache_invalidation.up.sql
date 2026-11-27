@@ -56,8 +56,10 @@ CREATE TRIGGER api_keys_cache_invalidation
 AFTER INSERT OR UPDATE OR DELETE ON api_keys
 FOR EACH ROW EXECUTE FUNCTION ggscale_cache_invalidation_notify();
 
+-- Do not use UPDATE OF here: legacy migration 0009 drops and recreates the
+-- tier column during its round trip, and a column-level trigger would block it.
 CREATE TRIGGER tenants_cache_invalidation
-AFTER UPDATE OF disabled_at, tier OR DELETE ON tenants
+AFTER UPDATE OR DELETE ON tenants
 FOR EACH ROW EXECUTE FUNCTION ggscale_cache_invalidation_notify();
 
 CREATE TRIGGER connection_limit_overrides_cache_invalidation
