@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,12 +29,18 @@ func (f *fakeOverrides) Invalidate(tenantID int64) { f.tenants = append(f.tenant
 func (f *fakeOverrides) SetHealthy(healthy bool)   { f.healthy = append(f.healthy, healthy) }
 
 type fakeEpochs struct {
-	players []int64
-	healthy []bool
+	players       []int64
+	healthy       []bool
+	healthChanges chan bool
 }
 
 func (f *fakeEpochs) Invalidate(playerID int64) { f.players = append(f.players, playerID) }
-func (f *fakeEpochs) SetHealthy(healthy bool)   { f.healthy = append(f.healthy, healthy) }
+func (f *fakeEpochs) SetHealthy(healthy bool) {
+	f.healthy = append(f.healthy, healthy)
+	if f.healthChanges != nil {
+		f.healthChanges <- healthy
+	}
+}
 
 func TestNewMetrics_should_reuse_collectors_from_the_same_registry(t *testing.T) {
 	registry := prometheus.NewRegistry()
@@ -63,11 +70,64 @@ func TestListener_should_route_each_cache_notification(t *testing.T) {
 	assert.Equal(t, []int64{9}, epochs.players)
 }
 
+type backoffRelay struct {
+	ready      chan struct{}
+	disconnect chan struct{}
+}
+
+func (r *backoffRelay) ListenChannelReady(_ context.Context, _ string, ready func(), _ func(string)) error {
+	ready()
+	close(r.ready)
+	<-r.disconnect
+	return errors.New("connection lost")
+}
+
+func TestListener_should_mark_caches_down_during_reconnect_backoff(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	keys := &fakeKeys{}
+	overrides := &fakeOverrides{}
+	epochs := &fakeEpochs{healthChanges: make(chan bool, 4)}
+	relay := &backoffRelay{ready: make(chan struct{}), disconnect: make(chan struct{})}
+	listener := New(relay, keys, overrides, epochs, registry)
+	listener.retryMin = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		listener.Run(ctx)
+		close(done)
+	}()
+
+	<-relay.ready
+	require.True(t, listener.Healthy())
+	require.Equal(t, float64(1), testutil.ToFloat64(listener.metrics.ready))
+	require.False(t, <-epochs.healthChanges)
+	require.True(t, <-epochs.healthChanges)
+	close(relay.disconnect)
+	downDuringBackoff := false
+	select {
+	case healthy := <-epochs.healthChanges:
+		downDuringBackoff = !healthy
+	case <-time.After(time.Second):
+	}
+	readyDuringBackoff := testutil.ToFloat64(listener.metrics.ready)
+	epochHealthDuringBackoff := epochs.healthy[len(epochs.healthy)-1]
+	overrideHealthDuringBackoff := overrides.healthy[len(overrides.healthy)-1]
+	cancel()
+	<-done
+
+	assert.Zero(t, readyDuringBackoff)
+	assert.True(t, downDuringBackoff)
+	assert.False(t, epochHealthDuringBackoff)
+	assert.False(t, overrideHealthDuringBackoff)
+	assert.Positive(t, keys.flushes)
+}
+
 type fakeRelay struct {
-	calls         int
-	firstReady    chan struct{}
-	secondStarted chan struct{}
-	allowSecond   chan struct{}
+	calls            int
+	firstReady       chan struct{}
+	allowFirstReturn chan struct{}
+	secondStarted    chan struct{}
+	allowSecond      chan struct{}
 }
 
 func (r *fakeRelay) ListenChannelReady(ctx context.Context, _ string, ready func(), _ func(string)) error {
@@ -75,6 +135,7 @@ func (r *fakeRelay) ListenChannelReady(ctx context.Context, _ string, ready func
 	if r.calls == 1 {
 		ready()
 		close(r.firstReady)
+		<-r.allowFirstReturn
 		return errors.New("connection lost")
 	}
 	close(r.secondStarted)
@@ -89,9 +150,10 @@ func TestListener_should_mark_caches_down_before_reconnecting(t *testing.T) {
 	overrides := &fakeOverrides{}
 	epochs := &fakeEpochs{}
 	relay := &fakeRelay{
-		firstReady:    make(chan struct{}),
-		secondStarted: make(chan struct{}),
-		allowSecond:   make(chan struct{}),
+		firstReady:       make(chan struct{}),
+		allowFirstReturn: make(chan struct{}),
+		secondStarted:    make(chan struct{}),
+		allowSecond:      make(chan struct{}),
 	}
 	listener := New(relay, keys, overrides, epochs, nil)
 	listener.retryMin = time.Millisecond
@@ -104,6 +166,7 @@ func TestListener_should_mark_caches_down_before_reconnecting(t *testing.T) {
 
 	<-relay.firstReady
 	require.True(t, listener.Healthy())
+	close(relay.allowFirstReturn)
 	<-relay.secondStarted
 	assert.False(t, listener.Healthy())
 	assert.Equal(t, false, epochs.healthy[len(epochs.healthy)-1])

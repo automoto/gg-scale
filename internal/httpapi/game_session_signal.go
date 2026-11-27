@@ -23,8 +23,10 @@ import (
 const (
 	maxGameSessionSignalBytes = 65536
 	maxSignalsPerMinute       = 30
-	signalBurst               = 10
-	signalRatePerSecond       = maxSignalsPerMinute / 60.0
+	// Match the burst to the sustained per-minute allowance so a large session
+	// can exchange its initial offers without an artificial ten-signal ceiling.
+	signalBurst         = maxSignalsPerMinute
+	signalRatePerSecond = maxSignalsPerMinute / 60.0
 )
 
 type signalMetrics struct {

@@ -112,11 +112,11 @@ func TestGameSessionSignals_should_throttle_burst_before_db_insert(t *testing.T)
 		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
 
-	for i := range 10 {
+	for i := range 30 {
 		resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-burst", hostToken, guestID, i)
 		require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
 	}
-	resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-burst", hostToken, guestID, 10)
+	resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-burst", hostToken, guestID, 30)
 
 	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, string(body))
 	retry, err := strconv.Atoi(resp.Header.Get("Retry-After"))
@@ -125,7 +125,7 @@ func TestGameSessionSignals_should_throttle_burst_before_db_insert(t *testing.T)
 	var stored int
 	require.NoError(t, c.bootstrapPool.QueryRow(t.Context(),
 		`SELECT count(*) FROM game_session_signal WHERE session_id = $1`, sess.SessionID).Scan(&stored))
-	assert.Equal(t, 10, stored)
+	assert.Equal(t, 30, stored)
 }
 
 func TestGameSessionSignals_should_refund_tokens_for_failed_sends(t *testing.T) {
@@ -146,7 +146,7 @@ func TestGameSessionSignals_should_refund_tokens_for_failed_sends(t *testing.T) 
 		fmt.Sprintf("%s/v1/game-session/%s/join", srv.URL, sess.SessionID), "signal-refund", guestToken,
 		map[string]any{"public_addr": addr("5.6.7.8", 9001)})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	for i := range 10 {
+	for i := range 30 {
 		resp, body = sendTestSignal(t, srv.URL, sess.SessionID, "signal-refund", hostToken, guestID, 100+i)
 		require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
 	}
@@ -154,5 +154,5 @@ func TestGameSessionSignals_should_refund_tokens_for_failed_sends(t *testing.T) 
 	var stored int
 	require.NoError(t, c.bootstrapPool.QueryRow(t.Context(),
 		`SELECT count(*) FROM game_session_signal WHERE session_id = $1`, sess.SessionID).Scan(&stored))
-	assert.Equal(t, 10, stored)
+	assert.Equal(t, 30, stored)
 }

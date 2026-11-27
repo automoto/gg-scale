@@ -19,10 +19,14 @@ import (
 
 type signalDenyLimiter struct {
 	calls int
+	rate  float64
+	burst float64
 }
 
-func (l *signalDenyLimiter) Allow(context.Context, string, float64, float64) (ratelimit.Decision, error) {
+func (l *signalDenyLimiter) Allow(_ context.Context, _ string, rate, burst float64) (ratelimit.Decision, error) {
 	l.calls++
+	l.rate = rate
+	l.burst = burst
 	return ratelimit.Decision{Allowed: false, RetryAfter: 1500 * time.Millisecond}, nil
 }
 
@@ -45,6 +49,8 @@ func TestGameSessionSignalSend_should_throttle_before_any_db_work(t *testing.T) 
 	require.ErrorAs(t, err, &withHeaders)
 	assert.Equal(t, "2", withHeaders.GetHeaders().Get("Retry-After"))
 	assert.Equal(t, 1, limiter.calls)
+	assert.Equal(t, 0.5, limiter.rate)
+	assert.Equal(t, float64(30), limiter.burst)
 }
 
 func TestSignalRateLimited_should_round_retry_after_up(t *testing.T) {

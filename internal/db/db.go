@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -154,6 +155,8 @@ func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payloa
 
 // ListenChannelReady is ListenChannel with a callback after LISTEN succeeds.
 // The callback can flush state accumulated while a reconnect was in progress.
+// Idle connections are pinged periodically so a silently dropped connection
+// triggers the caller's reconnect path instead of waiting forever.
 func (p *Pool) ListenChannelReady(ctx context.Context, channel string, ready func(), fn func(payload string)) error {
 	conn, err := p.pool.Acquire(ctx)
 	if err != nil {
@@ -173,15 +176,47 @@ func (p *Pool) ListenChannelReady(ctx context.Context, channel string, ready fun
 	if ready != nil {
 		ready()
 	}
+	return listenForNotifications(ctx, conn.Conn(), fn, listenWaitTimeout, listenPingTimeout)
+}
+
+const (
+	listenWaitTimeout = 30 * time.Second
+	listenPingTimeout = 5 * time.Second
+)
+
+type listenConnection interface {
+	WaitForNotification(context.Context) (*pgconn.Notification, error)
+	Ping(context.Context) error
+}
+
+func listenForNotifications(
+	ctx context.Context,
+	conn listenConnection,
+	fn func(payload string),
+	waitTimeout time.Duration,
+	pingTimeout time.Duration,
+) error {
 	for {
-		n, err := conn.Conn().WaitForNotification(ctx)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
+		waitCtx, cancelWait := context.WithTimeout(ctx, waitTimeout)
+		n, err := conn.WaitForNotification(waitCtx)
+		cancelWait()
+		if err == nil {
+			fn(n.Payload)
+			continue
+		}
+		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+			return nil
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("wait notification: %w", err)
 		}
-		fn(n.Payload)
+
+		pingCtx, cancelPing := context.WithTimeout(ctx, pingTimeout)
+		err = conn.Ping(pingCtx)
+		cancelPing()
+		if err != nil {
+			return fmt.Errorf("listen liveness: %w", err)
+		}
 	}
 }
 

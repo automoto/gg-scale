@@ -89,6 +89,7 @@ func (l *Listener) Run(ctx context.Context) {
 		l.setDown()
 		started := time.Now()
 		err := l.relay.ListenChannelReady(ctx, Channel, l.setReady, l.handle)
+		l.setDown()
 		if ctx.Err() != nil {
 			return
 		}
