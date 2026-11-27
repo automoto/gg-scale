@@ -42,27 +42,6 @@ func (q *Queries) CountActiveSignalMembers(ctx context.Context, arg CountActiveS
 	return count, err
 }
 
-const countRecentGameSessionSignals = `-- name: CountRecentGameSessionSignals :one
-SELECT count(*) FROM game_session_signal
-WHERE session_id = $1
-  AND from_player_id = $2
-  AND created_at > now() - interval '1 minute'
-`
-
-type CountRecentGameSessionSignalsParams struct {
-	SessionID    string
-	FromPlayerID int64
-}
-
-// Signals this player has sent into this session in the trailing minute; the
-// handler rejects once it reaches the per-minute cap.
-func (q *Queries) CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRecentGameSessionSignals, arg.SessionID, arg.FromPlayerID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const deleteExpiredGameSessionSignalsForTenant = `-- name: DeleteExpiredGameSessionSignalsForTenant :execrows
 DELETE FROM game_session_signal
 WHERE tenant_id = current_setting('app.tenant_id', true)::bigint
@@ -174,17 +153,4 @@ func (q *Queries) ListGameSessionSignalsForRecipient(ctx context.Context, arg Li
 		return nil, err
 	}
 	return items, nil
-}
-
-const lockSignalRate = `-- name: LockSignalRate :exec
-SELECT pg_advisory_xact_lock(hashtextextended('game_session_signal_rate', $1))
-`
-
-// Serializes a player's concurrent signal sends within the transaction so the
-// per-minute count+insert below can't be raced past the cap under READ
-// COMMITTED. player_id (project_players.id) is globally unique, so the lock
-// key never collides across tenants. Released on commit/rollback.
-func (q *Queries) LockSignalRate(ctx context.Context, fromPlayerID int64) error {
-	_, err := q.db.Exec(ctx, lockSignalRate, fromPlayerID)
-	return err
 }

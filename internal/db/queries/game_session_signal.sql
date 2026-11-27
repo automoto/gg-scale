@@ -15,21 +15,6 @@ WHERE s.id = sqlc.arg('session_id')
   AND p.last_seen > now() - interval '30 seconds'
   AND p.player_id = ANY(sqlc.arg('player_ids')::bigint[]);
 
--- name: LockSignalRate :exec
--- Serializes a player's concurrent signal sends within the transaction so the
--- per-minute count+insert below can't be raced past the cap under READ
--- COMMITTED. player_id (project_players.id) is globally unique, so the lock
--- key never collides across tenants. Released on commit/rollback.
-SELECT pg_advisory_xact_lock(hashtextextended('game_session_signal_rate', sqlc.arg('from_player_id')));
-
--- name: CountRecentGameSessionSignals :one
--- Signals this player has sent into this session in the trailing minute; the
--- handler rejects once it reaches the per-minute cap.
-SELECT count(*) FROM game_session_signal
-WHERE session_id = sqlc.arg('session_id')
-  AND from_player_id = sqlc.arg('from_player_id')
-  AND created_at > now() - interval '1 minute';
-
 -- name: InsertGameSessionSignal :one
 INSERT INTO game_session_signal
     (tenant_id, session_id, from_player_id, to_player_id, negotiation_id, kind, payload)

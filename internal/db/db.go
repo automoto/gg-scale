@@ -149,6 +149,12 @@ func (p *Pool) Q(ctx context.Context, fn func(pgx.Tx) error) error {
 // does not auto-issue UNLISTEN on Release, and a later Q()/BootstrapQ()
 // borrowing that conn would receive async NOTIFY frames mid-query.
 func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payload string)) error {
+	return p.ListenChannelReady(ctx, channel, nil, fn)
+}
+
+// ListenChannelReady is ListenChannel with a callback after LISTEN succeeds.
+// The callback can flush state accumulated while a reconnect was in progress.
+func (p *Pool) ListenChannelReady(ctx context.Context, channel string, ready func(), fn func(payload string)) error {
 	conn, err := p.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("listen acquire: %w", err)
@@ -163,6 +169,9 @@ func (p *Pool) ListenChannel(ctx context.Context, channel string, fn func(payloa
 	// pgx.Identifier so a future dynamic channel name can't be injected.
 	if _, err := conn.Exec(ctx, "LISTEN "+pgx.Identifier{channel}.Sanitize()); err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+	if ready != nil {
+		ready()
 	}
 	for {
 		n, err := conn.Conn().WaitForNotification(ctx)

@@ -156,9 +156,6 @@ type Querier interface {
 	// Queued, unclaimed, unexpired tickets in the same bucket as a ticket. Uses
 	// matchmaking_tickets_queued_idx.
 	CountQueuedTicketsLike(ctx context.Context, arg CountQueuedTicketsLikeParams) (int64, error)
-	// Signals this player has sent into this session in the trailing minute; the
-	// handler rejects once it reaches the per-minute cap.
-	CountRecentGameSessionSignals(ctx context.Context, arg CountRecentGameSessionSignalsParams) (int64, error)
 	// key_type is a security boundary (the token-route per-IP limiter exempts
 	// secret keys), so it is an explicit parameter — never the column default.
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
@@ -833,11 +830,6 @@ type Querier interface {
 	// Transaction-scoped advisory lock serializing session creation per project
 	// so the open-session cap can't be raced past. Released on commit/rollback.
 	LockProjectForGameSessionCreate(ctx context.Context, projectID int64) error
-	// Serializes a player's concurrent signal sends within the transaction so the
-	// per-minute count+insert below can't be raced past the cap under READ
-	// COMMITTED. player_id (project_players.id) is globally unique, so the lock
-	// key never collides across tenants. Released on commit/rollback.
-	LockSignalRate(ctx context.Context, fromPlayerID int64) error
 	// Transaction-scoped advisory lock serializing concurrent writes (put/delete)
 	// to a single storage object so the read-modify-write of the tenant byte
 	// counter can't be raced past. Released on commit/rollback.

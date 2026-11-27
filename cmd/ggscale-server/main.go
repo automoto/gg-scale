@@ -28,6 +28,7 @@ import (
 	"github.com/automoto/gg-scale/internal/billing"
 	"github.com/automoto/gg-scale/internal/cache/instrument"
 	"github.com/automoto/gg-scale/internal/cache/memory"
+	"github.com/automoto/gg-scale/internal/cacheinvalidation"
 	"github.com/automoto/gg-scale/internal/config"
 	"github.com/automoto/gg-scale/internal/controlpanel"
 	"github.com/automoto/gg-scale/internal/db"
@@ -690,6 +691,9 @@ func run() error {
 		ratelimit.NewDBOverrideStore(appPool), cfg.RateLimitOverrideCacheTTL)
 
 	keyCache := tenant.NewKeyCache(tenant.NewSQLLookup(pool), cfg.APIKeyCacheTTL, tenant.APIKeyCacheMaxEntries)
+	epochCache := httpapi.NewSessionEpochCache(appPool, cfg.SessionEpochCacheTTL, registry)
+	cacheListener := cacheinvalidation.New(appPool, keyCache, rateLimitOverrides, epochCache, registry)
+	go cacheListener.Run(appCtx)
 
 	router := httpapi.NewRouter(httpapi.Deps{
 		Version:               "v1",
@@ -707,6 +711,7 @@ func run() error {
 		StorageLimits:         storagelimit.NewCachedStore(storagelimit.NewStore(appPool), cfg.StorageLimitCacheTTL),
 		ProxyTrust:            ratelimit.NewProxyTrust(cfg.TrustedProxyHeader, cfg.TrustedProxyCIDRs),
 		Signer:                signer,
+		SessionEpochValidator: epochCache,
 		Mailer:                m,
 		MailFrom:              cfg.MailFrom,
 		EnqueuePasswordReset:  enqueuePasswordReset,

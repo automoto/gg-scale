@@ -673,8 +673,8 @@ var projectOps = []projectOp{
 	{
 		tool: "revoke_api_key",
 		description: "Cannot be undone. Revoke an API key of this Game Project: new requests with the key are refused " +
-			"at once on the server that handles this call, and on each other server within the " +
-			"API key cache time (API_KEY_CACHE_TTL, default " + tenant.DefaultAPIKeyCacheTTL.String() + "). " +
+			"at once on the server that handles this call, and normally within one second on every other server. " +
+			"If cache invalidation is unavailable, API_KEY_CACHE_TTL (default " + tenant.DefaultAPIKeyCacheTTL.String() + ") bounds the fallback delay. " +
 			"Use list_api_keys to find the key, and make a new key first if the game still needs one. " +
 			"A secret key can be revoked only when the person who created the token may manage secret keys.",
 		scope: managementtoken.ScopeKeysRevoke,
@@ -682,8 +682,8 @@ var projectOps = []projectOp{
 			Method: http.MethodPost, Path: "/v1/project/api-keys/{api_key_id}/revoke", OperationID: "revokeProjectAPIKey",
 			Summary: "Revoke an API key",
 			Description: "Revokes an API key of the Game Project. This cannot be undone. New requests with the key are refused at once " +
-				"on the server that handles this call, and on each other server within the API key cache time " +
-				"(API_KEY_CACHE_TTL, default " + tenant.DefaultAPIKeyCacheTTL.String() + "). Answers 404 for a key of another " +
+				"on the server that handles this call, and normally within one second on every other server. If cache invalidation is unavailable, " +
+				"API_KEY_CACHE_TTL (default " + tenant.DefaultAPIKeyCacheTTL.String() + ") bounds the fallback delay. Answers 404 for a key of another " +
 				"Game Project, a key with no Game Project, or a key that is already revoked. " +
 				"Answers 403 when the person who created the token may not manage keys of that type.",
 		},

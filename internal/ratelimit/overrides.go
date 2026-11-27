@@ -130,18 +130,19 @@ type OverrideInvalidator interface {
 // per-request middleware doesn't hit Postgres on every call. Mirrors the
 // feature-grant cache in internal/rbac.
 //
-// Freshness has two layers: the write path calls Invalidate to drop a tenant's
-// entries immediately on the process that served the write, and the TTL bounds
-// staleness everywhere else. The cache is per-process with no cross-node
-// invalidation, so other app instances converge within the TTL
-// rather than instantly.
+// Freshness has two layers: LISTEN/NOTIFY drops a tenant's entries on every
+// process, and the TTL is a fallback if a notification is missed. The listener
+// calls SetHealthy so connected hosts use the configured TTL (60s by default)
+// and disconnected hosts flush immediately and use a 5s fallback.
 type CachedOverrideStore struct {
 	inner OverrideStore
 	ttl   time.Duration
 	now   func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]overrideEntry
+	mu         sync.Mutex
+	cache      map[string]overrideEntry
+	healthy    bool
+	generation uint64
 }
 
 type overrideEntry struct {
@@ -150,8 +151,14 @@ type overrideEntry struct {
 	expiresAt time.Time
 }
 
-// DefaultOverrideCacheTTL is the default of RATE_LIMIT_OVERRIDE_CACHE_TTL.
-const DefaultOverrideCacheTTL = 5 * time.Second
+// DefaultOverrideCacheTTL is the healthy default of
+// RATE_LIMIT_OVERRIDE_CACHE_TTL. LISTEN/NOTIFY carries writes to other hosts,
+// so this is only a fallback for a missed notification.
+const DefaultOverrideCacheTTL = 60 * time.Second
+
+// fallbackOverrideCacheTTL bounds staleness while the invalidation listener is
+// disconnected. A disconnect also flushes every healthy entry at once.
+const fallbackOverrideCacheTTL = 5 * time.Second
 
 var _ OverrideInvalidator = (*CachedOverrideStore)(nil)
 
@@ -166,6 +173,24 @@ func NewCachedOverrideStore(inner OverrideStore, ttl time.Duration) *CachedOverr
 		now:   time.Now,
 		cache: make(map[string]overrideEntry),
 	}
+}
+
+// SetHealthy selects the notification-backed or fallback TTL. Both transitions
+// flush all entries so a reconnect cannot retain writes missed while down.
+func (c *CachedOverrideStore) SetHealthy(healthy bool) {
+	c.mu.Lock()
+	c.healthy = healthy
+	c.generation++
+	clear(c.cache)
+	c.mu.Unlock()
+}
+
+// InvalidateAll drops every tenant when the notification stream resets.
+func (c *CachedOverrideStore) InvalidateAll() {
+	c.mu.Lock()
+	clear(c.cache)
+	c.generation++
+	c.mu.Unlock()
 }
 
 // APILimit implements OverrideStore with caching.
@@ -191,6 +216,7 @@ func (c *CachedOverrideStore) Invalidate(tenantID int64) {
 	invitePrefix := "invite:" + id + ":"
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	delete(c.cache, apiKey)
 	for k := range c.cache {
 		if strings.HasPrefix(k, invitePrefix) {
@@ -202,6 +228,12 @@ func (c *CachedOverrideStore) Invalidate(tenantID int64) {
 func (c *CachedOverrideStore) get(key string, load func() (Limits, bool, error)) (Limits, bool, error) {
 	now := c.now()
 	c.mu.Lock()
+	healthy := c.healthy
+	generation := c.generation
+	ttl := fallbackOverrideCacheTTL
+	if healthy {
+		ttl = c.ttl
+	}
 	if e, ok := c.cache[key]; ok && now.Before(e.expiresAt) {
 		c.mu.Unlock()
 		return e.limits, e.found, nil
@@ -213,7 +245,9 @@ func (c *CachedOverrideStore) get(key string, load func() (Limits, bool, error))
 		return Limits{}, false, err
 	}
 	c.mu.Lock()
-	c.cache[key] = overrideEntry{limits: limits, found: found, expiresAt: now.Add(c.ttl)}
+	if c.generation == generation && c.healthy == healthy {
+		c.cache[key] = overrideEntry{limits: limits, found: found, expiresAt: c.now().Add(ttl)}
+	}
 	c.mu.Unlock()
 	return limits, found, nil
 }

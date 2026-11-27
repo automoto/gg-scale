@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/automoto/gg-scale/internal/db"
 	sqlcgen "github.com/automoto/gg-scale/internal/db/sqlc"
@@ -32,6 +34,19 @@ func (e epochValidator) CurrentEpoch(ctx context.Context, playerID int64) (int64
 		return 0, err
 	}
 	return int64(epoch), nil
+}
+
+func sessionEpochValidator(d Deps) playerauth.EpochValidator {
+	if d.SessionEpochValidator != nil {
+		return d.SessionEpochValidator
+	}
+	return epochValidator{d.Pool}
+}
+
+// NewSessionEpochCache builds the shared HTTP/WebSocket epoch validator. The
+// server-side verify route continues to query Postgres directly.
+func NewSessionEpochCache(pool *db.Pool, ttl time.Duration, reg prometheus.Registerer) *playerauth.CachedEpochValidator {
+	return playerauth.NewCachedEpochValidator(epochValidator{pool}, ttl, reg)
 }
 
 // playerTenantBanned reports whether the player's linked account is banned

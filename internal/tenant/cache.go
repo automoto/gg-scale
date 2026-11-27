@@ -102,7 +102,19 @@ func (c *KeyCache) Invalidate(tenantID int64) {
 	}
 }
 
-// copyKey hands each caller its own APIKey: Admit writes to the one it gets.
+// InvalidateAll drops every cached key and prevents in-flight lookups from
+// storing pre-flush results. Used after the invalidation listener reconnects.
+func (c *KeyCache) InvalidateAll() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	clear(c.entries)
+	c.drops++
+	c.mu.Unlock()
+}
+
+// copyKey hands each caller its own APIKey: *** writes to the one it gets.
 func copyKey(k *APIKey) (*APIKey, error) {
 	if k == nil {
 		return nil, ErrUnknownKey

@@ -104,8 +104,12 @@ type Deps struct {
 	// is behind a trusted reverse proxy / load balancer. nil = RemoteAddr only.
 	ProxyTrust *ratelimit.ProxyTrust
 	Signer     *auth.Signer
-	Mailer     mailer.Mailer
-	MailFrom   string
+	// SessionEpochValidator overrides the default uncached Postgres validator.
+	// Production supplies one shared cached validator for HTTP and both WS auth
+	// paths; the server-side verify endpoint deliberately does not use it.
+	SessionEpochValidator playerauth.EpochValidator
+	Mailer                mailer.Mailer
+	MailFrom              string
 	// EnqueuePasswordReset inserts the durable forgot-password delivery job
 	// (jobs.PasswordResetEmailArgs). nil = no job queue; the web handlers
 	// fall back to in-process delivery.
@@ -517,7 +521,7 @@ func NewRouter(d Deps) http.Handler {
 
 				// Player authenticated: requires X-Session-Token JWT.
 				r.Group(func(r chi.Router) {
-					r.Use(playerauth.New(d.Signer, epochValidator{d.Pool}))
+					r.Use(playerauth.New(d.Signer, sessionEpochValidator(d)))
 					r.Use(ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg))
 
 					if d.Matchmaker != nil {

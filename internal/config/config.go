@@ -90,9 +90,9 @@ type Config struct {
 	LeaderboardMaxPerProject int `env:"LEADERBOARD_MAX_PER_PROJECT" envDefault:"1000"`
 
 	// Cache times. Each app instance has its own caches and PostgreSQL is
-	// the source of truth. A write takes effect at once on the instance that
-	// served it, and within the cache time on every other instance. Each
-	// value must be more than 0.
+	// the source of truth. Committed API-key, override, and epoch writes
+	// invalidate every host through LISTEN/NOTIFY. TTLs remain the fallback
+	// when that stream is unavailable. SessionEpochCacheTTL also accepts 0.
 	//
 	// APIKeyCacheTTL is how long an API key lookup is kept. It bounds how
 	// long a revoked key, a disabled tenant, or a changed scope, tier or
@@ -105,9 +105,14 @@ type Config struct {
 	// policy. It bounds how long a role change (for example a removed team
 	// member) takes to reach the other instances. Default 10s.
 	RBACPolicyReloadInterval time.Duration `env:"RBAC_POLICY_RELOAD_INTERVAL" envDefault:"10s"`
-	// RateLimitOverrideCacheTTL is how long a rate limit override is kept.
-	// Default 5s.
-	RateLimitOverrideCacheTTL time.Duration `env:"RATE_LIMIT_OVERRIDE_CACHE_TTL" envDefault:"5s"`
+	// RateLimitOverrideCacheTTL is how long a rate limit override is kept while
+	// cache invalidation is healthy. A listener outage flushes entries and falls
+	// back to 5s. Default 60s.
+	RateLimitOverrideCacheTTL time.Duration `env:"RATE_LIMIT_OVERRIDE_CACHE_TTL" envDefault:"60s"`
+	// SessionEpochCacheTTL is how long player-authenticated HTTP and WebSocket
+	// handshakes reuse a session-epoch check. 0 disables caching. Entries are
+	// bypassed whenever cross-host invalidation is unavailable. Default 30s.
+	SessionEpochCacheTTL time.Duration `env:"SESSION_EPOCH_CACHE_TTL" envDefault:"30s"`
 	// StorageLimitCacheTTL is how long a storage value size limit is kept.
 	// Default 5s.
 	StorageLimitCacheTTL time.Duration `env:"STORAGE_LIMIT_CACHE_TTL" envDefault:"5s"`

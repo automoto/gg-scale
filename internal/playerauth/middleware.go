@@ -118,7 +118,13 @@ func Admit(ctx context.Context, tenantID int64, claims auth.Claims, validator Ep
 		return ctx, Refusal{Status: http.StatusForbidden}
 	}
 	if validator != nil {
-		epoch, err := validator.CurrentEpoch(ctx, claims.PlayerID)
+		var epoch int64
+		var err error
+		if tokenValidator, ok := validator.(TokenEpochValidator); ok {
+			epoch, err = tokenValidator.CurrentEpochForToken(ctx, claims.PlayerID, claims.SessionEpoch)
+		} else {
+			epoch, err = validator.CurrentEpoch(ctx, claims.PlayerID)
+		}
 		if errors.Is(err, ErrRevoked) {
 			return ctx, Refusal{Status: http.StatusUnauthorized}
 		}

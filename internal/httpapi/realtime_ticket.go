@@ -89,7 +89,7 @@ func registerRealtimeTicket(api huma.API, d Deps) {
 // key revoked, a tenant disabled, or a player banned after the ticket was
 // made is still refused.
 func realtimeTicketAuth(d Deps) func(http.Handler) http.Handler {
-	validator := epochValidator{d.Pool}
+	validator := sessionEpochValidator(d)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
@@ -141,7 +141,7 @@ func realtimeRoute(d Deps, ws http.Handler, reg prometheus.Registerer) http.Hand
 		ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))
 	byHeaders := tenant.NewLimited(d.Lookup, ratelimit.NewBadKeyLimiter(d.Limiter, d.ProxyTrust, reg))(
 		ratelimit.New(d.Limiter, d.RateLimitOverrides, reg)(
-			playerauth.New(d.Signer, epochValidator{d.Pool})(
+			playerauth.New(d.Signer, sessionEpochValidator(d))(
 				ratelimit.NewPlayerLimiter(d.Limiter, ratelimit.PlayerRate, ratelimit.PlayerBurst, reg)(ws))))
 	byTicket := realtimeTicketAuth(d)(limited)
 	return func(w http.ResponseWriter, r *http.Request) {
